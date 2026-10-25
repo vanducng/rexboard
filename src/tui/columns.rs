@@ -414,16 +414,16 @@ mod tests {
         ] {
             let buf = buffer(&app, width, 30);
             let list = list_width(&app, width);
-            let header: String = line(&buf, 1).chars().take(list).collect();
+            let header: String = line(&buf, 2).chars().take(list).collect();
             let columns = Columns::new(width, list);
-            let row_y = (2..buf.area.height)
+            let row_y = (3..buf.area.height)
                 .find(|&y| line(&buf, y).contains("seat-b msg"))
                 .unwrap();
             let mut x = 0u16;
             for (column, w) in &columns.cols {
                 if !column.header.is_empty() {
                     let label: String = (x..x + column.header.len() as u16)
-                        .map(|x| buf[(x, 1)].symbol())
+                        .map(|x| buf[(x, 2)].symbol())
                         .collect();
                     assert_eq!(label, column.header, "{width}: header at {x}:\n{header}");
                     assert_ne!(
@@ -452,16 +452,16 @@ mod tests {
 
     #[test]
     fn turn_shows_from_140_columns_with_a_dash_for_no_turn() {
-        assert!(!line(&buffer(&app(), 139, 30), 1).contains("TURN"));
+        assert!(!line(&buffer(&app(), 139, 30), 2).contains("TURN"));
         let mut app = App::default();
         let mut timed = row("local/quick", "done", "needs_you", false);
         timed.last_turn = Some(125);
         let untimed = row("local/fresh", "blocked", "needs_you", false);
         app.set_rows(vec![untimed, timed], hosts());
         let buf = buffer(&app, 140, 30);
-        let x = line(&buf, 1).find("TURN").unwrap();
+        let x = line(&buf, 2).find("TURN").unwrap();
         let cell = |needle: &str| {
-            let y = (2..30).find(|&y| line(&buf, y).contains(needle)).unwrap();
+            let y = (3..30).find(|&y| line(&buf, y).contains(needle)).unwrap();
             line(&buf, y).chars().skip(x).take(6).collect::<String>()
         };
         assert_eq!(cell("quick msg").trim_end(), "2m");
@@ -482,7 +482,7 @@ mod tests {
         app.set_rows(vec![asking, choosing, plain, stale], hosts());
         let row_at = |width: u16, needle: &str| {
             let buf = buffer(&app, width, 30);
-            let y = (2..30).find(|&y| line(&buf, y).contains(needle)).unwrap();
+            let y = (3..30).find(|&y| line(&buf, y).contains(needle)).unwrap();
             let list = list_width(&app, width);
             line(&buf, y).chars().take(list).collect::<String>()
         };
@@ -510,9 +510,10 @@ mod tests {
     }
 
     #[test]
-    fn under_12_rows_the_header_gives_its_line_back_to_the_list() {
+    fn under_12_rows_the_header_and_its_gap_give_their_lines_back_to_the_list() {
         let buf = buffer(&app(), 80, 12);
-        assert!(line(&buf, 1).contains("AGE"));
+        assert_eq!(line(&buf, 1).trim(), "", "a blank row under the top bar");
+        assert!(line(&buf, 2).contains("AGE"));
         let buf = buffer(&app(), 80, 11);
         assert!(!(0..11).any(|y| line(&buf, y).contains("HARNESS")));
         assert!(
