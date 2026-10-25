@@ -1,0 +1,33 @@
+[package]
+name = "rexboard"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+description = "Unofficial attention board for agent panes across Rex hosts"
+repository = "https://github.com/vanducng/rexboard"
+readme = "README.md"
+keywords = ["cli", "tui", "agents", "terminal"]
+categories = ["command-line-utilities"]
+authors = ["Duc Nguyen <me@vanducng.dev>"]
+publish = false
+
+[[bin]]
+name = "rexboard"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4.5", features = ["derive", "wrap_help"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+
+[profile.release]
+strip = true
+lto = "thin"
