@@ -1,6 +1,6 @@
 # System architecture
 
-rexboard reads Rex, remembers what Rex does not, and shows it. Two commands write to Rex: a jump, which focuses one pane and asks the Rex app to show its session, and `rexboard window`, which makes the board's own session and app window.
+rexboard reads Rex, remembers what Rex does not, and shows it. Two commands write to Rex: a jump, which focuses one pane and asks the Rex app to show its session, and `rexboard window`, which makes the board's own session and shows it in the focused app window (`--new`: a new app window).
 
 <img alt="rexboard architecture: local (this Mac) and mini each run one observer that feeds rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket; a jump, one of two writes to Rex, runs jump.pre_cmd, focuses the pane on its host and asks the Rex app to show its session" src="assets/architecture.svg" width="100%">
 

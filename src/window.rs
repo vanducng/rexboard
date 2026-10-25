@@ -31,9 +31,9 @@ pub fn title() -> String {
     format!("{TAB} - {SESSION}")
 }
 
-/// `rexboard window`: show the board in its own Rex app window. The `rexboard` session is made
-/// when it is missing. With `new`, or a session just made, a new app window opens for it;
-/// otherwise the session is selected, which focuses a window that already shows it.
+/// `rexboard window`: show the board in the focused Rex app window, by selecting the `rexboard`
+/// session there (the app focuses another window instead if one already shows it). The session
+/// is made when it is missing. With `new`, a new app window opens for it instead.
 pub fn window(new: bool, print_title: bool, json: bool) -> Result<()> {
     if print_title {
         if json {
@@ -43,12 +43,12 @@ pub fn window(new: bool, print_title: bool, json: bool) -> Result<()> {
         }
         return Ok(());
     }
-    let (board, made) = match board(&sessions()?) {
-        Some(board) => (board, false),
-        None => (create()?, true),
+    let board = match board(&sessions()?) {
+        Some(board) => board,
+        None => create()?,
     };
     let app_client = jump::app_client(config::load()?.client);
-    let opened = new || made;
+    let opened = new;
     if opened {
         open(&board, app_client.as_deref())?;
     } else {

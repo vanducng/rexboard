@@ -116,5 +116,5 @@
     <rect class="swatch" x="736" y="541" width="20" height="14" rx="2"/>
     <text class="legend" x="764" y="552">focal: serve and jumps</text>
     <text class="caption" x="32" y="588">A pane on local takes the same path through its own server.</text>
-    <text class="caption" x="32" y="608">rexboard window writes too: it makes the session and the app window the board runs in.</text>
+    <text class="caption" x="32" y="608">rexboard window writes too: it makes the board's session and shows it in the focused window.</text>
 </svg>
