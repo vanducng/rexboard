@@ -218,13 +218,15 @@ rexboard window --new          # always open a new window for it
 rexboard window --print-title  # board - rexboard
 ```
 
-The board lives in a Rex session labelled `rexboard`, in a tab labelled `board` that runs `rexboard board`. The board titles its pane `board`, and the Rex app titles a window `<pane title> - <session>`, so the board's window is `board - rexboard`. `--print-title` prints that, for window-manager rules.
+The board lives in a Rex session labelled `rexboard`, in a tab labelled `board` that runs `rexboard board`; a session of yours that happens to be labelled `rexboard` is never taken for it. The board titles its pane `board`, and the Rex app titles a window `<pane title> - <session>`, so the board's window is `board - rexboard`. `--print-title` prints that, for window-manager rules.
+
+With the board in its own window, set `jump.pre_cmd` in [config.toml](configuration.md) to focus your main Rex window, so a jump lands there and not on the board.
 
 - With no `rexboard` session on this host, `rexboard window` makes it (`rex new rexboard --window board -- rexboard board`), then opens a new app window for it.
 - With the session there, it asks the app to select it. The app focuses a window that already shows the session.
 - `--new` always opens a new app window and selects the session there.
 
-rexboard picks the app client the same way a jump does (`REX_CLIENT`, else `client` in [config.toml](configuration.md), else the only app on the unix socket). A new app window comes with a session of its own; rexboard destroys that session by its id once the board shows in the window. If that fails, the command exits 1 naming the session, with `rex kill SESSION` as the next step.
+rexboard picks the app client the same way a jump does (`REX_CLIENT`, else `client` in [config.toml](configuration.md), else the only app on the unix socket). A new app window comes with a session of its own, and rexboard destroys it once the board shows in the window: the session the app names, else the one session that appeared with the window, if it looks like a fresh window's (not labelled `rexboard`, one tab, one pane, no status record). rexboard waits up to 2 seconds for it. If none appears, several do, or the one that does looks busy, nothing is destroyed and the command exits 1 naming them, with `rex kill SESSION` as the next step once you have checked it.
 
 Rex does not say which session an app window shows. So when the `rexboard` session exists but no window shows it (its window was closed), plain `rexboard window` shows the board in the focused window. A window manager can avoid that: focus a window titled `board - rexboard` when one exists, and run `rexboard window --new` when none does. Like a jump, opening or selecting needs the app to answer, which it does not while the Mac's screen is locked.
 
