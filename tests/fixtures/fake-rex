@@ -5,6 +5,7 @@
 #                with status 1 and $FAKE_REX_STDERR on stderr when that is set
 #   do -         prints a recorded snapshot
 #   hosts        lists one remote host, mini
+#   capture      prints a few lines of generic pane text
 if [ -n "${FAKE_REX_LOG:-}" ]; then
   printf '%s\n' "$*" >>"$FAKE_REX_LOG"
 fi
@@ -37,6 +38,10 @@ case " $* " in
   *" do - "*)
     cat >/dev/null
     cat "${FAKE_REX_FIXTURE:-$dir/snapshot-two-hosts.json}"
+    ;;
+  *" capture "*)
+    printf '%s\n' '$ cargo test' 'running 12 tests' 'test parser::empty ... ok' \
+      'test parser::nested ... ok' 'test result: ok. 12 passed' '' 'Allow Bash: cargo test? (y/n)'
     ;;
   " hosts --json ")
     echo '{"hosts":[{"host":{"label":"mini"}}]}'
