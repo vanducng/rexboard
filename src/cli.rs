@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -16,4 +16,17 @@ pub struct Cli {
 }
 
 #[derive(Debug, Subcommand)]
-pub enum Command {}
+pub enum Command {
+    /// List agent panes on this host and every `rex hosts` entry, most urgent first.
+    Ls(LsArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct LsArgs {
+    /// Include plain shells, not just panes with a status record or a known harness.
+    #[arg(long)]
+    pub all: bool,
+    /// Only this host: `local`, or a label from `rex hosts`.
+    #[arg(long, value_name = "HOST")]
+    pub host: Option<String>,
+}

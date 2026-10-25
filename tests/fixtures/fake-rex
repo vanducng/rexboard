@@ -1,0 +1,15 @@
+#!/bin/sh
+# Stands in for the rex CLI: answers `do -` with a recorded snapshot and logs argv.
+if [ -n "${FAKE_REX_LOG:-}" ]; then
+  printf '%s\n' "$*" >>"$FAKE_REX_LOG"
+fi
+case " $* " in
+  *" do - "*)
+    cat >/dev/null
+    cat "${FAKE_REX_FIXTURE:-$(dirname "$0")/snapshot-two-hosts.json}"
+    ;;
+  *)
+    echo "fake-rex: unsupported: $*" >&2
+    exit 64
+    ;;
+esac

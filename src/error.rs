@@ -8,6 +8,12 @@ pub enum Error {
     Usage { message: String, steps: Vec<String> },
     #[error("a command is required")]
     Help,
+    #[error("{0}")]
+    RexNotFound(String),
+    #[error("{0}")]
+    Rex(String),
+    #[error("{0}")]
+    HostsUnreachable(String),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -23,6 +29,9 @@ impl Error {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Usage { .. } | Self::Help => "USAGE",
+            Self::RexNotFound(_) => "REX_NOT_FOUND",
+            Self::Rex(_) => "REX",
+            Self::HostsUnreachable(_) => "HOSTS_UNREACHABLE",
             Self::Io(_) => "IO",
         }
     }
@@ -30,14 +39,18 @@ impl Error {
     pub fn next_steps(&self) -> Vec<String> {
         match self {
             Self::Usage { steps, .. } if !steps.is_empty() => steps.clone(),
+            Self::RexNotFound(_) => vec!["install Rex".to_owned(), "set REXBOARD_REX".to_owned()],
+            Self::Rex(_) | Self::HostsUnreachable(_) => {
+                vec!["rex hosts".to_owned(), "retry the command once".to_owned()]
+            }
             _ => vec!["rexboard --help".to_owned()],
         }
     }
 
     pub fn exit_code(&self) -> ExitCode {
         match self {
-            Self::Usage { .. } | Self::Help => ExitCode::from(2),
-            Self::Io(_) => ExitCode::from(1),
+            Self::Usage { .. } | Self::Help | Self::HostsUnreachable(_) => ExitCode::from(2),
+            _ => ExitCode::from(1),
         }
     }
 
