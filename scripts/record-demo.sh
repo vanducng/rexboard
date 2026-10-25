@@ -31,16 +31,34 @@ chmod 700 "$root/run"
 export HOME="$root/home" XDG_RUNTIME_DIR="$root/run" XDG_CONFIG_HOME="$root/config" \
   XDG_STATE_HOME="$root/state" XDG_DATA_HOME="$root/data" XDG_CACHE_HOME="$root/cache" TMPDIR="$root/tmp"
 unset REX_SERVER REX_SESSION REX_BLOCK REX_CLIENT
+# Set only once the Rex server is proven to be the private one; nothing else is ever stopped.
+ours=0
+server_pid=
 cleanup() {
   tmux -L "$tmux_socket" kill-server 2>/dev/null || true
-  "$board" serve --stop >/dev/null 2>&1 || true
-  rex server stop >/dev/null 2>&1 || true
+  if [[ -S "$root/run/rexboard.sock" ]]; then
+    "$board" serve --stop >/dev/null 2>&1 || true
+  fi
+  if [[ "$ours" == 1 && -n "$server_pid" ]] && ps -o command= -p "$server_pid" | grep -qF "$root/"; then
+    kill "$server_pid" 2>/dev/null || true
+  fi
   rm -rf "$root"
 }
 trap cleanup EXIT
 
-# The private server starts on first use. It must have no hosts and no sessions of its own.
-rex server start >/dev/null
+# Start the private server, then prove it is ours: its socket and its process both live under
+# $root. Anything else is someone else's server, so refuse without touching it.
+rex server start >/dev/null 2>&1 || true
+read -r endpoint server_pid < <(rex server status --json 2>/dev/null |
+  python3 -c 'import json, sys; d = json.load(sys.stdin); print(d.get("endpoint", "-"), d.get("pid", "-"))' ||
+  echo "- -")
+if [[ "$endpoint" != "unix://$root/"* ]] || ! ps -o command= -p "$server_pid" 2>/dev/null | grep -qF "$root/"; then
+  server_pid=
+  echo "the Rex server rex reaches is not the private one under $root; refusing to record" >&2
+  exit 1
+fi
+ours=1
+# A second gate: the private server has no hosts of its own.
 hosts=$(rex hosts --json | python3 -c 'import json, sys; print(len(json.load(sys.stdin).get("hosts") or []))')
 [[ "$hosts" == 0 ]] || { echo "the demo Rex server has hosts; refusing to record" >&2; exit 1; }
 
