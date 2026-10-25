@@ -50,7 +50,8 @@ impl Error {
             Self::HostsUnreachable(_) => vec!["rex hosts".to_owned(), "rexboard ls".to_owned()],
             Self::ContractMismatch(_) => vec![
                 "rexboard --version".to_owned(),
-                "install the latest rexboard release".to_owned(),
+                "curl -fsSL https://raw.githubusercontent.com/vanducng/rexboard/main/install.sh | sh"
+                    .to_owned(),
             ],
             _ => vec!["rexboard --help".to_owned()],
         }

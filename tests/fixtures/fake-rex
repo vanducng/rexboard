@@ -1,7 +1,8 @@
 #!/bin/sh
 # Stands in for the rex CLI and logs argv to $FAKE_REX_LOG.
-#   do - --all   streams observer-<host>.ndjson (host from -S, else studio);
-#                FAKE_REX_EXIT_AFTER=N exits after N lines
+#   do - --all   streams observer-<host>.ndjson (host from -S, else studio), then
+#                $FAKE_REX_APPEND if set; FAKE_REX_EXIT_AFTER=N exits after N lines,
+#                with status 1 and $FAKE_REX_STDERR on stderr when that is set
 #   do -         prints a recorded snapshot
 #   hosts        lists one remote host, mini
 if [ -n "${FAKE_REX_LOG:-}" ]; then
@@ -18,9 +19,16 @@ case " $* " in
     cat >/dev/null
     if [ -n "${FAKE_REX_EXIT_AFTER:-}" ]; then
       head -n "$FAKE_REX_EXIT_AFTER" "$dir/observer-$host.ndjson"
+      if [ -n "${FAKE_REX_STDERR:-}" ]; then
+        echo "$FAKE_REX_STDERR" >&2
+        exit 1
+      fi
       exit 0
     fi
     cat "$dir/observer-$host.ndjson"
+    if [ -n "${FAKE_REX_APPEND:-}" ]; then
+      echo "$FAKE_REX_APPEND"
+    fi
     sleep 30
     ;;
   *" do - "*)

@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 use crate::cli::{Command, LsArgs, WatchArgs};
 use crate::collector::{Collector, HostEvent};
 use crate::error::Result;
+use crate::event::Event;
 use crate::pane::Snapshot;
 
 pub fn wants_json_raw(args: &[String]) -> bool {
@@ -140,24 +141,26 @@ fn watch(args: &WatchArgs) -> Result<()> {
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
-        let line = match event {
-            HostEvent::Event(event) => {
-                let mut line = serde_json::to_value(event).map_err(std::io::Error::other)?;
-                line["host"] = json!(host);
-                line
+        let mut line = match event {
+            // An unknown type passes through as Rex sent it.
+            HostEvent::Event(Event::Unknown, raw) => raw,
+            HostEvent::Event(event, _) => {
+                serde_json::to_value(event).map_err(std::io::Error::other)?
             }
             HostEvent::Down { reason, retry_in } => {
-                json!({ "host": host, "type": "down", "reason": reason, "retry_in_s": retry_in.as_secs() })
+                json!({ "type": "down", "reason": reason, "retry_in_s": retry_in.as_secs() })
             }
             HostEvent::Failed(err) => {
                 failed += 1;
                 if failed == collectors.len() {
                     return Err(err);
                 }
-                eprintln!("warning: {host}: {err}");
+                eprintln!("warning: {host} stopped and will not restart: {err}");
                 continue;
             }
         };
+        line["host"] = json!(host);
+        line["v"] = json!(event::VERSION);
         if writeln!(out, "{line}").and_then(|()| out.flush()).is_err() {
             break;
         }

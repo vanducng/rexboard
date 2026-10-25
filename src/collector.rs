@@ -1,11 +1,11 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -19,7 +19,8 @@ pub const OBSERVER: &str = concat!(
     include_str!("lua/observer.lua")
 );
 
-/// The observer ticks every 30s, so three missed ticks means the host is gone.
+const TICK: Duration = Duration::from_secs(30);
+/// Three missed ticks means the host is gone.
 const SILENCE: Duration = Duration::from_secs(90);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
@@ -27,12 +28,10 @@ pub type HostId = String;
 
 #[derive(Debug)]
 pub enum HostEvent {
-    Event(Event),
+    /// A parsed line and the object it came from.
+    Event(Event, Value),
     /// The observer stopped; a new one starts after `retry_in`.
-    Down {
-        reason: String,
-        retry_in: Duration,
-    },
+    Down { reason: String, retry_in: Duration },
     /// The stream cannot be read. The collector has stopped.
     Failed(Error),
 }
@@ -76,18 +75,18 @@ fn supervise(
     let send = |event| tx.send((id.clone(), event)).is_ok();
     let mut backoff = Duration::from_secs(1);
     while !stop.load(Ordering::SeqCst) {
-        let reason = match observe(host.as_deref(), pgid, &send) {
-            Ok(Run { reason, healthy }) => {
-                if healthy {
-                    backoff = Duration::from_secs(1);
-                }
-                reason
-            }
+        let started = Instant::now();
+        let reason = match observe(host.as_deref(), stop, pgid, &send) {
+            Ok(reason) => reason,
             Err(err) => {
                 send(HostEvent::Failed(err));
                 return;
             }
         };
+        // A run that fails on every event dies fast, so only a run that outlived a tick resets.
+        if started.elapsed() >= TICK {
+            backoff = Duration::from_secs(1);
+        }
         if stop.load(Ordering::SeqCst)
             || !send(HostEvent::Down {
                 reason,
@@ -105,24 +104,24 @@ fn supervise(
     }
 }
 
-struct Run {
-    reason: String,
-    healthy: bool,
-}
-
-/// Runs one observer until it ends or goes silent. Err means the stream itself is unreadable.
-fn observe(host: Option<&str>, pgid: &AtomicI32, send: &dyn Fn(HostEvent) -> bool) -> Result<Run> {
+/// Runs one observer until it ends or goes silent, and returns why. Err means the stream is unreadable.
+fn observe(
+    host: Option<&str>,
+    stop: &AtomicBool,
+    pgid: &AtomicI32,
+    send: &dyn Fn(HostEvent) -> bool,
+) -> Result<String> {
     let mut child = match start(host) {
         Ok(child) => child,
         Err(err @ Error::RexNotFound(_)) => return Err(err),
-        Err(err) => {
-            return Ok(Run {
-                reason: err.to_string(),
-                healthy: false,
-            });
-        }
+        Err(err) => return Ok(err.to_string()),
     };
     pgid.store(child.id() as i32, Ordering::SeqCst);
+    if stop.load(Ordering::SeqCst) {
+        stop_child(&mut child, pgid);
+        return Ok("stopped".into());
+    }
+    let stderr = last_line(child.stderr.take().expect("piped stderr"));
     let stdout = child.stdout.take().expect("piped stdout");
     let (lines_tx, lines) = mpsc::channel();
     thread::spawn(move || {
@@ -132,18 +131,20 @@ fn observe(host: Option<&str>, pgid: &AtomicI32, send: &dyn Fn(HostEvent) -> boo
             }
         }
     });
-    let mut version = "unknown".to_owned();
-    let mut healthy = false;
+    let mut version = "version unknown".to_owned();
     let reason = loop {
         match lines.recv_timeout(SILENCE) {
             Ok(Ok(line)) if line.trim().is_empty() => {}
             Ok(Ok(line)) => match event::parse(&line, &version) {
-                Ok(event) => {
-                    if let Event::Snapshot { rex_version, .. } = &event {
-                        version = rex_version.clone().unwrap_or(version);
-                        healthy = true;
+                Ok((event, raw)) => {
+                    if let Event::Snapshot {
+                        rex_version: Some(v),
+                        ..
+                    } = &event
+                    {
+                        version.clone_from(v);
                     }
-                    if !send(HostEvent::Event(event)) {
+                    if !send(HostEvent::Event(event, raw)) {
                         break "stopped".to_owned();
                     }
                 }
@@ -160,9 +161,22 @@ fn observe(host: Option<&str>, pgid: &AtomicI32, send: &dyn Fn(HostEvent) -> boo
         }
     };
     let status = stop_child(&mut child, pgid);
-    Ok(Run {
-        reason: status.map_or(reason.clone(), |s| format!("{reason} ({s})")),
-        healthy,
+    let mut reason = status.map_or(reason.clone(), |s| format!("{reason} ({s})"));
+    if let Some(line) = stderr.join().ok().flatten() {
+        reason = format!("{reason}: {line}");
+    }
+    Ok(reason)
+}
+
+/// The last non-empty stderr line, skipping the banner `rex do` prints when it starts listening.
+fn last_line(pipe: impl Read + Send + 'static) -> thread::JoinHandle<Option<String>> {
+    thread::spawn(move || {
+        BufReader::new(pipe)
+            .lines()
+            .map_while(std::result::Result::ok)
+            .map(|line| line.trim().to_owned())
+            .filter(|line| !line.is_empty() && !line.starts_with("listening:"))
+            .last()
     })
 }
 
@@ -173,15 +187,19 @@ fn start(host: Option<&str>) -> Result<Child> {
         cmd.args(["-S", host]);
     }
     let mut child = cmd
-        .args(["do", "-", "--all"])
+        .args(["do", "-", "--all", "--fail-fast"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .process_group(0)
         .spawn()
         .map_err(|err| Error::RexNotFound(format!("could not run {}: {err}", rex.display())))?;
     let mut stdin = child.stdin.take().expect("piped stdin");
-    stdin.write_all(OBSERVER.as_bytes())?;
+    if let Err(err) = stdin.write_all(OBSERVER.as_bytes()) {
+        kill_group(child.id() as i32);
+        let _ = child.wait();
+        return Err(err.into());
+    }
     Ok(child)
 }
 

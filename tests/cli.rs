@@ -278,10 +278,56 @@ fn watch_raw_restarts_observer_after_exit() {
             "session_created"
         ]
     );
-    assert!(lines.iter().all(|line| line["host"] == "local"));
-    assert_eq!(lines[2]["retry_in_s"], 1);
+    assert!(
+        lines
+            .iter()
+            .all(|line| line["host"] == "local" && line["v"] == 1)
+    );
+    let downs: Vec<_> = lines.iter().filter(|l| l["type"] == "down").collect();
+    assert_eq!(downs[0]["retry_in_s"], 1);
+    assert_eq!(downs[0]["reason"], "observer exited (exit status: 0)");
+    if let Some(second) = downs.get(1) {
+        assert_eq!(
+            second["retry_in_s"], 2,
+            "a short run must not reset the backoff"
+        );
+    }
     let argv = std::fs::read_to_string(log.path()).unwrap();
-    assert_eq!(argv.matches("do - --all").count(), 2, "{argv}");
+    assert!(
+        argv.matches("do - --all --fail-fast").count() >= 2,
+        "{argv}"
+    );
+}
+
+#[test]
+fn watch_raw_down_reason_is_observer_stderr() {
+    let lines = watch_lines(
+        watch_raw()
+            .args(["--host", "local"])
+            .env("FAKE_REX_EXIT_AFTER", "1")
+            .env(
+                "FAKE_REX_STDERR",
+                "observer.lua:12: attempt to index a nil value",
+            ),
+    );
+    let down = lines.iter().find(|l| l["type"] == "down").unwrap();
+    assert_eq!(
+        down["reason"],
+        "observer exited (exit status: 1): observer.lua:12: attempt to index a nil value"
+    );
+}
+
+#[test]
+fn watch_raw_passes_unknown_types_through() {
+    let lines = watch_lines(watch_raw().args(["--host", "local"]).env(
+        "FAKE_REX_APPEND",
+        r#"{"v":1,"type":"bell","session_id":"session:api"}"#,
+    ));
+    let bell = lines.last().unwrap();
+    assert_eq!(
+        *bell,
+        serde_json::json!({ "v": 1, "type": "bell", "session_id": "session:api", "host": "local" })
+    );
 }
 
 #[test]

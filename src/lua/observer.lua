@@ -67,8 +67,7 @@ rex.on("active_window_changed", function(_, ev)
   emit({ type = "active_window", session_id = ev.session_id, window_id = ev.window_id })
 end)
 rex.on("session_created", function(_, ev)
-  local s = ev.session or {}
-  emit({ type = "session_created", session_id = s.session_id, label = s.label })
+  if ev.session then emit({ type = "session_created", session = session_entry(rex, ev.session) }) end
 end)
 rex.on("session_destroyed", function(_, ev)
   emit({ type = "session_destroyed", session_id = ev.session_id })

@@ -72,8 +72,7 @@ pub enum Event {
         window_id: Option<String>,
     },
     SessionCreated {
-        session_id: String,
-        label: Option<String>,
+        session: Value,
     },
     SessionDestroyed {
         session_id: String,
@@ -92,23 +91,28 @@ pub enum LabelKind {
 }
 
 /// Parses one observer line. `rex_version` names the Rex build in a contract error.
-pub fn parse(line: &str, rex_version: &str) -> Result<Event> {
+pub fn parse(line: &str, rex_version: &str) -> Result<(Event, Value)> {
     let value: Value = serde_json::from_str(line)
         .map_err(|err| Error::Rex(format!("observer printed a line that is not JSON: {err}")))?;
     match value.get("v").and_then(Value::as_u64) {
         Some(VERSION) => {}
-        v => {
+        Some(v) => {
             return Err(Error::ContractMismatch(format!(
-                "observer line version {} is not {VERSION} (Rex {rex_version})",
-                v.map_or("missing".into(), |v| v.to_string())
+                "observer lines are contract version {v}, this rexboard reads version {VERSION} (Rex {rex_version})"
+            )));
+        }
+        None => {
+            return Err(Error::ContractMismatch(format!(
+                "observer line has no contract version, this rexboard reads version {VERSION} (Rex {rex_version})"
             )));
         }
     }
-    serde_json::from_value(value).map_err(|err| {
+    let event = Event::deserialize(&value).map_err(|err| {
         Error::Rex(format!(
             "unexpected observer line from Rex {rex_version}: {err}"
         ))
-    })
+    })?;
+    Ok((event, value))
 }
 
 #[cfg(test)]
@@ -117,19 +121,23 @@ mod tests {
 
     #[test]
     fn event_unknown_type_is_ignored() {
-        let event = parse(
+        let (event, raw) = parse(
             r#"{"v":1,"type":"bell","session_id":"s","extra":1}"#,
             "test",
         )
         .unwrap();
         assert_eq!(event, Event::Unknown);
+        assert_eq!(raw["type"], "bell");
     }
 
     #[test]
     fn event_rejects_unknown_major_version() {
         let err = parse(r#"{"v":2,"type":"tick"}"#, "0.0.1-gabc").unwrap_err();
         assert_eq!(err.code(), "CONTRACT_MISMATCH");
-        assert!(err.to_string().contains("Rex 0.0.1-gabc"), "{err}");
+        assert_eq!(
+            err.to_string(),
+            "observer lines are contract version 2, this rexboard reads version 1 (Rex 0.0.1-gabc)"
+        );
         assert!(parse(r#"{"type":"tick"}"#, "x").is_err());
     }
 
@@ -146,7 +154,8 @@ mod tests {
             r#"{"v":1,"type":"label","kind":"window","session_id":"session:a","id":"window:b","label":"two"}"#,
             "x",
         )
-        .unwrap();
+        .unwrap()
+        .0;
         assert_eq!(
             label,
             Event::Label {
@@ -160,7 +169,8 @@ mod tests {
             r#"{"v":1,"type":"active_window","session_id":"session:a","window_id":"window:b"}"#,
             "x",
         )
-        .unwrap();
+        .unwrap()
+        .0;
         assert_eq!(
             active,
             Event::ActiveWindow {
