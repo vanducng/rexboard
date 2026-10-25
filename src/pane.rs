@@ -1,5 +1,8 @@
 use std::collections::BTreeMap;
+use std::fmt;
+use std::marker::PhantomData;
 
+use serde::de::{Error as _, IgnoredAny, MapAccess, SeqAccess, Unexpected, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Deserialize)]
@@ -87,18 +90,29 @@ pub struct Pane {
     pub children: BTreeMap<String, usize>,
 }
 
-/// Lua encodes an empty table as `{}`, so an empty list can arrive as an object.
+/// Lua encodes an empty table as `{}`, so an empty list can arrive as an object. Anything else is drift.
 fn seq<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Vec<T>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Seq<T> {
-        List(Vec<T>),
-        Other(serde::de::IgnoredAny),
+    struct Seq<T>(PhantomData<T>);
+    impl<'de, T: Deserialize<'de>> Visitor<'de> for Seq<T> {
+        type Value = Vec<T>;
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("a list, or {} for an empty one")
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Vec<T>, A::Error> {
+            let mut items = Vec::new();
+            while let Some(item) = seq.next_element()? {
+                items.push(item);
+            }
+            Ok(items)
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Vec<T>, A::Error> {
+            match map.next_key::<IgnoredAny>()? {
+                None => Ok(Vec::new()),
+                Some(_) => Err(A::Error::invalid_type(Unexpected::Map, &self)),
+            }
+        }
     }
-    Ok(match Seq::deserialize(d)? {
-        Seq::List(items) => items,
-        Seq::Other(_) => Vec::new(),
-    })
+    d.deserialize_any(Seq(PhantomData))
 }
 
 pub fn rank(state: &str) -> u8 {
@@ -197,14 +211,27 @@ fn process_harness(name: &str) -> Option<String> {
 }
 
 /// Claude Code and the seat status line put a state glyph at the start of the title.
-fn title_state(title: &str) -> Option<&'static str> {
-    if title.starts_with("✳ ") {
-        return Some("idle");
+fn glyph(title: &str) -> Option<(&'static str, &str)> {
+    if let Some(rest) = title.strip_prefix("✳ ") {
+        return Some(("idle", rest));
     }
-    match title.chars().next()? {
-        '\u{2800}'..='\u{28FF}' | '◐' | '◑' => Some("working"),
+    let first = title.chars().next()?;
+    match first {
+        '\u{2800}'..='\u{28FF}' | '◐' | '◑' => {
+            let rest = &title[first.len_utf8()..];
+            Some(("working", rest.strip_prefix(' ').unwrap_or(rest)))
+        }
         _ => None,
     }
+}
+
+fn title_state(title: &str) -> Option<&'static str> {
+    glyph(title).map(|(state, _)| state)
+}
+
+/// The title without its leading state glyph, for display.
+pub fn bare_title(title: &str) -> &str {
+    glyph(title).map_or(title, |(_, rest)| rest)
 }
 
 #[cfg(test)]
@@ -225,5 +252,24 @@ mod tests {
         assert_eq!(title_state("◑ seat-a@demo"), Some("working"));
         assert_eq!(title_state("✳seat"), None);
         assert_eq!(title_state(""), None);
+    }
+
+    #[test]
+    fn bare_title_drops_the_glyph_and_its_space() {
+        assert_eq!(bare_title("✳ seat-a@demo"), "seat-a@demo");
+        assert_eq!(bare_title("⠋ seat-a@demo"), "seat-a@demo");
+        assert_eq!(bare_title("◐ seat-a@demo"), "seat-a@demo");
+        assert_eq!(bare_title("✳seat-a"), "✳seat-a");
+        assert_eq!(bare_title("Fix the parser"), "Fix the parser");
+    }
+
+    #[test]
+    fn seq_rejects_anything_but_a_list_or_empty_object() {
+        let parse = |json: &str| serde_json::from_str::<Snapshot>(json).map(|s| s.hosts.len());
+        assert_eq!(parse(r#"{"hosts": {}}"#).unwrap(), 0);
+        assert_eq!(parse(r#"{"hosts": [{"host": "local"}]}"#).unwrap(), 1);
+        assert!(parse(r#"{"hosts": {"a": 1}}"#).is_err());
+        assert!(parse(r#"{"hosts": "nope"}"#).is_err());
+        assert!(parse(r#"{"hosts": [{"host": 1}]}"#).is_err());
     }
 }

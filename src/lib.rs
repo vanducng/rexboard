@@ -40,8 +40,15 @@ pub fn execute(cli: &Cli) -> Result<()> {
 
 fn ls(args: &LsArgs, json: bool) -> Result<()> {
     let value = rex::run_script(None, rex::SNAPSHOT, &json!({ "host": args.host }))?;
-    let snapshot: Snapshot = serde_json::from_value(value)
-        .map_err(|err| Error::Rex(format!("unexpected snapshot shape: {err}")))?;
+    let version = value["rex_version"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_owned();
+    let snapshot: Snapshot = serde_json::from_value(value).map_err(|err| {
+        Error::Rex(format!(
+            "unexpected snapshot shape from Rex {version}: {err}"
+        ))
+    })?;
     if snapshot.hosts.is_empty() {
         let host = args.host.as_deref().unwrap_or("local");
         return Err(Error::usage_with(

@@ -39,10 +39,12 @@ impl Error {
     pub fn next_steps(&self) -> Vec<String> {
         match self {
             Self::Usage { steps, .. } if !steps.is_empty() => steps.clone(),
-            Self::RexNotFound(_) => vec!["install Rex".to_owned(), "set REXBOARD_REX".to_owned()],
-            Self::Rex(_) | Self::HostsUnreachable(_) => {
-                vec!["rex hosts".to_owned(), "retry the command once".to_owned()]
-            }
+            Self::RexNotFound(_) => vec![
+                "set REXBOARD_REX to the path of the rex CLI".to_owned(),
+                "install Rex".to_owned(),
+            ],
+            Self::Rex(_) => vec!["rex hosts".to_owned(), "retry the command once".to_owned()],
+            Self::HostsUnreachable(_) => vec!["rex hosts".to_owned(), "rexboard ls".to_owned()],
             _ => vec!["rexboard --help".to_owned()],
         }
     }

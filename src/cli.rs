@@ -5,10 +5,10 @@ use clap::{Args, Parser, Subcommand};
     name = "rexboard",
     version,
     about = "Unofficial attention board for agent panes across Rex hosts.",
-    after_help = "Errors: {\"ok\":false,\"error\":{code,message,next_steps}} on stderr with --json. Usage errors exit 2."
+    after_help = "Errors: {\"ok\":false,\"error\":{code,message,next_steps}} on stderr with --json. Exit 1: Rex failed. Exit 2: bad usage, or every host is unreachable."
 )]
 pub struct Cli {
-    /// Print one JSON object on stdout, and errors as JSON on stderr.
+    /// Print JSON on stdout, and errors as JSON on stderr.
     #[arg(long, global = true)]
     pub json: bool,
     #[command(subcommand)]

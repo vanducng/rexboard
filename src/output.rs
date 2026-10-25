@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use crate::pane::Pane;
+use crate::pane::{Pane, bare_title};
 
 pub fn table(panes: &[Pane], now: DateTime<Utc>) -> String {
     let rows: Vec<[String; 6]> = panes
@@ -17,7 +17,7 @@ pub fn table(panes: &[Pane], now: DateTime<Utc>) -> String {
                 pane.msg
                     .clone()
                     .filter(|msg| !msg.is_empty())
-                    .unwrap_or_else(|| pane.title.clone()),
+                    .unwrap_or_else(|| bare_title(&pane.title).to_owned()),
             ]
         })
         .collect();

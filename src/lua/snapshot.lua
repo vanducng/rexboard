@@ -11,4 +11,5 @@ if not want or want == "local" then hosts[#hosts + 1] = on("local", rex) end
 for _, label in ipairs(rex.servers()) do
   if not want or want == label then hosts[#hosts + 1] = on(label, rex.server(label)) end
 end
-return { hosts = hosts }
+local version = rex.call("server.version")
+return { hosts = hosts, rex_version = version and version.rex_version }

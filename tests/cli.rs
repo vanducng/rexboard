@@ -173,6 +173,31 @@ fn ls_every_host_down_is_hosts_unreachable() {
 }
 
 #[test]
+fn ls_record_without_state_is_a_rex_error() {
+    let snapshot = fixture_with_mini(serde_json::json!({ "host": "mini", "sessions": [{
+        "session_id": "session:web", "label": "web",
+        "windows": [{ "window_id": "window:web", "label": "seats", "blocks": [{
+            "block_id": "block:web", "label": "seat-b", "title": "", "process": {},
+            "records": [{ "app": "claude-code" }]
+        }]}]
+    }]}));
+    ls().env("FAKE_REX_FIXTURE", snapshot.path())
+        .arg("--json")
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("\"code\":\"REX\""))
+        .stderr(predicate::str::contains("missing field `state`"));
+}
+
+#[test]
+fn ls_text_drops_the_title_glyph() {
+    ls().assert()
+        .success()
+        .stdout(predicate::str::is_match(r"api › main › seat-a +seat-a@demo\n").unwrap())
+        .stdout(predicate::str::contains("✳").not());
+}
+
+#[test]
 fn ls_without_rex_errors_with_next_steps() {
     let home = tempfile::tempdir().unwrap();
     bin()
