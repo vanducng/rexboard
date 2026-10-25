@@ -131,7 +131,7 @@ fn connection(stream: UnixStream, tx: &Sender<Msg>) {
             Ok(request) => request,
             Err(err) => {
                 let reply = error_line("USAGE", &format!("bad request: {err}"));
-                if writeln!(out, "{reply}").is_err() {
+                if out.write_all(format!("{reply}\n").as_bytes()).is_err() {
                     return;
                 }
                 continue;
@@ -144,7 +144,9 @@ fn connection(stream: UnixStream, tx: &Sender<Msg>) {
             return;
         }
         for reply in reply_rx.iter() {
-            if writeln!(out, "{reply}").and_then(|()| out.flush()).is_err() {
+            // One write per line: serve may exit right after a stop reply, and a client must
+            // never see the JSON without its newline.
+            if out.write_all(format!("{reply}\n").as_bytes()).is_err() {
                 return;
             }
             if !streaming {
@@ -173,6 +175,8 @@ struct Reducer {
     waiting: Vec<SyncSender<String>>,
     started: Instant,
     announced: bool,
+    rows_cache: Option<String>,
+    suspects: BTreeSet<(String, String)>,
     rows_due: Option<Instant>,
     save_due: Option<Instant>,
 }
@@ -200,6 +204,8 @@ impl Reducer {
             waiting: Vec::new(),
             started: Instant::now(),
             announced: false,
+            rows_cache: None,
+            suspects: BTreeSet::new(),
             rows_due: None,
             save_due: None,
         }
@@ -222,8 +228,12 @@ impl Reducer {
                 self.subscribers.owe_all();
             }
             if self.subscribers.owed() {
-                let line = self.rows_line().to_string();
-                self.subscribers.pay(&line);
+                // Serialized once per change, not on every pass while a reader is owed rows.
+                if self.rows_cache.is_none() {
+                    self.rows_cache = Some(self.rows_line().to_string());
+                }
+                let line = self.rows_cache.as_deref().unwrap_or_default();
+                self.subscribers.pay(line);
             }
             if self.save_due.is_some_and(|due| now >= due) {
                 self.save_due = None;
@@ -233,6 +243,12 @@ impl Reducer {
             }
             if now.duration_since(beat) >= HEARTBEAT {
                 beat = now;
+                // A working report goes suspect with time alone, with no event to say so.
+                let suspects = self.board.suspects(chrono::Utc::now());
+                if suspects != self.suspects {
+                    self.suspects = suspects;
+                    self.rows_changed();
+                }
                 let line = json!({ "v": VERSION, "heartbeat": true }).to_string();
                 self.subscribers.heartbeat(&line);
                 let pids: Vec<i32> = self
@@ -315,6 +331,7 @@ impl Reducer {
     }
 
     fn set_hosts(&mut self, labels: &[String]) {
+        self.rows_cache = None;
         let mut want: Vec<HostId> = vec!["local".into()];
         want.extend(labels.iter().cloned());
         let gone: Vec<HostId> = self
@@ -341,6 +358,7 @@ impl Reducer {
     }
 
     fn host_event(&mut self, host: &str, event: &HostEvent, paths: &Paths) {
+        self.rows_cache = None;
         if !self.hosts.contains_key(host) || self.hosts[host] == "stopped" {
             return;
         }
@@ -383,6 +401,7 @@ impl Reducer {
     }
 
     fn rows_changed(&mut self) {
+        self.rows_cache = None;
         let now = Instant::now();
         self.rows_due.get_or_insert(now + DEBOUNCE);
         self.save_due.get_or_insert(now + SAVE_EVERY);
@@ -395,7 +414,7 @@ impl Reducer {
     }
 
     fn rows_line(&self) -> Value {
-        json!({ "v": VERSION, "rows": self.board.rows(), "hosts": self.hosts })
+        json!({ "v": VERSION, "rows": self.board.rows(chrono::Utc::now()), "hosts": self.hosts })
     }
 
     fn request(&mut self, request: Request, reply: SyncSender<String>) {
@@ -425,7 +444,7 @@ impl Reducer {
     fn next(&self, after: Option<&str>, back: bool) -> Value {
         let mut rows: Vec<_> = self
             .board
-            .rows()
+            .rows(chrono::Utc::now())
             .into_iter()
             .filter(|row| row.group == Group::NeedsYou)
             .collect();

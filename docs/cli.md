@@ -27,7 +27,7 @@ rexboard ls --direct        # one snapshot here, without serve
 
 A pane is listed when it has a status record or a known harness. `--all` adds the rest. `ls` builds its rows the same way as `watch --json`, so they carry the same fields and order: by `group`, then, inside `needs_you`, `blocked` before `error` before unseen `done`, then the longest in its state first. `ls --direct` sees one snapshot, so every `done` is unseen and `last_turn` is `null`.
 
-The text table has the columns `GROUP`, `STATE`, `AGE` (time in the current state, `≥` when estimated), `HARNESS` (`-` when unknown), `HOST`, `WHERE` (`session › tab › pane`) and `WHAT` (the record's message, else the pane title without its leading state glyph).
+The text table has the columns `GROUP`, `STATE`, `AGE` (time in the current state as `34s`, `12m`, `5h43m` or `3d4h`; `≥` when estimated; `-` for a pane with no status record, whose time cannot be known), `HARNESS` (`claude`, `codex` and so on, with a `?` when it is read from the title of a pane with no status record; `-` when unknown), `HOST`, `WHERE` (`session › tab › pane`, each label cut to 24 columns with `…` in the middle, so a long OpenRig tab label keeps both ends; a pane labelled `shell`, or with the name of its foreground process, shows as `session › tab` unless another agent pane shares its tab) and `WHAT` (the record's message, else the pane title without its leading state glyph). In a terminal, `WHAT` and then `WHERE` are cut so each line fits its width. `WHERE` is cut tab first, then session, so the last label stays whole and the ` › ` separators stay; a label that would be cut below 6 columns shows as `…` alone. Piped output keeps every column whole. Every cell is printed without escape sequences or control characters, since titles and messages come from the programs in each pane. Widths count wide characters such as CJK and emoji as two columns. `--json` keeps every label and title whole, and the full harness name (`claude-code`).
 
 ### JSON fields
 
@@ -44,6 +44,7 @@ The text table has the columns `GROUP`, `STATE`, `AGE` (time in the current stat
 | `block_id` | string | Rex block id of the pane |
 | `pane` | string | Block (pane) label |
 | `title` | string | Terminal title, `""` when none |
+| `process` | string or null | The pane's foreground process, as in `zsh`, `tmux`, or a version such as `2.1.310` (Claude Code runs under its version number) |
 | `harness` | string or null | `effective_app` (else `app`) of the record, else the foreground process (`claude`, `codex`, `pi`; a version string like `2.1.310` is `claude-code`), else `claude-code` for a title that starts with a Claude state glyph, else `codex` for a tmux pane titled `DIR | MODEL` (exactly one ` | `, a `DIR` with no spaces, a `MODEL` of letters, digits, `.` and `-` with at least one letter and one digit) |
 | `state` | string | `blocked`, `error`, `done`, `working` or `idle` from the record; with no record, from the title glyph (`✳ ` is `idle`, a braille spinner or `◐`/`◑` is `working`), else `unknown` |
 | `kind` | string or null | The record's `kind`, such as `permission` |
@@ -52,12 +53,14 @@ The text table has the columns `GROUP`, `STATE`, `AGE` (time in the current stat
 | `source` | string | `native`: the pane reports its own status. `bridge`: the record came through `tmux`. `inferred`: no record, state read from the title |
 | `children` | object | Counts by state of the pane's other records, such as Claude subagents: `{"working": 1}` |
 | `since` | string | RFC 3339 UTC time the pane entered its current `state` and `kind`. A report in the same state keeps it |
-| `since_estimated` | boolean | `true` when rexboard did not see the change: a row first seen in a snapshot that is `working` (its `updated_at` is the last report, not the start) or has no record, or an `updated_at` that is not RFC 3339. That last case also prints `warning: HOST: updated_at "VALUE" is not RFC 3339 (Rex VERSION); time in state is estimated` on stderr, once per host and value |
+| `since_estimated` | boolean | `true` when rexboard did not see the change: a row first seen in a snapshot that is `working` (its `updated_at` is the last report, not the start) or has no record, or an `updated_at` that is not RFC 3339. That last case also prints `warning: HOST: updated_at "VALUE" is not RFC 3339 (Rex VERSION); time in state is estimated` on stderr, once per host. A row with no record still carries a `since` in `--json`; the text table and the board show its age as `-` |
 | `turn_started` | string or null | When the pane last entered `working` |
 | `last_turn` | integer or null | Seconds from entering `working` to the next `done` or `blocked`. Short when the turn was already running when rexboard started |
-| `seen` | boolean | `false` after the pane enters `done`, `blocked` or `error`; `true` once it enters `working` again. A `done`, `blocked` or `error` first seen in a snapshot starts unseen. Nothing marks a pane seen by hand yet |
+| `seen` | boolean | `false` after the pane enters `done`, `blocked` or `error`; `true` once it enters `working` again. A `done`, `blocked` or `error` first seen in a snapshot starts unseen. `rexboard seen KEY`, or `s` on the board, marks it seen |
 | `stale` | boolean | `true` while the host's observer is down; the next snapshot clears it |
-| `group` | string | `needs_you` (`blocked`, `error`, unseen `done`), `working`, `quiet` (`idle`, seen `done`), or `unreported` (`source` is `inferred`, `state` is `unknown`, or `stale`) |
+| `suspect` | boolean | `true` when the record says `working`, its last report is more than 120 seconds old, and the pane disagrees: its title starts with Claude's idle `✳ ` (not checked when `tmux` is in front, since the title is then tmux's and keeps the idle glyph while the agent works), or a shell (`zsh`, `bash`, `fish`, `sh`) is back in front. A hook that never reported the end of a turn leaves this behind. `state` keeps the record's value; the board and the `ls` table show `idle?` |
+| `suspect_reason` | string or null | Why, as in `reported working at 14:02; the title shows idle`. A report a day old or more gives its date: `reported working at Oct 24 14:02; zsh is back in front` |
+| `group` | string | `needs_you` (`blocked`, `error`, unseen `done`), `working`, `quiet` (`idle`, seen `done`), or `unreported` (`source` is `inferred`, `state` is `unknown`, `stale`, or `suspect`) |
 
 The pane's main record is the one with no `id`; if every record has one, the most urgent wins.
 
@@ -149,6 +152,15 @@ A host stops for good when its observer prints a line that is not JSON or a know
 | 0 | `--for` elapsed, Ctrl-C or SIGTERM, or stdout closed |
 | 1 | `REX_NOT_FOUND`: no `rex` CLI. `REX`: `rex hosts` failed, or every host stopped on a bad line. `CONTRACT_MISMATCH`: every host stopped and the last one stopped on a version mismatch; next steps `rexboard --version` and the `install.sh` one-liner |
 | 2 | `USAGE`: neither `--json` nor `--raw`, a bad flag, or `--host` names no host |
+
+## `rexboard board`
+
+```bash
+rexboard          # in a terminal, with no command
+rexboard board
+```
+
+The board: the agent panes `ls` lists, grouped as `NEEDS YOU`, `WORKING`, `QUIET` and `UNREPORTED`, with a ticking time in state. It is a client of [`rexboard serve`](#rexboard-serve) and starts it when nothing answers. `board` without a terminal fails with `USAGE`; [TUI](tui.md) has the layout and keys.
 
 ## `rexboard serve`
 

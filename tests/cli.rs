@@ -106,6 +106,7 @@ fn ls_json_lists_panes_from_both_hosts() {
             "block:web-seat-b",
             "block:api-claude",
             "block:web-codex",
+            "block:web-rig-review",
             "block:api-seat-a",
             "block:web-codex-seat"
         ]
@@ -419,7 +420,8 @@ fn ls_json_adds_board_fields() {
     );
     assert_eq!(codex["turn_started"], "2026-01-01T10:02:00.000Z");
     assert_eq!(by_block(&panes, "block:api-seat-a")["group"], "unreported");
-    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 23));
+    assert_eq!(codex["process"], "codex");
+    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 26));
 }
 
 /// A status line for the fixture's idle seat on `host`, sent after the recorded stream ends.
@@ -526,7 +528,7 @@ fn ls_text_shows_group_and_estimated_age() {
     ls().assert()
         .success()
         .stdout(predicate::str::starts_with("GROUP"))
-        .stdout(predicate::str::is_match(r"\nworking +working +≥\d+d +codex").unwrap());
+        .stdout(predicate::str::is_match(r"\nworking +working +≥\d+d\d+h +codex").unwrap());
 }
 
 /// A serve with its own runtime and state dirs, stopped when the test ends.
@@ -903,4 +905,176 @@ fn seen_without_a_host_is_usage() {
         .assert()
         .code(2)
         .stderr(predicate::str::contains("KEY must be HOST/BLOCK_ID"));
+}
+
+#[test]
+fn ls_text_squeezes_long_labels_and_dates_only_reported_rows() {
+    let out = ls().assert().success().get_output().stdout.clone();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("web › 2-openrig:ri…89abcdef#l2 › seat-r"),
+        "a long tab label is squeezed in the middle:\n{text}"
+    );
+    let seat = text.lines().find(|l| l.contains("seat-a@demo")).unwrap();
+    assert!(
+        seat.contains("unreported  idle     -  "),
+        "no record, no age: {seat}"
+    );
+    let panes = ls_json(&mut ls());
+    let review = by_block(&panes, "block:web-rig-review");
+    assert_eq!(
+        review["tab"], "2-openrig:rig:demo-team#0123456789abcdef#l2",
+        "--json keeps the full label"
+    );
+    let seat = by_block(&panes, "block:api-seat-a");
+    assert_eq!(
+        seat["since_estimated"], true,
+        "no record: since is a guess, as docs/cli.md says"
+    );
+}
+
+/// Runs `rexboard board` on a fresh pty, sends `signal` (if any) once the
+/// board is on the alternate screen, and returns everything it wrote plus how it exited.
+fn board_under_pty(
+    signal: Option<libc::c_int>,
+    hang_up: bool,
+) -> (String, std::process::ExitStatus) {
+    use std::io::Read;
+    use std::os::fd::FromRawFd;
+    let (mut master, mut slave) = (0, 0);
+    let mut size = libc::winsize {
+        ws_row: 24,
+        ws_col: 80,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    let opened = unsafe {
+        libc::openpty(
+            &raw mut master,
+            &raw mut slave,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &raw mut size,
+        )
+    };
+    assert_eq!(opened, 0, "openpty failed");
+    // Close-on-exec, so children that other tests spawn meanwhile do not inherit the pty.
+    for fd in [master, slave] {
+        unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+    }
+    let stdio = || unsafe {
+        std::process::Stdio::from_raw_fd(libc::fcntl(slave, libc::F_DUPFD_CLOEXEC, 0))
+    };
+    // No setsid or controlling tty: crossterm reads a tty stdin, and a pre_exec fork from the
+    // busy parallel suite got the child SIGKILLed in about a third of runs.
+    let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_rexboard"));
+    cmd.arg("board")
+        .env("REXBOARD_REX", fixture("fake-rex"))
+        .env("XDG_RUNTIME_DIR", NO_SERVE)
+        .env("XDG_STATE_HOME", NO_SERVE)
+        .env("TMPDIR", NO_SERVE)
+        .env("TERM", "xterm-256color")
+        .stdin(stdio())
+        .stdout(stdio())
+        .stderr(stdio());
+    let mut child = cmd.spawn().unwrap();
+    unsafe { libc::close(slave) };
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let close = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (sink, closing) = (seen.clone(), close.clone());
+    unsafe { libc::fcntl(master, libc::F_SETFL, libc::O_NONBLOCK) };
+    let reader = std::thread::spawn(move || {
+        // Owns the master: dropping it on `close` hangs up the terminal, as a closed window does.
+        let mut file = unsafe { std::fs::File::from_raw_fd(master) };
+        let mut chunk = [0; 4096];
+        while !closing.load(std::sync::atomic::Ordering::SeqCst) {
+            match file.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => sink.lock().unwrap().extend_from_slice(&chunk[..n]),
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(_) => break,
+            }
+        }
+    });
+    let text = || String::from_utf8_lossy(&seen.lock().unwrap()).into_owned();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !text().contains("\x1b[?1049h") {
+        if std::time::Instant::now() >= deadline {
+            let status = child.try_wait().unwrap();
+            let _ = child.kill();
+            panic!(
+                "no alternate screen in 10s; exit {status:?}; output {:?}",
+                text()
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    if hang_up {
+        close.store(true, std::sync::atomic::Ordering::SeqCst);
+        reader.join().unwrap();
+    }
+    if let Some(signal) = signal {
+        unsafe { libc::kill(child.id() as i32, signal) };
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            panic!("board did not exit within 5s of signal {signal:?} (hang up: {hang_up})");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    if !hang_up {
+        eventually("the restore sequence", || text().contains("\x1b[?1049l"));
+    }
+    (text(), status)
+}
+
+#[test]
+fn board_restores_the_terminal_on_sigterm_and_sighup() {
+    for signal in [libc::SIGTERM, libc::SIGHUP] {
+        let (out, status) = board_under_pty(Some(signal), false);
+        assert!(status.success(), "signal {signal}: {status:?}");
+        let entered = out.find("\x1b[?1049h").unwrap();
+        let left = out.rfind("\x1b[?1049l").unwrap();
+        assert!(
+            left > entered,
+            "the alternate screen is left after it was entered"
+        );
+        assert!(
+            out[left..].contains("\x1b[?25h"),
+            "the cursor is shown again"
+        );
+    }
+}
+
+#[test]
+fn ls_does_not_suspect_a_seat_under_tmux_by_its_title() {
+    // tmux owns the title and keeps the idle glyph while the agent works.
+    let panes = ls_json(&mut ls());
+    let seat = by_block(&panes, "block:web-rig-review");
+    assert_eq!(seat["state"], "working");
+    assert_eq!(seat["suspect"], false, "{seat}");
+    assert_eq!(seat["group"], "working");
+    let out = ls().assert().success().get_output().stdout.clone();
+    let text = String::from_utf8(out).unwrap();
+    let line = text.lines().find(|l| l.contains("seat-r")).unwrap();
+    assert!(!line.contains("idle?"), "{line}");
+}
+
+#[test]
+fn board_exits_when_its_terminal_hangs_up() {
+    let (_, status) = board_under_pty(Some(libc::SIGHUP), true);
+    assert!(status.success(), "{status:?}");
+}
+
+#[test]
+fn board_exits_when_its_terminal_closes_without_a_sighup() {
+    let (_, status) = board_under_pty(None, true);
+    assert!(status.success(), "{status:?}");
 }

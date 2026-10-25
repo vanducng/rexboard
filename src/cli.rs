@@ -23,6 +23,9 @@ pub enum Command {
     Watch(WatchArgs),
     /// Run the board daemon behind ls, watch --json and seen. They start it when it is not running.
     Serve(ServeArgs),
+    /// Open the board: agent panes grouped by what they need. `rexboard` with no command opens it
+    /// in a terminal.
+    Board,
     /// Mark a pane seen, by the `key` from `ls --json` (HOST/BLOCK_ID).
     Seen {
         #[arg(value_name = "KEY")]

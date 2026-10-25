@@ -33,8 +33,18 @@ pub struct Row {
     pub last_turn: Option<i64>,
     pub seen: bool,
     pub stale: bool,
+    /// The record says `working`, but it is old and the pane looks idle, so it is not trusted.
+    #[serde(default)]
+    pub suspect: bool,
+    #[serde(default)]
+    pub suspect_reason: Option<String>,
     pub group: Group,
 }
+
+/// How old a `working` report can get before a pane that looks idle makes it suspect.
+const SUSPECT_AFTER_SECS: i64 = 120;
+
+const SHELLS: [&str; 4] = ["zsh", "bash", "fish", "sh"];
 
 #[derive(Debug)]
 struct Entry {
@@ -49,9 +59,43 @@ struct Entry {
 }
 
 impl Entry {
-    fn group(&self) -> Group {
+    /// Why a `working` record is not believed: its last report is old and the pane disagrees,
+    /// as when a hook never reported the turn's end.
+    fn suspect(&self, now: DateTime<Utc>) -> Option<String> {
         let p = &self.pane;
-        if self.stale || p.source == "inferred" || p.state == "unknown" {
+        if p.state != "working" || p.source == "inferred" {
+            return None;
+        }
+        let at = DateTime::parse_from_rfc3339(p.updated_at.as_deref()?).ok()?;
+        let age = now - at.with_timezone(&Utc);
+        if age.num_seconds() <= SUSPECT_AFTER_SECS {
+            return None;
+        }
+        let at = at
+            .with_timezone(&chrono::Local)
+            .format(if age.num_days() >= 1 {
+                "%b %-d %H:%M"
+            } else {
+                "%H:%M"
+            });
+        // Under tmux the title is tmux's and keeps its idle glyph while the agent works.
+        let process = self.src.process.as_deref();
+        if process != Some("tmux") && p.title.starts_with("✳ ") {
+            return Some(format!("reported working at {at}; the title shows idle"));
+        }
+        let shell = process.filter(|name| SHELLS.contains(name))?;
+        Some(format!(
+            "reported working at {at}; {shell} is back in front"
+        ))
+    }
+
+    fn group(&self, now: DateTime<Utc>) -> Group {
+        let p = &self.pane;
+        if self.stale
+            || p.source == "inferred"
+            || p.state == "unknown"
+            || self.suspect(now).is_some()
+        {
             return Group::Unreported;
         }
         match p.state.as_str() {
@@ -62,7 +106,8 @@ impl Entry {
         }
     }
 
-    fn row(&self) -> Row {
+    fn row(&self, now: DateTime<Utc>) -> Row {
+        let suspect_reason = self.suspect(now);
         Row {
             key: format!("{}/{}", self.pane.host, self.pane.block_id),
             pane: self.pane.clone(),
@@ -72,7 +117,9 @@ impl Entry {
             last_turn: self.last_turn,
             seen: self.seen,
             stale: self.stale,
-            group: self.group(),
+            suspect: suspect_reason.is_some(),
+            suspect_reason,
+            group: self.group(now),
         }
     }
 }
@@ -233,13 +280,21 @@ impl Board {
         }
     }
 
-    /// Rows in board order: by group, then longest in state first.
-    pub fn rows(&self) -> Vec<Row> {
+    /// Rows in board order at `now`: by group, then longest in state first.
+    pub fn rows(&self, now: DateTime<Utc>) -> Vec<Row> {
         let mut entries: Vec<&Entry> = self.rows.values().collect();
-        entries.sort_by(|a, b| {
-            (a.group(), urgency(a), a.since).cmp(&(b.group(), urgency(b), b.since))
-        });
-        entries.into_iter().map(Entry::row).collect()
+        entries.sort_by_key(|e| (e.group(now), urgency(e, now), e.since));
+        entries.into_iter().map(|entry| entry.row(now)).collect()
+    }
+
+    /// The rows that are suspect at `now`. Time alone can make a row suspect, so serve checks
+    /// this every second, not only on events.
+    pub fn suspects(&self, now: DateTime<Utc>) -> BTreeSet<RowKey> {
+        self.rows
+            .iter()
+            .filter(|(_, entry)| entry.suspect(now).is_some())
+            .map(|(key, _)| key.clone())
+            .collect()
     }
 
     fn snapshot(
@@ -528,8 +583,8 @@ impl Board {
 }
 
 /// Inside NeedsYou, blocked comes before error, then unseen done.
-fn urgency(entry: &Entry) -> u8 {
-    match entry.group() {
+fn urgency(entry: &Entry, now: DateTime<Utc>) -> u8 {
+    match entry.group(now) {
         Group::NeedsYou => pane::rank(&entry.pane.state),
         _ => 0,
     }
@@ -574,7 +629,7 @@ mod tests {
 
     fn row(board: &Board, block: &str) -> Row {
         board
-            .rows()
+            .rows(at(10_000))
             .into_iter()
             .find(|r| r.pane.block_id == block)
             .unwrap()
@@ -647,7 +702,11 @@ mod tests {
         assert!(row.pane.children.is_empty());
         assert_eq!(row.group, Group::Unreported);
         let gone = replay(21);
-        assert!(gone.rows().iter().all(|r| r.pane.block_id != PANE));
+        assert!(
+            gone.rows(at(10_000))
+                .iter()
+                .all(|r| r.pane.block_id != PANE)
+        );
     }
 
     #[test]
@@ -688,7 +747,7 @@ mod tests {
         ]);
         board.apply("mini", &snapshot(blocks), at(10)).unwrap();
         let order: Vec<_> = board
-            .rows()
+            .rows(at(10_000))
             .into_iter()
             .map(|r| (r.group, r.pane.block_id))
             .collect();
@@ -717,7 +776,7 @@ mod tests {
             retry_in: Duration::from_secs(1),
         };
         assert_eq!(board.apply("mini", &down, at(2)).unwrap().len(), 1);
-        let rows = board.rows();
+        let rows = board.rows(at(10_000));
         let mini = rows.iter().find(|r| r.pane.host == "mini").unwrap();
         let studio = rows.iter().find(|r| r.pane.host == "studio").unwrap();
         assert!(mini.stale);
@@ -734,7 +793,7 @@ mod tests {
             block("block:utc", "done", "2026-01-01T04:00:00Z"),
         ]);
         board.apply("mini", &snapshot(blocks), at(0)).unwrap();
-        let rows = board.rows();
+        let rows = board.rows(at(10_000));
         assert_eq!(rows[0].pane.block_id, "block:utc");
         assert_eq!(rows[0].since, "2026-01-01T04:00:00.000Z");
         assert_eq!(rows[1].pane.block_id, "block:minus3");
@@ -774,5 +833,99 @@ mod tests {
                 .starts_with("unexpected pane shape from Rex 0.0.1-gabc: missing field `state`"),
             "{err}"
         );
+    }
+
+    fn working(id: &str, title: &str, process: &str, updated_at: &str) -> Value {
+        json!({ "block_id": id, "label": "seat-a", "title": title, "process": { "name": process },
+            "records": [{ "state": "working", "app": "claude-code", "updated_at": updated_at,
+                          "owner": { "name": "tmux" } }] })
+    }
+
+    #[test]
+    fn an_old_working_report_with_an_idle_pane_is_suspect() {
+        let mut board = Board::default();
+        let blocks = json!([
+            working(
+                "block:idle-title",
+                "✳ seat-a@demo",
+                "2.1.0",
+                "2026-01-01T00:00:00Z"
+            ),
+            working(
+                "block:under-tmux",
+                "✳ seat-t@demo",
+                "tmux",
+                "2026-01-01T00:00:00Z"
+            ),
+            working("block:shell", "", "zsh", "2026-01-01T00:00:00Z"),
+            working(
+                "block:busy",
+                "◐ seat-a@demo",
+                "2.1.0",
+                "2026-01-01T00:00:00Z"
+            ),
+        ]);
+        board.apply("mini", &snapshot(blocks), at(5)).unwrap();
+        let fresh = board.rows(at(SUSPECT_AFTER_SECS));
+        assert!(
+            fresh.iter().all(|r| !r.suspect),
+            "a recent report is trusted"
+        );
+        let later = board.rows(at(SUSPECT_AFTER_SECS + 1));
+        let get = |id: &str| later.iter().find(|r| r.pane.block_id == id).unwrap();
+        let idle = get("block:idle-title");
+        assert!(idle.suspect);
+        assert_eq!(idle.pane.state, "working", "the raw state stays");
+        assert_eq!(idle.group, Group::Unreported);
+        assert!(
+            idle.suspect_reason
+                .as_deref()
+                .unwrap()
+                .ends_with("; the title shows idle")
+        );
+        let tmux = get("block:under-tmux");
+        assert!(
+            !tmux.suspect,
+            "under tmux the title is tmux's, not the agent's"
+        );
+        assert_eq!(tmux.group, Group::Working);
+        let shell = get("block:shell");
+        assert!(shell.suspect);
+        assert!(
+            shell
+                .suspect_reason
+                .as_deref()
+                .unwrap()
+                .ends_with("; zsh is back in front")
+        );
+        let busy = get("block:busy");
+        assert!(!busy.suspect, "the harness is still in front");
+        assert_eq!(busy.group, Group::Working);
+        assert_eq!(
+            board.suspects(at(SUSPECT_AFTER_SECS + 1)).len(),
+            2,
+            "serve can see a row turn suspect with time alone"
+        );
+        let day_old = board.rows(at(86_400 + 5));
+        let reason = day_old
+            .iter()
+            .find(|r| r.pane.block_id == "block:shell")
+            .and_then(|r| r.suspect_reason.clone())
+            .unwrap();
+        assert!(
+            reason.starts_with("reported working at Jan 1 ")
+                || reason.starts_with("reported working at Dec 31 "),
+            "a report a day old gives its date: {reason}"
+        );
+    }
+
+    #[test]
+    fn rows_from_a_serve_without_suspect_fields_parse() {
+        let row = serde_json::to_value(replay(3).rows(at(3)).remove(0)).unwrap();
+        let mut old = row.as_object().unwrap().clone();
+        old.remove("suspect");
+        old.remove("suspect_reason");
+        let parsed: Row = serde_json::from_value(Value::Object(old)).unwrap();
+        assert!(!parsed.suspect && parsed.suspect_reason.is_none());
     }
 }
