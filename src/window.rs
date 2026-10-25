@@ -75,8 +75,9 @@ struct Board {
 }
 
 /// A new app window comes with a session of its own. Open one, show the board in it, then
-/// destroy that session: the one the app names, else the one new session that looks like a
-/// fresh window's. Anything less certain destroys nothing and says what it found.
+/// destroy that session: the one the app names, if it is new and not the board's, else the one
+/// new session that looks like a fresh window's. Anything less certain destroys nothing and says
+/// what it found.
 fn open(board: &Board, app_client: Option<&str>) -> Result<()> {
     let before: BTreeSet<String> = sessions()?
         .iter()
@@ -85,7 +86,9 @@ fn open(board: &Board, app_client: Option<&str>) -> Result<()> {
     let reply = call(&json!({ "mode": "open", "app_client": app_client }))?;
     let named = ["session_id", "session"]
         .iter()
-        .find_map(|key| reply["reply"][*key].as_str().map(str::to_owned));
+        .find_map(|key| reply["reply"][*key].as_str())
+        .filter(|id| *id != board.id && !before.contains(*id))
+        .map(str::to_owned);
     let made = match named {
         Some(id) => id,
         None => new_window_session(&before, &board.id)?,
@@ -93,13 +96,19 @@ fn open(board: &Board, app_client: Option<&str>) -> Result<()> {
     call(
         &json!({ "mode": "select", "session_id": board.id, "window_id": board.tab, "app_client": app_client }),
     )?;
-    call(&json!({ "mode": "destroy", "session_id": made }))?;
+    call(&json!({ "mode": "destroy", "session_id": made })).map_err(|err| Error::RexExplained {
+        message: format!(
+            "the board is shown, but the new window's own session {made} is left open"
+        ),
+        steps: vec![format!("rex kill {made}"), "rex ls".to_owned()],
+        detail: err.to_string(),
+    })?;
     Ok(())
 }
 
 /// The session a new app window came with: the one session that was not there before, once it
-/// shows up, if it looks like a fresh window's (not the board's label, one tab, one pane, no
-/// status record).
+/// shows up, if it looks like a fresh window's (not the board's label, one tab, one pane running
+/// a login shell, no status record).
 fn new_window_session(before: &BTreeSet<String>, board: &str) -> Result<String> {
     let deadline = Instant::now() + APPEAR_WITHIN;
     loop {
@@ -174,10 +183,29 @@ fn panes(session: &Value) -> impl Iterator<Item = &Value> {
         .flat_map(|w| w["blocks"].as_array().into_iter().flatten())
 }
 
+const SHELLS: [&str; 4] = ["zsh", "bash", "fish", "sh"];
+
+fn is_shell(name: &str) -> bool {
+    SHELLS.contains(&name.trim_start_matches('-'))
+}
+
+/// A shell pane's title is empty, the shell's name, or a directory.
+fn shell_title(title: &str) -> bool {
+    title.is_empty() || is_shell(title) || title.starts_with('~') || title.starts_with('/')
+}
+
 fn looks_fresh(session: &Value) -> bool {
     let windows = session["windows"].as_array().map_or(0, Vec::len);
-    let records = panes(session).any(|b| b["records"].as_array().is_some_and(|r| !r.is_empty()));
-    session["label"] != SESSION && windows == 1 && panes(session).count() == 1 && !records
+    let mut panes = panes(session);
+    let (Some(pane), None) = (panes.next(), panes.next()) else {
+        return false;
+    };
+    let records = pane["records"].as_array().is_some_and(|r| !r.is_empty());
+    session["label"] != SESSION
+        && windows == 1
+        && !records
+        && pane["process"]["name"].as_str().is_some_and(is_shell)
+        && shell_title(pane["title"].as_str().unwrap_or(""))
 }
 
 fn describe(session: &Value) -> String {

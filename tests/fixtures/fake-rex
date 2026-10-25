@@ -9,7 +9,8 @@
 #   capture      prints a few lines of generic pane text
 #   new          succeeds, and touches $FAKE_REX_STATE/made when FAKE_REX_STATE is set
 #   do - (window script, mode open) prints $FAKE_REX_OPEN_REPLY (default {"ok":true,"reply":{}});
-#                other window modes print $FAKE_REX_WINDOW_REPLY (default {"ok":true})
+#                mode destroy prints $FAKE_REX_DESTROY_REPLY, other modes $FAKE_REX_WINDOW_REPLY
+#                (both default {"ok":true})
 #   do - (snapshot) with $FAKE_REX_FIXTURES set: the Nth call prints $FAKE_REX_FIXTURES/N.json, or
 #                the last one there is; the count lives in $FAKE_REX_STATE
 if [ -n "${FAKE_REX_LOG:-}" ]; then
@@ -54,6 +55,7 @@ case " $* " in
       *client.window.new*)
         case " $* " in
           *'"mode":"open"'*) ok='{"ok":true,"reply":{}}'; printf '%s\n' "${FAKE_REX_OPEN_REPLY:-$ok}" ;;
+          *'"mode":"destroy"'*) ok='{"ok":true}'; printf '%s\n' "${FAKE_REX_DESTROY_REPLY:-$ok}" ;;
           *) ok='{"ok":true}'; printf '%s\n' "${FAKE_REX_WINDOW_REPLY:-$ok}" ;;
         esac
         ;;

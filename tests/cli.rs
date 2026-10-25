@@ -1700,6 +1700,38 @@ fn window_new_destroys_the_session_the_app_names() {
 }
 
 #[test]
+fn window_new_ignores_a_named_session_that_is_not_new() {
+    for named in ["session:mine", "session:board"] {
+        let dir = tempfile::tempdir().unwrap();
+        let mine = session("mine", "api", "build", "zsh", 1, false);
+        window_cmd(
+            dir.path(),
+            &[
+                vec![board_session(), mine.clone()],
+                vec![board_session(), mine.clone()],
+                vec![board_session(), mine, fresh_session("win")],
+            ],
+        )
+        .env(
+            "FAKE_REX_OPEN_REPLY",
+            format!(r#"{{"ok":true,"reply":{{"session_id":"{named}"}}}}"#),
+        )
+        .args(["window", "--new"])
+        .assert()
+        .success();
+        assert_eq!(
+            window_calls(dir.path()),
+            calls(&[
+                ("open", ""),
+                ("select", "session:board"),
+                ("destroy", "session:win")
+            ]),
+            "{named}"
+        );
+    }
+}
+
+#[test]
 fn window_new_destroys_one_fresh_session() {
     let dir = tempfile::tempdir().unwrap();
     window_cmd(
@@ -1793,6 +1825,57 @@ fn window_new_destroys_nothing_when_the_new_session_is_not_fresh() {
                 .all(|(mode, _)| mode != "destroy")
         );
     }
+}
+
+#[test]
+fn window_new_never_destroys_a_new_agent_session() {
+    for process in ["2.1.0", "codex"] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut agent = fresh_session("agent");
+        agent["windows"][0]["blocks"][0]["process"]["name"] = process.into();
+        window_cmd(
+            dir.path(),
+            &[
+                vec![board_session()],
+                vec![board_session()],
+                vec![board_session(), agent],
+            ],
+        )
+        .args(["window", "--new"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "does not look like the new window's own",
+        ));
+        assert!(
+            window_calls(dir.path())
+                .iter()
+                .all(|(mode, _)| mode != "destroy"),
+            "{process}"
+        );
+    }
+}
+
+#[test]
+fn window_new_names_the_session_it_could_not_destroy() {
+    let dir = tempfile::tempdir().unwrap();
+    window_cmd(
+        dir.path(),
+        &[
+            vec![board_session()],
+            vec![board_session()],
+            vec![board_session(), fresh_session("win")],
+        ],
+    )
+    .env(
+        "FAKE_REX_DESTROY_REPLY",
+        r#"{"ok":false,"step":"session.destroy","error":"busy"}"#,
+    )
+    .args(["window", "--new"])
+    .assert()
+    .code(1)
+    .stderr(predicate::str::contains("session:win"))
+    .stderr(predicate::str::contains("rex kill session:win"));
 }
 
 #[test]
