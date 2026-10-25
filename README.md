@@ -40,7 +40,7 @@ A pane needs you when it is blocked (often on a permission prompt), has an error
 
 ## How it works
 
-<img alt="rexboard architecture: local (this Mac) and mini each run one observer that feeds rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket; a jump, one of two writes to Rex, runs jump.pre_cmd, focuses the pane on its host and asks the Rex app to show its session" src="docs/assets/architecture.svg" width="100%">
+<img alt="rexboard architecture: local (this Mac) and mini each run one observer that feeds rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket; a jump, one of two writes to Rex, runs jump.pre_cmd if set, focuses the pane on its host and asks the Rex app to show its session" src="docs/assets/architecture.svg" width="100%">
 
 rexboard reads Rex. Two commands write to it: a jump (blue) focuses the pane on its host and asks the Rex app to show it, and `rexboard window` makes the board's own session and shows it in the focused window.
 

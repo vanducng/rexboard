@@ -220,7 +220,7 @@ rexboard window --print-title  # board - rexboard
 
 The board lives in a Rex session labelled `rexboard`, in a tab labelled `board` that runs `rexboard board`; a session of yours that happens to be labelled `rexboard` is never taken for it. The board titles its pane `board`, and the Rex app titles a window `<pane title> - <session>`, so the board's window is `board - rexboard`. `--print-title` prints that, for window-manager rules.
 
-The board shows in the window you are in, so going back and forth is all in one Rex window: show the board, Enter goes to the agent's pane in that same window, and the board is one key away again.
+The board shows in the window you are in, so going back and forth is all in one Rex window: show the board, Enter goes to the agent's pane in that same window, and running `rexboard window` again (bind it to a key) shows the board again.
 
 - With no `rexboard` session on this host, `rexboard window` makes it (`rex new rexboard --window board -- rexboard board`).
 - Then it asks the app to select the session, which shows the board in the focused window. If another app window already shows the session, the app focuses that window instead.

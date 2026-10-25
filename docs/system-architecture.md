@@ -2,7 +2,7 @@
 
 rexboard reads Rex, remembers what Rex does not, and shows it. Two commands write to Rex: a jump, which focuses one pane and asks the Rex app to show its session, and `rexboard window`, which makes the board's own session and shows it in the focused app window (`--new`: a new app window).
 
-<img alt="rexboard architecture: local (this Mac) and mini each run one observer that feeds rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket; a jump, one of two writes to Rex, runs jump.pre_cmd, focuses the pane on its host and asks the Rex app to show its session" src="assets/architecture.svg" width="100%">
+<img alt="rexboard architecture: local (this Mac) and mini each run one observer that feeds rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket; a jump, one of two writes to Rex, runs jump.pre_cmd if set, focuses the pane on its host and asks the Rex app to show its session" src="assets/architecture.svg" width="100%">
 
 Each host runs one observer, `rex [-S HOST] do - --all`, whose NDJSON lines ([CLI](cli.md)) feed serve's collectors and its one reducer thread. Two reads bypass serve: the board's peek runs `rex [-S HOST] capture` straight against the pane's host, `ls --direct` takes its own snapshot, and `watch --raw` and `watch --direct` run their own observers.
 

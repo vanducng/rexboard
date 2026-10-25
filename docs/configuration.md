@@ -9,7 +9,7 @@ client = "studio"
 [jump]
 # Only for a board in its own window (`rexboard window --new`): runs before every jump, as
 # an argv list (no shell), to focus the main Rex window first.
-pre_cmd = ["focus-main-rex-window"]   # a script of yours, such as a yabai focus
+# pre_cmd = ["focus-main-rex-window"]   # a script of yours, such as a yabai focus
 
 [hosts]
 # `rex hosts` labels rexboard leaves out: no observer, no rows.
