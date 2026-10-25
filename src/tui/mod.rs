@@ -1,4 +1,5 @@
 mod app;
+mod columns;
 mod theme;
 mod view;
 
