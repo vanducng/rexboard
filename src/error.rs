@@ -26,10 +26,15 @@ pub enum Error {
     NotFound(String),
     #[error("nobody needs you")]
     NobodyNeedsYou,
+    /// No app, or not exactly one, could take a jump on this host.
     #[error("{message}")]
-    AmbiguousClient {
+    AmbiguousClient { message: String, steps: Vec<String> },
+    /// Rex failed in a way rexboard can explain; `detail` keeps Rex's own words for --json.
+    #[error("{message}")]
+    RexExplained {
         message: String,
-        labels: Vec<String>,
+        steps: Vec<String>,
+        detail: String,
     },
     #[error("{0}")]
     Config(String),
@@ -64,7 +69,7 @@ impl Error {
             Self::Usage { .. } | Self::Help => "USAGE",
             Self::Cancelled => "CANCELLED",
             Self::RexNotFound(_) => "REX_NOT_FOUND",
-            Self::Rex(_) => "REX",
+            Self::Rex(_) | Self::RexExplained { .. } => "REX",
             Self::HostsUnreachable(_) => "HOSTS_UNREACHABLE",
             Self::ContractMismatch(_) => "CONTRACT_MISMATCH",
             Self::Serve { .. } => "SERVE",
@@ -91,10 +96,7 @@ impl Error {
             Self::ServeRunning(_) => vec!["rexboard serve --stop".to_owned()],
             Self::NotFound(_) => vec!["rexboard ls --json".to_owned()],
             Self::NobodyNeedsYou => vec!["rexboard ls".to_owned()],
-            Self::AmbiguousClient { labels, .. } => labels
-                .iter()
-                .map(|label| format!("client = \"{label}\" in config.toml, or REX_CLIENT={label}"))
-                .collect(),
+            Self::AmbiguousClient { steps, .. } | Self::RexExplained { steps, .. } => steps.clone(),
             Self::Config(_) | Self::Jump(_) => vec![CONFIG_DOC.to_owned()],
             Self::ContractMismatch(_) => vec![
                 "rexboard --version".to_owned(),
@@ -121,7 +123,7 @@ const CONFIG_DOC: &str = "https://github.com/vanducng/rexboard/blob/main/docs/co
 
 pub fn report(json: bool, err: &Error) {
     if json {
-        let body = json!({
+        let mut body = json!({
             "ok": false,
             "error": {
                 "code": err.code(),
@@ -129,6 +131,9 @@ pub fn report(json: bool, err: &Error) {
                 "next_steps": err.next_steps(),
             }
         });
+        if let Error::RexExplained { detail, .. } = err {
+            body["error"]["detail"] = json!(detail);
+        }
         eprintln!("{body}");
         return;
     }

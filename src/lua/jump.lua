@@ -34,12 +34,14 @@ local function local_app()
     return nil, { ok = false, code = "no_client", error = "no Rex app client named " .. a.app_client,
       labels = labels(apps) }
   end
+  if #apps == 0 then return nil, { ok = false, code = "no_app" } end
   local mine = {}
   for _, c in ipairs(apps) do
     if c.principal and c.principal.transport == "unix" then mine[#mine + 1] = c end
   end
   if #mine == 1 then return mine[1] end
-  return nil, { ok = false, code = "ambiguous_client", labels = labels(#mine > 1 and mine or apps) }
+  if #mine == 0 then return nil, { ok = false, code = "no_unix_app", labels = labels(apps) } end
+  return nil, { ok = false, code = "ambiguous_client", labels = labels(mine) }
 end
 
 -- This Mac's app as a client of a remote server: the app connected from this Mac's node.

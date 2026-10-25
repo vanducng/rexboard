@@ -91,12 +91,12 @@ pub fn go(row: &Row) -> Result<()> {
             "app_client": app_client,
         }),
     )?;
-    check(&reply)?;
+    check(&reply, &row.key)?;
     client::call(&json!({ "cmd": "seen", "key": row.key }))?;
     Ok(())
 }
 
-fn check(reply: &Value) -> Result<()> {
+fn check(reply: &Value, key: &str) -> Result<()> {
     if reply["ok"] == true {
         return Ok(());
     }
@@ -106,26 +106,68 @@ fn check(reply: &Value) -> Result<()> {
         .flatten()
         .filter_map(|label| label.as_str().map(str::to_owned))
         .collect();
-    let text = |key: &str| reply[key].as_str().unwrap_or("no reason given").to_owned();
+    let text = |field: &str| {
+        reply[field]
+            .as_str()
+            .unwrap_or("no reason given")
+            .to_owned()
+    };
+    let pick_one = || {
+        labels
+            .iter()
+            .map(|label| format!("client = \"{label}\" in config.toml, or REX_CLIENT={label}"))
+            .collect()
+    };
+    let (step, error) = (text("step"), text("error"));
     Err(match reply["code"].as_str() {
         Some("ambiguous_client") => Error::AmbiguousClient {
             message: format!(
-                "more than one Rex app could take the jump: {}",
+                "more than one Rex app is on this host's unix socket: {}",
                 labels.join(", ")
             ),
-            labels,
+            steps: pick_one(),
+        },
+        Some("no_unix_app") => Error::AmbiguousClient {
+            message: format!(
+                "no Rex app is on this host's unix socket; app clients: {}",
+                labels.join(", ")
+            ),
+            steps: pick_one(),
+        },
+        Some("no_app") => Error::AmbiguousClient {
+            message: "no Rex app is connected to this host's Rex server".to_owned(),
+            steps: vec!["open the Rex app".to_owned(), "rex client ls".to_owned()],
         },
         Some("no_client") => Error::Config(format!(
             "{}; the app clients are: {}",
             text("error"),
             labels.join(", ")
         )),
-        _ => Error::Rex(format!(
-            "jump failed at {}: {}",
-            text("step"),
-            text("error")
-        )),
+        _ if step == "session.select"
+            && (error.contains("code=timeout") || error.contains("status=504")) =>
+        {
+            Error::RexExplained {
+                message: format!(
+                    "the Rex app on {} did not answer within 5s; it does not answer while the Mac's screen is locked",
+                    app_name(&error)
+                ),
+                steps: vec![
+                    format!("unlock the Mac, then rexboard jump {key}"),
+                    "rex client ls".to_owned(),
+                ],
+                detail: error,
+            }
+        }
+        _ => Error::Rex(format!("jump failed at {step}: {error}")),
     })
+}
+
+/// The app's name from Rex's timeout text, as in `"studio" did not answer`.
+fn app_name(error: &str) -> String {
+    error
+        .split_once(" did not answer")
+        .and_then(|(head, _)| head.rsplit('"').nth(1))
+        .map_or_else(|| "this Mac".to_owned(), crate::output::clean)
 }
 
 fn pre_cmd(argv: &[String]) -> Result<()> {

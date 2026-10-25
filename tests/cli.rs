@@ -1390,3 +1390,75 @@ fn config_excludes_hosts_and_rejects_unknown_keys() {
         .stderr(predicate::str::contains("\"code\":\"CONFIG\""))
         .stderr(predicate::str::contains("colour"));
 }
+
+#[test]
+fn jump_explains_an_app_that_does_not_answer() {
+    let serve = needing();
+    let raw = r#"stream response \"control-2\" failed: \"studio\" did not answer within 5s (status=504 code=timeout)"#;
+    let reply = format!(r#"{{"ok":false,"step":"session.select","error":"{raw}"}}"#);
+    serve
+        .needing_cmd()
+        .env("FAKE_REX_JUMP_REPLY", &reply)
+        .args(["jump", "1"])
+        .assert()
+        .code(1)
+        .stderr(
+            "error: the Rex app on studio did not answer within 5s; it does not answer while \
+             the Mac's screen is locked\nnext: unlock the Mac, then rexboard jump mini/block:seat-old\n",
+        );
+    let out = serve
+        .needing_cmd()
+        .env("FAKE_REX_JUMP_REPLY", &reply)
+        .args(["--json", "jump", "1"])
+        .assert()
+        .code(1)
+        .get_output()
+        .stderr
+        .clone();
+    let error: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(error["error"]["code"], "REX");
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("code=timeout"),
+        "--json keeps Rex's words: {error}"
+    );
+    assert_eq!(error["error"]["next_steps"][1], "rex client ls");
+}
+
+#[test]
+fn jump_without_a_usable_app_says_which_case() {
+    let serve = needing();
+    let fail = |reply: &str| {
+        let out = serve
+            .needing_cmd()
+            .env("FAKE_REX_JUMP_REPLY", reply)
+            .args(["--json", "jump", "1"])
+            .assert()
+            .code(1)
+            .get_output()
+            .stderr
+            .clone();
+        serde_json::from_slice::<serde_json::Value>(&out).unwrap()["error"].clone()
+    };
+    let none = fail(r#"{"ok":false,"code":"no_app"}"#);
+    assert_eq!(none["code"], "AMBIGUOUS_CLIENT");
+    assert_eq!(
+        none["message"],
+        "no Rex app is connected to this host's Rex server"
+    );
+    assert_eq!(
+        none["next_steps"],
+        serde_json::json!(["open the Rex app", "rex client ls"])
+    );
+    let elsewhere = fail(r#"{"ok":false,"code":"no_unix_app","labels":["remote-app"]}"#);
+    assert_eq!(
+        elsewhere["message"],
+        "no Rex app is on this host's unix socket; app clients: remote-app"
+    );
+    assert_eq!(
+        elsewhere["next_steps"][0],
+        "client = \"remote-app\" in config.toml, or REX_CLIENT=remote-app"
+    );
+}
