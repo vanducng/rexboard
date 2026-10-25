@@ -11,10 +11,15 @@
 #   do - (window script, mode open) prints $FAKE_REX_OPEN_REPLY (default {"ok":true,"reply":{}});
 #                mode destroy prints $FAKE_REX_DESTROY_REPLY, other modes $FAKE_REX_WINDOW_REPLY
 #                (both default {"ok":true})
+#                A destroy without session.attach first fails as Rex does (409, not attached).
+#   FAKE_REX_ENV_LOG  each call appends the REX_BLOCK, REX_SESSION and REX_CLIENT it sees (- if unset)
 #   do - (snapshot) with $FAKE_REX_FIXTURES set: the Nth call prints $FAKE_REX_FIXTURES/N.json, or
 #                the last one there is; the count lives in $FAKE_REX_STATE
 if [ -n "${FAKE_REX_LOG:-}" ]; then
   printf '%s\n' "$*" >>"$FAKE_REX_LOG"
+fi
+if [ -n "${FAKE_REX_ENV_LOG:-}" ]; then
+  printf 'REX_BLOCK=%s REX_SESSION=%s REX_CLIENT=%s\n' "${REX_BLOCK:--}" "${REX_SESSION:--}" "${REX_CLIENT:--}" >>"$FAKE_REX_ENV_LOG"
 fi
 dir=$(dirname "$0")
 host=studio
@@ -55,7 +60,14 @@ case " $* " in
       *client.window.new*)
         case " $* " in
           *'"mode":"open"'*) ok='{"ok":true,"reply":{}}'; printf '%s\n' "${FAKE_REX_OPEN_REPLY:-$ok}" ;;
-          *'"mode":"destroy"'*) ok='{"ok":true}'; printf '%s\n' "${FAKE_REX_DESTROY_REPLY:-$ok}" ;;
+          *'"mode":"destroy"'*)
+            if printf '%s\n' "$script" | sed -n '/a.mode == "destroy"/,/"session.destroy"/p' | grep -q '"session.attach"'; then
+              ok='{"ok":true}'
+            else
+              ok='{"ok":false,"step":"session.destroy","error":"stream is not attached to session (status=409 code=conflict)"}'
+            fi
+            printf '%s\n' "${FAKE_REX_DESTROY_REPLY:-$ok}"
+            ;;
           *) ok='{"ok":true}'; printf '%s\n' "${FAKE_REX_WINDOW_REPLY:-$ok}" ;;
         esac
         ;;

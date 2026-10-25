@@ -1,6 +1,6 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::process::CommandExt;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -190,7 +190,7 @@ fn last_line(pipe: impl Read + Send + 'static) -> thread::JoinHandle<Option<Stri
 
 fn start(host: Option<&str>) -> Result<Child> {
     let rex = rex::locate()?;
-    let mut cmd = Command::new(&rex);
+    let mut cmd = rex::command(&rex);
     if let Some(host) = host {
         cmd.args(["-S", host]);
     }
@@ -231,7 +231,7 @@ fn stop_child(child: &mut Child, pgid: &AtomicI32) -> Option<std::process::ExitS
 pub fn hosts() -> Result<Vec<String>> {
     let exclude = crate::config::load()?.hosts.exclude;
     let rex = rex::locate()?;
-    let mut cmd = Command::new(&rex);
+    let mut cmd = rex::command(&rex);
     cmd.args(["hosts", "--json"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

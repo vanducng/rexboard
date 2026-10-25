@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -264,7 +264,7 @@ fn board(sessions: &[Value]) -> Option<Board> {
 fn create() -> Result<Board> {
     let rex = rex::locate()?;
     let me = std::env::current_exe()?;
-    let mut cmd = Command::new(&rex);
+    let mut cmd = rex::command(&rex);
     cmd.args(["new", SESSION, "--window", TAB, "--"])
         .arg(&me)
         .arg("board")

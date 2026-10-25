@@ -2,7 +2,7 @@ mod app;
 mod theme;
 mod view;
 
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -242,7 +242,7 @@ fn listen(tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
 
 /// The last lines of a pane, as plain text with control characters removed.
 fn capture(host: &str, block: &str) -> Result<Vec<String>> {
-    let mut cmd = Command::new(rex::locate()?);
+    let mut cmd = rex::command(&rex::locate()?);
     if host != "local" {
         cmd.args(["-S", host]);
     }
