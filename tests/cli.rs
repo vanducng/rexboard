@@ -211,3 +211,85 @@ fn ls_without_rex_errors_with_next_steps() {
         .stderr(predicate::str::contains("\"code\":\"REX_NOT_FOUND\""))
         .stderr(predicate::str::contains("set REXBOARD_REX"));
 }
+
+fn watch_lines(cmd: &mut Command) -> Vec<serde_json::Value> {
+    let out = cmd.assert().success().get_output().stdout.clone();
+    String::from_utf8(out)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("watch --raw prints JSON lines"))
+        .collect()
+}
+
+fn watch_raw() -> Command {
+    let mut cmd = bin();
+    cmd.env("REXBOARD_REX", fixture("fake-rex"))
+        .args(["watch", "--raw", "--for", "2"]);
+    cmd
+}
+
+#[test]
+fn watch_raw_merges_two_hosts() {
+    let lines = watch_lines(&mut watch_raw());
+    let of = |host: &str| -> Vec<&str> {
+        lines
+            .iter()
+            .filter(|line| line["host"] == host)
+            .map(|line| line["type"].as_str().unwrap())
+            .collect()
+    };
+    let recorded = |name: &str| -> Vec<String> {
+        std::fs::read_to_string(fixture(name))
+            .unwrap()
+            .lines()
+            .map(|line| {
+                serde_json::from_str::<serde_json::Value>(line).unwrap()["type"].to_string()
+            })
+            .map(|ty| ty.trim_matches('"').to_owned())
+            .collect()
+    };
+    assert_eq!(of("local"), recorded("observer-studio.ndjson"));
+    assert_eq!(of("mini"), recorded("observer-mini.ndjson"));
+    let blocked = lines
+        .iter()
+        .find(|line| line["host"] == "mini" && line["record"]["state"] == "blocked")
+        .unwrap();
+    assert_eq!(blocked["record"]["kind"], "permission");
+    assert_eq!(blocked["session_id"], "session:web-probe");
+}
+
+#[test]
+fn watch_raw_restarts_observer_after_exit() {
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let lines = watch_lines(
+        watch_raw()
+            .args(["--host", "local"])
+            .env("FAKE_REX_EXIT_AFTER", "2")
+            .env("FAKE_REX_LOG", log.path()),
+    );
+    let types: Vec<_> = lines.iter().map(|l| l["type"].as_str().unwrap()).collect();
+    assert_eq!(
+        types[..5],
+        [
+            "snapshot",
+            "session_created",
+            "down",
+            "snapshot",
+            "session_created"
+        ]
+    );
+    assert!(lines.iter().all(|line| line["host"] == "local"));
+    assert_eq!(lines[2]["retry_in_s"], 1);
+    let argv = std::fs::read_to_string(log.path()).unwrap();
+    assert_eq!(argv.matches("do - --all").count(), 2, "{argv}");
+}
+
+#[test]
+fn watch_without_raw_is_usage() {
+    bin()
+        .env("REXBOARD_REX", fixture("fake-rex"))
+        .args(["watch", "--json"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("rexboard watch --raw"));
+}

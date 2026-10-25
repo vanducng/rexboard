@@ -1,12 +1,34 @@
 #!/bin/sh
-# Stands in for the rex CLI: answers `do -` with a recorded snapshot and logs argv.
+# Stands in for the rex CLI and logs argv to $FAKE_REX_LOG.
+#   do - --all   streams observer-<host>.ndjson (host from -S, else studio);
+#                FAKE_REX_EXIT_AFTER=N exits after N lines
+#   do -         prints a recorded snapshot
+#   hosts        lists one remote host, mini
 if [ -n "${FAKE_REX_LOG:-}" ]; then
   printf '%s\n' "$*" >>"$FAKE_REX_LOG"
 fi
+dir=$(dirname "$0")
+host=studio
+if [ "${1:-}" = "-S" ]; then
+  host=$2
+  shift 2
+fi
 case " $* " in
+  *" do - --all "*)
+    cat >/dev/null
+    if [ -n "${FAKE_REX_EXIT_AFTER:-}" ]; then
+      head -n "$FAKE_REX_EXIT_AFTER" "$dir/observer-$host.ndjson"
+      exit 0
+    fi
+    cat "$dir/observer-$host.ndjson"
+    sleep 30
+    ;;
   *" do - "*)
     cat >/dev/null
-    cat "${FAKE_REX_FIXTURE:-$(dirname "$0")/snapshot-two-hosts.json}"
+    cat "${FAKE_REX_FIXTURE:-$dir/snapshot-two-hosts.json}"
+    ;;
+  " hosts --json ")
+    echo '{"hosts":[{"host":{"label":"mini"}}]}'
     ;;
   *)
     echo "fake-rex: unsupported: $*" >&2
