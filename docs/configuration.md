@@ -1,6 +1,6 @@
 # Configuration
 
-rexboard reads `$XDG_CONFIG_HOME/rexboard/config.toml`, else `~/.config/rexboard/config.toml`. Every key is optional, and a missing file is an empty one. A file that cannot be read, or that has a key rexboard does not know, fails every command with `CONFIG` (exit 1), naming the file and the key.
+rexboard reads `$XDG_CONFIG_HOME/rexboard/config.toml`, else `~/.config/rexboard/config.toml`. Every key is optional, and a missing file is an empty one. A file that cannot be read, or that has a key rexboard does not know, fails `jump`, `next`, `pick`, `ls --direct`, `watch --raw` and `watch --direct` with `CONFIG` (exit 1), naming the file and the key. serve reads the file when it starts and each time it rescans `rex hosts` (every 5 minutes); while the file is bad, a starting serve watches only this host, and a running one keeps the hosts it has.
 
 ```toml
 # The Rex app client a jump selects the session in, by label or id.
@@ -18,11 +18,10 @@ exclude = ["build-box"]
 
 | Key | Type | Default | What |
 | --- | --- | --- | --- |
-| `client` | string | none | The app client that takes jumps on this host, by its label (`rex client ls`) or id. `REX_CLIENT` in the environment wins over it. Without either, rexboard uses the only app connected over the unix socket, and fails with `AMBIGUOUS_CLIENT` when there is none or more than one. Jumps to a remote host use the app connected from this Mac's Tailscale node instead |
+| `client` | string | none | The app client that takes jumps on this host, by its label (`rex client ls`) or id. `REX_CLIENT` in the environment wins over it. Without either, rexboard uses the only app connected over the unix socket, and fails with `AMBIGUOUS_CLIENT` when no app is connected, when none is on the unix socket, or when more than one is; the message says which, and the next steps name each app. Jumps to a remote host use the app connected from this Mac's Tailscale node instead |
 | `jump.pre_cmd` | array of strings | none | A command run before each jump, with no shell. It must exit 0 within 5 seconds, or the jump fails with `JUMP` and nothing is selected |
 | `hosts.exclude` | array of strings | `[]` | Remote hosts to leave out of `ls`, `watch` and the board. After a change, run `rexboard serve --stop` so serve rescans |
 
-serve reads `hosts.exclude` when it starts and each time it rescans `rex hosts` (every 5 minutes).
 
 ## Why `jump.pre_cmd`
 
