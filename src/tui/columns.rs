@@ -116,7 +116,7 @@ const fn column(
 }
 
 /// Every column, left to right. Sort letters follow k9s: S state, A age, T turn, R harness
-/// (runtime), O host, N where (name), M msg.
+/// (runtime), O host, W where, M msg.
 pub const COLUMNS: [Column; 8] = [
     column(
         Col::Glyph,
@@ -175,7 +175,7 @@ pub const COLUMNS: [Column; 8] = [
     column(
         Col::Where,
         "WHERE",
-        Some('N'),
+        Some('W'),
         Dir::Up,
         0,
         Width::Where,
@@ -338,7 +338,7 @@ impl Columns {
                 let underline = c
                     .letter
                     .and_then(|letter| c.header.find(letter))
-                    .filter(|&at| at < text.trim_end().len());
+                    .filter(|_| text.starts_with(c.header));
                 HeaderCell { text, underline }
             })
             .collect();
@@ -546,10 +546,10 @@ mod tests {
                 Some('A'),
                 Some('R'),
                 Some('O'),
-                None,
+                Some('W'),
                 Some('M')
             ],
-            "WHERE has no N to underline"
+            "every column's letter"
         );
     }
 }

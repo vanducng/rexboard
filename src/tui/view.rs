@@ -9,7 +9,7 @@ use unicode_width::UnicodeWidthStr;
 use super::app::{App, Item, Link, Spot};
 use super::columns::{Col, Columns, Tier, Tone, column_of, tier};
 use super::theme;
-use super::views::View;
+use super::views::{Key, View};
 use crate::board::Row;
 use crate::output::{clean, fit, in_state, name, wheres};
 use crate::pane::bare_title;
@@ -27,13 +27,13 @@ pub const KEYS: [(&str, &str); 16] = [
     ("j/k", "move; g/G first, last"),
     ("1-9", "the nth NEEDS YOU row"),
     ("s", "mark seen"),
-    ("ctrl+s", "mark shown done rows seen"),
+    ("ctrl+s", "mark done rows seen (was S)"),
     ("space", "peek at the pane"),
     ("/", "filter; enter keeps it"),
     ("v", "status, flat, harness, host"),
     (":", "a view by name; tab completes"),
     ("S A T", "sort by state, age, turn"),
-    ("R O N M", "by harness, host, where, msg"),
+    ("R O W M", "by harness, host, where, msg"),
     ("esc", "clear filter/sort/peek/folds"),
     ("z", "fold or open a group"),
     ("enter", "go to the pane"),
@@ -271,7 +271,8 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
         &app.rows,
         columns.width(Col::Where).saturating_sub(1),
         columns.tier != Tier::Wide,
-        columns.has(Col::Host),
+        // The host view's groups already name the host, so its rows need no `@HOST`.
+        columns.has(Col::Host) || app.view.group_by == Some(Key::Host),
     );
     let mut lines: Vec<Line> = items
         .iter()
@@ -588,7 +589,7 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled(kept, theme::bright()));
         spans.push(Span::styled(" · esc clears · ", theme::dim()));
     }
-    // The essentials first, so a narrow board keeps them.
+    // The essentials first, so a narrow board keeps them; `v view` then shows after `/ filter`.
     let keys: &[(&str, &str)] = if app.pick {
         &[("enter", "go"), ("j/k", "move"), ("/", "filter")]
     } else {
@@ -597,6 +598,7 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
             ("s", "seen"),
             ("/", "filter"),
             ("?", "keys"),
+            ("v", "view"),
             ("space", "peek"),
             ("enter", "jump"),
             ("1-9", "select"),
@@ -608,21 +610,31 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         ("q", " quit")
     };
     let quit = format!("{quit_key}{quit_what}");
-    let mut first = true;
+    let mut shown: Vec<(&str, &str)> = Vec::new();
     for &(key, what) in keys {
         if key == "space" && app.peek.is_some() {
             continue;
         }
-        let sep = if first { "" } else { " · " };
-        let piece = sep.width() + key.width() + 1 + what.width();
+        let sep = if shown.is_empty() { 0 } else { " · ".width() };
+        let piece = sep + key.width() + 1 + what.width();
         if used + piece + quit.width() + 2 > width {
             break;
         }
-        spans.push(Span::styled(sep, theme::dim()));
+        used += piece;
+        shown.push((key, what));
+    }
+    if let Some(at) = shown.iter().position(|&(key, _)| key == "v") {
+        let v = shown.remove(at);
+        let after = shown
+            .iter()
+            .position(|&(key, _)| key == "/")
+            .map_or(at, |i| i + 1);
+        shown.insert(after, v);
+    }
+    for (i, (key, what)) in shown.into_iter().enumerate() {
+        spans.push(Span::styled(if i == 0 { "" } else { " · " }, theme::dim()));
         spans.push(Span::styled(key, theme::bright()));
         spans.push(Span::styled(format!(" {what}"), theme::dim()));
-        used += piece;
-        first = false;
     }
     spans.push(Span::raw(
         " ".repeat(width.saturating_sub(used + quit.width()).max(2)),
@@ -1126,10 +1138,65 @@ mod tests {
             "v       status, flat, harness, host",
             ":       a view by name; tab completes",
             "S A T   sort by state, age, turn",
-            "R O N M by harness, host, where, msg",
+            "R O W M by harness, host, where, msg",
             "esc     clear filter/sort/peek/folds",
         ] {
             assert!(text.contains(want), "{want:?}:\n{text}");
         }
+    }
+
+    #[test]
+    fn a_board_down_to_3_columns_draws_without_a_panic() {
+        for width in [3, 9, 10, 11] {
+            let text = render(&fuller(), width, 14);
+            assert_eq!(text.lines().count(), 14, "{width}");
+        }
+    }
+
+    #[test]
+    fn the_footer_shows_v_view_after_filter_when_it_fits() {
+        let app = fuller();
+        let wide = render(&app, 120, 30);
+        assert!(
+            wide.lines()
+                .last()
+                .unwrap()
+                .contains("/ filter · v view · ? keys"),
+            "{wide}"
+        );
+        for (width, shows) in [(50, false), (53, false), (54, true)] {
+            let text = render(&app, width, 30);
+            let bar = text.lines().last().unwrap();
+            assert_eq!(bar.contains("v view"), shows, "{width}: {bar}");
+            assert!(bar.contains("? keys"), "{width}: {bar}");
+        }
+    }
+
+    #[test]
+    fn the_host_view_drops_the_at_host_its_group_already_names() {
+        let mut app = App::default();
+        let mut rows = Vec::new();
+        for (key, host) in [("local/block:p1", "local"), ("mini/block:p3", "mini")] {
+            let mut r = row(key, "done", "needs_you", false);
+            (r.pane.host, r.pane.session, r.pane.tab, r.pane.pane) = (
+                host.into(),
+                "api-gateway".into(),
+                "pair".into(),
+                "shell".into(),
+            );
+            r.pane.window_id = format!("window:pair-{host}");
+            rows.push(r);
+        }
+        app.set_rows(rows, hosts());
+        assert!(render(&app, 50, 20).contains("@mini"), "status keeps it");
+        for _ in 0..3 {
+            press(&mut app, KeyCode::Char('v'));
+        }
+        assert_eq!(app.view.name, "host");
+        let text = render(&app, 50, 20);
+        assert!(
+            text.contains("MINI (1)") && !text.contains("@mini"),
+            "{text}"
+        );
     }
 }

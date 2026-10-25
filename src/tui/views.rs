@@ -374,4 +374,61 @@ mod tests {
         assert_eq!(app.toast(), Some("no view \"nope\""));
         assert_eq!(app.view.name, "flat");
     }
+
+    #[test]
+    fn digits_count_needs_you_rows_in_the_order_shown() {
+        let mut app = App::default();
+        app.set_rows(mixed(), hosts());
+        press(&mut app, KeyCode::Char('A'));
+        press(&mut app, KeyCode::Char('A'));
+        assert_eq!(app.sort, Some((Col::Age, Dir::Up)));
+        press(&mut app, KeyCode::Char('1'));
+        assert_eq!(
+            app.selected,
+            Some(Spot::Row("local/new".into())),
+            "the first row drawn"
+        );
+        press(&mut app, KeyCode::Char('2'));
+        assert_eq!(app.selected, Some(Spot::Row("mini/old".into())));
+    }
+
+    #[test]
+    fn coming_back_to_a_view_with_the_rows_group_folded_rests_on_its_header() {
+        let mut app = App::default();
+        app.set_rows(mixed(), hosts());
+        // In status, fold WORKING and move up to a NEEDS YOU row.
+        for _ in 0..3 {
+            press(&mut app, KeyCode::Char('j'));
+        }
+        assert_eq!(app.selected, Some(Spot::Row("mini/run".into())));
+        press(&mut app, KeyCode::Char('z'));
+        press(&mut app, KeyCode::Char('k'));
+        // In flat, select the working row, then come back to status.
+        press(&mut app, KeyCode::Char('v'));
+        while app.selected != Some(Spot::Row("mini/run".into())) {
+            press(&mut app, KeyCode::Char('j'));
+        }
+        for _ in 0..3 {
+            press(&mut app, KeyCode::Char('v'));
+        }
+        assert_eq!(app.view.name, "status");
+        assert_eq!(
+            app.selected,
+            Some(Spot::Group(Bucket::Status(Group::Working))),
+            "the folded group's header, not the first row"
+        );
+    }
+
+    #[test]
+    fn the_first_capital_s_of_a_run_says_bulk_seen_moved() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('S'));
+        assert_eq!(
+            app.toast(),
+            Some("sorted by state · bulk seen is ctrl+s now")
+        );
+        app.toast = None;
+        press(&mut app, KeyCode::Char('S'));
+        assert_eq!(app.toast(), None, "once per run");
+    }
 }

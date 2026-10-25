@@ -82,6 +82,7 @@ pub struct App {
     pub commanding: bool,
     pub view: View,
     pub sort: Option<Sort>,
+    told_ctrl_s: bool,
     pub folded: BTreeSet<Bucket>,
     pub peek: Option<Peek>,
     /// The `?` key table is open in the detail pane.
@@ -243,6 +244,12 @@ impl App {
             self.unfold_all();
         }
         self.view = view;
+        // A row in a group this view keeps folded rests on that group's header, as `z` does.
+        if let Some(group) = self.current().and_then(|row| bucket(&self.view, row))
+            && self.folded.contains(&group)
+        {
+            self.selected = Some(Spot::Group(group));
+        }
         self.keep_selection_visible();
     }
 
@@ -290,6 +297,11 @@ impl App {
         let Some(column) = by_letter(letter) else {
             return;
         };
+        // ponytail: one hint per run for S's move to ctrl+s; drop it in v0.3.
+        if letter == 'S' && !self.told_ctrl_s {
+            self.told_ctrl_s = true;
+            self.say("sorted by state · bulk seen is ctrl+s now");
+        }
         self.sort = Some(match self.sort {
             Some((id, dir)) if id == column.id => (id, dir.flip()),
             _ => (column.id, column.first),
@@ -384,11 +396,15 @@ impl App {
                 }
                 let n = c as usize - '1' as usize;
                 let pick = self
-                    .rows
-                    .iter()
-                    .filter(|row| row.group == Group::NeedsYou && self.matches(row))
-                    .nth(n)
-                    .map(|row| Spot::Row(row.key.clone()));
+                    .items()
+                    .into_iter()
+                    .filter_map(|item| match item {
+                        Item::Row(i) if self.rows[i].group == Group::NeedsYou => {
+                            Some(Spot::Row(self.rows[i].key.clone()))
+                        }
+                        _ => None,
+                    })
+                    .nth(n);
                 if pick.is_some() {
                     self.selected = pick;
                 }
