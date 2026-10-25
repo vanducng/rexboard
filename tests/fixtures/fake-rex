@@ -51,7 +51,8 @@ case " $* " in
     if [ -n "$append" ]; then
       echo "$append"
     fi
-    sleep 30
+    # exec: a forked sleep can miss the group SIGTERM on macOS and hold the pipes open.
+    exec sleep 30
     ;;
   *" do - "*)
     script=$(cat)

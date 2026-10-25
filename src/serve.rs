@@ -386,7 +386,12 @@ impl Reducer {
                     }
                     changed
                 }
-                Err(err) => self.stop_host(host, &err),
+                Err(err) => {
+                    if let Some(collector) = self.collectors.get(host) {
+                        collector.restart(host, &err, event);
+                    }
+                    Vec::new()
+                }
             },
         };
         for warning in self.board.take_warnings() {

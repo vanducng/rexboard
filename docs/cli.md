@@ -92,7 +92,7 @@ rexboard watch --raw --for 60       # stop after 60 seconds
 
 ### Rows (`--json`)
 
-Each line is one JSON array: the agent rows from every host, in the same shape and order as `ls --json`. A new line follows each change to any row, at most one every 100ms, so a burst of reports prints once. A host's `down` marks its rows `stale`; its next snapshot replaces them, and `since`, `seen` and the turn fields survive for panes whose `state` and `kind` did not change. A host whose events rexboard cannot read (a record without `state`, a bad block or session shape) stops for good: `warning: HOST stopped and will not restart: ...` on stderr, its rows stay but turn `stale`, and the other hosts keep printing. Pending rows print once more when `watch` stops.
+Each line is one JSON array: the agent rows from every host, in the same shape and order as `ls --json`. A new line follows each change to any row, at most one every 100ms, so a burst of reports prints once. A host's `down` marks its rows `stale`; its next snapshot replaces them, and `since`, `seen` and the turn fields survive for panes whose `state` and `kind` did not change. A host that sends a line or record rexboard cannot read restarts its observer, as [Down and restart](#down-and-restart) describes; its rows stay `stale` until the new snapshot, and the other hosts keep printing. Pending rows print once more when `watch` stops.
 
 ### Lines (`--raw`)
 
@@ -143,14 +143,14 @@ When an observer exits, its output can't be read, or it prints nothing for 90 se
 
 The wait starts at 1 second and doubles up to 30. It goes back to 1 only after a run that lasted at least 30 seconds, so an observer that fails on every event backs off instead of restarting every second. A host that keeps going down never stops `watch`.
 
-A host stops for good when its observer prints a line that is not JSON or a known type with a bad field (`REX`), or a different `v` (`CONTRACT_MISMATCH`). rexboard prints `warning: HOST stopped and will not restart: ...` on stderr, and the other hosts keep streaming.
+A line rexboard cannot read restarts that host's observer the same way: a line that is not JSON, a known type with a bad field, or (with `--json` and in `serve`) a record the board rejects, such as a status without `state`. stderr gets `warning: HOST: ERROR; restarting its observer: LINE`, with the line cut at 500 characters. Until the new snapshot the host's rows are `stale` and can lag: about 1 second after a one-off line. If every snapshot carries the same line, the host stays `stale`, retries with a wait that doubles up to 30 seconds, and logs the warning each time. Only a different `v` (`CONTRACT_MISMATCH`) stops a host for good: `warning: HOST stopped and will not restart: ...`, and the other hosts keep streaming.
 
 ### Exit codes and errors
 
 | Exit | When |
 | --- | --- |
 | 0 | `--for` elapsed, Ctrl-C or SIGTERM, or stdout closed |
-| 1 | `REX_NOT_FOUND`: no `rex` CLI. `REX`: `rex hosts` failed, or every host stopped on a bad line. `CONTRACT_MISMATCH`: every host stopped and the last one stopped on a version mismatch; next steps `rexboard --version` and the `install.sh` one-liner |
+| 1 | `REX_NOT_FOUND`: no `rex` CLI. `REX`: `rex hosts` failed. `CONTRACT_MISMATCH`: every host stopped and the last one stopped on a version mismatch; next steps `rexboard --version` and the `install.sh` one-liner |
 | 2 | `USAGE`: neither `--json` nor `--raw`, a bad flag, or `--host` names no host |
 
 ## `rexboard board`

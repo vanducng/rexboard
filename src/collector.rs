@@ -55,6 +55,15 @@ impl Collector {
     pub fn pid(&self) -> i32 {
         self.pgid.load(Ordering::SeqCst)
     }
+
+    /// For an event the board rejects: ends the running observer, so the host goes down and a new
+    /// snapshot follows after the backoff.
+    pub fn restart(&self, host: &str, err: &Error, event: &HostEvent) {
+        if let HostEvent::Event(_, raw) = event {
+            warn_restart(host, err, &raw.to_string());
+        }
+        kill_group(self.pid());
+    }
 }
 
 impl Drop for Collector {
@@ -109,7 +118,7 @@ fn supervise(
     }
 }
 
-/// Runs one observer until it ends or goes silent, and returns why. Err means the stream is unreadable.
+/// Runs one observer until it ends or goes silent, and returns why. Err means rex is missing or speaks another contract.
 fn observe(
     host: Option<&str>,
     stop: &AtomicBool,
@@ -153,9 +162,13 @@ fn observe(
                         break "stopped".to_owned();
                     }
                 }
-                Err(err) => {
+                Err(err @ Error::ContractMismatch(_)) => {
                     stop_child(&mut child, pgid);
                     return Err(err);
+                }
+                Err(err) => {
+                    warn_restart(host.unwrap_or("local"), &err, &line);
+                    break err.to_string();
                 }
             },
             Ok(Err(err)) => break format!("read failed: {err}"),
@@ -174,6 +187,11 @@ fn observe(
         reason = format!("{reason}: {line}");
     }
     Ok(reason)
+}
+
+fn warn_restart(host: &str, err: &Error, line: &str) {
+    let line: String = line.chars().take(500).collect();
+    eprintln!("warning: {host}: {err}; restarting its observer: {line}");
 }
 
 /// The last non-empty stderr line, skipping the banner `rex do` prints when it starts listening.

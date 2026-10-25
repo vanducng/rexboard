@@ -41,7 +41,7 @@ end)
 rex.on("block_created", function(_, ev)
   local listed = rex.call("session.list_blocks", { session_id = ev.session_id }) or {}
   for _, b in ipairs(listed.blocks or {}) do
-    if b.block_id == ev.block_id and b.creator_name == term then
+    if b.block_id == ev.block_id and b.creator_name == term and b.placement == "placed" then
       emit({ type = "block_created", session_id = ev.session_id, window_id = b.window_id,
         block = block(rex, ev.session_id, b) })
     end

@@ -399,6 +399,30 @@ fn watch_raw_passes_unknown_types_through() {
 }
 
 #[test]
+fn watch_raw_restarts_a_host_after_an_unreadable_line() {
+    // Shape Rex sent for a detached block (window_id null) before the observer filtered them.
+    let bad = r#"{"v":1,"type":"block_created","session_id":"session:api","block":{"block_id":"block:api-detached"}}"#;
+    let (lines, errors) = watch_until(
+        &["--raw", "--host", "local"],
+        &[("FAKE_REX_APPEND", bad)],
+        |lines| count(lines, "local", "snapshot") == 2,
+    );
+    let down = lines.iter().find(|line| line["type"] == "down").unwrap();
+    assert!(
+        down["reason"]
+            .as_str()
+            .unwrap()
+            .contains("missing field `window_id`"),
+        "{down}"
+    );
+    assert!(
+        errors.contains("warning: local: unexpected observer line from Rex 0.0.1792787366-g623b2d: missing field `window_id`; restarting its observer: {\"v\":1,\"type\":\"block_created\""),
+        "{errors}"
+    );
+    assert!(!errors.contains("will not restart"), "{errors}");
+}
+
+#[test]
 fn watch_without_raw_is_usage() {
     bin()
         .env("REXBOARD_REX", fixture("fake-rex"))
@@ -467,38 +491,32 @@ fn watch_json_prints_debounced_rows() {
 }
 
 #[test]
-fn watch_json_keeps_other_hosts_when_one_sends_a_bad_record() {
+fn watch_json_restarts_a_host_that_sends_a_bad_record() {
     let bad = r#"{"v":1,"type":"status","session_id":"session:web","block_id":"block:web-seat-b","record_id":"","record":{"app":"x"}}"#;
     let marker = seat_done("session:api", "block:api-seat-a");
-    let (prints, errors) = watch_until(
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let mini_starts = || {
+        std::fs::read_to_string(log.path())
+            .unwrap()
+            .matches("-S mini do - --all")
+            .count()
+    };
+    let (_, errors) = watch_until(
         &["--json", "--direct"],
         &[
             ("FAKE_REX_APPEND_mini", bad),
             ("FAKE_REX_APPEND_studio", &marker),
+            ("FAKE_REX_LOG", log.path().to_str().unwrap()),
         ],
-        |prints| {
-            rows_where(prints, "block:api-seat-a", "done")
-                && prints
-                    .last()
-                    .unwrap()
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|row| row["host"] == "mini" && row["stale"] == true)
-        },
-    );
-    let last = prints.last().unwrap().as_array().unwrap();
-    let mini = last.iter().find(|row| row["host"] == "mini").unwrap();
-    assert_eq!(
-        mini["group"], "unreported",
-        "the stopped host's rows stay, marked stale"
+        |prints| mini_starts() >= 2 && rows_where(prints, "block:api-seat-a", "done"),
     );
     assert!(
         errors.contains(
-            "warning: mini stopped and will not restart: unexpected pane shape from Rex 0.0.1792787366-g623b2d: missing field `state`"
+            "warning: mini: unexpected pane shape from Rex 0.0.1792787366-g623b2d: missing field `state`; restarting its observer: {"
         ),
         "{errors}"
     );
+    assert!(!errors.contains("will not restart"), "{errors}");
 }
 
 #[test]
@@ -844,6 +862,25 @@ fn serve_next_cycles_through_needs_you() {
     assert_eq!(none["error"]["code"], "NOBODY_NEEDS_YOU");
     let bad = ask(serde_json::json!({ "cmd": "dance" }));
     assert_eq!(bad["error"]["code"], "USAGE");
+}
+
+#[test]
+fn serve_restarts_a_host_that_sends_a_bad_record() {
+    let serve = Serve::new();
+    let bad = r#"{"v":1,"type":"status","session_id":"session:web","block_id":"block:web-seat-b","record_id":"","record":{"app":"x"}}"#;
+    serve
+        .cmd()
+        .env("FAKE_REX_APPEND_mini", bad)
+        .args(["ls", "--json"])
+        .assert()
+        .success();
+    eventually("a second mini observer", || serve.observer_starts() >= 3);
+    let log = std::fs::read_to_string(serve.file("serve.log")).unwrap();
+    assert!(
+        log.contains("warning: mini: unexpected pane shape from Rex 0.0.1792787366-g623b2d: missing field `state`; restarting its observer: {"),
+        "{log}"
+    );
+    assert!(!log.contains("will not restart"), "{log}");
 }
 
 #[test]
