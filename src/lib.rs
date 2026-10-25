@@ -23,7 +23,7 @@ use clap::CommandFactory;
 
 use serde_json::json;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -198,9 +198,12 @@ fn watch(args: &WatchArgs, json: bool) -> Result<()> {
         .duration
         .map(|secs| Instant::now() + Duration::from_secs(secs));
     let (tx, rx) = mpsc::channel();
-    let collectors: Vec<Collector> = hosts
+    let collectors: BTreeMap<String, Collector> = hosts
         .iter()
-        .map(|host| Collector::spawn(host.clone(), tx.clone()))
+        .map(|host| {
+            let id = host.as_deref().unwrap_or("local").to_owned();
+            (id, Collector::spawn(host.clone(), tx.clone()))
+        })
         .collect();
     drop(tx);
     let mut failed = BTreeSet::new();
@@ -236,8 +239,8 @@ fn watch(args: &WatchArgs, json: bool) -> Result<()> {
             let changed = match board.apply(&host, &event, chrono::Utc::now()) {
                 Ok(changed) => changed,
                 Err(err) => {
-                    stop_host(&mut failed, collectors.len(), &host, err)?;
-                    board.mark_stale(&host)
+                    collectors[&host].restart(&host, &err, &event);
+                    Vec::new()
                 }
             };
             for warning in board.take_warnings() {
