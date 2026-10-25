@@ -5,6 +5,8 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 
+use super::columns::{Sort, by_letter};
+use super::views::{Bucket, View, arrange, bucket, views};
 use crate::board::{Group, Row};
 use crate::output::{labels, path};
 
@@ -32,10 +34,10 @@ pub enum Effect {
 }
 
 /// One line of the list: a group header or a row (an index into `App::rows`).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Item {
     Header {
-        group: Group,
+        bucket: Bucket,
         count: usize,
         folded: bool,
     },
@@ -46,7 +48,7 @@ pub enum Item {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Spot {
     Row(String),
-    Group(Group),
+    Group(Bucket),
 }
 
 pub struct Peek {
@@ -75,7 +77,13 @@ pub struct App {
     pub selected: Option<Spot>,
     pub filter: Input,
     pub filtering: bool,
-    pub folded: BTreeSet<Group>,
+    /// The `:` prompt: a view name being typed.
+    pub command: Input,
+    pub commanding: bool,
+    pub view: View,
+    pub sort: Option<Sort>,
+    told_ctrl_s: bool,
+    pub folded: BTreeSet<Bucket>,
     pub peek: Option<Peek>,
     /// The `?` key table is open in the detail pane.
     pub keys: bool,
@@ -105,7 +113,7 @@ impl App {
             .map(|row| row.key.clone())
             .collect();
         if !needs.is_subset(&self.needs) {
-            self.folded.remove(&Group::NeedsYou);
+            self.folded.remove(&Bucket::Status(Group::NeedsYou));
         }
         self.needs = needs;
         self.keep_selection_visible();
@@ -145,24 +153,25 @@ impl App {
             .any(|field| field.to_lowercase().contains(&query))
     }
 
-    /// Headers and rows, filtered, with folded groups showing only their header.
+    /// Headers and rows in the view's groups and order, filtered, with folded groups showing
+    /// only their header.
     pub fn items(&self) -> Vec<Item> {
         let mut items = Vec::new();
-        let mut i = 0;
-        while i < self.rows.len() {
-            let group = self.rows[i].group;
-            let end = i + self.rows[i..]
-                .iter()
-                .take_while(|row| row.group == group)
-                .count();
-            let members: Vec<usize> = (i..end).filter(|&j| self.matches(&self.rows[j])).collect();
-            i = end;
+        for (bucket, members) in arrange(&self.rows, &self.view, self.sort) {
+            let members: Vec<usize> = members
+                .into_iter()
+                .filter(|&i| self.matches(&self.rows[i]))
+                .collect();
             if members.is_empty() {
                 continue;
             }
-            let folded = self.folded.contains(&group);
+            let Some(bucket) = bucket else {
+                items.extend(members.into_iter().map(Item::Row));
+                continue;
+            };
+            let folded = self.folded.contains(&bucket);
             items.push(Item::Header {
-                group,
+                bucket,
                 count: members.len(),
                 folded,
             });
@@ -180,10 +189,10 @@ impl App {
             .filter_map(|item| match item {
                 Item::Row(i) => Some(Spot::Row(self.rows[i].key.clone())),
                 Item::Header {
-                    group,
+                    bucket,
                     folded: true,
                     ..
-                } => Some(Spot::Group(group)),
+                } => Some(Spot::Group(bucket)),
                 Item::Header { .. } => None,
             })
             .collect()
@@ -213,9 +222,9 @@ impl App {
         self.selected = Some(spots[next].clone());
     }
 
-    fn first_row_of(&self, group: Group) -> Option<Spot> {
+    fn first_row_of(&self, group: &Bucket) -> Option<Spot> {
         self.items().into_iter().find_map(|item| match item {
-            Item::Row(i) if self.rows[i].group == group => {
+            Item::Row(i) if bucket(&self.view, &self.rows[i]).as_ref() == Some(group) => {
                 Some(Spot::Row(self.rows[i].key.clone()))
             }
             _ => None,
@@ -224,13 +233,97 @@ impl App {
 
     fn unfold_all(&mut self) {
         self.folded.clear();
-        if let Some(Spot::Group(group)) = self.selected {
-            self.selected = self.first_row_of(group);
+        if let Some(Spot::Group(group)) = self.selected.clone() {
+            self.selected = self.first_row_of(&group);
         }
+    }
+
+    /// Switches to `view`; the selection keeps its row.
+    fn show(&mut self, view: View) {
+        if let Some(Spot::Group(_)) = self.selected {
+            self.unfold_all();
+        }
+        self.view = view;
+        // A row in a group this view keeps folded rests on that group's header, as `z` does.
+        if let Some(group) = self.current().and_then(|row| bucket(&self.view, row))
+            && self.folded.contains(&group)
+        {
+            self.selected = Some(Spot::Group(group));
+        }
+        self.keep_selection_visible();
+    }
+
+    /// The `:` prompt's Tab: the one view name the typed text starts, else the longest prefix
+    /// the names share.
+    fn complete(&mut self) {
+        let typed = self.command.value().to_owned();
+        let names: Vec<String> = views()
+            .into_iter()
+            .map(|v| v.name)
+            .filter(|name| name.starts_with(&typed))
+            .collect();
+        let Some(first) = names.first() else {
+            return;
+        };
+        let common = names.iter().fold(first.clone(), |acc, name| {
+            acc.chars()
+                .zip(name.chars())
+                .take_while(|(a, b)| a == b)
+                .map(|(a, _)| a)
+                .collect()
+        });
+        self.command = Input::new(common);
+    }
+
+    /// The `:` prompt's Enter: a view's name, or the start of exactly one.
+    fn open(&mut self) {
+        let typed = self.command.value().trim().to_owned();
+        let all = views();
+        let found = all.iter().find(|v| v.name == typed).cloned().or_else(|| {
+            let mut starts = all.iter().filter(|v| v.name.starts_with(&typed));
+            match (starts.next(), starts.next()) {
+                (Some(one), None) if !typed.is_empty() => Some(one.clone()),
+                _ => None,
+            }
+        });
+        match found {
+            Some(view) => self.show(view),
+            None => self.say(format!("no view \"{typed}\"")),
+        }
+    }
+
+    /// Shift and a column's letter: sort by it, or flip it if it is already the sort.
+    fn sort_by(&mut self, letter: char) {
+        let Some(column) = by_letter(letter) else {
+            return;
+        };
+        // ponytail: one hint per run for S's move to ctrl+s; drop it in v0.3.
+        if letter == 'S' && !self.told_ctrl_s {
+            self.told_ctrl_s = true;
+            self.say("sorted by state · bulk seen is ctrl+s now");
+        }
+        self.sort = Some(match self.sort {
+            Some((id, dir)) if id == column.id => (id, dir.flip()),
+            _ => (column.id, column.first),
+        });
     }
 
     pub fn handle(&mut self, key: KeyEvent) -> Option<Effect> {
         self.failed = None;
+        if self.commanding {
+            match key.code {
+                KeyCode::Esc => self.commanding = false,
+                KeyCode::Tab => self.complete(),
+                KeyCode::Enter => {
+                    self.commanding = false;
+                    self.open();
+                }
+                _ => {
+                    self.command.handle_event(&Event::Key(key));
+                }
+            }
+            return None;
+        }
         if self.filtering {
             match key.code {
                 KeyCode::Esc => {
@@ -245,8 +338,12 @@ impl App {
             self.keep_selection_visible();
             return None;
         }
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-            return Some(Effect::Quit);
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            return match key.code {
+                KeyCode::Char('c') => Some(Effect::Quit),
+                KeyCode::Char('s') => self.seen_all(),
+                _ => None,
+            };
         }
         match key.code {
             KeyCode::Char('q') => return Some(Effect::Quit),
@@ -255,6 +352,16 @@ impl App {
             KeyCode::Char('g') | KeyCode::Home => self.selected = self.spots().first().cloned(),
             KeyCode::Char('G') | KeyCode::End => self.selected = self.spots().last().cloned(),
             KeyCode::Char('/') => self.filtering = true,
+            KeyCode::Char(':') => {
+                self.command.reset();
+                self.commanding = true;
+            }
+            KeyCode::Char('v') => {
+                let all = views();
+                let at = all.iter().position(|v| *v == self.view).unwrap_or(0);
+                self.show(all[(at + 1) % all.len()].clone());
+            }
+            KeyCode::Char(c) if by_letter(c).is_some() => self.sort_by(c),
             KeyCode::Char('?') => {
                 self.keys = !self.keys;
                 self.peek = None;
@@ -264,47 +371,43 @@ impl App {
                 self.filter.reset();
                 self.peek = None;
                 self.keys = false;
+                self.sort = None;
                 self.unfold_all();
                 self.keep_selection_visible();
             }
             KeyCode::Char('z') => match self.selected.clone() {
                 Some(Spot::Group(group)) => {
                     self.folded.remove(&group);
-                    self.selected = self.first_row_of(group);
+                    self.selected = self.first_row_of(&group);
                 }
                 Some(Spot::Row(_)) => {
-                    if let Some(group) = self.current().map(|row| row.group) {
-                        self.folded.insert(group);
+                    if let Some(group) = self.current().and_then(|row| bucket(&self.view, row)) {
+                        self.folded.insert(group.clone());
                         self.selected = Some(Spot::Group(group));
                     }
                 }
                 None => {}
             },
             KeyCode::Char(c @ '1'..='9') => {
-                self.folded.remove(&Group::NeedsYou);
+                for row in self.rows.iter().filter(|row| row.group == Group::NeedsYou) {
+                    if let Some(group) = bucket(&self.view, row) {
+                        self.folded.remove(&group);
+                    }
+                }
                 let n = c as usize - '1' as usize;
                 let pick = self
-                    .rows
-                    .iter()
-                    .filter(|row| row.group == Group::NeedsYou && self.matches(row))
-                    .nth(n)
-                    .map(|row| Spot::Row(row.key.clone()));
+                    .items()
+                    .into_iter()
+                    .filter_map(|item| match item {
+                        Item::Row(i) if self.rows[i].group == Group::NeedsYou => {
+                            Some(Spot::Row(self.rows[i].key.clone()))
+                        }
+                        _ => None,
+                    })
+                    .nth(n);
                 if pick.is_some() {
                     self.selected = pick;
                 }
-            }
-            KeyCode::Char('S') => {
-                let keys: Vec<String> = self
-                    .rows
-                    .iter()
-                    .filter(|row| row.pane.state == "done" && !row.seen && self.matches(row))
-                    .map(|row| row.key.clone())
-                    .collect();
-                if keys.is_empty() {
-                    self.say("no unseen done rows");
-                    return None;
-                }
-                return Some(Effect::SeenAll(keys));
             }
             KeyCode::Char('s') => {
                 return self.current().map(|row| Effect::Seen {
@@ -349,6 +452,21 @@ impl App {
         None
     }
 
+    /// `ctrl+s`: every unseen `done` row the list shows, to be marked seen.
+    fn seen_all(&mut self) -> Option<Effect> {
+        let keys: Vec<String> = self
+            .rows
+            .iter()
+            .filter(|row| row.pane.state == "done" && !row.seen && self.matches(row))
+            .map(|row| row.key.clone())
+            .collect();
+        if keys.is_empty() {
+            self.say("no unseen done rows");
+            return None;
+        }
+        Some(Effect::SeenAll(keys))
+    }
+
     fn keep_selection_visible(&mut self) {
         let spots = self.spots();
         if !self
@@ -364,6 +482,7 @@ impl App {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use crate::tui::columns::{Col, Dir};
 
     pub fn row(key: &str, state: &str, group: &str, seen: bool) -> Row {
         let (host, block) = key.split_once('/').unwrap();
@@ -403,6 +522,10 @@ pub mod tests {
         app.handle(KeyEvent::from(code))
     }
 
+    fn ctrl_s(app: &mut App) -> Option<Effect> {
+        app.handle(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+    }
+
     fn selected(app: &App) -> String {
         match app.selected.clone().unwrap() {
             Spot::Row(key) => key,
@@ -438,7 +561,7 @@ pub mod tests {
             press(&mut app, KeyCode::Char(c));
         }
         let header = |group, count| Item::Header {
-            group,
+            bucket: Bucket::Status(group),
             count,
             folded: false,
         };
@@ -456,15 +579,17 @@ pub mod tests {
     }
 
     #[test]
-    fn capital_s_marks_only_unseen_done_rows() {
+    fn ctrl_s_marks_only_unseen_done_rows_and_capital_s_sorts() {
         let mut app = App::default();
         let mut all = rows();
         all.push(row("mini/old-done", "done", "needs_you", false));
         all.push(row("mini/seen-done", "done", "quiet", true));
         all.push(row("mini/broken", "error", "needs_you", false));
         app.set_rows(all, hosts());
+        assert_eq!(press(&mut app, KeyCode::Char('S')), None, "S sorts now");
+        assert_eq!(app.sort, Some((Col::State, Dir::Up)));
         assert_eq!(
-            press(&mut app, KeyCode::Char('S')),
+            ctrl_s(&mut app),
             Some(Effect::SeenAll(vec![
                 "local/claude".into(),
                 "mini/old-done".into()
@@ -477,7 +602,7 @@ pub mod tests {
         }
         press(&mut app, KeyCode::Enter);
         assert_eq!(
-            press(&mut app, KeyCode::Char('S')),
+            ctrl_s(&mut app),
             Some(Effect::SeenAll(vec!["mini/old-done".into()])),
             "a kept filter narrows it to the rows shown"
         );
@@ -486,7 +611,7 @@ pub mod tests {
             vec![row("mini/seat-b", "blocked", "needs_you", false)],
             hosts(),
         );
-        assert_eq!(press(&mut app, KeyCode::Char('S')), None);
+        assert_eq!(ctrl_s(&mut app), None);
         assert_eq!(app.toast(), Some("no unseen done rows"));
     }
 
@@ -543,11 +668,11 @@ pub mod tests {
         press(&mut app, KeyCode::Char('z'));
         assert_eq!(
             app.selected,
-            Some(Spot::Group(Group::Working)),
+            Some(Spot::Group(Bucket::Status(Group::Working))),
             "rests on the folded header"
         );
         assert!(app.items().contains(&Item::Header {
-            group: Group::Working,
+            bucket: Bucket::Status(Group::Working),
             count: 1,
             folded: true
         }));
@@ -578,17 +703,17 @@ pub mod tests {
     fn a_new_row_in_needs_you_unfolds_it() {
         let mut app = app();
         press(&mut app, KeyCode::Char('z'));
-        assert!(app.folded.contains(&Group::NeedsYou));
+        assert!(app.folded.contains(&Bucket::Status(Group::NeedsYou)));
         app.set_rows(rows(), hosts());
         assert!(
-            app.folded.contains(&Group::NeedsYou),
+            app.folded.contains(&Bucket::Status(Group::NeedsYou)),
             "same rows: stays folded"
         );
         let mut more = rows();
         more.insert(0, row("mini/seat-x", "blocked", "needs_you", false));
         app.set_rows(more, hosts());
         assert!(
-            !app.folded.contains(&Group::NeedsYou),
+            !app.folded.contains(&Bucket::Status(Group::NeedsYou)),
             "a new blocked row opens it"
         );
     }

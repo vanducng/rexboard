@@ -2,6 +2,7 @@ mod app;
 mod columns;
 mod theme;
 mod view;
+mod views;
 
 use std::process::Stdio;
 use std::sync::Arc;
