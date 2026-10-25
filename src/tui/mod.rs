@@ -14,7 +14,8 @@ use serde_json::json;
 
 use crate::client::{self, Rows};
 use crate::error::{Error, Result};
-use crate::rex;
+use crate::output::clean;
+use crate::{interrupted, rex, stop_on_signals};
 
 use app::{App, Effect};
 
@@ -24,11 +25,13 @@ const PEEK_LINES: usize = 12;
 enum Msg {
     Rows(Rows),
     Gone(String),
-    Peek(String, Vec<String>),
+    Peek(String, std::result::Result<Vec<String>, String>),
     Say(String),
 }
 
 pub fn run() -> Result<()> {
+    // SIGTERM or SIGHUP (the board window closing) ends the loop, so Restore puts the terminal back.
+    stop_on_signals();
     let (tx, rx) = mpsc::channel();
     let generation = Arc::new(AtomicU64::new(0));
     listen(&tx, &generation);
@@ -40,6 +43,9 @@ pub fn run() -> Result<()> {
         terminal.draw(|frame| view::draw(frame, &app, chrono::Utc::now()))?;
         let mut changed = false;
         while !changed {
+            if interrupted() {
+                return Ok(());
+            }
             if event::poll(Duration::from_millis(50))? {
                 match event::read()? {
                     Event::Key(key) if key.kind != KeyEventKind::Release => {
@@ -91,10 +97,10 @@ fn apply(app: &mut App, msg: Msg) {
 fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
     let tx = tx.clone();
     match effect {
-        Effect::Seen(key) => {
+        Effect::Seen { key, label, state } => {
             thread::spawn(move || {
                 let text = match client::call(&json!({ "cmd": "seen", "key": key })) {
-                    Ok(_) => format!("seen {key}"),
+                    Ok(_) => seen_message(&label, &state),
                     Err(err) => format!("seen failed: {err}"),
                 };
                 let _ = tx.send(Msg::Say(text));
@@ -102,8 +108,7 @@ fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
         }
         Effect::Peek { key, host, block } => {
             thread::spawn(move || {
-                let lines = capture(&host, &block)
-                    .unwrap_or_else(|err| vec![format!("peek failed: {err}")]);
+                let lines = capture(&host, &block).map_err(|err| format!("peek failed: {err}"));
                 let _ = tx.send(Msg::Peek(key, lines));
             });
         }
@@ -127,10 +132,14 @@ fn listen(tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
             current()
         });
         if current() {
-            let why = result
-                .err()
-                .map_or("serve stopped".into(), |err| err.to_string());
-            let _ = tx.send(Msg::Gone(format!("{why}; r reconnects")));
+            let why = match result {
+                Err(Error::Serve { message, .. }) if message == "serve stopped" => {
+                    "serve stopped".to_owned()
+                }
+                Err(err) => format!("serve: {err}"),
+                Ok(()) => "serve stopped".to_owned(),
+            };
+            let _ = tx.send(Msg::Gone(format!("{why} · r reconnects")));
         }
     });
 }
@@ -151,12 +160,23 @@ fn capture(host: &str, block: &str) -> Result<Vec<String>> {
     if !out.status.success() {
         return Err(Error::Rex(format!("rex capture failed ({})", out.status)));
     }
-    let text = String::from_utf8_lossy(&out.stdout);
-    let lines: Vec<String> = text
-        .lines()
-        .map(|line| line.chars().filter(|c| !c.is_control()).collect())
-        .collect();
-    Ok(lines[lines.len().saturating_sub(PEEK_LINES)..].to_vec())
+    Ok(peek_lines(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// The last lines of captured pane text, with every escape sequence and control character
+/// removed: the text comes from whatever runs in that pane.
+fn peek_lines(text: &str) -> Vec<String> {
+    let lines: Vec<String> = text.lines().map(clean).collect();
+    lines[lines.len().saturating_sub(PEEK_LINES)..].to_vec()
+}
+
+/// What `s` reports. A blocked or erroring pane stays in NEEDS YOU, so it says why.
+fn seen_message(label: &str, state: &str) -> String {
+    match state {
+        "blocked" => format!("{label} marked seen; it stays in NEEDS YOU while blocked"),
+        "error" => format!("{label} marked seen; it stays in NEEDS YOU while in error"),
+        _ => format!("{label} marked seen"),
+    }
 }
 
 struct Restore;
@@ -164,5 +184,46 @@ struct Restore;
 impl Drop for Restore {
     fn drop(&mut self) {
         ratatui::restore();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn peek_lines_keep_the_last_twelve_without_escape_sequences() {
+        let mut text: String = (1..=20).map(|n| format!("line {n}\n")).collect();
+        text.push_str("\x1b[31mRED\x1b[0m\n");
+        text.push_str("clip \x1b]52;c;aGVsbG8=\x07end\n");
+        text.push_str("title \x1b]0;set by the pane\x1b\\end\n");
+        text.push_str("c1 \u{9b}2Jend\n");
+        text.push_str("tab\there\r\n");
+        let lines = peek_lines(&text);
+        assert_eq!(lines.len(), PEEK_LINES);
+        assert_eq!(lines.last().unwrap(), "tab here");
+        assert!(
+            lines.iter().all(|l| !l.chars().any(char::is_control)),
+            "{lines:?}"
+        );
+        assert!(lines.contains(&"RED".to_owned()), "{lines:?}");
+        assert!(lines.contains(&"clip end".to_owned()), "{lines:?}");
+        assert!(lines.contains(&"title end".to_owned()), "{lines:?}");
+        assert!(lines.contains(&"c1 end".to_owned()), "{lines:?}");
+        assert!(
+            lines
+                .iter()
+                .all(|l| !l.contains("[31m") && !l.contains("]52;")),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn seen_says_when_a_row_stays_in_needs_you() {
+        assert_eq!(seen_message("seat-a", "done"), "seat-a marked seen");
+        assert_eq!(
+            seen_message("seat-a", "blocked"),
+            "seat-a marked seen; it stays in NEEDS YOU while blocked"
+        );
     }
 }

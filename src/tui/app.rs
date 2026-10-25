@@ -12,7 +12,11 @@ const TOAST: Duration = Duration::from_secs(3);
 /// What a key asks the outside world to do.
 #[derive(Debug, PartialEq)]
 pub enum Effect {
-    Seen(String),
+    Seen {
+        key: String,
+        label: String,
+        state: String,
+    },
     Peek {
         key: String,
         host: String,
@@ -25,13 +29,25 @@ pub enum Effect {
 /// One line of the list: a group header or a row (an index into `App::rows`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Item {
-    Header(Group, usize),
+    Header {
+        group: Group,
+        count: usize,
+        folded: bool,
+    },
     Row(usize),
+}
+
+/// What the selection rests on: a row, or a folded group's header so `z` can open it again.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Spot {
+    Row(String),
+    Group(Group),
 }
 
 pub struct Peek {
     pub key: String,
-    pub lines: Option<Vec<String>>,
+    /// None while capturing; the lines, or why the capture failed.
+    pub lines: Option<Result<Vec<String>, String>>,
 }
 
 #[derive(Default)]
@@ -40,26 +56,37 @@ pub struct App {
     pub rows: Vec<Row>,
     pub panes: usize,
     pub hosts: BTreeMap<String, String>,
-    pub selected: Option<String>,
+    pub selected: Option<Spot>,
     pub filter: Input,
     pub filtering: bool,
     pub folded: BTreeSet<Group>,
     pub peek: Option<Peek>,
+    /// The `?` key table is open in the detail pane.
+    pub keys: bool,
     pub toast: Option<(String, Instant)>,
     pub connected: bool,
+    needs: BTreeSet<String>,
 }
 
 impl App {
-    /// New rows from serve. The selection follows its key, else lands on the first row.
+    /// New rows from serve. The selection follows its key; a row that newly needs you opens
+    /// NEEDS YOU if it was folded.
     pub fn set_rows(&mut self, all: Vec<Row>, hosts: BTreeMap<String, String>) {
         self.panes = all.len();
         self.rows = all.into_iter().filter(|row| row.pane.is_agent()).collect();
         self.hosts = hosts;
         self.connected = true;
-        let keep = self.selected.as_ref().is_some_and(|key| self.visible(key));
-        if !keep {
-            self.selected = self.rows_shown().first().map(|&i| self.rows[i].key.clone());
+        let needs: BTreeSet<String> = self
+            .rows
+            .iter()
+            .filter(|row| row.group == Group::NeedsYou)
+            .map(|row| row.key.clone())
+            .collect();
+        if !needs.is_subset(&self.needs) {
+            self.folded.remove(&Group::NeedsYou);
         }
+        self.needs = needs;
+        self.keep_selection_visible();
     }
 
     pub fn say(&mut self, text: impl Into<String>) {
@@ -92,65 +119,81 @@ impl App {
         let mut i = 0;
         while i < self.rows.len() {
             let group = self.rows[i].group;
-            let members: Vec<usize> = (i..self.rows.len())
-                .take_while(|&j| self.rows[j].group == group)
-                .filter(|&j| self.matches(&self.rows[j]))
-                .collect();
-            i += (i..self.rows.len())
-                .take_while(|&j| self.rows[j].group == group)
+            let end = i + self.rows[i..]
+                .iter()
+                .take_while(|row| row.group == group)
                 .count();
+            let members: Vec<usize> = (i..end).filter(|&j| self.matches(&self.rows[j])).collect();
+            i = end;
             if members.is_empty() {
                 continue;
             }
-            items.push(Item::Header(group, members.len()));
-            if !self.folded.contains(&group) {
+            let folded = self.folded.contains(&group);
+            items.push(Item::Header {
+                group,
+                count: members.len(),
+                folded,
+            });
+            if !folded {
                 items.extend(members.into_iter().map(Item::Row));
             }
         }
         items
     }
 
-    fn rows_shown(&self) -> Vec<usize> {
+    /// Where the selection can rest, in list order: rows and folded headers.
+    pub fn spots(&self) -> Vec<Spot> {
         self.items()
             .into_iter()
             .filter_map(|item| match item {
-                Item::Row(i) => Some(i),
-                Item::Header(..) => None,
+                Item::Row(i) => Some(Spot::Row(self.rows[i].key.clone())),
+                Item::Header {
+                    group,
+                    folded: true,
+                    ..
+                } => Some(Spot::Group(group)),
+                Item::Header { .. } => None,
             })
             .collect()
     }
 
-    fn visible(&self, key: &str) -> bool {
-        self.rows_shown()
-            .into_iter()
-            .any(|i| self.rows[i].key == key)
-    }
-
     pub fn current(&self) -> Option<&Row> {
-        let key = self.selected.as_ref()?;
+        let Some(Spot::Row(key)) = &self.selected else {
+            return None;
+        };
         self.rows.iter().find(|row| &row.key == key)
     }
 
-    /// Moves the selection over rows only, wrapping at both ends.
+    /// Moves the selection, wrapping at both ends.
     fn step(&mut self, by: isize) {
-        let shown = self.rows_shown();
-        if shown.is_empty() {
+        let spots = self.spots();
+        if spots.is_empty() {
             return;
         }
         let at = self
             .selected
             .as_ref()
-            .and_then(|key| shown.iter().position(|&i| &self.rows[i].key == key));
+            .and_then(|spot| spots.iter().position(|s| s == spot));
         let next = match at {
             None => 0,
-            Some(at) => (at as isize + by).rem_euclid(shown.len() as isize) as usize,
+            Some(at) => (at as isize + by).rem_euclid(spots.len() as isize) as usize,
         };
-        self.selected = Some(self.rows[shown[next]].key.clone());
+        self.selected = Some(spots[next].clone());
     }
 
-    fn select_at(&mut self, pick: impl FnOnce(&[usize]) -> Option<usize>) {
-        if let Some(i) = pick(&self.rows_shown()) {
-            self.selected = Some(self.rows[i].key.clone());
+    fn first_row_of(&self, group: Group) -> Option<Spot> {
+        self.items().into_iter().find_map(|item| match item {
+            Item::Row(i) if self.rows[i].group == group => {
+                Some(Spot::Row(self.rows[i].key.clone()))
+            }
+            _ => None,
+        })
+    }
+
+    fn unfold_all(&mut self) {
+        self.folded.clear();
+        if let Some(Spot::Group(group)) = self.selected {
+            self.selected = self.first_row_of(group);
         }
     }
 
@@ -176,50 +219,70 @@ impl App {
             KeyCode::Char('q') => return Some(Effect::Quit),
             KeyCode::Char('j') | KeyCode::Down => self.step(1),
             KeyCode::Char('k') | KeyCode::Up => self.step(-1),
-            KeyCode::Char('g') | KeyCode::Home => self.select_at(|s| s.first().copied()),
-            KeyCode::Char('G') | KeyCode::End => self.select_at(|s| s.last().copied()),
+            KeyCode::Char('g') | KeyCode::Home => self.selected = self.spots().first().cloned(),
+            KeyCode::Char('G') | KeyCode::End => self.selected = self.spots().last().cloned(),
             KeyCode::Char('/') => self.filtering = true,
+            KeyCode::Char('?') => {
+                self.keys = !self.keys;
+                self.peek = None;
+            }
             KeyCode::Esc => {
                 self.filter.reset();
                 self.peek = None;
+                self.keys = false;
+                self.unfold_all();
                 self.keep_selection_visible();
             }
-            KeyCode::Char('z') => {
-                if let Some(group) = self.current().map(|row| row.group) {
-                    if !self.folded.remove(&group) {
-                        self.folded.insert(group);
-                    }
-                    self.keep_selection_visible();
+            KeyCode::Char('z') => match self.selected.clone() {
+                Some(Spot::Group(group)) => {
+                    self.folded.remove(&group);
+                    self.selected = self.first_row_of(group);
                 }
-            }
+                Some(Spot::Row(_)) => {
+                    if let Some(group) = self.current().map(|row| row.group) {
+                        self.folded.insert(group);
+                        self.selected = Some(Spot::Group(group));
+                    }
+                }
+                None => {}
+            },
             KeyCode::Char(c @ '1'..='9') => {
+                self.folded.remove(&Group::NeedsYou);
                 let n = c as usize - '1' as usize;
                 let pick = self
-                    .rows_shown()
-                    .into_iter()
-                    .filter(|&i| self.rows[i].group == Group::NeedsYou)
-                    .nth(n);
-                if let Some(i) = pick {
-                    self.selected = Some(self.rows[i].key.clone());
+                    .rows
+                    .iter()
+                    .filter(|row| row.group == Group::NeedsYou && self.matches(row))
+                    .nth(n)
+                    .map(|row| Spot::Row(row.key.clone()));
+                if pick.is_some() {
+                    self.selected = pick;
                 }
             }
-            KeyCode::Char('s') => return self.current().map(|row| Effect::Seen(row.key.clone())),
+            KeyCode::Char('s') => {
+                return self.current().map(|row| Effect::Seen {
+                    key: row.key.clone(),
+                    label: row.pane.pane.clone(),
+                    state: row.pane.state.clone(),
+                });
+            }
             KeyCode::Char(' ') => {
                 let row = self.current()?;
-                let effect = Effect::Peek {
-                    key: row.key.clone(),
-                    host: row.pane.host.clone(),
-                    block: row.pane.block_id.clone(),
-                };
-                if self.peek.as_ref().is_some_and(|peek| peek.key == row.key) {
+                let (key, host, block) = (
+                    row.key.clone(),
+                    row.pane.host.clone(),
+                    row.pane.block_id.clone(),
+                );
+                if self.peek.as_ref().is_some_and(|peek| peek.key == key) {
                     self.peek = None;
                     return None;
                 }
+                self.keys = false;
                 self.peek = Some(Peek {
-                    key: row.key.clone(),
+                    key: key.clone(),
                     lines: None,
                 });
-                return Some(effect);
+                return Some(Effect::Peek { key, host, block });
             }
             KeyCode::Enter => {
                 if self.current().is_some() {
@@ -233,8 +296,13 @@ impl App {
     }
 
     fn keep_selection_visible(&mut self) {
-        if !self.selected.as_ref().is_some_and(|key| self.visible(key)) {
-            self.selected = self.rows_shown().first().map(|&i| self.rows[i].key.clone());
+        let spots = self.spots();
+        if !self
+            .selected
+            .as_ref()
+            .is_some_and(|spot| spots.contains(spot))
+        {
+            self.selected = spots.first().cloned();
         }
     }
 }
@@ -257,26 +325,34 @@ pub mod tests {
         .unwrap()
     }
 
+    pub fn hosts() -> BTreeMap<String, String> {
+        BTreeMap::from([("local".into(), "up".into()), ("mini".into(), "up".into())])
+    }
+
+    pub fn rows() -> Vec<Row> {
+        vec![
+            row("mini/seat-b", "blocked", "needs_you", false),
+            row("local/claude", "done", "needs_you", false),
+            row("mini/codex", "working", "working", true),
+            row("local/seat-a", "idle", "quiet", true),
+        ]
+    }
+
     pub fn app() -> App {
         let mut app = App::default();
-        app.set_rows(
-            vec![
-                row("mini/seat-b", "blocked", "needs_you", false),
-                row("local/claude", "done", "needs_you", false),
-                row("mini/codex", "working", "working", true),
-                row("local/seat-a", "idle", "quiet", true),
-            ],
-            BTreeMap::from([("local".into(), "up".into()), ("mini".into(), "up".into())]),
-        );
+        app.set_rows(rows(), hosts());
         app
     }
 
-    fn press(app: &mut App, code: KeyCode) -> Option<Effect> {
+    pub fn press(app: &mut App, code: KeyCode) -> Option<Effect> {
         app.handle(KeyEvent::from(code))
     }
 
-    fn selected(app: &App) -> &str {
-        app.selected.as_deref().unwrap()
+    fn selected(app: &App) -> String {
+        match app.selected.clone().unwrap() {
+            Spot::Row(key) => key,
+            Spot::Group(group) => format!("{group:?}"),
+        }
     }
 
     #[test]
@@ -306,13 +382,17 @@ pub mod tests {
         for c in "mini".chars() {
             press(&mut app, KeyCode::Char(c));
         }
-        let items = app.items();
+        let header = |group, count| Item::Header {
+            group,
+            count,
+            folded: false,
+        };
         assert_eq!(
-            items,
+            app.items(),
             [
-                Item::Header(Group::NeedsYou, 1),
+                header(Group::NeedsYou, 1),
                 Item::Row(0),
-                Item::Header(Group::Working, 1),
+                header(Group::Working, 1),
                 Item::Row(2)
             ]
         );
@@ -326,9 +406,71 @@ pub mod tests {
         press(&mut app, KeyCode::Char('j'));
         assert_eq!(
             press(&mut app, KeyCode::Char('s')),
-            Some(Effect::Seen("local/claude".into()))
+            Some(Effect::Seen {
+                key: "local/claude".into(),
+                label: "claude".into(),
+                state: "done".into(),
+            })
         );
         assert_eq!(press(&mut app, KeyCode::Enter), None);
         assert_eq!(app.toast(), Some("jump arrives in a later version"));
+    }
+
+    #[test]
+    fn z_folds_then_unfolds_from_the_folded_header() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('z'));
+        assert_eq!(
+            app.selected,
+            Some(Spot::Group(Group::Working)),
+            "rests on the folded header"
+        );
+        assert!(app.items().contains(&Item::Header {
+            group: Group::Working,
+            count: 1,
+            folded: true
+        }));
+        press(&mut app, KeyCode::Char('z'));
+        assert!(app.folded.is_empty(), "z on a folded header opens it");
+        assert_eq!(selected(&app), "mini/codex");
+    }
+
+    #[test]
+    fn esc_unfolds_every_group_even_with_all_folded() {
+        let mut app = app();
+        for _ in 0..3 {
+            press(&mut app, KeyCode::Char('z'));
+            press(&mut app, KeyCode::Char('j'));
+        }
+        assert_eq!(app.folded.len(), 3);
+        assert!(
+            app.spots()
+                .iter()
+                .all(|spot| matches!(spot, Spot::Group(_)))
+        );
+        press(&mut app, KeyCode::Esc);
+        assert!(app.folded.is_empty());
+        assert!(app.current().is_some());
+    }
+
+    #[test]
+    fn a_new_row_in_needs_you_unfolds_it() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('z'));
+        assert!(app.folded.contains(&Group::NeedsYou));
+        app.set_rows(rows(), hosts());
+        assert!(
+            app.folded.contains(&Group::NeedsYou),
+            "same rows: stays folded"
+        );
+        let mut more = rows();
+        more.insert(0, row("mini/seat-x", "blocked", "needs_you", false));
+        app.set_rows(more, hosts());
+        assert!(
+            !app.folded.contains(&Group::NeedsYou),
+            "a new blocked row opens it"
+        );
     }
 }

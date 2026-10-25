@@ -144,11 +144,12 @@ extern "C" fn on_signal(_: libc::c_int) {
     INTERRUPTED.store(true, Ordering::SeqCst);
 }
 
-/// SIGINT and SIGTERM set a flag the loops check, so they return and Drop stops the observers.
+/// SIGINT, SIGTERM and SIGHUP set a flag the loops check, so they return and Drop cleans up.
 pub(crate) fn stop_on_signals() {
     unsafe {
         libc::signal(libc::SIGINT, on_signal as *const () as libc::sighandler_t);
         libc::signal(libc::SIGTERM, on_signal as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGHUP, on_signal as *const () as libc::sighandler_t);
     }
 }
 
