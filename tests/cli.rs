@@ -20,7 +20,7 @@ fn version_prints_name() {
         .arg("--version")
         .assert()
         .success()
-        .stdout("rexboard 0.0.0\n");
+        .stdout(format!("rexboard {}\n", env!("CARGO_PKG_VERSION")));
 }
 
 #[test]
