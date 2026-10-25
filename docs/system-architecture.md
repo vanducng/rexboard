@@ -1,19 +1,13 @@
 # System architecture
 
-rexboard reads Rex, remembers what Rex does not, and shows it. Nothing writes to Rex.
+rexboard reads Rex, remembers what Rex does not, and shows it. Nothing writes to Rex except a jump, which focuses one pane and asks the Rex app to show its session.
 
-```
- Rex host (local)        Rex host (mini)
-       │                        │
- rex do - --all          rex -S mini do - --all       one observer per host,
- observer.lua            observer.lua                 NDJSON lines (docs/cli.md)
-       └───────────┬────────────┘
-                   ▼
-            rexboard serve        collectors → one reducer thread (Board)
-            │      │      │       state.json, transitions.jsonl, serve.log
-            ▼      ▼      ▼
-           ls   watch   seen      clients over a unix socket
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/architecture-dark.svg">
+  <img alt="rexboard architecture: one observer per Rex host feeds rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket; a jump runs jump.pre_cmd, focuses the pane on its host and asks the Rex app to select its session" src="assets/architecture.svg" width="100%">
+</picture>
+
+Each host runs one observer, `rex [-S HOST] do - --all`, whose NDJSON lines ([CLI](cli.md)) feed serve's collectors and its one reducer thread. The diagram's source is [assets/architecture.html](assets/architecture.html) and [assets/architecture-dark.html](assets/architecture-dark.html): edit those, then export each diagram to the `.svg` next to it.
 
 ## Pieces
 

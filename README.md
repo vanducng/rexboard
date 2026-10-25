@@ -4,6 +4,13 @@ An attention board for coding-agent panes across Rex hosts: which agent is worki
 
 Unofficial. Not affiliated with Superlogical or Rex.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-dark.svg">
+  <img alt="rexboard architecture: one observer per Rex host feeds rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket; a jump runs jump.pre_cmd, focuses the pane on its host and asks the Rex app to select its session" src="docs/assets/architecture.svg" width="100%">
+</picture>
+
+How it fits together: [system architecture](docs/system-architecture.md).
+
 This is an early scaffold. The binary only prints its help and version for now; the board arrives in later releases.
 
 ## Install
