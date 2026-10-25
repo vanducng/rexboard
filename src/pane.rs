@@ -194,7 +194,8 @@ pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
     let harness = main
         .and_then(|r| r.effective_app.clone().or_else(|| r.app.clone()))
         .or_else(|| process.and_then(process_harness))
-        .or_else(|| title_state(&src.title).map(|_| "claude-code".to_owned()));
+        .or_else(|| title_state(&src.title).map(|_| "claude-code".to_owned()))
+        .or_else(|| codex_title(&src.title).then(|| "codex".to_owned()));
     let owner = main
         .and_then(|r| r.owner.as_ref())
         .and_then(|o| o.name.as_deref());
@@ -233,6 +234,22 @@ pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
         source,
         children,
     }
+}
+
+/// Codex in tmux reports nothing and titles the pane `<dir> | <model>`, as in `api | gpt-x`.
+/// Strict, so a shell command with a pipe never matches.
+fn codex_title(title: &str) -> bool {
+    let Some((dir, model)) = title.split_once(" | ") else {
+        return false;
+    };
+    title.matches('|').count() == 1
+        && !dir.is_empty()
+        && !dir.contains(char::is_whitespace)
+        && !model.is_empty()
+        && model.chars().any(|c| c.is_ascii_alphabetic())
+        && model
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
 }
 
 fn process_harness(name: &str) -> Option<String> {
@@ -275,6 +292,18 @@ pub fn bare_title(title: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_title_is_strict() {
+        assert!(codex_title("api | gpt-x"));
+        assert!(codex_title("projects | GPT-6.1-Sol"));
+        assert!(!codex_title("tail -f log | grep err"), "a shell pipe");
+        assert!(!codex_title("a | b | c"), "two separators");
+        assert!(!codex_title("api | gpt x"), "a space in the model");
+        assert!(!codex_title("api|gpt-x"), "no spaces around the bar");
+        assert!(!codex_title(" | gpt-x"), "no dir");
+        assert!(!codex_title("api | 6.1"), "a model has letters");
+    }
 
     #[test]
     fn version_string_process_is_claude() {

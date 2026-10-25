@@ -106,9 +106,18 @@ fn ls_json_lists_panes_from_both_hosts() {
             "block:web-seat-b",
             "block:api-claude",
             "block:web-codex",
-            "block:api-seat-a"
+            "block:api-seat-a",
+            "block:web-codex-seat"
         ]
     );
+    let codex_seat = by_block(&panes, "block:web-codex-seat");
+    assert_eq!(
+        codex_seat["harness"], "codex",
+        "a Codex title with no record"
+    );
+    assert_eq!(codex_seat["source"], "inferred");
+    assert_eq!(codex_seat["state"], "unknown");
+    assert_eq!(codex_seat["group"], "unreported");
     let claude = by_block(&panes, "block:api-claude");
     assert_eq!(claude["host"], "local");
     assert_eq!(claude["session"], "api");

@@ -15,14 +15,20 @@
                   "block_id": "block:api-claude",
                   "label": "shell",
                   "title": "Fix the parser",
-                  "process": { "name": "2.1.310", "cwd": "/work/api" },
+                  "process": {
+                    "name": "2.1.310",
+                    "cwd": "/work/api"
+                  },
                   "records": [
                     {
                       "state": "done",
                       "app": "claude-code",
                       "effective_app": "claude-code",
                       "msg": "Tests pass",
-                      "owner": { "name": "2.1.310", "pid": 101 },
+                      "owner": {
+                        "name": "2.1.310",
+                        "pid": 101
+                      },
                       "updated_at": "2026-01-01T10:00:00+00:00"
                     },
                     {
@@ -30,7 +36,10 @@
                       "state": "working",
                       "app": "claude-code",
                       "effective_app": "claude-code",
-                      "owner": { "name": "2.1.310", "pid": 101 },
+                      "owner": {
+                        "name": "2.1.310",
+                        "pid": 101
+                      },
                       "updated_at": "2026-01-01T10:00:05+00:00"
                     }
                   ]
@@ -39,14 +48,20 @@
                   "block_id": "block:api-seat-a",
                   "label": "seat-a",
                   "title": "✳ seat-a@demo",
-                  "process": { "name": "tmux", "cwd": "/work/api" },
+                  "process": {
+                    "name": "tmux",
+                    "cwd": "/work/api"
+                  },
                   "records": {}
                 },
                 {
                   "block_id": "block:api-shell",
                   "label": "shell",
                   "title": "user@studio:/work/api",
-                  "process": { "name": "zsh", "cwd": "/work/api" },
+                  "process": {
+                    "name": "zsh",
+                    "cwd": "/work/api"
+                  },
                   "records": {}
                 }
               ]
@@ -75,7 +90,10 @@
                   "block_id": "block:web-seat-b",
                   "label": "seat-b",
                   "title": "⠋ seat-b@demo",
-                  "process": { "name": "tmux", "cwd": "/work/web" },
+                  "process": {
+                    "name": "tmux",
+                    "cwd": "/work/web"
+                  },
                   "records": [
                     {
                       "state": "blocked",
@@ -83,7 +101,10 @@
                       "app": "claude-code",
                       "effective_app": "claude-code",
                       "msg": "Allow Bash?",
-                      "owner": { "name": "tmux", "pid": 202 },
+                      "owner": {
+                        "name": "tmux",
+                        "pid": 202
+                      },
                       "updated_at": "2026-01-01T10:01:00+00:00"
                     }
                   ]
@@ -92,15 +113,31 @@
                   "block_id": "block:web-codex",
                   "label": "shell",
                   "title": "web",
-                  "process": { "name": "codex", "cwd": "/work/web" },
+                  "process": {
+                    "name": "codex",
+                    "cwd": "/work/web"
+                  },
                   "records": [
                     {
                       "state": "working",
                       "app": "codex",
-                      "owner": { "name": "codex", "pid": 203 },
+                      "owner": {
+                        "name": "codex",
+                        "pid": 203
+                      },
                       "updated_at": "2026-01-01T10:02:00+00:00"
                     }
                   ]
+                },
+                {
+                  "block_id": "block:web-codex-seat",
+                  "label": "seat-c",
+                  "title": "api | gpt-x",
+                  "process": {
+                    "name": "tmux",
+                    "cwd": "/work/web"
+                  },
+                  "records": {}
                 }
               ]
             }
