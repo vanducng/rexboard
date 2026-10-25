@@ -9,11 +9,12 @@ mod pane;
 mod rex;
 mod serve;
 mod state;
+mod tui;
 
 pub use cli::Cli;
 pub use error::{Error, report};
 
-use std::io::{Write, stderr};
+use std::io::{IsTerminal, Write, stderr, stdin, stdout};
 
 use clap::CommandFactory;
 
@@ -37,6 +38,9 @@ pub fn wants_json_raw(args: &[String]) -> bool {
 
 pub fn execute(cli: &Cli) -> Result<()> {
     let Some(command) = &cli.command else {
+        if !cli.json && stdout().is_terminal() && stdin().is_terminal() {
+            return tui::run();
+        }
         if cli.json {
             return Err(Error::usage_with(
                 "a command is required",
@@ -57,6 +61,15 @@ pub fn execute(cli: &Cli) -> Result<()> {
         Command::Serve(args) if args.foreground => serve::run(),
         Command::Serve(_) => client::start_serve(cli.json),
         Command::Seen { key } => client::seen(key, cli.json),
+        Command::Board => {
+            if !stdout().is_terminal() || !stdin().is_terminal() {
+                return Err(Error::usage_with(
+                    "board needs a terminal",
+                    &["rexboard ls", "rexboard watch --json"],
+                ));
+            }
+            tui::run()
+        }
     }
 }
 
@@ -120,7 +133,7 @@ fn ls(args: &LsArgs, json: bool) -> Result<()> {
             serde_json::to_string(&rows).map_err(std::io::Error::other)?
         );
     } else {
-        print!("{}", output::table(&rows, now));
+        print!("{}", output::table(&rows, now, output::terminal_width()));
     }
     Ok(())
 }

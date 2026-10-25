@@ -21,10 +21,10 @@ const START_WITHIN: Duration = Duration::from_secs(2);
 /// serve.log is cut back to nothing past this size when a client starts serve.
 const LOG_MAX: u64 = 1024 * 1024;
 
-#[derive(Debug, Deserialize)]
-struct Rows {
-    rows: Vec<Row>,
-    hosts: BTreeMap<String, String>,
+#[derive(Debug, Default, Deserialize)]
+pub struct Rows {
+    pub rows: Vec<Row>,
+    pub hosts: BTreeMap<String, String>,
 }
 
 /// None when nothing answers. A socket served by another user is an error, since `/tmp` is shared.
@@ -264,12 +264,37 @@ pub fn ls(args: &LsArgs, json: bool) -> Result<()> {
             serde_json::to_string(&list).map_err(std::io::Error::other)?
         );
     } else {
-        print!("{}", output::table(&list, chrono::Utc::now()));
+        print!(
+            "{}",
+            output::table(&list, chrono::Utc::now(), output::terminal_width())
+        );
     }
     Ok(())
 }
 
 /// Prints the agent rows on every change, until --for, a signal, or serve stopping.
+/// Calls `each` with every rows line serve sends, and with None at least every 200ms, until
+/// serve closes or `each` returns false.
+pub fn subscribe(mut each: impl FnMut(Option<Rows>) -> bool) -> Result<()> {
+    let paths = Paths::find()?;
+    let mut stream = connect_or_start(&paths)?;
+    send(&mut stream, &json!({ "cmd": "subscribe" }))?;
+    stream.set_read_timeout(Some(Duration::from_millis(200)))?;
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    loop {
+        let next = match read(&mut reader, &mut line) {
+            Ok(Some(value)) if value.get("rows").is_some() => Some(rows(value)?),
+            Ok(Some(_)) | Err(Error::Io(_)) => None,
+            Ok(None) => return Err(Error::serve("serve stopped")),
+            Err(err) => return Err(err),
+        };
+        if !each(next) {
+            return Ok(());
+        }
+    }
+}
+
 pub fn watch(args: &WatchArgs) -> Result<()> {
     let paths = Paths::find()?;
     let mut stream = connect_or_start(&paths)?;
