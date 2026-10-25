@@ -277,7 +277,7 @@ impl App {
                 let keys: Vec<String> = self
                     .rows
                     .iter()
-                    .filter(|row| row.pane.state == "done" && !row.seen)
+                    .filter(|row| row.pane.state == "done" && !row.seen && self.matches(row))
                     .map(|row| row.key.clone())
                     .collect();
                 if keys.is_empty() {
@@ -447,6 +447,17 @@ pub mod tests {
             ])),
             "never blocked, error or already seen rows"
         );
+        press(&mut app, KeyCode::Char('/'));
+        for c in "old".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(
+            press(&mut app, KeyCode::Char('S')),
+            Some(Effect::SeenAll(vec!["mini/old-done".into()])),
+            "a kept filter narrows it to the rows shown"
+        );
+        press(&mut app, KeyCode::Esc);
         app.set_rows(
             vec![row("mini/seat-b", "blocked", "needs_you", false)],
             hosts(),
