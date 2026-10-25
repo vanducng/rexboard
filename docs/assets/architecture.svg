@@ -1,4 +1,4 @@
-<svg id="architecture" viewBox="0 0 1040 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="architecture-title architecture-desc">
+<svg id="architecture" viewBox="0 0 1040 616" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="architecture-title architecture-desc">
   <title id="architecture-title">rexboard architecture</title>
   <desc id="architecture-desc">Two Rex hosts, local (this Mac) and mini, each stream one observer to rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket. A jump is the one write to Rex: it runs jump.pre_cmd, focuses the pane on its host and asks the Rex app to show its session.</desc>
   <defs>
@@ -115,6 +115,5 @@
     <text class="legend" x="648" y="552">optional</text>
     <rect class="swatch" x="736" y="541" width="20" height="14" rx="2"/>
     <text class="legend" x="764" y="552">focal: serve and jumps</text>
-    <text class="caption" x="32" y="588">rexboard only reads Rex. The one write is a jump (blue): it focuses the pane on its host and asks the Rex app to show it.</text>
-    <text class="caption" x="32" y="608">A pane on local takes the same path through its own server.</text>
+    <text class="caption" x="32" y="588">A pane on local takes the same path through its own server.</text>
 </svg>
