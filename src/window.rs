@@ -1,4 +1,7 @@
+use std::collections::BTreeSet;
 use std::process::{Child, Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -16,6 +19,11 @@ const SCRIPT: &str = concat!(
 /// The board's own Rex session, and the tab its board runs in.
 pub const SESSION: &str = "rexboard";
 pub const TAB: &str = "board";
+
+/// How long a new session may take to show up: the app's own after a new window, or the board's
+/// after `rex new`.
+const APPEAR_WITHIN: Duration = Duration::from_secs(2);
+const POLL: Duration = Duration::from_millis(100);
 
 /// The app titles a window `<pane title> - <session>`, and the board titles its pane after
 /// the tab, so a window manager can match this.
@@ -35,36 +43,23 @@ pub fn window(new: bool, print_title: bool, json: bool) -> Result<()> {
         }
         return Ok(());
     }
-    let (board, made) = match find()? {
+    let (board, made) = match board(&sessions()?) {
         Some(board) => (board, false),
-        None => {
-            create()?;
-            let board = find()?.ok_or_else(|| {
-                Error::Rex(format!(
-                    "rex new did not leave a session labelled {SESSION}"
-                ))
-            })?;
-            (board, true)
-        }
+        None => (create()?, true),
     };
-    let config = config::load()?;
-    let reply = rex::run_script(
-        None,
-        SCRIPT,
-        &json!({
-            "mode": if new || made { "new" } else { "select" },
-            "session_id": board.0,
-            "window_id": board.1,
-            "app_client": jump::app_client(config.client),
-        }),
-    )?;
-    stray(&reply)?;
-    jump::check(&reply, "window", "rexboard window")?;
-    let opened = reply["opened"] == true;
+    let app_client = jump::app_client(config::load()?.client);
+    let opened = new || made;
+    if opened {
+        open(&board, app_client.as_deref())?;
+    } else {
+        call(
+            &json!({ "mode": "select", "session_id": board.id, "window_id": board.tab, "app_client": app_client }),
+        )?;
+    }
     if json {
         println!(
             "{}",
-            json!({ "ok": true, "opened": opened, "session_id": board.0, "title": title() })
+            json!({ "ok": true, "opened": opened, "session_id": board.id, "title": title() })
         );
     } else if opened {
         println!("opened the board window: {}", title());
@@ -74,51 +69,169 @@ pub fn window(new: bool, print_title: bool, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// A new app window comes with a session of its own. window.lua destroys it; if that failed,
-/// say which session is left so it can be closed by hand.
-fn stray(reply: &Value) -> Result<()> {
-    match reply["made"].as_str() {
-        Some(made) if reply["destroyed"] != true => Err(Error::RexExplained {
-            message: format!("the new Rex window left an extra session behind: {made}"),
-            steps: vec![format!("rex kill {made}")],
-            detail: reply["error"].as_str().unwrap_or_default().to_owned(),
-        }),
-        _ => Ok(()),
+struct Board {
+    id: String,
+    tab: String,
+}
+
+/// A new app window comes with a session of its own. Open one, show the board in it, then
+/// destroy that session: the one the app names, else the one new session that looks like a
+/// fresh window's. Anything less certain destroys nothing and says what it found.
+fn open(board: &Board, app_client: Option<&str>) -> Result<()> {
+    let before: BTreeSet<String> = sessions()?
+        .iter()
+        .filter_map(|s| s["session_id"].as_str().map(str::to_owned))
+        .collect();
+    let reply = call(&json!({ "mode": "open", "app_client": app_client }))?;
+    let named = ["session_id", "session"]
+        .iter()
+        .find_map(|key| reply["reply"][*key].as_str().map(str::to_owned));
+    let made = match named {
+        Some(id) => id,
+        None => new_window_session(&before, &board.id)?,
+    };
+    call(
+        &json!({ "mode": "select", "session_id": board.id, "window_id": board.tab, "app_client": app_client }),
+    )?;
+    call(&json!({ "mode": "destroy", "session_id": made }))?;
+    Ok(())
+}
+
+/// The session a new app window came with: the one session that was not there before, once it
+/// shows up, if it looks like a fresh window's (not the board's label, one tab, one pane, no
+/// status record).
+fn new_window_session(before: &BTreeSet<String>, board: &str) -> Result<String> {
+    let deadline = Instant::now() + APPEAR_WITHIN;
+    loop {
+        let now = sessions()?;
+        let fresh: Vec<&Value> = now
+            .iter()
+            .filter(|s| {
+                s["session_id"]
+                    .as_str()
+                    .is_some_and(|id| id != board && !before.contains(id))
+            })
+            .collect();
+        let ids = || -> Vec<String> {
+            fresh
+                .iter()
+                .filter_map(|s| s["session_id"].as_str().map(str::to_owned))
+                .collect()
+        };
+        match fresh.as_slice() {
+            [one] if looks_fresh(one) => return Ok(ids().remove(0)),
+            [one] => {
+                return Err(left(
+                    format!(
+                        "a session appeared that does not look like the new window's own ({}); nothing was destroyed",
+                        describe(one)
+                    ),
+                    &ids(),
+                ));
+            }
+            [] if Instant::now() < deadline => thread::sleep(POLL),
+            [] => {
+                return Err(Error::RexExplained {
+                    message: format!(
+                        "the new Rex window's own session did not show up within {}s; nothing was destroyed",
+                        APPEAR_WITHIN.as_secs()
+                    ),
+                    steps: vec!["rex ls".to_owned()],
+                    detail: String::new(),
+                });
+            }
+            _ => {
+                return Err(left(
+                    format!(
+                        "more than one session appeared with the new window: {}; nothing was destroyed",
+                        ids().join(", ")
+                    ),
+                    &ids(),
+                ));
+            }
+        }
     }
 }
 
-/// The `rexboard` session on this host and its `board` tab (else its first tab).
-fn find() -> Result<Option<(String, String)>> {
+fn left(message: String, ids: &[String]) -> Error {
+    let mut steps = vec!["rex ls".to_owned()];
+    steps.extend(
+        ids.iter()
+            .map(|id| format!("rex kill {id}, if it is the new window's")),
+    );
+    Error::RexExplained {
+        message,
+        steps,
+        detail: String::new(),
+    }
+}
+
+fn panes(session: &Value) -> impl Iterator<Item = &Value> {
+    session["windows"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|w| w["blocks"].as_array().into_iter().flatten())
+}
+
+fn looks_fresh(session: &Value) -> bool {
+    let windows = session["windows"].as_array().map_or(0, Vec::len);
+    let records = panes(session).any(|b| b["records"].as_array().is_some_and(|r| !r.is_empty()));
+    session["label"] != SESSION && windows == 1 && panes(session).count() == 1 && !records
+}
+
+fn describe(session: &Value) -> String {
+    format!(
+        "{}: {} tabs, {} panes",
+        session["session_id"].as_str().unwrap_or("?"),
+        session["windows"].as_array().map_or(0, Vec::len),
+        panes(session).count()
+    )
+}
+
+fn call(args: &Value) -> Result<Value> {
+    let reply = rex::run_script(None, SCRIPT, args)?;
+    jump::check(&reply, "window", "rexboard window")?;
+    Ok(reply)
+}
+
+/// This host's sessions, from the snapshot script.
+fn sessions() -> Result<Vec<Value>> {
     let snapshot = rex::run_script(None, rex::SNAPSHOT, &json!({ "host": "local" }))?;
-    let sessions = snapshot["hosts"]
+    Ok(snapshot["hosts"]
         .as_array()
         .into_iter()
         .flatten()
         .filter(|host| host["host"] == "local")
-        .flat_map(|host| host["sessions"].as_array().into_iter().flatten());
-    for session in sessions {
-        if session["label"] != SESSION {
-            continue;
-        }
-        let windows: Vec<&Value> = session["windows"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .collect();
-        let tab = windows
-            .iter()
-            .find(|w| w["label"] == TAB)
-            .or_else(|| windows.first())
-            .and_then(|w| w["window_id"].as_str());
-        if let (Some(id), Some(tab)) = (session["session_id"].as_str(), tab) {
-            return Ok(Some((id.to_owned(), tab.to_owned())));
-        }
-    }
-    Ok(None)
+        .flat_map(|host| host["sessions"].as_array().into_iter().flatten().cloned())
+        .collect())
 }
 
-/// Makes the `rexboard` session with the board running in its `board` tab.
-fn create() -> Result<()> {
+/// The board's session: labelled `rexboard`, with a `board` tab whose pane runs the board (its
+/// title is `board`, or its process is `rexboard`). Someone's own `rexboard` session never is.
+fn board(sessions: &[Value]) -> Option<Board> {
+    sessions.iter().find_map(|session| {
+        if session["label"] != SESSION {
+            return None;
+        }
+        let tab = session["windows"].as_array()?.iter().find(|w| {
+            w["label"] == TAB
+                && w["blocks"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|b| b["title"] == TAB || b["process"]["name"] == SESSION)
+        })?;
+        Some(Board {
+            id: session["session_id"].as_str()?.to_owned(),
+            tab: tab["window_id"].as_str()?.to_owned(),
+        })
+    })
+}
+
+/// Makes the `rexboard` session with the board running in its `board` tab, and waits for the
+/// board to start in it.
+fn create() -> Result<Board> {
     let rex = rex::locate()?;
     let me = std::env::current_exe()?;
     let mut cmd = Command::new(&rex);
@@ -140,5 +253,17 @@ fn create() -> Result<()> {
             why.unwrap_or("no output")
         )));
     }
-    Ok(())
+    let deadline = Instant::now() + APPEAR_WITHIN;
+    loop {
+        if let Some(board) = board(&sessions()?) {
+            return Ok(board);
+        }
+        if Instant::now() >= deadline {
+            return Err(Error::Rex(format!(
+                "rex new {SESSION} made no session running the board within {}s",
+                APPEAR_WITHIN.as_secs()
+            )));
+        }
+        thread::sleep(POLL);
+    }
 }

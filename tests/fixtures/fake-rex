@@ -8,8 +8,10 @@
 #   hosts        lists one remote host, mini
 #   capture      prints a few lines of generic pane text
 #   new          succeeds, and touches $FAKE_REX_STATE/made when FAKE_REX_STATE is set
-#   do - (window script) prints $FAKE_REX_WINDOW_REPLY (default {"ok":true,"opened":false});
-#                the snapshot is $FAKE_REX_FIXTURE_AFTER once $FAKE_REX_STATE/made exists
+#   do - (window script, mode open) prints $FAKE_REX_OPEN_REPLY (default {"ok":true,"reply":{}});
+#                other window modes print $FAKE_REX_WINDOW_REPLY (default {"ok":true})
+#   do - (snapshot) with $FAKE_REX_FIXTURES set: the Nth call prints $FAKE_REX_FIXTURES/N.json, or
+#                the last one there is; the count lives in $FAKE_REX_STATE
 if [ -n "${FAKE_REX_LOG:-}" ]; then
   printf '%s\n' "$*" >>"$FAKE_REX_LOG"
 fi
@@ -49,10 +51,18 @@ case " $* " in
     script=$(cat)
     case "$script" in
       *session.focus_block*) ok='{"ok":true}'; printf '%s\n' "${FAKE_REX_JUMP_REPLY:-$ok}" ;;
-      *client.window.new*) ok='{"ok":true,"opened":false}'; printf '%s\n' "${FAKE_REX_WINDOW_REPLY:-$ok}" ;;
+      *client.window.new*)
+        case " $* " in
+          *'"mode":"open"'*) ok='{"ok":true,"reply":{}}'; printf '%s\n' "${FAKE_REX_OPEN_REPLY:-$ok}" ;;
+          *) ok='{"ok":true}'; printf '%s\n' "${FAKE_REX_WINDOW_REPLY:-$ok}" ;;
+        esac
+        ;;
       *)
-        if [ -n "${FAKE_REX_FIXTURE_AFTER:-}" ] && [ -e "${FAKE_REX_STATE:-/nonexistent}/made" ]; then
-          cat "$FAKE_REX_FIXTURE_AFTER"
+        if [ -n "${FAKE_REX_FIXTURES:-}" ]; then
+          n=$(($(cat "$FAKE_REX_STATE/snapshot-count" 2>/dev/null || echo 0) + 1))
+          echo "$n" >"$FAKE_REX_STATE/snapshot-count"
+          while [ "$n" -gt 1 ] && [ ! -e "$FAKE_REX_FIXTURES/$n.json" ]; do n=$((n - 1)); done
+          cat "$FAKE_REX_FIXTURES/$n.json"
         else
           cat "${FAKE_REX_FIXTURE:-$dir/snapshot-two-hosts.json}"
         fi

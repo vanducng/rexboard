@@ -1,8 +1,13 @@
--- Shows the rexboard session in this Mac's Rex app. Runs after app.lua.
--- mode "select": select the session; the app focuses a window that already shows it.
--- mode "new": open a new app window, show the session there, then destroy the session the new
--- window came with, so no unlabelled session is left behind.
--- Returns { ok = true, opened, made, destroyed }, or a failure shaped as in app.lua.
+-- The Rex calls behind `rexboard window`; rexboard decides what to call. Runs after app.lua.
+-- mode "open": ask this Mac's app for a new window; the reply is the app's answer.
+-- mode "select": ask the app to show the session (it focuses a window that already shows it).
+-- mode "destroy": destroy the one session rexboard named, by its id.
+if a.mode == "destroy" then
+  local _, err = rex.call("session.destroy", { session_id = a.session_id })
+  if err then return fail("session.destroy", err) end
+  return { ok = true }
+end
+
 local app, why = local_app()
 if not app then return why end
 
@@ -12,40 +17,12 @@ local function perform(action, args)
   })
 end
 
-local show = { session_id = a.session_id, window_id = a.window_id }
-if a.mode ~= "new" then
-  local _, err = perform("session.select", show)
-  if err then return fail("session.select", err) end
-  return { ok = true, opened = false }
+if a.mode == "open" then
+  local reply, err = perform("client.window.new")
+  if err then return fail("client.window.new", err) end
+  return { ok = true, reply = reply }
 end
 
-local function ids()
-  local out = {}
-  for _, s in ipairs((rex.call("session.list") or {}).sessions or {}) do out[s.session_id] = true end
-  return out
-end
-
-local before = ids()
-local _, werr = perform("client.window.new")
-if werr then return fail("client.window.new", werr) end
-local made
-for _ = 1, 20 do
-  for id in pairs(ids()) do
-    if not before[id] and id ~= a.session_id then made = id end
-  end
-  if made then break end
-end
-
-local function destroy()
-  if not made then return false end
-  local _, derr = rex.call("session.destroy", { session_id = made })
-  return derr == nil
-end
-
-local _, serr = perform("session.select", show)
-if serr then
-  local reply = fail("session.select", serr)
-  reply.made, reply.destroyed = made, destroy()
-  return reply
-end
-return { ok = true, opened = true, made = made, destroyed = destroy() }
+local _, err = perform("session.select", { session_id = a.session_id, window_id = a.window_id })
+if err then return fail("session.select", err) end
+return { ok = true }
