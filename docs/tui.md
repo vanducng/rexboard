@@ -39,4 +39,4 @@ Long labels are cut to fit: a `session`, `tab` or `pane` label to 24 columns wit
 | `esc` | Clear the filter, close the peek and the key table, and open every folded group |
 | `q`, `ctrl-c` | Quit |
 
-The board redraws when serve sends rows, on a key, and once a second for the clock and the times in state. SIGTERM and SIGHUP (closing its window) quit it the same way as `q`, so the terminal is left as it was.
+The board redraws when serve sends rows, on a key, and once a second for the clock and the times in state. SIGTERM and SIGHUP (closing its window) quit it the same way as `q`, so the terminal is left as it was, and the board exits on its own within a second if its terminal goes away.
