@@ -2,12 +2,15 @@
 
 rexboard reads Rex, remembers what Rex does not, and shows it. Nothing writes to Rex except a jump, which focuses one pane and asks the Rex app to show its session.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/architecture-dark.svg">
-  <img alt="rexboard architecture: one observer per Rex host feeds rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket; a jump runs jump.pre_cmd, focuses the pane on its host and asks the Rex app to select its session" src="assets/architecture.svg" width="100%">
-</picture>
+<img alt="rexboard architecture: local (this Mac) and mini each run one observer that feeds rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket; a jump, the one write to Rex, runs jump.pre_cmd, focuses the pane on its host and asks the Rex app to show its session" src="assets/architecture.svg" width="100%">
 
-Each host runs one observer, `rex [-S HOST] do - --all`, whose NDJSON lines ([CLI](cli.md)) feed serve's collectors and its one reducer thread. The diagram's source is [assets/architecture.html](assets/architecture.html) and [assets/architecture-dark.html](assets/architecture-dark.html): edit those, then export each diagram to the `.svg` next to it.
+Each host runs one observer, `rex [-S HOST] do - --all`, whose NDJSON lines ([CLI](cli.md)) feed serve's collectors and its one reducer thread. Two reads bypass serve: the board's peek runs `rex [-S HOST] capture` straight against the pane's host, and `ls --direct` and `watch --raw` run their own observers.
+
+The image follows the reader's light or dark setting by itself. Its source is [assets/architecture.html](assets/architecture.html): after editing it, copy its `<svg>` element out with
+
+```bash
+sed -n '/<svg /,/<\/svg>/p' docs/assets/architecture.html > docs/assets/architecture.svg
+```
 
 ## Pieces
 
