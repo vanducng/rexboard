@@ -131,7 +131,7 @@ fn connection(stream: UnixStream, tx: &Sender<Msg>) {
             Ok(request) => request,
             Err(err) => {
                 let reply = error_line("USAGE", &format!("bad request: {err}"));
-                if writeln!(out, "{reply}").is_err() {
+                if out.write_all(format!("{reply}\n").as_bytes()).is_err() {
                     return;
                 }
                 continue;
@@ -144,7 +144,9 @@ fn connection(stream: UnixStream, tx: &Sender<Msg>) {
             return;
         }
         for reply in reply_rx.iter() {
-            if writeln!(out, "{reply}").and_then(|()| out.flush()).is_err() {
+            // One write per line: serve may exit right after a stop reply, and a client must
+            // never see the JSON without its newline.
+            if out.write_all(format!("{reply}\n").as_bytes()).is_err() {
                 return;
             }
             if !streaming {

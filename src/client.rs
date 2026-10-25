@@ -394,7 +394,8 @@ pub fn stop_serve(json: bool) -> Result<()> {
     };
     let pid = recorded_pid(&paths);
     send(&mut stream, &json!({ "cmd": "stop" }))?;
-    read(&mut BufReader::new(stream), &mut String::new())?;
+    // serve may close as it stops; the wait below is what proves it stopped.
+    let _ = read(&mut BufReader::new(stream), &mut String::new());
     let deadline = Instant::now() + Duration::from_secs(5);
     let running = || match pid {
         Some(pid) => alive(pid),
