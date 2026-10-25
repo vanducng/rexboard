@@ -357,7 +357,12 @@ pub fn age(at: &str, now: DateTime<Utc>) -> String {
     let Ok(at) = DateTime::parse_from_rfc3339(at) else {
         return "-".into();
     };
-    let secs = (now - at.with_timezone(&Utc)).num_seconds().max(0);
+    span((now - at.with_timezone(&Utc)).num_seconds())
+}
+
+/// A length of time, in the two largest units past an hour: `30s`, `12m`, `5h43m`, `3d0h`.
+pub fn span(secs: i64) -> String {
+    let secs = secs.max(0);
     match secs {
         0..60 => format!("{secs}s"),
         60..3600 => format!("{}m", secs / 60),

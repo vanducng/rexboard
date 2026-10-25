@@ -16,6 +16,9 @@ use crate::pane::bare_title;
 /// Width of the detail pane when it sits on the right.
 const DETAIL: u16 = 38;
 
+/// Below this many rows the column header is left out, so no row is lost to it.
+const HEADED: u16 = 12;
+
 const STOPPED: &str = "serve stopped · r reconnects";
 
 /// The `?` table: every key, in the order an operator reaches for them.
@@ -53,7 +56,7 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
             Constraint::Length(DETAIL),
         ])
         .areas(body);
-        list(frame, list_area, app, area.width, now);
+        list(frame, list_area, app, area, now);
         let bar = vec![Line::styled("│", theme::dim()); usize::from(rule.height)];
         frame.render_widget(Paragraph::new(bar), rule);
         let padded = Rect {
@@ -76,7 +79,7 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
             Constraint::Length(height),
         ])
         .areas(body);
-        list(frame, list_area, app, area.width, now);
+        list(frame, list_area, app, area, now);
         frame.render_widget(rule_line(rule.width), rule);
         // A peek keeps its newest lines when the pane is short.
         let skip = lines.len().saturating_sub(usize::from(height));
@@ -179,7 +182,8 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn list(frame: &mut Frame, area: Rect, app: &App, board: u16, now: DateTime<Utc>) {
+/// The list, under a header line naming its columns. `board` is the whole screen.
+fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc>) {
     let items = app.items();
     if items.is_empty() {
         let query = app.filter.value();
@@ -199,6 +203,16 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: u16, now: DateTime<Utc>
         );
         return;
     }
+    let width = usize::from(area.width);
+    let columns = Columns::new(board.width, width);
+    let area = if board.height >= HEADED {
+        let [top, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
+        let cells = columns.header().concat();
+        frame.render_widget(Paragraph::new(Line::styled(cells, theme::header())), top);
+        rest
+    } else {
+        area
+    };
     let height = usize::from(area.height);
     let room = if items.len() > height {
         height.saturating_sub(1)
@@ -207,13 +221,11 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: u16, now: DateTime<Utc>
     };
     let at = items.iter().position(|item| is_selected(app, item));
     let offset = at.map_or(0, |at| (at + 1).saturating_sub(room));
-    let width = usize::from(area.width);
-    let layout = Columns::new(board, width);
     let places = wheres(
         &app.rows,
-        layout.width(Col::Where).saturating_sub(1),
-        layout.tier != Tier::Wide,
-        layout.has(Col::Host),
+        columns.width(Col::Where).saturating_sub(1),
+        columns.tier != Tier::Wide,
+        columns.has(Col::Host),
     );
     let mut lines: Vec<Line> = items
         .iter()
@@ -239,7 +251,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: u16, now: DateTime<Utc>
                 &app.rows[i],
                 &places[i],
                 app,
-                &layout,
+                &columns,
                 is_selected(app, item),
                 now,
             ),
@@ -284,7 +296,7 @@ fn row_line(
     row: &Row,
     place: &str,
     app: &App,
-    layout: &Columns,
+    columns: &Columns,
     selected: bool,
     now: DateTime<Utc>,
 ) -> Line<'static> {
@@ -294,7 +306,7 @@ fn row_line(
     } else {
         Style::new()
     };
-    let mut spans: Vec<Span> = layout
+    let mut spans: Vec<Span> = columns
         .cells(row, place, now)
         .into_iter()
         .map(|(text, tone)| {
