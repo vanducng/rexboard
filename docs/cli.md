@@ -11,7 +11,7 @@ rexboard runs the `rex` CLI. It uses the first of:
 3. `rex` on `PATH`
 4. the macOS app bundle: `~/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex`
 
-With none of them, a command fails with `REX_NOT_FOUND`.
+With none of them, a command fails with `REX_NOT_FOUND`, next steps `set REXBOARD_REX to the path of the rex CLI` and `install Rex`.
 
 ## `rexboard ls`
 
@@ -26,7 +26,7 @@ One embedded Lua script runs through `rex do -` and reads this host plus every `
 
 A pane is listed when it has a status record or a known harness. `--all` adds the rest. Panes sort by state: `blocked`, `error`, `done`, `working`, `idle`, `unknown`.
 
-The text table has the columns `STATE`, `AGE` (since `updated_at`, `-` when there is none), `HARNESS`, `HOST`, `WHERE` (`session › tab › pane`) and `WHAT` (the record's message, else the pane title).
+The text table has the columns `STATE`, `AGE` (since `updated_at`, `-` when there is none), `HARNESS` (`-` when unknown), `HOST`, `WHERE` (`session › tab › pane`) and `WHAT` (the record's message, else the pane title without its leading state glyph).
 
 ### JSON fields
 
@@ -59,7 +59,7 @@ Fields are a contract. New fields may appear. Renaming or removing one is a brea
 | Exit | When |
 | --- | --- |
 | 0 | Listed. A host that cannot be reached prints `warning: HOST is unreachable: ...` on stderr, and the rest are listed |
-| 1 | `REX_NOT_FOUND`: no `rex` CLI. `REX`: `rex do` failed, timed out, or printed something unexpected |
-| 2 | `HOSTS_UNREACHABLE`: every host failed. `USAGE`: a bad flag, or `--host` names no host |
+| 1 | `REX_NOT_FOUND`: no `rex` CLI. `REX`: `rex do` failed, timed out, or returned a snapshot rexboard does not understand; the message names the Rex version |
+| 2 | `HOSTS_UNREACHABLE`: every host failed; next steps `rex hosts` and `rexboard ls`. `USAGE`: a bad flag, or `--host` names no host |
 
 With `--json`, errors print on stderr as `{"ok":false,"error":{"code":...,"message":...,"next_steps":[...]}}`.
