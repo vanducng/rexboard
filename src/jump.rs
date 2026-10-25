@@ -11,7 +11,11 @@ use crate::error::{Error, Result};
 use crate::output::{labels, path};
 use crate::rex;
 
-const SCRIPT: &str = include_str!("lua/jump.lua");
+const SCRIPT: &str = concat!(
+    include_str!("lua/app.lua"),
+    "\n",
+    include_str!("lua/jump.lua")
+);
 
 /// How long `jump.pre_cmd` may take, such as a window manager focusing the main Rex window.
 const PRE_CMD_WITHIN: Duration = Duration::from_secs(5);
@@ -75,10 +79,7 @@ pub fn go(row: &Row) -> Result<()> {
     {
         pre_cmd(argv)?;
     }
-    let app_client = std::env::var("REX_CLIENT")
-        .ok()
-        .filter(|label| !label.is_empty())
-        .or(config.client);
+    let app_client = app_client(config.client);
     let p = &row.pane;
     let reply = rex::run_script(
         None,
@@ -91,12 +92,22 @@ pub fn go(row: &Row) -> Result<()> {
             "app_client": app_client,
         }),
     )?;
-    check(&reply, &row.key)?;
+    check(&reply, "jump", &format!("rexboard jump {}", row.key))?;
     client::call(&json!({ "cmd": "seen", "key": row.key, "jump": true }))?;
     Ok(())
 }
 
-fn check(reply: &Value, key: &str) -> Result<()> {
+/// The Rex app client to ask: `REX_CLIENT`, else `client` from config.toml.
+pub fn app_client(configured: Option<String>) -> Option<String> {
+    std::env::var("REX_CLIENT")
+        .ok()
+        .filter(|label| !label.is_empty())
+        .or(configured)
+}
+
+/// Turns a Lua reply into an error the reader can act on. `what` names the action in Rex's own
+/// failures, and `retry` is the command to run again once the app answers.
+pub fn check(reply: &Value, what: &str, retry: &str) -> Result<()> {
     if reply["ok"] == true {
         return Ok(());
     }
@@ -143,7 +154,7 @@ fn check(reply: &Value, key: &str) -> Result<()> {
             text("error"),
             labels.join(", ")
         )),
-        _ if step == "session.select"
+        _ if matches!(step.as_str(), "session.select" | "client.window.new")
             && (error.contains("code=timeout") || error.contains("status=504")) =>
         {
             Error::RexExplained {
@@ -152,13 +163,13 @@ fn check(reply: &Value, key: &str) -> Result<()> {
                     app_name(&error)
                 ),
                 steps: vec![
-                    format!("unlock the Mac, then rexboard jump {key}"),
+                    format!("unlock the Mac, then {retry}"),
                     "rex client ls".to_owned(),
                 ],
                 detail: error,
             }
         }
-        _ => Error::Rex(format!("jump failed at {step}: {error}")),
+        _ => Error::Rex(format!("{what} failed at {step}: {error}")),
     })
 }
 

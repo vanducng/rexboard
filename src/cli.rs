@@ -45,6 +45,15 @@ pub enum Command {
     },
     /// Pick a pane from the board's list and go to it. Enter goes and exits 0; esc exits 1.
     Pick,
+    /// Show the board in its own Rex app window, titled `board - rexboard`.
+    Window {
+        /// Always open a new app window for the board, even when its session exists.
+        #[arg(long)]
+        new: bool,
+        /// Print the window title a window manager can match, and do nothing else.
+        #[arg(long, conflicts_with = "new")]
+        print_title: bool,
+    },
 }
 
 #[derive(Debug, Args)]

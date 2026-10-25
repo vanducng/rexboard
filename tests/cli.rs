@@ -1498,3 +1498,133 @@ fn next_outside_a_pane_starts_after_the_last_jump() {
         "seen alone does not move it"
     );
 }
+
+/// The two-host snapshot, with a `rexboard` session on local when `with_board` is set.
+fn snapshot_with_board(dir: &std::path::Path, name: &str, with_board: bool) -> std::path::PathBuf {
+    let mut snapshot: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(fixture("snapshot-two-hosts.json")).unwrap())
+            .unwrap();
+    if with_board {
+        let board = serde_json::json!({ "session_id": "session:board", "label": "rexboard",
+            "windows": [{ "window_id": "window:board", "label": "board", "blocks": [
+                { "block_id": "block:board", "label": "shell", "title": "board",
+                  "process": { "name": "rexboard" }, "records": {} } ] }] });
+        snapshot["hosts"][0]["sessions"]
+            .as_array_mut()
+            .unwrap()
+            .push(board);
+    }
+    let path = dir.join(name);
+    std::fs::write(&path, snapshot.to_string()).unwrap();
+    path
+}
+
+/// A `rexboard window` command against fake-rex, logging to `dir/rex.log`.
+fn window_cmd(dir: &std::path::Path) -> Command {
+    let mut cmd = bin();
+    cmd.env("REXBOARD_REX", fixture("fake-rex"))
+        .env("FAKE_REX_LOG", dir.join("rex.log"))
+        .env("FAKE_REX_STATE", dir)
+        .env_remove("REX_CLIENT");
+    cmd
+}
+
+fn window_scripts(dir: &std::path::Path) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(dir.join("rex.log"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| line.strip_prefix("do - --json --args "))
+        .filter_map(|args| serde_json::from_str::<serde_json::Value>(args).ok())
+        .filter(|args| args.get("mode").is_some())
+        .collect()
+}
+
+#[test]
+fn window_print_title_matches_session_and_tab() {
+    let dir = tempfile::tempdir().unwrap();
+    window_cmd(dir.path())
+        .args(["window", "--print-title"])
+        .assert()
+        .success()
+        .stdout("board - rexboard\n");
+    let empty = snapshot_with_board(dir.path(), "before.json", false);
+    let after = snapshot_with_board(dir.path(), "after.json", true);
+    window_cmd(dir.path())
+        .env("FAKE_REX_FIXTURE", &empty)
+        .env("FAKE_REX_FIXTURE_AFTER", &after)
+        .arg("window")
+        .assert()
+        .success();
+    let log = std::fs::read_to_string(dir.path().join("rex.log")).unwrap();
+    let new = log
+        .lines()
+        .find(|line| line.starts_with("new "))
+        .expect("the session is made");
+    let words: Vec<&str> = new.split_whitespace().collect();
+    assert_eq!(
+        &words[..5],
+        ["new", "rexboard", "--window", "board", "--"],
+        "{new}"
+    );
+    assert!(
+        words[5].ends_with("rexboard") && words[6] == "board",
+        "{new}"
+    );
+    assert_eq!(
+        format!("{} - {}", words[3], words[1]),
+        "board - rexboard",
+        "the title is the tab, then the session"
+    );
+    assert_eq!(
+        window_scripts(dir.path())[0]["mode"],
+        "new",
+        "a session just made opens a new window"
+    );
+}
+
+#[test]
+fn window_reuses_existing_rexboard_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let board = snapshot_with_board(dir.path(), "board.json", true);
+    window_cmd(dir.path())
+        .env("FAKE_REX_FIXTURE", &board)
+        .arg("window")
+        .assert()
+        .success()
+        .stdout("showed the board: board - rexboard\n");
+    let log = std::fs::read_to_string(dir.path().join("rex.log")).unwrap();
+    assert!(!log.lines().any(|l| l.starts_with("new ")), "{log}");
+    let scripts = window_scripts(dir.path());
+    assert_eq!(scripts.len(), 1);
+    assert_eq!(scripts[0]["mode"], "select");
+    assert_eq!(scripts[0]["session_id"], "session:board");
+    assert_eq!(scripts[0]["window_id"], "window:board");
+}
+
+#[test]
+fn window_new_leaves_no_extra_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let board = snapshot_with_board(dir.path(), "board.json", true);
+    window_cmd(dir.path())
+        .env("FAKE_REX_FIXTURE", &board)
+        .env(
+            "FAKE_REX_WINDOW_REPLY",
+            r#"{"ok":true,"opened":true,"made":"session:extra","destroyed":true}"#,
+        )
+        .args(["window", "--new"])
+        .assert()
+        .success()
+        .stdout("opened the board window: board - rexboard\n");
+    assert_eq!(window_scripts(dir.path())[0]["mode"], "new");
+    window_cmd(dir.path())
+        .env("FAKE_REX_FIXTURE", &board)
+        .env(
+            "FAKE_REX_WINDOW_REPLY",
+            r#"{"ok":true,"opened":true,"made":"session:extra","destroyed":false}"#,
+        )
+        .args(["--json", "window", "--new"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("session:extra"))
+        .stderr(predicate::str::contains("rex kill session:extra"));
+}

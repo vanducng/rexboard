@@ -4,7 +4,7 @@ mod view;
 
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -61,6 +61,9 @@ fn board(pick: bool) -> Result<Option<Row>> {
     app.pick = pick;
     let mut terminal = ratatui::init();
     let _restore = Restore;
+    if !pick {
+        title_board();
+    }
     let mut tick = Instant::now();
     loop {
         terminal
@@ -139,6 +142,7 @@ fn terminal_gone() -> bool {
 /// the panic hook, which aborts. A signal can come just before its terminal goes.
 fn leave() -> ! {
     let _ = ratatui::try_restore();
+    untitle();
     let _ = ratatui::crossterm::execute!(std::io::stdout(), ratatui::crossterm::cursor::Show);
     std::process::exit(LEAVE_CODE.load(Ordering::SeqCst))
 }
@@ -277,6 +281,26 @@ impl Drop for Restore {
     fn drop(&mut self) {
         // try_restore: restore() prints its error, which panics once the terminal is gone.
         let _ = ratatui::try_restore();
+        untitle();
+    }
+}
+
+static TITLED: AtomicBool = AtomicBool::new(false);
+
+/// Titles the pane `board`, so the Rex app titles the board's window `board - rexboard`. The
+/// terminal's own title is pushed first and popped on the way out.
+fn title_board() {
+    use std::io::Write;
+    let mut out = std::io::stdout();
+    let set = write!(out, "\x1b[22;0t\x1b]2;{}\x07", crate::window::TAB).and_then(|()| out.flush());
+    TITLED.store(set.is_ok(), Ordering::SeqCst);
+}
+
+fn untitle() {
+    use std::io::Write;
+    if TITLED.swap(false, Ordering::SeqCst) {
+        let mut out = std::io::stdout();
+        let _ = write!(out, "\x1b[23;0t").and_then(|()| out.flush());
     }
 }
 

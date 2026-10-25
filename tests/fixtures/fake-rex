@@ -7,6 +7,9 @@
 #                (default {"ok":true})
 #   hosts        lists one remote host, mini
 #   capture      prints a few lines of generic pane text
+#   new          succeeds, and touches $FAKE_REX_STATE/made when FAKE_REX_STATE is set
+#   do - (window script) prints $FAKE_REX_WINDOW_REPLY (default {"ok":true,"opened":false});
+#                the snapshot is $FAKE_REX_FIXTURE_AFTER once $FAKE_REX_STATE/made exists
 if [ -n "${FAKE_REX_LOG:-}" ]; then
   printf '%s\n' "$*" >>"$FAKE_REX_LOG"
 fi
@@ -15,6 +18,12 @@ host=studio
 if [ "${1:-}" = "-S" ]; then
   host=$2
   shift 2
+fi
+if [ "${1:-}" = new ]; then
+  if [ -n "${FAKE_REX_STATE:-}" ]; then
+    touch "$FAKE_REX_STATE/made"
+  fi
+  exit 0
 fi
 case " $* " in
   *" do - --all "*)
@@ -40,7 +49,14 @@ case " $* " in
     script=$(cat)
     case "$script" in
       *session.focus_block*) ok='{"ok":true}'; printf '%s\n' "${FAKE_REX_JUMP_REPLY:-$ok}" ;;
-      *) cat "${FAKE_REX_FIXTURE:-$dir/snapshot-two-hosts.json}" ;;
+      *client.window.new*) ok='{"ok":true,"opened":false}'; printf '%s\n' "${FAKE_REX_WINDOW_REPLY:-$ok}" ;;
+      *)
+        if [ -n "${FAKE_REX_FIXTURE_AFTER:-}" ] && [ -e "${FAKE_REX_STATE:-/nonexistent}/made" ]; then
+          cat "$FAKE_REX_FIXTURE_AFTER"
+        else
+          cat "${FAKE_REX_FIXTURE:-$dir/snapshot-two-hosts.json}"
+        fi
+        ;;
     esac
     ;;
   *" capture "*)
