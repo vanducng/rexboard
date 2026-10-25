@@ -416,7 +416,7 @@ fn watch_raw_restarts_a_host_after_an_unreadable_line() {
         "{down}"
     );
     assert!(
-        errors.contains("warning: local: unexpected observer line from Rex 0.0.1792787366-g623b2d: missing field `window_id`; restarting its watcher: {\"v\":1,\"type\":\"block_created\""),
+        errors.contains("warning: local: unexpected observer line from Rex 0.0.1792787366-g623b2d: missing field `window_id`; restarting its observer: {\"v\":1,\"type\":\"block_created\""),
         "{errors}"
     );
     assert!(!errors.contains("will not restart"), "{errors}");
@@ -512,7 +512,7 @@ fn watch_json_restarts_a_host_that_sends_a_bad_record() {
     );
     assert!(
         errors.contains(
-            "warning: mini: unexpected pane shape from Rex 0.0.1792787366-g623b2d: missing field `state`; restarting its watcher: {"
+            "warning: mini: unexpected pane shape from Rex 0.0.1792787366-g623b2d: missing field `state`; restarting its observer: {"
         ),
         "{errors}"
     );
@@ -877,7 +877,7 @@ fn serve_restarts_a_host_that_sends_a_bad_record() {
     eventually("a second mini observer", || serve.observer_starts() >= 3);
     let log = std::fs::read_to_string(serve.file("serve.log")).unwrap();
     assert!(
-        log.contains("warning: mini: unexpected pane shape from Rex 0.0.1792787366-g623b2d: missing field `state`; restarting its watcher: {"),
+        log.contains("warning: mini: unexpected pane shape from Rex 0.0.1792787366-g623b2d: missing field `state`; restarting its observer: {"),
         "{log}"
     );
     assert!(!log.contains("will not restart"), "{log}");

@@ -191,7 +191,7 @@ fn observe(
 
 fn warn_restart(host: &str, err: &Error, line: &str) {
     let line: String = line.chars().take(500).collect();
-    eprintln!("warning: {host}: {err}; restarting its watcher: {line}");
+    eprintln!("warning: {host}: {err}; restarting its observer: {line}");
 }
 
 /// The last non-empty stderr line, skipping the banner `rex do` prints when it starts listening.
