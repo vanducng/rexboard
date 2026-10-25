@@ -1,5 +1,5 @@
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread;
@@ -24,6 +24,16 @@ static FDS: Mutex<()> = Mutex::new(());
 /// accept and connect.
 pub fn fd_guard() -> MutexGuard<'static, ()> {
     FDS.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A `rex` command. rexboard names its own targets, so a caller's (maybe a pane on another host)
+/// must not reach rex as the default block, session or app client.
+pub fn command(rex: &Path) -> Command {
+    let mut cmd = Command::new(rex);
+    for var in ["REX_BLOCK", "REX_SESSION", "REX_CLIENT"] {
+        cmd.env_remove(var);
+    }
+    cmd
 }
 
 pub fn spawn(cmd: &mut Command) -> std::io::Result<Child> {
@@ -65,7 +75,7 @@ pub fn locate() -> Result<PathBuf> {
 /// Runs `rex [-S host] do - --json --args <json>` with `lua` on stdin and returns its JSON result.
 pub fn run_script(host: Option<&str>, lua: &str, args: &Value) -> Result<Value> {
     let rex = locate()?;
-    let mut cmd = Command::new(&rex);
+    let mut cmd = command(&rex);
     if let Some(host) = host {
         cmd.args(["-S", host]);
     }

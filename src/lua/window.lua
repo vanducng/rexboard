@@ -3,6 +3,9 @@
 -- mode "select": ask the app to show the session (it focuses a window that already shows it).
 -- mode "destroy": destroy the one session rexboard named, by its id.
 if a.mode == "destroy" then
+  -- session.destroy acts only on a session this stream is attached to.
+  local _, aerr = rex.call("session.attach", { session_id = a.session_id })
+  if aerr then return fail("session.attach", aerr) end
   local _, err = rex.call("session.destroy", { session_id = a.session_id })
   if err then return fail("session.destroy", err) end
   return { ok = true }

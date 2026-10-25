@@ -1325,6 +1325,38 @@ fn next_cycles_needs_you_in_order_and_wraps() {
     );
 }
 
+/// Every line in a FAKE_REX_ENV_LOG, which must exist and show no caller target.
+fn assert_no_rex_targets(env_log: &std::path::Path) {
+    let lines = std::fs::read_to_string(env_log).unwrap();
+    assert!(!lines.is_empty(), "rex was not called");
+    for line in lines.lines() {
+        assert_eq!(line, "REX_BLOCK=- REX_SESSION=- REX_CLIENT=-");
+    }
+}
+
+#[test]
+fn next_keeps_the_callers_rex_targets_out_of_rex() {
+    let serve = needing();
+    let env_log = serve.dir.path().join("rex-env.log");
+    let out = serve
+        .needing_cmd()
+        .env("REX_BLOCK", "block:seat-old")
+        .env("REX_SESSION", "session:caller")
+        .env("FAKE_REX_ENV_LOG", &env_log)
+        .args(["--json", "next"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let reply: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        reply["key"], "mini/block:seat-new",
+        "REX_BLOCK is still the cursor"
+    );
+    assert_no_rex_targets(&env_log);
+}
+
 #[test]
 fn next_skips_seen_done() {
     let serve = needing();
@@ -1749,6 +1781,33 @@ fn window_new_destroys_one_fresh_session() {
         window_calls(dir.path()).last().unwrap(),
         &("destroy".to_owned(), "session:win".to_owned())
     );
+}
+
+#[test]
+fn window_keeps_the_callers_rex_targets_out_of_rex() {
+    let dir = tempfile::tempdir().unwrap();
+    let env_log = dir.path().join("rex-env.log");
+    window_cmd(
+        dir.path(),
+        &[
+            vec![],
+            vec![board_session()],
+            vec![board_session()],
+            vec![board_session(), fresh_session("win")],
+        ],
+    )
+    .env("REX_BLOCK", "block:caller")
+    .env("REX_SESSION", "session:caller")
+    .env("FAKE_REX_ENV_LOG", &env_log)
+    .arg("window")
+    .assert()
+    .success();
+    assert!(made_with_rex_new(dir.path()).is_some());
+    assert_eq!(
+        window_calls(dir.path()).last().unwrap(),
+        &("destroy".to_owned(), "session:win".to_owned())
+    );
+    assert_no_rex_targets(&env_log);
 }
 
 #[test]
