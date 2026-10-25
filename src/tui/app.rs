@@ -25,6 +25,8 @@ pub enum Effect {
     },
     /// Mark these unseen `done` rows seen.
     SeenAll(Vec<String>),
+    /// Go to this row's pane.
+    Jump(Box<Row>),
     Reconnect,
     Quit,
 }
@@ -79,6 +81,8 @@ pub struct App {
     pub keys: bool,
     pub toast: Option<(String, Instant)>,
     pub link: Link,
+    /// `rexboard pick`: the list alone; enter goes and esc gives up.
+    pub pick: bool,
     needs: BTreeSet<String>,
 }
 
@@ -240,6 +244,7 @@ impl App {
                 self.keys = !self.keys;
                 self.peek = None;
             }
+            KeyCode::Esc if self.pick => return Some(Effect::Quit),
             KeyCode::Esc => {
                 self.filter.reset();
                 self.peek = None;
@@ -289,7 +294,7 @@ impl App {
             KeyCode::Char('s') => {
                 return self.current().map(|row| Effect::Seen {
                     key: row.key.clone(),
-                    label: path(&labels(row, &self.rows, true), usize::MAX),
+                    label: path(&labels(row, true), usize::MAX),
                     state: row.pane.state.clone(),
                 });
             }
@@ -312,9 +317,9 @@ impl App {
                 return Some(Effect::Peek { key, host, block });
             }
             KeyCode::Enter => {
-                if self.current().is_some() {
-                    self.say("jump arrives in a later version");
-                }
+                return self
+                    .current()
+                    .map(|row| Effect::Jump(Box::new(row.clone())));
             }
             KeyCode::Char('r') => {
                 self.link = Link::Connecting;
@@ -478,8 +483,10 @@ pub mod tests {
                 state: "done".into(),
             })
         );
-        assert_eq!(press(&mut app, KeyCode::Enter), None);
-        assert_eq!(app.toast(), Some("jump arrives in a later version"));
+        assert!(matches!(
+            press(&mut app, KeyCode::Enter),
+            Some(Effect::Jump(row)) if row.key == "local/claude"
+        ));
     }
 
     #[test]

@@ -7,6 +7,9 @@ use crate::pane::{Pane, bare_title};
 /// The widest a `session`, `tab` or `pane` label gets in `session › tab › pane`.
 const SEGMENT_MAX: usize = 24;
 
+/// The narrowest a session label is cut to, so its stem stays readable.
+const SESSION_MIN: usize = 8;
+
 /// The narrowest WHAT gets before WHERE gives up columns too.
 const WHAT_MIN: usize = 16;
 
@@ -39,12 +42,15 @@ pub fn table(rows: &[Row], now: DateTime<Utc>, width: Option<usize>) -> String {
                 in_state(row, now),
                 harness(row),
                 pane.host.clone(),
-                place(row, rows),
+                String::new(),
                 what(row).to_owned(),
             ]
             .map(|cell| clean(&cell))
         })
         .collect();
+    for (cell, place) in cells.iter_mut().zip(wheres(rows, usize::MAX, false, true)) {
+        cell[5] = place;
+    }
     let header = ["GROUP", "STATE", "AGE", "HARNESS", "HOST", "WHERE", "WHAT"].map(String::from);
     let mut widths = [0; 7];
     for row in std::iter::once(&header).chain(&cells) {
@@ -60,8 +66,8 @@ pub fn table(rows: &[Row], now: DateTime<Utc>, width: Option<usize>) -> String {
         let place = widths[5].saturating_sub(over).max("WHERE".len());
         widths[5] = place;
         widths[6] = what;
-        for (cell, row) in cells.iter_mut().zip(rows) {
-            cell[5] = path(&labels(row, rows, false), place);
+        for (cell, place) in cells.iter_mut().zip(wheres(rows, place, false, true)) {
+            cell[5] = place;
             cell[6] = fit(&cell[6], what).trim_end().to_owned();
         }
     }
@@ -122,49 +128,73 @@ pub fn what(row: &Row) -> &str {
         .unwrap_or_else(|| bare_title(&row.pane.title))
 }
 
-/// WHERE in full, each label capped so one long label cannot swamp the column.
-pub fn place(row: &Row, rows: &[Row]) -> String {
-    labels(row, rows, false)
-        .iter()
-        .map(|label| squeeze(label, SEGMENT_MAX))
-        .collect::<Vec<_>>()
-        .join(SEP)
-}
-
 /// A pane label that names nothing: `shell`, or what runs in the pane.
 fn generic(pane: &Pane) -> bool {
     pane.pane == "shell" || pane.process.as_deref() == Some(pane.pane.as_str())
 }
 
-/// The pane label tells this row apart: it is not generic, or another agent shares the tab.
-fn names_pane(row: &Row, rows: &[Row]) -> bool {
-    let p = &row.pane;
-    !generic(p)
-        || rows
-            .iter()
-            .filter(|r| {
-                r.pane.is_agent() && r.pane.host == p.host && r.pane.window_id == p.window_id
-            })
-            .count()
-            > 1
-}
-
 /// WHERE's labels: `session › tab › pane`, or `session › tab` when the pane label is generic.
 /// `short` keeps two labels for narrow rows: `session › pane`, or `session › tab`.
-pub fn labels<'a>(row: &'a Row, rows: &[Row], short: bool) -> Vec<&'a str> {
+pub fn labels(row: &Row, short: bool) -> Vec<&str> {
     let p = &row.pane;
-    match (names_pane(row, rows), short) {
-        (false, _) => vec![&p.session, &p.tab],
-        (true, false) => vec![&p.session, &p.tab, &p.pane],
-        (true, true) => vec![&p.session, &p.pane],
+    match (generic(p), short) {
+        (true, _) => vec![&p.session, &p.tab],
+        (false, false) => vec![&p.session, &p.tab, &p.pane],
+        (false, true) => vec![&p.session, &p.pane],
     }
 }
 
+/// WHERE for each row in `max` columns. Rows that would still read the same get told apart:
+/// by host when the host has no column of its own, else by `#N`, the pane's place among its
+/// tab's agent panes.
+pub fn wheres(rows: &[Row], max: usize, short: bool, host_column: bool) -> Vec<String> {
+    let first: Vec<String> = rows
+        .iter()
+        .map(|row| path(&labels(row, short), max))
+        .collect();
+    rows.iter()
+        .zip(&first)
+        .map(|(row, place)| {
+            let twins: Vec<&Row> = rows
+                .iter()
+                .zip(&first)
+                .filter(|(other, text)| {
+                    *text == place && (!host_column || other.pane.host == row.pane.host)
+                })
+                .map(|(other, _)| other)
+                .collect();
+            if twins.len() < 2 {
+                return place.clone();
+            }
+            let suffix = if twins.iter().any(|other| other.pane.host != row.pane.host) {
+                format!(" @{}", clean(&row.pane.host))
+            } else {
+                format!(" #{}", position(row, rows))
+            };
+            let room = max.saturating_sub(suffix.width());
+            format!("{}{suffix}", path(&labels(row, short), room))
+        })
+        .collect()
+}
+
+/// The pane's place among the agent panes of its tab, oldest first: Rex block ids sort by
+/// creation time.
+fn position(row: &Row, rows: &[Row]) -> usize {
+    let p = &row.pane;
+    1 + rows
+        .iter()
+        .filter(|other| {
+            let o = &other.pane;
+            o.host == p.host && o.window_id == p.window_id && o.block_id < p.block_id
+        })
+        .count()
+}
+
 /// What to call a row: its pane label, or for a generic one its title, else its tab.
-pub fn name(row: &Row, rows: &[Row]) -> String {
+pub fn name(row: &Row) -> String {
     let p = &row.pane;
     let title = bare_title(&p.title);
-    let name = if names_pane(row, rows) {
+    let name = if !generic(p) {
         &p.pane
     } else if title.is_empty() {
         &p.tab
@@ -174,8 +204,9 @@ pub fn name(row: &Row, rows: &[Row]) -> String {
     clean(name)
 }
 
-/// Labels joined with ` › ` in at most `max` columns. The last label is what you recognise, so
-/// the cuts go to the middle label first, then the first, then the last; separators stay.
+/// Labels joined with ` › ` in at most `max` columns, with the separators kept. The cuts go to
+/// the least telling label first: the middle (the tab), then the first (the session) down to a
+/// readable stem, then the last.
 pub fn path(labels: &[&str], max: usize) -> String {
     let whole: Vec<String> = labels.iter().map(|label| clean(label)).collect();
     let mut parts: Vec<String> = whole
@@ -192,9 +223,12 @@ pub fn path(labels: &[&str], max: usize) -> String {
         if over == 0 {
             break;
         }
-        let keep = parts[i].width().saturating_sub(over).max(1);
+        let mut keep = parts[i].width().saturating_sub(over).max(1);
+        if i == 0 && last > 0 {
+            keep = keep.max(SESSION_MIN.min(whole[0].width()));
+        }
         // A label cut to a few columns reads as noise; `…` alone says one is there.
-        parts[i] = if keep < 6 && i != last {
+        parts[i] = if keep < 6 && i != 0 && i != last {
             "…".to_owned()
         } else {
             squeeze(&whole[i], keep)
@@ -372,8 +406,23 @@ mod tests {
         assert_eq!(path(&labels, 60), "api › 2-openrig:ri…89abcdef#l2 › seat-d");
         assert_eq!(path(&labels, 30), "api › 2-openr…cdef#l2 › seat-d");
         assert_eq!(path(&labels, 16), "api › … › seat-d");
-        assert_eq!(path(&labels, 14), "… › … › seat-d");
-        assert_eq!(path(&["web", "shell"], 9), "… › shell");
+        assert_eq!(
+            path(&labels, 14),
+            "api › … › se…d",
+            "the session keeps its stem"
+        );
+        assert_eq!(path(&["web", "shell"], 9), "web › s…l");
+        let gateway = [
+            "api-gateway",
+            "2-openrig:rig:demo-team#0123456789abcdef#l2",
+            "seat-r",
+        ];
+        assert_eq!(path(&gateway, 25), "api-gateway › … › seat-r");
+        assert_eq!(
+            path(&gateway, 20),
+            "api-…way › … › se…-r",
+            "never a bare session"
+        );
         assert_eq!(
             path(&labels, 20),
             "api › … › seat-d",
@@ -390,32 +439,54 @@ mod tests {
             ("c".into(), "codex".into(), "Fix the parser".into());
         codex.pane.process = Some("codex".into());
         codex.pane.window_id = "other".into();
-        let rows = vec![shell.clone(), codex.clone()];
-        assert_eq!(place(&shell, &rows), "api › build");
-        assert_eq!(labels(&shell, &rows, true), ["api", "build"]);
-        assert_eq!(name(&shell, &rows), "build", "no title: the tab");
+        assert_eq!(labels(&shell, false), ["api", "build"]);
+        assert_eq!(labels(&shell, true), ["api", "build"]);
+        assert_eq!(name(&shell), "build", "no title: the tab");
         assert_eq!(
-            place(&codex, &rows),
-            "api › build",
+            labels(&codex, false),
+            ["api", "build"],
             "named after its process"
         );
         assert_eq!(
-            name(&codex, &rows),
+            name(&codex),
             "Fix the parser",
             "the title when there is one"
         );
         let mut seat = shell.clone();
         (seat.pane.block_id, seat.pane.pane) = ("s".into(), "seat-a".into());
-        let shared = vec![shell.clone(), seat.clone()];
-        assert_eq!(
-            place(&shell, &shared),
-            "api › build › shell",
-            "two agents in one tab keep their pane labels"
-        );
-        assert_eq!(labels(&seat, &shared, true), ["api", "seat-a"]);
-        assert_eq!(name(&shell, &shared), "shell");
+        assert_eq!(labels(&seat, false), ["api", "build", "seat-a"]);
+        assert_eq!(labels(&seat, true), ["api", "seat-a"]);
+        assert_eq!(name(&seat), "seat-a");
     }
 
+    #[test]
+    fn rows_that_read_the_same_get_their_place_in_the_tab_or_their_host() {
+        let mut first = row("shell", "", "");
+        (first.pane.session, first.pane.tab, first.pane.block_id) =
+            ("api".into(), "build".into(), "block:01".into());
+        let mut second = first.clone();
+        second.pane.block_id = "block:02".into();
+        let mut seat = first.clone();
+        (seat.pane.block_id, seat.pane.pane) = ("block:03".into(), "seat-a".into());
+        let rows = vec![second.clone(), first.clone(), seat];
+        assert_eq!(
+            wheres(&rows, 40, false, true),
+            ["api › build #2", "api › build #1", "api › build › seat-a"]
+        );
+        let mut elsewhere = first.clone();
+        elsewhere.pane.host = "studio".into();
+        let rows = vec![first, elsewhere];
+        assert_eq!(
+            wheres(&rows, 40, true, false),
+            ["api › build @mini", "api › build @studio"],
+            "no HOST column: the host tells them apart"
+        );
+        assert_eq!(
+            wheres(&rows, 40, true, true),
+            ["api › build", "api › build"],
+            "the HOST column already does"
+        );
+    }
     #[test]
     fn clean_drops_whole_escape_sequences() {
         let text = "a\x1b[31mRED\x1b[0m b\x1b]52;c;aGVsbG8=\x07c\x1b]0;title\x1b\\d\u{9b}2Je\tf\rg";

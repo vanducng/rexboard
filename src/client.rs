@@ -176,7 +176,8 @@ fn parse(line: &str) -> Result<Value> {
     if let Some(error) = value.get("error") {
         let message = error["message"].as_str().unwrap_or_default().to_owned();
         return Err(match error["code"].as_str() {
-            Some("NOT_FOUND" | "NOBODY_NEEDS_YOU") => Error::NotFound(message),
+            Some("NOT_FOUND") => Error::NotFound(message),
+            Some("NOBODY_NEEDS_YOU") => Error::NobodyNeedsYou,
             Some("USAGE") => Error::usage_with(message, &["rexboard --help"]),
             code => Error::serve(format!("{}: {message}", code.unwrap_or("ERROR"))),
         });
@@ -184,7 +185,6 @@ fn parse(line: &str) -> Result<Value> {
     Ok(value)
 }
 
-/// One request, one reply.
 /// One request, one reply. A serve that closes without answering, as one that is stopping
 /// does, gets one more try, which starts a new serve if needed.
 pub fn call(request: &Value) -> Result<Value> {

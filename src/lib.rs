@@ -2,8 +2,10 @@ mod board;
 mod cli;
 mod client;
 mod collector;
+mod config;
 mod error;
 mod event;
+mod jump;
 mod output;
 mod pane;
 mod rex;
@@ -61,20 +63,31 @@ pub fn execute(cli: &Cli) -> Result<()> {
         Command::Serve(args) if args.foreground => serve::run(),
         Command::Serve(_) => client::start_serve(cli.json),
         Command::Seen { key } => client::seen(key, cli.json),
-        Command::Board => {
+        Command::Jump { target } => jump::jump(target, cli.json),
+        Command::Next { back } => jump::next(*back, cli.json),
+        Command::Board | Command::Pick => {
             if !stdout().is_terminal() || !stdin().is_terminal() {
                 return Err(Error::usage_with(
-                    "board needs a terminal",
-                    &["rexboard ls", "rexboard watch --json"],
+                    "the board needs a terminal",
+                    &["rexboard ls", "rexboard jump N"],
                 ));
             }
-            tui::run()
+            if matches!(command, Command::Pick) {
+                tui::pick(cli.json)
+            } else {
+                tui::run()
+            }
         }
     }
 }
 
 fn ls(args: &LsArgs, json: bool) -> Result<()> {
-    let value = rex::run_script(None, rex::SNAPSHOT, &json!({ "host": args.host }))?;
+    let exclude = config::load()?.hosts.exclude;
+    let value = rex::run_script(
+        None,
+        rex::SNAPSHOT,
+        &json!({ "host": args.host, "exclude": exclude }),
+    )?;
     let rex_version = value["rex_version"].as_str().map(str::to_owned);
     let version = rex_version
         .clone()

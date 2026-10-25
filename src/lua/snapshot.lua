@@ -6,10 +6,12 @@ local function on(host, api)
 end
 
 local want = rex.args and rex.args.host
+local skip = {}
+for _, label in ipairs(rex.args and rex.args.exclude or {}) do skip[label] = true end
 local hosts = {}
 if not want or want == "local" then hosts[#hosts + 1] = on("local", rex) end
 for _, label in ipairs(rex.servers()) do
-  if not want or want == label then hosts[#hosts + 1] = on(label, rex.server(label)) end
+  if (not want or want == label) and not skip[label] then hosts[#hosts + 1] = on(label, rex.server(label)) end
 end
 local version = rex.call("server.version")
 return { hosts = hosts, rex_version = version and version.rex_version }

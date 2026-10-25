@@ -227,8 +227,9 @@ fn stop_child(child: &mut Child, pgid: &AtomicI32) -> Option<std::process::ExitS
     status
 }
 
-/// Remote host labels from `rex hosts --json`.
+/// Remote host labels from `rex hosts --json`, less `hosts.exclude` in config.toml.
 pub fn hosts() -> Result<Vec<String>> {
+    let exclude = crate::config::load()?.hosts.exclude;
     let rex = rex::locate()?;
     let mut cmd = Command::new(&rex);
     cmd.args(["hosts", "--json"])
@@ -259,7 +260,9 @@ pub fn hosts() -> Result<Vec<String>> {
                 "rex hosts entry has no host.label: {entry}"
             )));
         };
-        labels.push(label.to_owned());
+        if !exclude.iter().any(|skip| skip == label) {
+            labels.push(label.to_owned());
+        }
     }
     Ok(labels)
 }

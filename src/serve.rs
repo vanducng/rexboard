@@ -441,20 +441,30 @@ impl Reducer {
         offer(&reply, &line.to_string());
     }
 
+    /// The NEEDS YOU row after `after` (a key, or the block id of the pane asking), unseen
+    /// rows first: a jump marks its row seen, so the queue moves on. Seen blocked or erroring
+    /// rows still need you, so they cycle once nothing is unseen.
     fn next(&self, after: Option<&str>, back: bool) -> Value {
-        let mut rows: Vec<_> = self
+        let needs: Vec<_> = self
             .board
             .rows(chrono::Utc::now())
             .into_iter()
             .filter(|row| row.group == Group::NeedsYou)
             .collect();
+        let mut rows: Vec<_> = needs.iter().filter(|row| !row.seen).cloned().collect();
         if rows.is_empty() {
-            return error_line("NOBODY_NEEDS_YOU", "no pane needs you");
+            rows = needs;
+        }
+        if rows.is_empty() {
+            return error_line("NOBODY_NEEDS_YOU", "nobody needs you");
         }
         if back {
             rows.reverse();
         }
-        let at = after.and_then(|key| rows.iter().position(|row| row.key == key));
+        let at = after.and_then(|id| {
+            rows.iter()
+                .position(|row| row.key == id || row.pane.block_id == id)
+        });
         let pick = at.map_or(0, |i| (i + 1) % rows.len());
         json!({ "v": VERSION, "row": rows[pick] })
     }

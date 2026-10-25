@@ -9,7 +9,7 @@ use unicode_width::UnicodeWidthStr;
 use super::app::{App, Item, Link, Spot};
 use super::theme;
 use crate::board::Row;
-use crate::output::{clean, fit, harness, in_state, labels, name, path, state_word, what};
+use crate::output::{clean, fit, harness, in_state, name, state_word, what, wheres};
 use crate::pane::bare_title;
 
 /// Width of the detail pane when it sits on the right.
@@ -27,7 +27,7 @@ pub const KEYS: [(&str, &str); 12] = [
     ("/", "filter; enter keeps it"),
     ("esc", "clear filter, peek, folds"),
     ("z", "fold or open a group"),
-    ("enter", "jump (later version)"),
+    ("enter", "go to the pane"),
     ("r", "reconnect to serve"),
     ("?", "this table"),
     ("q", "quit"),
@@ -63,7 +63,7 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
     ])
     .areas(area);
     header(frame, top, app, now);
-    if tier == Tier::Wide {
+    if tier == Tier::Wide && !app.pick {
         let [list_area, rule, detail_area] = Layout::horizontal([
             Constraint::Min(40),
             Constraint::Length(1),
@@ -81,7 +81,11 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
         let lines = detail(app, now, usize::from(padded.width), true);
         frame.render_widget(Paragraph::new(lines), padded);
     } else {
-        let lines = detail(app, now, usize::from(body.width), false);
+        let lines = if app.pick {
+            Vec::new()
+        } else {
+            detail(app, now, usize::from(body.width), false)
+        };
         let height = (lines.len() as u16).min(body.height / 2);
         let [list_area, rule, detail_area] = Layout::vertical([
             Constraint::Min(3),
@@ -212,6 +216,12 @@ fn list(frame: &mut Frame, area: Rect, app: &App, tier: Tier, now: DateTime<Utc>
     let at = items.iter().position(|item| is_selected(app, item));
     let offset = at.map_or(0, |at| (at + 1).saturating_sub(room));
     let width = usize::from(area.width);
+    let places = wheres(
+        &app.rows,
+        where_what(tier, width).0.saturating_sub(1),
+        tier != Tier::Wide,
+        tier >= Tier::Mid,
+    );
     let mut lines: Vec<Line> = items
         .iter()
         .skip(offset)
@@ -232,7 +242,15 @@ fn list(frame: &mut Frame, area: Rect, app: &App, tier: Tier, now: DateTime<Utc>
                     line
                 }
             }
-            Item::Row(i) => row_line(&app.rows[i], app, tier, width, is_selected(app, item), now),
+            Item::Row(i) => row_line(
+                &app.rows[i],
+                &places[i],
+                app,
+                tier,
+                width,
+                is_selected(app, item),
+                now,
+            ),
         })
         .collect();
     let below: usize = items
@@ -289,8 +307,10 @@ fn where_what(tier: Tier, width: usize) -> (usize, usize) {
     (share, rest - share)
 }
 
+/// One row of the list. `place` is its WHERE, worked out with the other rows.
 fn row_line(
     row: &Row,
+    place: &str,
     app: &App,
     tier: Tier,
     width: usize,
@@ -318,9 +338,8 @@ fn row_line(
         lead_width(tier)
     );
     let (share, what_width) = where_what(tier, width);
-    let labels = labels(row, &app.rows, tier != Tier::Wide);
     let room = share.saturating_sub(1);
-    cells.push((fit(&path(&labels, room), room) + " ", soft));
+    cells.push((fit(place, room) + " ", soft));
     cells.push((fit(what(row), what_width), soft));
     let mut spans: Vec<Span> = cells
         .into_iter()
@@ -365,10 +384,7 @@ fn detail(app: &App, now: DateTime<Utc>, width: usize, wide: bool) -> Vec<Line<'
         };
     };
     let p = &row.pane;
-    let mut lines = vec![Line::styled(
-        fit(&name(row, &app.rows), width),
-        theme::accent(),
-    )];
+    let mut lines = vec![Line::styled(fit(&name(row), width), theme::accent())];
     let peek = app.peek.as_ref().filter(|peek| peek.key == row.key);
     if let (false, Some(peek)) = (wide, peek) {
         lines.extend(peek_lines(peek, width));
@@ -453,7 +469,7 @@ fn detail(app: &App, now: DateTime<Utc>, width: usize, wide: bool) -> Vec<Line<'
         ));
     }
     lines.push(Line::styled(
-        fit("enter jumps in a later version", width),
+        fit("enter goes to the pane", width),
         theme::dim(),
     ));
     if let Some(peek) = peek {
@@ -528,18 +544,30 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled(" · esc clears · ", theme::dim()));
     }
     // The essentials first, so a narrow board keeps them.
-    let keys = [
-        ("j/k", "move"),
-        ("s", "seen"),
-        ("/", "filter"),
-        ("?", "keys"),
-        ("space", "peek"),
-        ("enter", "jump"),
-        ("1-9", "select"),
-    ];
-    let quit = "q quit";
+    let keys: &[(&str, &str)] = if app.pick {
+        &[("enter", "go"), ("j/k", "move"), ("/", "filter")]
+    } else {
+        &[
+            ("j/k", "move"),
+            ("s", "seen"),
+            ("/", "filter"),
+            ("?", "keys"),
+            ("space", "peek"),
+            ("enter", "jump"),
+            ("1-9", "select"),
+        ]
+    };
+    let (quit_key, quit_what) = if app.pick {
+        ("esc", " cancel")
+    } else {
+        ("q", " quit")
+    };
+    let quit = format!("{quit_key}{quit_what}");
     let mut first = true;
-    for (key, what) in keys {
+    for &(key, what) in keys {
+        if key == "space" && app.peek.is_some() {
+            continue;
+        }
         let sep = if first { "" } else { " · " };
         let piece = sep.width() + key.width() + 1 + what.width();
         if used + piece + quit.width() + 2 > width {
@@ -554,8 +582,8 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
     spans.push(Span::raw(
         " ".repeat(width.saturating_sub(used + quit.width()).max(2)),
     ));
-    spans.push(Span::styled("q", theme::bright()));
-    spans.push(Span::styled(" quit", theme::dim()));
+    spans.push(Span::styled(quit_key, theme::bright()));
+    spans.push(Span::styled(quit_what, theme::dim()));
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
@@ -567,7 +595,7 @@ mod tests {
 
     use super::*;
     use crate::tui::app::tests::{app, hosts, press, row};
-    use crate::tui::app::{App, Peek};
+    use crate::tui::app::{App, Effect, Peek};
 
     fn fuller() -> App {
         let mut app = app();
@@ -841,10 +869,61 @@ mod tests {
         let mut app = app();
         press(&mut app, KeyCode::Char(' '));
         let text = render(&app, 80, 30);
+        let bar = text.lines().last().unwrap();
+        assert!(bar.starts_with("space closes · "), "{text}");
         assert!(
-            text.lines().last().unwrap().starts_with("space closes · "),
-            "{text}"
+            !bar.contains("space peek"),
+            "one space key at a time: {bar}"
         );
+    }
+
+    #[test]
+    fn pick_shows_the_list_alone_with_its_own_keys() {
+        let mut app = app();
+        app.pick = true;
+        for width in [50, 140] {
+            let text = render(&app, width, 30);
+            assert!(
+                !text.contains("state     blocked"),
+                "no detail pane:\n{text}"
+            );
+            let bar = text.lines().last().unwrap();
+            assert!(bar.starts_with("enter go · j/k move"), "{bar}");
+            assert!(bar.ends_with("esc cancel"), "{bar}");
+        }
+        assert_eq!(press(&mut app, KeyCode::Esc), Some(Effect::Quit));
+    }
+
+    #[test]
+    fn at_120_columns_where_keeps_what_tells_rows_apart() {
+        let mut app = App::default();
+        let tab = "2-openrig:rig:demo-team#0123456789abcdef#l2";
+        let mut rows = Vec::new();
+        for (key, session) in [("local/gw", "api-gateway"), ("local/fe", "web-frontend")] {
+            let mut r = row(key, "blocked", "needs_you", false);
+            (r.pane.session, r.pane.tab, r.pane.pane) =
+                (session.into(), tab.into(), "seat-r".into());
+            r.pane.window_id = format!("window:{session}");
+            rows.push(r);
+        }
+        for key in ["local/block:b1", "local/block:b2"] {
+            let mut r = row(key, "working", "working", true);
+            (r.pane.session, r.pane.tab, r.pane.pane) =
+                ("api".into(), "build".into(), "shell".into());
+            r.pane.window_id = "window:build".into();
+            rows.push(r);
+        }
+        app.set_rows(rows, hosts());
+        let text = render(&app, 120, 36);
+        for want in [
+            "api-gateway › … › seat-r",
+            "web-frontend › … › seat-r",
+            "api › build #1",
+            "api › build #2",
+        ] {
+            assert!(text.contains(want), "{want:?} missing:\n{text}");
+        }
+        assert!(!text.contains(" … › … ›"), "{text}");
     }
 
     #[test]
