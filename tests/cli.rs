@@ -934,10 +934,9 @@ fn ls_text_squeezes_long_labels_and_dates_only_reported_rows() {
 
 /// Runs `rexboard board` on a fresh pty as its controlling terminal, sends `signal` once the
 /// board is on the alternate screen, and returns everything it wrote plus how it exited.
-fn board_under_pty(signal: libc::c_int) -> (String, std::process::ExitStatus) {
+fn board_under_pty(signal: libc::c_int, hang_up: bool) -> (String, std::process::ExitStatus) {
     use std::io::Read;
     use std::os::fd::FromRawFd;
-    use std::os::unix::process::CommandExt;
     let (mut master, mut slave) = (0, 0);
     let mut size = libc::winsize {
         ws_row: 24,
@@ -955,7 +954,15 @@ fn board_under_pty(signal: libc::c_int) -> (String, std::process::ExitStatus) {
         )
     };
     assert_eq!(opened, 0, "openpty failed");
-    let stdio = || unsafe { std::process::Stdio::from_raw_fd(libc::dup(slave)) };
+    // Close-on-exec, so children that other tests spawn meanwhile do not inherit the pty.
+    for fd in [master, slave] {
+        unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+    }
+    let stdio = || unsafe {
+        std::process::Stdio::from_raw_fd(libc::fcntl(slave, libc::F_DUPFD_CLOEXEC, 0))
+    };
+    // No setsid or controlling tty: crossterm reads a tty stdin, and a pre_exec fork from the
+    // busy parallel suite got the child SIGKILLed in about a third of runs.
     let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_rexboard"));
     cmd.arg("board")
         .env("REXBOARD_REX", fixture("fake-rex"))
@@ -966,51 +973,66 @@ fn board_under_pty(signal: libc::c_int) -> (String, std::process::ExitStatus) {
         .stdin(stdio())
         .stdout(stdio())
         .stderr(stdio());
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::setsid();
-            libc::ioctl(0, libc::TIOCSCTTY as _, 0);
-            Ok(())
-        });
-    }
     let mut child = cmd.spawn().unwrap();
     unsafe { libc::close(slave) };
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let sink = seen.clone();
-    std::thread::spawn(move || {
+    let close = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (sink, closing) = (seen.clone(), close.clone());
+    unsafe { libc::fcntl(master, libc::F_SETFL, libc::O_NONBLOCK) };
+    let reader = std::thread::spawn(move || {
+        // Owns the master: dropping it on `close` hangs up the terminal, as a closed window does.
         let mut file = unsafe { std::fs::File::from_raw_fd(master) };
         let mut chunk = [0; 4096];
-        while let Ok(n) = file.read(&mut chunk) {
-            if n == 0 {
-                break;
+        while !closing.load(std::sync::atomic::Ordering::SeqCst) {
+            match file.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => sink.lock().unwrap().extend_from_slice(&chunk[..n]),
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(_) => break,
             }
-            sink.lock().unwrap().extend_from_slice(&chunk[..n]);
         }
     });
     let text = || String::from_utf8_lossy(&seen.lock().unwrap()).into_owned();
-    eventually("the board on the alternate screen", || {
-        text().contains("\x1b[?1049h")
-    });
-    unsafe { libc::kill(child.id() as i32, signal) };
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !text().contains("\x1b[?1049h") {
+        if std::time::Instant::now() >= deadline {
+            let status = child.try_wait().unwrap();
+            let _ = child.kill();
+            panic!(
+                "no alternate screen in 10s; exit {status:?}; output {:?}",
+                text()
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    if hang_up {
+        close.store(true, std::sync::atomic::Ordering::SeqCst);
+        reader.join().unwrap();
+    }
+    unsafe { libc::kill(child.id() as i32, signal) };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     let status = loop {
         if let Some(status) = child.try_wait().unwrap() {
             break status;
         }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "board did not exit on the signal"
-        );
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            panic!("board did not exit within 5s of signal {signal} (hang up: {hang_up})");
+        }
         std::thread::sleep(std::time::Duration::from_millis(20));
     };
-    eventually("the restore sequence", || text().contains("\x1b[?1049l"));
+    if !hang_up {
+        eventually("the restore sequence", || text().contains("\x1b[?1049l"));
+    }
     (text(), status)
 }
 
 #[test]
 fn board_restores_the_terminal_on_sigterm_and_sighup() {
     for signal in [libc::SIGTERM, libc::SIGHUP] {
-        let (out, status) = board_under_pty(signal);
+        let (out, status) = board_under_pty(signal, false);
         assert!(status.success(), "signal {signal}: {status:?}");
         let entered = out.find("\x1b[?1049h").unwrap();
         let left = out.rfind("\x1b[?1049l").unwrap();
@@ -1048,4 +1070,14 @@ fn ls_marks_an_old_working_report_on_an_idle_pane_suspect() {
     let text = String::from_utf8(out).unwrap();
     let line = text.lines().find(|l| l.contains("seat-r")).unwrap();
     assert!(line.contains("unreported  idle?"), "{line}");
+}
+
+#[test]
+fn board_exits_when_its_terminal_hangs_up() {
+    // Any exit will do: the terminal is gone, so there is nothing to restore or report to.
+    let (_, status) = board_under_pty(libc::SIGHUP, true);
+    assert!(
+        status.code().is_some(),
+        "exited on its own, not killed: {status:?}"
+    );
 }
