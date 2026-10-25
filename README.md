@@ -26,13 +26,11 @@ cargo install --locked --git https://github.com/vanducng/rexboard
 
 ```bash
 rexboard                 # the board, in this terminal
-rexboard window          # the board in its own Rex app window, titled "board - rexboard"
+rexboard window          # the board in the Rex window you are in
 rexboard ls --json       # every agent pane, most urgent first, as JSON
 rexboard next            # go to the next pane that needs you
 rexboard pick            # choose a pane from the list and go to it
 ```
-
-With the board in its own window, set `jump.pre_cmd` in [config.toml](docs/configuration.md) to focus your main Rex window, so a jump lands there and not on the board.
 
 The first command starts `rexboard serve` in the background. It watches this host and every host in `rex hosts`, and keeps what Rex does not: how long each pane has been in its state, and whether you have seen it.
 
@@ -42,9 +40,9 @@ A pane needs you when it is blocked (often on a permission prompt), has an error
 
 ## How it works
 
-<img alt="rexboard architecture: local (this Mac) and mini each run one observer that feeds rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket; a jump, one of two writes to Rex, runs jump.pre_cmd, focuses the pane on its host and asks the Rex app to show its session" src="docs/assets/architecture.svg" width="100%">
+<img alt="rexboard architecture: local (this Mac) and mini each run one observer that feeds rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket; a jump, one of two writes to Rex, runs jump.pre_cmd if set, focuses the pane on its host and asks the Rex app to show its session" src="docs/assets/architecture.svg" width="100%">
 
-rexboard reads Rex. Two commands write to it: a jump (blue) focuses the pane on its host and asks the Rex app to show it, and `rexboard window` makes the board's own session and app window.
+rexboard reads Rex. Two commands write to it: a jump (blue) focuses the pane on its host and asks the Rex app to show it, and `rexboard window` makes the board's own session and shows it in the focused window.
 
 ## Docs
 
@@ -52,7 +50,7 @@ rexboard reads Rex. Two commands write to it: a jump (blue) focuses the pane on 
 | --- | --- |
 | [CLI](docs/cli.md) | Every command, its output, fields and exit codes |
 | [TUI](docs/tui.md) | The board's layout and keys, and `pick` |
-| [Configuration](docs/configuration.md) | `config.toml`: the app client, `jump.pre_cmd` and excluded hosts |
+| [Configuration](docs/configuration.md) | `config.toml`: the app client, `jump.pre_cmd` (for a board in its own window) and excluded hosts |
 | [System architecture](docs/system-architecture.md) | serve, the observers, the protocol and the files |
 | [Development](docs/development-guidelines.md) | Setup, checks, layout, conventions, tests |
 | [Deployment](docs/deployment.md) | CI, release-please, release assets, install, rollback |

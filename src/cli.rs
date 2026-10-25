@@ -45,7 +45,7 @@ pub enum Command {
     },
     /// Pick a pane from the board's list and go to it. Enter goes and exits 0; esc exits 1.
     Pick,
-    /// Show the board in its own Rex app window, titled `board - rexboard`.
+    /// Show the board in the focused Rex app window (`--new`: its own window, titled `board - rexboard`).
     Window {
         /// Always open a new app window for the board, even when its session exists.
         #[arg(long)]

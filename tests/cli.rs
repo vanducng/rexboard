@@ -1630,20 +1630,16 @@ fn window_print_title_matches_session_and_tab() {
         .assert()
         .success()
         .stdout("board - rexboard\n");
-    // No board yet: rex new makes it, then a new window opens for it.
-    window_cmd(
-        dir.path(),
-        &[
-            vec![],
-            vec![board_session()],
-            vec![board_session()],
-            vec![board_session(), fresh_session("win")],
-        ],
-    )
-    .arg("window")
-    .assert()
-    .success()
-    .stdout("opened the board window: board - rexboard\n");
+}
+
+#[test]
+fn window_makes_a_missing_board_session_and_shows_it_in_the_focused_window() {
+    let dir = tempfile::tempdir().unwrap();
+    window_cmd(dir.path(), &[vec![], vec![board_session()]])
+        .arg("window")
+        .assert()
+        .success()
+        .stdout("showed the board: board - rexboard\n");
     let new = made_with_rex_new(dir.path()).expect("the session is made");
     let words: Vec<&str> = new.split_whitespace().collect();
     assert_eq!(
@@ -1656,6 +1652,30 @@ fn window_print_title_matches_session_and_tab() {
         "{new}"
     );
     assert_eq!(format!("{} - {}", words[3], words[1]), "board - rexboard");
+    assert_eq!(
+        window_calls(dir.path()),
+        calls(&[("select", "session:board")]),
+        "selected in the focused window; no new app window"
+    );
+}
+
+#[test]
+fn window_new_with_no_board_session_makes_it_and_opens_a_window() {
+    let dir = tempfile::tempdir().unwrap();
+    window_cmd(
+        dir.path(),
+        &[
+            vec![],
+            vec![board_session()],
+            vec![board_session()],
+            vec![board_session(), fresh_session("win")],
+        ],
+    )
+    .args(["window", "--new"])
+    .assert()
+    .success()
+    .stdout("opened the board window: board - rexboard\n");
+    assert!(made_with_rex_new(dir.path()).is_some());
     assert_eq!(
         window_calls(dir.path()),
         calls(&[
@@ -1687,12 +1707,7 @@ fn window_never_takes_a_users_own_rexboard_session() {
     let mine = session("mine", "rexboard", "notes", "vim", 1, false);
     window_cmd(
         dir.path(),
-        &[
-            vec![mine.clone()],
-            vec![mine.clone(), board_session()],
-            vec![mine.clone(), board_session()],
-            vec![mine, board_session(), fresh_session("win")],
-        ],
+        &[vec![mine.clone()], vec![mine, board_session()]],
     )
     .arg("window")
     .assert()
@@ -1700,6 +1715,10 @@ fn window_never_takes_a_users_own_rexboard_session() {
     assert!(
         made_with_rex_new(dir.path()).is_some(),
         "the board's own session is made"
+    );
+    assert_eq!(
+        window_calls(dir.path()),
+        calls(&[("select", "session:board")])
     );
     assert!(
         window_calls(dir.path())
@@ -1799,7 +1818,7 @@ fn window_keeps_the_callers_rex_targets_out_of_rex() {
     .env("REX_BLOCK", "block:caller")
     .env("REX_SESSION", "session:caller")
     .env("FAKE_REX_ENV_LOG", &env_log)
-    .arg("window")
+    .args(["window", "--new"])
     .assert()
     .success();
     assert!(made_with_rex_new(dir.path()).is_some());

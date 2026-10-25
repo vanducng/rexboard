@@ -1,6 +1,6 @@
 <svg id="architecture" viewBox="0 0 1040 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="architecture-title architecture-desc">
   <title id="architecture-title">rexboard architecture</title>
-  <desc id="architecture-desc">Two Rex hosts, local (this Mac) and mini, each stream one observer to rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket. A jump writes to Rex: it runs jump.pre_cmd, focuses the pane on its host and asks the Rex app to show its session.</desc>
+  <desc id="architecture-desc">Two Rex hosts, local (this Mac) and mini, each stream one observer to rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket. A jump writes to Rex: it runs jump.pre_cmd if set, focuses the pane on its host and asks the Rex app to show its session.</desc>
   <defs>
     <style>
     #architecture { --paper: #f5f5f5; --ink: #2d3142; --muted: #4f5d75; --soft: #5f6b80; --accent: #eb6c36; --accent-tint: rgba(235,108,54,0.08); --link: #2e5aa8; --box: #ffffff; --wash: rgba(45,49,66,0.03); --wash2: rgba(45,49,66,0.05); --line: rgba(45,49,66,0.30); --zone-fill: rgba(45,49,66,0.02); --zone-stroke: rgba(45,49,66,0.12); }
@@ -58,8 +58,8 @@
     <rect class="mask" x="648" y="262" width="88" height="14" rx="2"/>
     <text class="elabel" x="692" y="273" text-anchor="middle">ROWS · SEEN</text>
     <line class="jump" x1="852" y1="360" x2="852" y2="440" marker-end="url(#architecture-arrow-link)"/>
-    <rect class="mask" x="860" y="393" width="76" height="14" rx="2"/>
-    <text class="elabel-jump" x="898" y="404" text-anchor="middle">1 PRE_CMD</text>
+    <rect class="mask" x="860" y="393" width="140" height="14" rx="2"/>
+    <text class="elabel-jump" x="930" y="404" text-anchor="middle">1 PRE_CMD (IF SET)</text>
     <line class="jump dashed" x1="728" y1="456" x2="280" y2="456" marker-end="url(#architecture-arrow-link)"/>
     <rect class="mask" x="456" y="434" width="96" height="14" rx="2"/>
     <text class="elabel-jump" x="504" y="445" text-anchor="middle">FOCUS WINDOW</text>
@@ -116,5 +116,5 @@
     <rect class="swatch" x="736" y="541" width="20" height="14" rx="2"/>
     <text class="legend" x="764" y="552">focal: serve and jumps</text>
     <text class="caption" x="32" y="588">A pane on local takes the same path through its own server.</text>
-    <text class="caption" x="32" y="608">rexboard window writes too: it makes the session and the app window the board runs in.</text>
+    <text class="caption" x="32" y="608">rexboard window writes too: it makes the board's session and shows it in the focused window.</text>
 </svg>
