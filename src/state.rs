@@ -33,16 +33,19 @@ impl Paths {
             .filter(|path| path.as_os_str().len() <= SOCKET_MAX)
             .unwrap_or(fallback);
         if socket.as_os_str().len() > SOCKET_MAX {
-            return Err(Error::Serve(format!(
-                "socket path {} is longer than {SOCKET_MAX} bytes; set XDG_RUNTIME_DIR or TMPDIR to a shorter directory",
-                socket.display()
-            )));
+            return Err(Error::serve_with(
+                format!(
+                    "socket path {} is longer than {SOCKET_MAX} bytes; set XDG_RUNTIME_DIR or TMPDIR to a shorter directory",
+                    socket.display()
+                ),
+                &["export TMPDIR=/tmp", "rexboard ls --direct"],
+            ));
         }
         let dir = match std::env::var_os("XDG_STATE_HOME") {
             Some(dir) => PathBuf::from(dir).join("rexboard"),
             None => {
                 let home = std::env::var_os("HOME")
-                    .ok_or_else(|| Error::Serve("neither XDG_STATE_HOME nor HOME is set".into()))?;
+                    .ok_or_else(|| Error::serve("neither XDG_STATE_HOME nor HOME is set"))?;
                 PathBuf::from(home).join(".local/state/rexboard")
             }
         };
@@ -54,7 +57,7 @@ impl Paths {
             .recursive(true)
             .mode(0o700)
             .create(&self.dir)
-            .map_err(|err| Error::Serve(format!("could not create {}: {err}", self.dir.display())))
+            .map_err(|err| Error::serve(format!("could not create {}: {err}", self.dir.display())))
     }
 
     pub fn state(&self) -> PathBuf {
@@ -113,26 +116,12 @@ impl Lock {
         Ok(Some((Self { file }, previous)))
     }
 
-    /// True when a serve holds the lock right now.
-    pub fn held(path: &Path) -> bool {
-        let Ok(file) = File::open(path) else {
-            return false;
-        };
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
-            unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
-            return false;
-        }
-        true
-    }
-
+    /// One write at offset 0, then the length, so a reader never sees an empty file.
     pub fn write(&mut self, record: &Record) -> Result<()> {
-        self.file.set_len(0)?;
+        let body = serde_json::to_vec(record).map_err(std::io::Error::other)?;
         self.file.rewind()?;
-        self.file.write_all(
-            serde_json::to_string(record)
-                .map_err(std::io::Error::other)?
-                .as_bytes(),
-        )?;
+        self.file.write_all(&body)?;
+        self.file.set_len(body.len() as u64)?;
         Ok(())
     }
 }

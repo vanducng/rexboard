@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TrySendError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -20,6 +20,7 @@ pub const VERSION: u64 = 1;
 const DEBOUNCE: Duration = Duration::from_millis(100);
 const SAVE_EVERY: Duration = Duration::from_secs(1);
 const HEARTBEAT: Duration = Duration::from_secs(1);
+const SUBSCRIBER_BUFFER: usize = 4;
 const RESCAN: Duration = Duration::from_secs(300);
 /// `rows` waits this long at most for every host's first snapshot after serve starts.
 const READY_WITHIN: Duration = Duration::from_secs(5);
@@ -43,7 +44,7 @@ enum Request {
 enum Msg {
     Host(HostId, HostEvent),
     Hosts(Vec<String>),
-    Request(Request, Sender<String>),
+    Request(Request, SyncSender<String>),
 }
 
 /// Runs serve in this process until `stop`, SIGINT or SIGTERM.
@@ -70,7 +71,7 @@ pub fn run() -> Result<()> {
         let _guard = rex::fd_guard();
         UnixListener::bind(&paths.socket)
     }
-    .map_err(|err| Error::Serve(format!("could not bind {}: {err}", paths.socket.display())))?;
+    .map_err(|err| Error::serve(format!("could not bind {}: {err}", paths.socket.display())))?;
     std::fs::set_permissions(&paths.socket, std::fs::Permissions::from_mode(0o600))?;
     listener.set_nonblocking(true)?;
     stop_on_signals();
@@ -137,7 +138,8 @@ fn connection(stream: UnixStream, tx: &Sender<Msg>) {
             }
         };
         let streaming = matches!(request, Request::Subscribe);
-        let (reply_tx, reply_rx) = mpsc::channel();
+        // Bounded: a subscriber that stops reading loses lines instead of growing serve.
+        let (reply_tx, reply_rx) = mpsc::sync_channel(SUBSCRIBER_BUFFER);
         if tx.send(Msg::Request(request, reply_tx)).is_err() {
             return;
         }
@@ -167,8 +169,8 @@ struct Reducer {
     restored: BTreeSet<HostId>,
     host_tx: Sender<(HostId, HostEvent)>,
     tx: Sender<Msg>,
-    subscribers: Vec<Sender<String>>,
-    waiting: Vec<Sender<String>>,
+    subscribers: Vec<SyncSender<String>>,
+    waiting: Vec<SyncSender<String>>,
     started: Instant,
     announced: bool,
     rows_due: Option<Instant>,
@@ -218,20 +220,18 @@ impl Reducer {
             if self.rows_due.is_some_and(|due| now >= due) {
                 self.rows_due = None;
                 let line = self.rows_line().to_string();
-                self.subscribers
-                    .retain(|sub| sub.send(line.clone()).is_ok());
+                self.subscribers.retain(|sub| offer(sub, &line));
             }
             if self.save_due.is_some_and(|due| now >= due) {
                 self.save_due = None;
-                if let Err(err) = state::save(&paths.state(), &self.board.memory()) {
+                if let Err(err) = state::save(&paths.state(), &self.memory_to_save()) {
                     eprintln!("serve: could not save state: {err}");
                 }
             }
             if now.duration_since(beat) >= HEARTBEAT {
                 beat = now;
                 let line = json!({ "v": VERSION, "heartbeat": true }).to_string();
-                self.subscribers
-                    .retain(|sub| sub.send(line.clone()).is_ok());
+                self.subscribers.retain(|sub| offer(sub, &line));
                 let pids: Vec<i32> = self
                     .collectors
                     .values()
@@ -253,7 +253,7 @@ impl Reducer {
                 self.rows_due = Some(now);
                 let line = self.rows_line().to_string();
                 for waiter in self.waiting.drain(..) {
-                    let _ = waiter.send(line.clone());
+                    offer(&waiter, &line);
                 }
             }
             let msg = match rx.recv_timeout(Duration::from_millis(50)) {
@@ -265,13 +265,29 @@ impl Reducer {
                 Msg::Host(host, event) => self.host_event(&host, &event, paths),
                 Msg::Hosts(labels) => self.set_hosts(&labels),
                 Msg::Request(Request::Stop, reply) => {
-                    let _ = reply.send(json!({ "v": VERSION, "ok": true }).to_string());
+                    offer(&reply, &json!({ "v": VERSION, "ok": true }).to_string());
                     break;
                 }
                 Msg::Request(request, reply) => self.request(request, reply),
             }
         }
-        state::save(&paths.state(), &self.board.memory())
+        state::save(&paths.state(), &self.memory_to_save())
+    }
+
+    /// The board's memory, plus what was loaded for hosts whose first snapshot has not come,
+    /// so a host offline for a whole run keeps its seen and since for the next one.
+    fn memory_to_save(&self) -> BTreeMap<String, Memory> {
+        let mut memory: BTreeMap<String, Memory> = self
+            .memory
+            .iter()
+            .filter(|(key, _)| {
+                key.split_once('/')
+                    .is_none_or(|(host, _)| !self.restored.contains(host))
+            })
+            .map(|(key, m)| (key.clone(), m.clone()))
+            .collect();
+        memory.extend(self.board.memory());
+        memory
     }
 
     fn rescan_now(&mut self) {
@@ -379,7 +395,7 @@ impl Reducer {
         json!({ "v": VERSION, "rows": self.board.rows(), "hosts": self.hosts })
     }
 
-    fn request(&mut self, request: Request, reply: Sender<String>) {
+    fn request(&mut self, request: Request, reply: SyncSender<String>) {
         let line = match request {
             Request::Rows if !self.ready() => {
                 self.waiting.push(reply);
@@ -388,7 +404,7 @@ impl Reducer {
             Request::Rows => self.rows_line(),
             Request::Subscribe => {
                 if self.ready() {
-                    let _ = reply.send(self.rows_line().to_string());
+                    offer(&reply, &self.rows_line().to_string());
                 }
                 self.subscribers.push(reply);
                 return;
@@ -403,7 +419,7 @@ impl Reducer {
             Request::Next { after, back } => self.next(after.as_deref(), back),
             Request::Stop => unreachable!("handled in run"),
         };
-        let _ = reply.send(line.to_string());
+        offer(&reply, &line.to_string());
     }
 
     fn next(&self, after: Option<&str>, back: bool) -> Value {
@@ -423,6 +439,15 @@ impl Reducer {
         let pick = at.map_or(0, |i| (i + 1) % rows.len());
         json!({ "v": VERSION, "row": rows[pick] })
     }
+}
+
+/// Sends unless the receiver is full; each rows line is a whole snapshot, so a skipped one is
+/// replaced by the next. False once the receiver is gone.
+fn offer(to: &SyncSender<String>, line: &str) -> bool {
+    !matches!(
+        to.try_send(line.to_owned()),
+        Err(TrySendError::Disconnected(_))
+    )
 }
 
 fn split(key: &str) -> Option<(String, String)> {

@@ -16,8 +16,8 @@ pub enum Error {
     HostsUnreachable(String),
     #[error("{0}")]
     ContractMismatch(String),
-    #[error("{0}")]
-    Serve(String),
+    #[error("{message}")]
+    Serve { message: String, steps: Vec<String> },
     #[error("{0}")]
     ServeRunning(String),
     #[error("{0}")]
@@ -27,6 +27,18 @@ pub enum Error {
 }
 
 impl Error {
+    /// serve did not start, answer or stop.
+    pub fn serve(message: impl Into<String>) -> Self {
+        Self::serve_with(message, &["rexboard serve --stop", "rexboard ls --direct"])
+    }
+
+    pub fn serve_with(message: impl Into<String>, steps: &[&str]) -> Self {
+        Self::Serve {
+            message: message.into(),
+            steps: steps.iter().map(|s| (*s).to_owned()).collect(),
+        }
+    }
+
     pub fn usage_with(message: impl Into<String>, steps: &[&str]) -> Self {
         Self::Usage {
             message: message.into(),
@@ -41,7 +53,7 @@ impl Error {
             Self::Rex(_) => "REX",
             Self::HostsUnreachable(_) => "HOSTS_UNREACHABLE",
             Self::ContractMismatch(_) => "CONTRACT_MISMATCH",
-            Self::Serve(_) => "SERVE",
+            Self::Serve { .. } => "SERVE",
             Self::ServeRunning(_) => "SERVE_RUNNING",
             Self::NotFound(_) => "NOT_FOUND",
             Self::Io(_) => "IO",
@@ -57,10 +69,7 @@ impl Error {
             ],
             Self::Rex(_) => vec!["rex hosts".to_owned(), "retry the command once".to_owned()],
             Self::HostsUnreachable(_) => vec!["rex hosts".to_owned(), "rexboard ls".to_owned()],
-            Self::Serve(_) => vec![
-                "rexboard serve --stop".to_owned(),
-                "rexboard ls --direct".to_owned(),
-            ],
+            Self::Serve { steps, .. } => steps.clone(),
             Self::ServeRunning(_) => vec!["rexboard serve --stop".to_owned()],
             Self::NotFound(_) => vec!["rexboard ls --json".to_owned()],
             Self::ContractMismatch(_) => vec![
