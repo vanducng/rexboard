@@ -1,0 +1,14 @@
+{"v":1,"type":"snapshot","rex_version":"0.0.1792787366-g623b2d","sessions":[{"session_id":"session:api","label":"api","windows":[{"window_id":"window:api-main","label":"main","blocks":[{"block_id":"block:api-seat-a","label":"seat-a","title":"✳ seat-a@demo","process":{"name":"tmux","cwd":"/work/api"},"records":{}}]}]}]}
+{"session":{"label":"api-probe","session_id":"session:api-probe","windows":[{"blocks":[{"block_id":"block:api-probe","label":"shell","process":{},"records":{},"title":""}],"label":"one","window_id":"window:api-probe"}]},"type":"session_created","v":1}
+{"block_id":"block:api-probe","cwd":"/work/api","name":"zsh","session_id":"session:api-probe","type":"process","v":1}
+{"block_id":"block:api-probe","session_id":"session:api-probe","title":"probe pane","type":"title","v":1}
+{"block_id":"block:api-probe","cwd":"/work/api","name":"bash","session_id":"session:api-probe","type":"process","v":1}
+{"block_id":"block:api-probe","record":{"app":"probe","effective_app":"probe","owner":{"name":"bash","pid":101},"state":"working","updated_at":"2026-10-25T02:43:12.634658Z"},"record_id":"","session_id":"session:api-probe","type":"status","v":1}
+{"block_id":"block:api-probe","record":{"app":"probe","effective_app":"probe","kind":"permission","owner":{"name":"bash","pid":101},"state":"blocked","updated_at":"2026-10-25T02:43:13.644659Z"},"record_id":"","session_id":"session:api-probe","type":"status","v":1}
+{"block_id":"block:api-probe","record":{"app":"probe","effective_app":"probe","owner":{"name":"bash","pid":101},"state":"done","updated_at":"2026-10-25T02:43:14.654449Z"},"record_id":"","session_id":"session:api-probe","type":"status","v":1}
+{"block_id":"block:api-probe","exit_code":0,"session_id":"session:api-probe","type":"child_exited","v":1}
+{"block_id":"block:api-probe","session_id":"session:api-probe","type":"block_closed","v":1}
+{"session_id":"session:api-probe","type":"window_closed","v":1,"window_id":"window:api-probe"}
+{"session_id":"session:api-probe","type":"active_window","v":1,"window_id":null}
+{"session_id":"session:api-probe","type":"session_destroyed","v":1}
+{"type":"tick","v":1}

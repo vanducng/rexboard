@@ -1,5 +1,7 @@
 mod cli;
+mod collector;
 mod error;
+mod event;
 mod output;
 mod pane;
 mod rex;
@@ -13,8 +15,14 @@ use clap::CommandFactory;
 
 use serde_json::json;
 
-use crate::cli::{Command, LsArgs};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
+
+use crate::cli::{Command, LsArgs, WatchArgs};
+use crate::collector::{Collector, HostEvent};
 use crate::error::Result;
+use crate::event::Event;
 use crate::pane::Snapshot;
 
 pub fn wants_json_raw(args: &[String]) -> bool {
@@ -35,6 +43,7 @@ pub fn execute(cli: &Cli) -> Result<()> {
     };
     match command {
         Command::Ls(args) => ls(args, cli.json),
+        Command::Watch(args) => watch(args),
     }
 }
 
@@ -79,6 +88,82 @@ fn ls(args: &LsArgs, json: bool) -> Result<()> {
         );
     } else {
         print!("{}", output::table(&panes, chrono::Utc::now()));
+    }
+    Ok(())
+}
+
+static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn interrupted(_: libc::c_int) {
+    INTERRUPTED.store(true, Ordering::SeqCst);
+}
+
+fn watch(args: &WatchArgs) -> Result<()> {
+    if !args.raw {
+        return Err(Error::usage_with(
+            "watch needs --raw for now",
+            &["rexboard watch --raw"],
+        ));
+    }
+    let mut hosts: Vec<Option<String>> = vec![None];
+    hosts.extend(collector::hosts()?.into_iter().map(Some));
+    if let Some(want) = &args.host {
+        hosts.retain(|host| host.as_deref().unwrap_or("local") == want);
+        if hosts.is_empty() {
+            return Err(Error::usage_with(
+                format!("no host named {want}"),
+                &["rex hosts", "rexboard watch --raw"],
+            ));
+        }
+    }
+    // Observers run in their own process group, so stop on a signal and let Drop kill them.
+    unsafe {
+        libc::signal(libc::SIGINT, interrupted as *const () as libc::sighandler_t);
+        libc::signal(
+            libc::SIGTERM,
+            interrupted as *const () as libc::sighandler_t,
+        );
+    }
+    let deadline = args
+        .duration
+        .map(|secs| Instant::now() + Duration::from_secs(secs));
+    let (tx, rx) = mpsc::channel();
+    let collectors: Vec<Collector> = hosts
+        .iter()
+        .map(|host| Collector::spawn(host.clone(), tx.clone()))
+        .collect();
+    drop(tx);
+    let mut failed = 0;
+    let mut out = std::io::stdout().lock();
+    while !INTERRUPTED.load(Ordering::SeqCst) && deadline.is_none_or(|d| Instant::now() < d) {
+        let (host, event) = match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(next) => next,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
+        let mut line = match event {
+            // An unknown type passes through as Rex sent it.
+            HostEvent::Event(Event::Unknown, raw) => raw,
+            HostEvent::Event(event, _) => {
+                serde_json::to_value(event).map_err(std::io::Error::other)?
+            }
+            HostEvent::Down { reason, retry_in } => {
+                json!({ "type": "down", "reason": reason, "retry_in_s": retry_in.as_secs() })
+            }
+            HostEvent::Failed(err) => {
+                failed += 1;
+                if failed == collectors.len() {
+                    return Err(err);
+                }
+                eprintln!("warning: {host} stopped and will not restart: {err}");
+                continue;
+            }
+        };
+        line["host"] = json!(host);
+        line["v"] = json!(event::VERSION);
+        if writeln!(out, "{line}").and_then(|()| out.flush()).is_err() {
+            break;
+        }
     }
     Ok(())
 }

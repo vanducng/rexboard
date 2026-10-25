@@ -19,6 +19,21 @@ pub struct Cli {
 pub enum Command {
     /// List agent panes on this host and every `rex hosts` entry, most urgent first.
     Ls(LsArgs),
+    /// Stream events from this host and every `rex hosts` entry as they happen.
+    Watch(WatchArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct WatchArgs {
+    /// Print one JSON line per event, tagged with its `host`.
+    #[arg(long)]
+    pub raw: bool,
+    /// Only this host: `local`, or a label from `rex hosts`.
+    #[arg(long, value_name = "HOST")]
+    pub host: Option<String>,
+    /// Stop after this many seconds. Without it, watch runs until interrupted.
+    #[arg(long = "for", value_name = "SECONDS")]
+    pub duration: Option<u64>,
 }
 
 #[derive(Debug, Args)]

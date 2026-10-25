@@ -63,3 +63,74 @@ Fields are a contract. New fields may appear. Renaming or removing one is a brea
 | 2 | `HOSTS_UNREACHABLE`: every host failed; next steps `rex hosts` and `rexboard ls`. `USAGE`: a bad flag, or `--host` names no host |
 
 With `--json`, errors print on stderr as `{"ok":false,"error":{"code":...,"message":...,"next_steps":[...]}}`.
+
+## `rexboard watch`
+
+```bash
+rexboard watch --raw                # every event from every host, as it happens
+rexboard watch --raw --host mini    # one host: local, or a label from `rex hosts`
+rexboard watch --raw --for 60       # stop after 60 seconds
+```
+
+`--raw` is required for now; without it, `watch` fails with `USAGE`. A later release adds views on top of this stream.
+
+rexboard reads the host list once from `rex hosts --json`, adds this host as `local`, and keeps one embedded Lua observer running per host through `rex [-S HOST] do - --all --fail-fast`. A host added after `watch` starts needs a restart. Without `--for`, `watch` runs until Ctrl-C, SIGTERM, or until stdout closes. `--json` only changes how errors print; the stream is always JSON.
+
+### Lines
+
+Each line is one JSON object. Every line has these three fields:
+
+```json
+{"block_id":"block:web-seat-b","host":"mini","session_id":"session:web","title":"Fix the parser","type":"title","v":1}
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `host` | string | `local`, or the label from `rex hosts` |
+| `v` | number | Line contract version, `1`. A new major version is a breaking change |
+| `type` | string | One of the types below |
+
+A missing value is `null`. `ids` is `[]` when empty.
+
+| `type` | Other fields | When |
+| --- | --- | --- |
+| `snapshot` | `sessions`, `rex_version` | First line from each observer, and again after every restart. `sessions` is the full session, window and block tree in Rex's shape |
+| `status` | `session_id`, `block_id`, `record_id`, `record` | A pane reported a status. `record` is Rex's record (`state`, `kind`, `msg`, `app`, `effective_app`, `owner`, `updated_at`). `record_id` is `""` or `null` for the pane's main record, else the sub-record's id, such as a Claude subagent |
+| `status_removed` | `session_id`, `block_id`, `ids`, `reason` | Status records were cleared |
+| `title` | `session_id`, `block_id`, `title` | The terminal title changed |
+| `process` | `session_id`, `block_id`, `name`, `cwd` | The foreground process changed |
+| `child_exited` | `session_id`, `block_id`, `exit_code` | The pane's process exited |
+| `block_created` | `session_id`, `window_id`, `block` | A terminal pane opened. `block` has the same shape as a block in `snapshot` |
+| `block_closed` | `session_id`, `block_id` | A pane closed |
+| `window_created` | `session_id`, `window_id`, `label` | A tab opened |
+| `window_closed` | `session_id`, `window_id` | A tab closed |
+| `label` | `kind`, `session_id`, `id`, `label` | A session or tab was renamed. `kind` is `session` or `window`; `id` is that session or window id |
+| `active_window` | `session_id`, `window_id` | The focused tab changed. `window_id` is `null` when the session's last tab closed |
+| `session_created` | `session` | A session started. `session` is the full entry, the same shape as one session in `snapshot`: `session_id`, `label`, and `windows` with their blocks. A pane's title and process can still be empty here; `title` and `process` lines follow |
+| `session_destroyed` | `session_id` | A session ended |
+| `tick` | none | Every 30 seconds per host, so a quiet host still shows it is alive |
+| `down` | `reason`, `retry_in_s` | rexboard lost the observer. See below |
+
+A line of a type not listed here is passed through as Rex sent it, with `host` and `v` added. Safe to ignore.
+
+Types may be added. Renaming or removing a type or field is a breaking change.
+
+### Down and restart
+
+When an observer exits, its output can't be read, or it prints nothing for 90 seconds (three missed ticks), rexboard prints a `down` line, waits `retry_in_s` seconds, and starts a new observer. The new observer begins with a fresh `snapshot`. A Lua handler that fails also ends the observer (`--fail-fast`), and the last line it printed on stderr is added to `reason`:
+
+```json
+{"host":"mini","reason":"observer exited (exit status: 1): observer.lua:12: attempt to index a nil value","retry_in_s":1,"type":"down","v":1}
+```
+
+The wait starts at 1 second and doubles up to 30. It goes back to 1 only after a run that lasted at least 30 seconds, so an observer that fails on every event backs off instead of restarting every second. A host that keeps going down never stops `watch`.
+
+A host stops for good when its observer prints a line that is not JSON or a known type with a bad field (`REX`), or a different `v` (`CONTRACT_MISMATCH`). rexboard prints `warning: HOST stopped and will not restart: ...` on stderr, and the other hosts keep streaming.
+
+### Exit codes and errors
+
+| Exit | When |
+| --- | --- |
+| 0 | `--for` elapsed, Ctrl-C or SIGTERM, or stdout closed |
+| 1 | `REX_NOT_FOUND`: no `rex` CLI. `REX`: `rex hosts` failed, or every host stopped on a bad line. `CONTRACT_MISMATCH`: every host stopped and the last one stopped on a version mismatch; next steps `rexboard --version` and the `install.sh` one-liner |
+| 2 | `USAGE`: no `--raw`, a bad flag, or `--host` names no host |

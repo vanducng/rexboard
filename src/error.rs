@@ -14,6 +14,8 @@ pub enum Error {
     Rex(String),
     #[error("{0}")]
     HostsUnreachable(String),
+    #[error("{0}")]
+    ContractMismatch(String),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -32,6 +34,7 @@ impl Error {
             Self::RexNotFound(_) => "REX_NOT_FOUND",
             Self::Rex(_) => "REX",
             Self::HostsUnreachable(_) => "HOSTS_UNREACHABLE",
+            Self::ContractMismatch(_) => "CONTRACT_MISMATCH",
             Self::Io(_) => "IO",
         }
     }
@@ -45,6 +48,11 @@ impl Error {
             ],
             Self::Rex(_) => vec!["rex hosts".to_owned(), "retry the command once".to_owned()],
             Self::HostsUnreachable(_) => vec!["rex hosts".to_owned(), "rexboard ls".to_owned()],
+            Self::ContractMismatch(_) => vec![
+                "rexboard --version".to_owned(),
+                "curl -fsSL https://raw.githubusercontent.com/vanducng/rexboard/main/install.sh | sh"
+                    .to_owned(),
+            ],
             _ => vec!["rexboard --help".to_owned()],
         }
     }
