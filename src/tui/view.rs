@@ -8,6 +8,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, Item, Link, Spot};
 use super::columns::{Col, Columns, Tier, Tone, column_of, tier};
+use super::status::ALL;
 use super::theme;
 use super::views::{Key, View};
 use crate::board::Row;
@@ -24,18 +25,19 @@ const HEADED: u16 = 12;
 const STOPPED: &str = "serve stopped · r reconnects";
 
 /// The `?` table: every key, in the order an operator reaches for them.
-pub const KEYS: [(&str, &str); 16] = [
+pub const KEYS: [(&str, &str); 17] = [
     ("j/k", "move; g/G first, last"),
     ("1-9", "the nth NEEDS YOU row"),
     ("s", "mark seen"),
     ("ctrl+s", "mark done rows seen (was S)"),
     ("space", "peek at the pane"),
     ("/", "filter; enter keeps it"),
+    ("f", "one status: w d q p e u i"),
     ("v", "status, flat, harness, host"),
     (":", "a view by name; tab completes"),
     ("S A T", "sort by state, age, turn"),
     ("R O W M", "by harness, host, where, msg"),
-    ("esc", "clear filter/sort/peek/folds"),
+    ("esc", "clear filters/sort/peek/folds"),
     ("z", "fold or open a group"),
     ("enter", "go to the pane"),
     ("r", "reconnect to serve"),
@@ -109,6 +111,43 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
     footer(frame, bottom, app);
 }
 
+/// While `f` waits: each status with its count and its letter underlined, as the column header
+/// marks sort letters. Narrower, the separators tighten and the hint goes, then `w4 d6 …`.
+fn status_keys(app: &App, width: usize) -> Line<'static> {
+    let named = |sep: &str, tail: &str| -> Line<'static> {
+        let mut spans = vec![Span::styled("f ", theme::bright())];
+        for (i, status) in ALL.iter().enumerate() {
+            let (letter, rest) = status.name().split_at(1);
+            if i > 0 {
+                spans.push(Span::styled(sep.to_owned(), theme::dim()));
+            }
+            spans.push(Span::styled(
+                letter.to_owned(),
+                theme::bright().add_modifier(Modifier::UNDERLINED),
+            ));
+            spans.push(Span::styled(
+                format!("{rest} {}", app.status_count(*status)),
+                theme::bright(),
+            ));
+        }
+        spans.push(Span::styled(tail.to_owned(), theme::dim()));
+        Line::from(spans)
+    };
+    for line in [named(" · ", " · f/esc clears"), named("  ", "")] {
+        if line.width() <= width {
+            return line;
+        }
+    }
+    let short: Vec<String> = ALL
+        .iter()
+        .map(|&s| format!("{}{}", s.letter(), app.status_count(s)))
+        .collect();
+    Line::styled(
+        fit(&format!("f {} · f/esc clears", short.join(" ")), width),
+        theme::bright(),
+    )
+}
+
 fn rule_line(width: u16) -> Paragraph<'static> {
     Paragraph::new("─".repeat(usize::from(width))).style(theme::dim())
 }
@@ -124,13 +163,18 @@ fn count(n: usize, noun: &str) -> String {
 
 /// `view: flat ↓age`, unless the board is on the status view with no sort.
 fn view_label(app: &App) -> Option<String> {
+    let only = app.status.map(|status| format!("only {}", status.name()));
     if app.view == View::default() && app.sort.is_none() {
-        return None;
+        return only;
     }
     let sort = app.sort.map_or_else(String::new, |(id, dir)| {
         format!(" {}{}", dir.arrow(), column_of(id).header.to_lowercase())
     });
-    Some(format!("view: {}{sort}", app.view.name))
+    let view = format!("view: {}{sort}", app.view.name);
+    Some(match only {
+        Some(only) => format!("{view} · {only}"),
+        None => view,
+    })
 }
 
 fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
@@ -182,7 +226,8 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
                 } else {
                     0
                 };
-            left + right < width
+            // At least 3 columns before the clock, so the host list goes before it gets tight.
+            left + right + 3 <= width
         })
         .unwrap_or((false, false, false));
     let mut left = vec![Span::styled("rexboard", theme::accent())];
@@ -217,7 +262,13 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
     let items = app.items();
     if items.is_empty() {
         let query = app.filter.value();
-        let text = if !query.is_empty() {
+        let text = if let Some(status) = app.status {
+            if query.is_empty() {
+                format!("no {} rows · f f or esc clears", status.name())
+            } else {
+                format!("no {} rows match \"{query}\" · esc clears", status.name())
+            }
+        } else if !query.is_empty() {
             format!("no rows match \"{query}\" · esc clears")
         } else {
             match &app.link {
@@ -553,6 +604,10 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
             Paragraph::new(Line::styled(fit(&text, width), theme::bright())),
             area,
         );
+        return;
+    }
+    if app.picking_status {
+        frame.render_widget(Paragraph::new(status_keys(app, width)), area);
         return;
     }
     if let Some(toast) = app.toast() {
@@ -1146,10 +1201,88 @@ mod tests {
             ":       a view by name; tab completes",
             "S A T   sort by state, age, turn",
             "R O W M by harness, host, where, msg",
-            "esc     clear filter/sort/peek/folds",
+            "esc     clear filters/sort/peek/folds",
+            "f       one status: w d q p e u i",
         ] {
             assert!(text.contains(want), "{want:?}:\n{text}");
         }
+    }
+
+    #[test]
+    fn f_shows_each_status_with_its_count_until_its_letter() {
+        let mut app = crate::tui::status::tests::every_status();
+        press(&mut app, KeyCode::Char('f'));
+        let last = |app: &App, width| {
+            render(app, width, 30)
+                .lines()
+                .last()
+                .unwrap()
+                .trim_end()
+                .to_owned()
+        };
+        assert_eq!(
+            last(&app, 140),
+            "f working 1 · done 2 · question 1 · permission 2 · error 1 · unreported 2 · idle 1 · f/esc clears"
+        );
+        assert_eq!(
+            last(&app, 80),
+            "f working 1  done 2  question 1  permission 2  error 1  unreported 2  idle 1"
+        );
+        assert_eq!(last(&app, 50), "f w1 d2 q1 p2 e1 u2 i1 · f/esc clears");
+        press(&mut app, KeyCode::Char('p'));
+        assert!(
+            !last(&app, 140).starts_with("f w"),
+            "the keys go once a letter is in"
+        );
+    }
+
+    #[test]
+    fn an_empty_status_filter_says_so_and_how_to_clear_it() {
+        let mut app = crate::tui::status::tests::every_status();
+        app.set_rows(
+            app.rows
+                .iter()
+                .filter(|row| row.pane.state != "error")
+                .cloned()
+                .collect(),
+            app.hosts.clone(),
+        );
+        press(&mut app, KeyCode::Char('f'));
+        press(&mut app, KeyCode::Char('e'));
+        assert!(
+            render(&app, 80, 30).contains("no error rows · f f or esc clears"),
+            "{}",
+            render(&app, 80, 30)
+        );
+        press(&mut app, KeyCode::Char('/'));
+        press(&mut app, KeyCode::Char('x'));
+        press(&mut app, KeyCode::Enter);
+        assert!(render(&app, 80, 30).contains("no error rows match \"x\" · esc clears"));
+    }
+
+    #[test]
+    fn the_top_bar_names_the_status_filter() {
+        let mut app = crate::tui::status::tests::every_status();
+        press(&mut app, KeyCode::Char('f'));
+        press(&mut app, KeyCode::Char('q'));
+        let top = render(&app, 120, 30).lines().next().unwrap().to_owned();
+        assert!(top.starts_with("rexboard · only question · "), "{top}");
+        for width in 30..130 {
+            let top = render(&app, width, 30).lines().next().unwrap().to_owned();
+            if let Some(at) = top.find(':').map(|i| i - 2) {
+                assert!(
+                    top[..at].ends_with("   "),
+                    "{width}: at least 3 spaces before the clock\n{top}"
+                );
+            }
+        }
+        press(&mut app, KeyCode::Char('v'));
+        press(&mut app, KeyCode::Char('A'));
+        let top = render(&app, 120, 30).lines().next().unwrap().to_owned();
+        assert!(
+            top.starts_with("rexboard · view: flat ↓age · only question · "),
+            "{top}"
+        );
     }
 
     #[test]

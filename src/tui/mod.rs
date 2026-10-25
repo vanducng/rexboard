@@ -1,5 +1,6 @@
 mod app;
 mod columns;
+mod status;
 mod theme;
 mod view;
 mod views;
