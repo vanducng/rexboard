@@ -198,7 +198,7 @@ Each lands the Rex app on the pane, on its host, and marks it seen through serve
 
 1. runs `jump.pre_cmd` from [config.toml](configuration.md), if set, since the app selects the session in whichever of its windows has focus;
 2. focuses the pane on the server that owns it (`session.focus_block`);
-3. asks this Mac's Rex app to select the pane's session and tab (`client.perform session.select`). On this host that is the app client named by `REX_CLIENT`, else `client` in config.toml, else the only app connected over the unix socket. On a remote host it is the app connected from this Mac's Tailscale node.
+3. asks this Mac's Rex app to select the pane's session and tab (`client.perform session.select`). On this host that is the app client named by `REX_CLIENT`, else `client` in config.toml, else the only app connected over the unix socket. On a remote host it is the app connected from this Mac's Tailscale node. The app has 5 seconds to answer; it does not answer while the Mac's screen is locked, and the jump then fails with `REX` and the reason.
 
 `next` picks from `needs_you` in board order: blocked, then error, then unseen done, each longest waiting first. It starts after the pane it runs in (`REX_BLOCK`), and goes to unseen rows first, so repeated `next` works through the queue; once every row is seen, the blocked and erroring ones cycle. `pick` opens the board's list without the detail pane: Enter jumps and exits 0, esc exits 1.
 
