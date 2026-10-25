@@ -10,6 +10,9 @@ const SEGMENT_MAX: usize = 24;
 /// The narrowest a session label is cut to, so its stem stays readable.
 const SESSION_MIN: usize = 8;
 
+/// A tab this narrow or less stays whole while there is anything else to cut.
+const SHORT_TAB: usize = 6;
+
 /// The narrowest WHAT gets before WHERE gives up columns too.
 const WHAT_MIN: usize = 16;
 
@@ -145,8 +148,8 @@ pub fn labels(row: &Row, short: bool) -> Vec<&str> {
 }
 
 /// WHERE for each row in `max` columns. Rows that would still read the same get told apart:
-/// by host when the host has no column of its own, else by `#N`, the pane's place among its
-/// tab's agent panes.
+/// `@HOST` when they are on different hosts and the host has no column of its own, and `#N`,
+/// the pane's place among its tab's agent panes, when another of them is on the same host.
 pub fn wheres(rows: &[Row], max: usize, short: bool, host_column: bool) -> Vec<String> {
     let first: Vec<String> = rows
         .iter()
@@ -163,14 +166,21 @@ pub fn wheres(rows: &[Row], max: usize, short: bool, host_column: bool) -> Vec<S
                 })
                 .map(|(other, _)| other)
                 .collect();
-            if twins.len() < 2 {
+            let mut suffix = String::new();
+            if twins.iter().any(|other| other.pane.host != row.pane.host) {
+                suffix.push_str(&format!(" @{}", clean(&row.pane.host)));
+            }
+            if twins
+                .iter()
+                .filter(|other| other.pane.host == row.pane.host)
+                .count()
+                > 1
+            {
+                suffix.push_str(&format!(" #{}", position(row, rows)));
+            }
+            if suffix.is_empty() {
                 return place.clone();
             }
-            let suffix = if twins.iter().any(|other| other.pane.host != row.pane.host) {
-                format!(" @{}", clean(&row.pane.host))
-            } else {
-                format!(" #{}", position(row, rows))
-            };
             let room = max.saturating_sub(suffix.width());
             format!("{}{suffix}", path(&labels(row, short), room))
         })
@@ -205,8 +215,8 @@ pub fn name(row: &Row) -> String {
 }
 
 /// Labels joined with ` › ` in at most `max` columns, with the separators kept. The cuts go to
-/// the least telling label first: the middle (the tab), then the first (the session) down to a
-/// readable stem, then the last.
+/// the least telling label first: a long tab, then the session down to a readable stem, then
+/// the last label; only past those do a short tab and the stems give way.
 pub fn path(labels: &[&str], max: usize) -> String {
     let whole: Vec<String> = labels.iter().map(|label| clean(label)).collect();
     let mut parts: Vec<String> = whole
@@ -217,22 +227,32 @@ pub fn path(labels: &[&str], max: usize) -> String {
         parts.iter().map(|p| p.width()).sum::<usize>() + SEP.width() * parts.len().saturating_sub(1)
     };
     let last = parts.len().saturating_sub(1);
-    let order: Vec<usize> = (1..last).chain([0, last]).collect();
-    for i in order {
-        let over = width(&parts).saturating_sub(max);
-        if over == 0 {
-            break;
+    let middle: Vec<usize> = (1..last).collect();
+    // Each pass: the labels it cuts, the narrowest it leaves them, and the width a label must
+    // pass for this pass to touch it.
+    let passes = [
+        (middle.clone(), 0, SHORT_TAB),
+        (vec![0], SESSION_MIN, 0),
+        (vec![last], SHORT_TAB, 0),
+        (vec![0], 3, 0),
+        (middle.clone(), 0, 0),
+        (vec![last], 1, 0),
+    ];
+    for (cut, floor, wider) in passes {
+        for i in cut {
+            let over = width(&parts).saturating_sub(max);
+            let now = parts[i].width();
+            if over == 0 || now <= floor.max(1) || now <= wider {
+                continue;
+            }
+            let keep = now.saturating_sub(over).max(floor);
+            // A tab cut to a few columns reads as noise; `…` alone says one is there.
+            parts[i] = if middle.contains(&i) && keep <= SHORT_TAB {
+                "…".to_owned()
+            } else {
+                squeeze(&whole[i], keep)
+            };
         }
-        let mut keep = parts[i].width().saturating_sub(over).max(1);
-        if i == 0 && last > 0 {
-            keep = keep.max(SESSION_MIN.min(whole[0].width()));
-        }
-        // A label cut to a few columns reads as noise; `…` alone says one is there.
-        parts[i] = if keep < 6 && i != 0 && i != last {
-            "…".to_owned()
-        } else {
-            squeeze(&whole[i], keep)
-        };
     }
     let joined = parts.join(SEP);
     if joined.width() <= max {
@@ -420,7 +440,7 @@ mod tests {
         assert_eq!(path(&gateway, 25), "api-gateway › … › seat-r");
         assert_eq!(
             path(&gateway, 20),
-            "api-…way › … › se…-r",
+            "api…way › … › seat-r",
             "never a bare session"
         );
         assert_eq!(
@@ -475,17 +495,36 @@ mod tests {
         );
         let mut elsewhere = first.clone();
         elsewhere.pane.host = "studio".into();
-        let rows = vec![first, elsewhere];
+        let rows = vec![first.clone(), second.clone(), elsewhere];
         assert_eq!(
             wheres(&rows, 40, true, false),
-            ["api › build @mini", "api › build @studio"],
-            "no HOST column: the host tells them apart"
+            [
+                "api › build @mini #1",
+                "api › build @mini #2",
+                "api › build @studio"
+            ],
+            "no HOST column: the host where hosts differ, and #N where one host has two"
         );
         assert_eq!(
             wheres(&rows, 40, true, true),
-            ["api › build", "api › build"],
-            "the HOST column already does"
+            ["api › build #1", "api › build #2", "api › build"],
+            "the HOST column already tells the hosts apart"
         );
+        let narrow = wheres(&rows, 17, true, false);
+        for (row, text) in rows.iter().zip(&narrow) {
+            assert!(text.width() <= 17, "{text}");
+            assert_eq!(text.matches(" › ").count(), 1, "separators stay: {text}");
+            assert!(text.contains(&format!(" @{}", row.pane.host)), "{text}");
+        }
+        assert_ne!(narrow[0], narrow[1], "{narrow:?}");
+    }
+
+    #[test]
+    fn a_short_tab_stays_whole_and_the_session_gives_way() {
+        assert_eq!(path(&["api-gateway", "build"], 14), "api…ay › build");
+        let three = ["api-gateway", "build", "seat-a"];
+        assert_eq!(path(&three, 25), "api-…way › build › seat-a");
+        assert_eq!(path(&three, 23), "api…ay › build › seat-a");
     }
     #[test]
     fn clean_drops_whole_escape_sequences() {
