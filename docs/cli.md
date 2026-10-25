@@ -67,7 +67,7 @@ Fields are a contract. New fields may appear. Renaming or removing one is a brea
 
 | Exit | When |
 | --- | --- |
-| 0 | Listed. A host that cannot be reached prints `warning: HOST is unreachable: ...` on stderr (through serve: `warning: HOST is unreachable (STATE)`, where `STATE` is `starting`, `down` or `stopped`), and the rest are listed |
+| 0 | Listed. A host that cannot be reached prints `warning: HOST is unreachable: ...` on stderr (through serve: one line per host that is `starting`, `down` or `stopped`), and the rest are listed. When a host is `down` or `stopped`, the warning and the `HOSTS_UNREACHABLE` error end with `; see STATE_DIR/serve.log` |
 | 1 | `REX_NOT_FOUND`: no `rex` CLI. `REX`: `rex do` failed, timed out, or returned a snapshot rexboard does not understand; the message names the Rex version. `SERVE`: serve did not start or answer; the message names `serve.log` |
 | 2 | `HOSTS_UNREACHABLE`: every host failed; next steps `rex hosts` and `rexboard ls`. `USAGE`: a bad flag, or `--host` names no host |
 
@@ -158,11 +158,11 @@ rexboard serve --foreground   # run it in this terminal
 rexboard serve --stop         # stop it and its observers
 ```
 
-`serve` owns one observer per host and the board, and answers `ls`, `watch --json` and `seen` over a unix socket. Any of those starts it when nothing answers, as `rexboard serve --foreground` in its own session with its output in `serve.log`, and waits up to 2 seconds for it. Only one runs at a time: a second `serve --foreground` fails with `SERVE_RUNNING` (exit 1). It rescans `rex hosts` every 5 minutes.
+`serve` owns one observer per host and the board, and answers `ls`, `watch --json` and `seen` over a unix socket. Any of those starts it when nothing answers, as `rexboard serve --foreground` in its own session with its output in `serve.log`, and waits up to 2 seconds for it. serve keeps the environment of the command that started it. After changing `REXBOARD_REX` or `REX_BIN_DIR`, run `rexboard serve --stop`. Only one runs at a time: a second `serve --foreground` fails with `SERVE_RUNNING` (exit 1). It rescans `rex hosts` every 5 minutes.
 
 `serve` keeps `since`, `seen` and the turn fields in `state.json` and puts them back after a restart for every pane whose `state` and `kind` did not change. It appends each state change to `transitions.jsonl`. [System architecture](system-architecture.md) has the protocol and the files.
 
-`serve --stop` exits 0 whether or not serve was running, and waits up to 5 seconds for it to let go of its lock.
+`serve --stop` exits 0 whether or not serve was running. It waits up to 5 seconds for serve's process to exit, then fails with `SERVE`. `serve --json` prints `pid` as a number, `null` when unknown.
 
 ## `rexboard seen`
 
@@ -170,4 +170,4 @@ rexboard serve --stop         # stop it and its observers
 rexboard seen mini/block:web-seat-b
 ```
 
-Marks a pane seen, by the `key` from `ls --json`: it leaves `needs_you` if it was an unseen `done`. serve keeps it across restarts until the pane changes state again. An unknown key fails with `NOT_FOUND` (exit 1).
+Marks a pane seen, by the `key` from `ls --json`: it leaves `needs_you` if it was an unseen `done`. serve keeps it across restarts until the pane changes state again. An unknown key fails with `NOT_FOUND` (exit 1). A key without `/` fails with `USAGE` (exit 2).

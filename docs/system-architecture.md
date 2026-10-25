@@ -34,14 +34,14 @@ serve uses std threads and channels; there is no async runtime. Collectors, the 
 
 | Path | What |
 | --- | --- |
-| `$XDG_RUNTIME_DIR/rexboard.sock`, else `$TMPDIR/rexboard-UID.sock` | The socket, mode 0600. A path over 103 bytes falls back to `$TMPDIR`, then fails with `SERVE` |
+| `$XDG_RUNTIME_DIR/rexboard.sock`, else `$TMPDIR/rexboard-UID.sock` (`/tmp` when `TMPDIR` is unset) | The socket, mode 0600. A path over 103 bytes falls back to `$TMPDIR`, then fails with `SERVE`. A client refuses a socket served by another uid |
 | `$XDG_STATE_HOME/rexboard/` (default `~/.local/state/rexboard/`) | The state dir, mode 0700 |
 | `serve.lock` | The `flock` that keeps serve to one instance, plus `{pid, rex, children}`: serve's pid, the `rex` path and its observers' pids |
-| `state.json` | `{"v":1,"panes":{KEY:{state,kind,since,since_estimated,turn_started,last_turn,seen}}}`, written through a temp file and a rename at most once a second, and on stop |
+| `state.json` | `{"v":1,"panes":{KEY:{state,kind,since,since_estimated,turn_started,last_turn,seen}}}`, written through a temp file and a rename at most once a second, and on stop. Entries for a host that has not sent its first snapshot this run are kept as loaded |
 | `transitions.jsonl` | One line per state change: `{at, host, block_id, from, to, kind}`. Over 5 MB at serve start, it moves to `transitions.jsonl.1`, replacing the older one |
-| `serve.log` | serve's stderr when a client started it. Over 1 MB when a client starts serve, it starts empty |
+| `serve.log` | serve's output when a command started it. A client clears it first when it is over 1 MB |
 
-On start, serve takes the lock, then stops observers a dead serve left behind. A recorded pid is stopped only if it is still its own process group, its parent is init or the recorded serve, and its command is the recorded `rex` running `do - --all --fail-fast`. Anything else is skipped and logged, because the pid may now belong to another program.
+On start, serve takes the lock, removes a stale socket, then stops observers a dead serve left behind. A recorded pid is stopped only if it is still its own process group, its parent is init or the recorded serve, and its command is the recorded `rex` running `do - --all --fail-fast`. Anything else is skipped and logged, because the pid may now belong to another program.
 
 ## Protocol
 
@@ -50,7 +50,7 @@ One JSON request per line on the socket; every reply line carries `"v": 1`.
 | Request | Reply |
 | --- | --- |
 | `{"cmd":"rows"}` | `{"v":1,"rows":[ROW...],"hosts":{HOST:STATE}}`. `STATE` is `starting`, `up`, `down` or `stopped`. Right after serve starts, the reply waits up to 5s for every host's first snapshot |
-| `{"cmd":"subscribe"}` | The same `rows` line now and on every change (at most every 100ms), plus `{"v":1,"heartbeat":true}` every second |
+| `{"cmd":"subscribe"}` | The same `rows` line now and on every change (at most every 100ms), plus `{"v":1,"heartbeat":true}` every second. Each subscriber has room for 4 lines; a reader that falls behind misses lines rather than growing serve, and the next `rows` line is a full snapshot again |
 | `{"cmd":"seen","key":"HOST/BLOCK_ID"}` | `{"v":1,"ok":true,"key":KEY}` |
 | `{"cmd":"next","after":KEY,"back":false}` | `{"v":1,"row":ROW}`: the next `needs_you` row after `after` (or the first), wrapping; `back` goes the other way |
 | `{"cmd":"stop"}` | `{"v":1,"ok":true}`, then serve saves and exits |
