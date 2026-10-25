@@ -1,16 +1,21 @@
 use chrono::{DateTime, Utc};
 
-use crate::pane::{Pane, bare_title};
+use crate::board::Row;
+use crate::pane::bare_title;
 
-pub fn table(panes: &[Pane], now: DateTime<Utc>) -> String {
-    let rows: Vec<[String; 6]> = panes
+pub fn table(rows: &[Row], now: DateTime<Utc>) -> String {
+    let cells: Vec<[String; 7]> = rows
         .iter()
-        .map(|pane| {
+        .map(|row| {
+            let pane = &row.pane;
+            let estimated = if row.since_estimated { "≥" } else { "" };
             [
+                serde_json::to_value(row.group)
+                    .ok()
+                    .and_then(|group| group.as_str().map(str::to_owned))
+                    .unwrap_or_default(),
                 pane.state.clone(),
-                pane.updated_at
-                    .as_deref()
-                    .map_or("-".into(), |at| age(at, now)),
+                format!("{estimated}{}", age(&row.since, now)),
                 pane.harness.clone().unwrap_or_else(|| "-".into()),
                 pane.host.clone(),
                 format!("{} › {} › {}", pane.session, pane.tab, pane.pane),
@@ -21,15 +26,15 @@ pub fn table(panes: &[Pane], now: DateTime<Utc>) -> String {
             ]
         })
         .collect();
-    let header = ["STATE", "AGE", "HARNESS", "HOST", "WHERE", "WHAT"].map(String::from);
-    let mut widths = [0; 6];
-    for row in std::iter::once(&header).chain(&rows) {
+    let header = ["GROUP", "STATE", "AGE", "HARNESS", "HOST", "WHERE", "WHAT"].map(String::from);
+    let mut widths = [0; 7];
+    for row in std::iter::once(&header).chain(&cells) {
         for (width, cell) in widths.iter_mut().zip(row) {
             *width = (*width).max(cell.chars().count());
         }
     }
     let mut out = String::new();
-    for row in std::iter::once(&header).chain(&rows) {
+    for row in std::iter::once(&header).chain(&cells) {
         let mut line = String::new();
         for (i, cell) in row.iter().enumerate() {
             if i + 1 == row.len() {

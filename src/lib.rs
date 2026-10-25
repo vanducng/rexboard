@@ -16,6 +16,7 @@ use clap::CommandFactory;
 
 use serde_json::json;
 
+use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -51,10 +52,10 @@ pub fn execute(cli: &Cli) -> Result<()> {
 
 fn ls(args: &LsArgs, json: bool) -> Result<()> {
     let value = rex::run_script(None, rex::SNAPSHOT, &json!({ "host": args.host }))?;
-    let version = value["rex_version"]
-        .as_str()
-        .unwrap_or("unknown")
-        .to_owned();
+    let rex_version = value["rex_version"].as_str().map(str::to_owned);
+    let version = rex_version
+        .clone()
+        .unwrap_or_else(|| "version unknown".into());
     let snapshot: Snapshot = serde_json::from_value(value).map_err(|err| {
         Error::Rex(format!(
             "unexpected snapshot shape from Rex {version}: {err}"
@@ -87,13 +88,16 @@ fn ls(args: &LsArgs, json: bool) -> Result<()> {
     for host in up {
         let snapshot = Event::Snapshot {
             sessions: host.sessions,
-            rex_version: Some(version.clone()),
+            rex_version: rex_version.clone(),
         };
         board.apply(
             &host.host,
             &HostEvent::Event(snapshot, serde_json::Value::Null),
             now,
         )?;
+    }
+    for warning in board.take_warnings() {
+        eprintln!("{warning}");
     }
     let rows: Vec<_> = board
         .rows()
@@ -106,8 +110,7 @@ fn ls(args: &LsArgs, json: bool) -> Result<()> {
             serde_json::to_string(&rows).map_err(std::io::Error::other)?
         );
     } else {
-        let panes: Vec<_> = rows.into_iter().map(|row| row.pane).collect();
-        print!("{}", output::table(&panes, now));
+        print!("{}", output::table(&rows, now));
     }
     Ok(())
 }
@@ -124,7 +127,7 @@ const DEBOUNCE: Duration = Duration::from_millis(100);
 fn watch(args: &WatchArgs, json: bool) -> Result<()> {
     if !args.raw && !json {
         return Err(Error::usage_with(
-            "watch needs --raw or --json for now",
+            "watch needs --json or --raw for now",
             &["rexboard watch --json", "rexboard watch --raw"],
         ));
     }
@@ -156,21 +159,15 @@ fn watch(args: &WatchArgs, json: bool) -> Result<()> {
         .map(|host| Collector::spawn(host.clone(), tx.clone()))
         .collect();
     drop(tx);
-    let mut failed = 0;
+    let mut failed = BTreeSet::new();
     let mut out = std::io::stdout().lock();
     let mut board = Board::default();
     let mut due: Option<Instant> = None;
     while !INTERRUPTED.load(Ordering::SeqCst) && deadline.is_none_or(|d| Instant::now() < d) {
         if due.is_some_and(|due| Instant::now() >= due) {
             due = None;
-            let rows: Vec<_> = board
-                .rows()
-                .into_iter()
-                .filter(|r| r.pane.is_agent())
-                .collect();
-            let rows = serde_json::to_string(&rows).map_err(std::io::Error::other)?;
-            if writeln!(out, "{rows}").and_then(|()| out.flush()).is_err() {
-                break;
+            if print_rows(&mut out, &board).is_err() {
+                return Ok(());
             }
         }
         let wait = due.map_or(Duration::from_millis(100), |due| {
@@ -181,14 +178,28 @@ fn watch(args: &WatchArgs, json: bool) -> Result<()> {
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
+        if failed.contains(&host) {
+            continue;
+        }
+        if let HostEvent::Failed(err) = event {
+            stop_host(&mut failed, collectors.len(), &host, err)?;
+            if !args.raw && !board.mark_stale(&host).is_empty() {
+                due.get_or_insert_with(|| Instant::now() + DEBOUNCE);
+            }
+            continue;
+        }
         if !args.raw {
-            if let HostEvent::Failed(err) = event {
-                failed += 1;
-                if failed == collectors.len() {
-                    return Err(err);
+            let changed = match board.apply(&host, &event, chrono::Utc::now()) {
+                Ok(changed) => changed,
+                Err(err) => {
+                    stop_host(&mut failed, collectors.len(), &host, err)?;
+                    board.mark_stale(&host)
                 }
-                eprintln!("warning: {host} stopped and will not restart: {err}");
-            } else if !board.apply(&host, &event, chrono::Utc::now())?.is_empty() {
+            };
+            for warning in board.take_warnings() {
+                eprintln!("{warning}");
+            }
+            if !changed.is_empty() {
                 due.get_or_insert_with(|| Instant::now() + DEBOUNCE);
             }
             continue;
@@ -202,20 +213,36 @@ fn watch(args: &WatchArgs, json: bool) -> Result<()> {
             HostEvent::Down { reason, retry_in } => {
                 json!({ "type": "down", "reason": reason, "retry_in_s": retry_in.as_secs() })
             }
-            HostEvent::Failed(err) => {
-                failed += 1;
-                if failed == collectors.len() {
-                    return Err(err);
-                }
-                eprintln!("warning: {host} stopped and will not restart: {err}");
-                continue;
-            }
+            HostEvent::Failed(_) => continue,
         };
         line["host"] = json!(host);
         line["v"] = json!(event::VERSION);
         if writeln!(out, "{line}").and_then(|()| out.flush()).is_err() {
-            break;
+            return Ok(());
         }
     }
+    if due.is_some() {
+        let _ = print_rows(&mut out, &board);
+    }
     Ok(())
+}
+
+/// One host's bad line stops that host only; watch fails once every host has.
+fn stop_host(failed: &mut BTreeSet<String>, hosts: usize, host: &str, err: Error) -> Result<()> {
+    failed.insert(host.to_owned());
+    if failed.len() == hosts {
+        return Err(err);
+    }
+    eprintln!("warning: {host} stopped and will not restart: {err}");
+    Ok(())
+}
+
+fn print_rows(out: &mut impl Write, board: &Board) -> std::io::Result<()> {
+    let rows: Vec<_> = board
+        .rows()
+        .into_iter()
+        .filter(|row| row.pane.is_agent())
+        .collect();
+    writeln!(out, "{}", serde_json::to_string(&rows)?)?;
+    out.flush()
 }
