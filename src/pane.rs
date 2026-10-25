@@ -296,7 +296,7 @@ mod tests {
     #[test]
     fn codex_title_is_strict() {
         assert!(codex_title("api | gpt-x"));
-        assert!(codex_title("projects | GPT-6.1-Sol"));
+        assert!(codex_title("work | Model-2.5-Pro"));
         assert!(!codex_title("tail -f log | grep err"), "a shell pipe");
         assert!(!codex_title("a | b | c"), "two separators");
         assert!(!codex_title("api | gpt x"), "a space in the model");
