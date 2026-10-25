@@ -15,7 +15,7 @@ use serde_json::json;
 use crate::board::Row;
 use crate::client::{self, Rows};
 use crate::error::{Error, Result};
-use crate::output::clean;
+use crate::output::{clean, labels, path};
 use crate::{interrupted, jump, rex, stop_on_signals};
 
 use app::{App, Effect, Link};
@@ -193,7 +193,7 @@ fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
         Effect::Jump(row) => {
             thread::spawn(move || {
                 let result = jump::go(&row)
-                    .map(|()| format!("jumped to {}", jump::name(&row)))
+                    .map(|()| format!("jumped to {}", path(&labels(&row, true), usize::MAX)))
                     .map_err(|err| err.to_string());
                 let _ = tx.send(Msg::Jumped(result));
             });

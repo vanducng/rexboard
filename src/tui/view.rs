@@ -980,6 +980,37 @@ mod tests {
     }
 
     #[test]
+    fn twins_stay_distinct_on_a_very_narrow_board() {
+        let mut app = App::default();
+        let mut rows = Vec::new();
+        for (key, host) in [
+            ("local/block:p1", "local"),
+            ("local/block:p2", "local"),
+            ("mini/block:p3", "mini"),
+        ] {
+            let mut r = row(key, "done", "needs_you", false);
+            (r.pane.host, r.pane.session, r.pane.tab, r.pane.pane) = (
+                host.into(),
+                "api-gateway".into(),
+                "pair".into(),
+                "shell".into(),
+            );
+            r.pane.window_id = format!("window:pair-{host}");
+            rows.push(r);
+        }
+        app.set_rows(rows, hosts());
+        for width in [30, 40] {
+            let text = render(&app, width, 20);
+            let lines: Vec<&str> = text.lines().filter(|l| l.starts_with('●')).collect();
+            assert_eq!(lines.len(), 3, "{text}");
+            assert!(lines.iter().any(|l| l.contains(" #1")), "{text}");
+            assert!(lines.iter().any(|l| l.contains(" #2")), "{text}");
+            assert!(lines.iter().any(|l| l.contains(" @mini")), "{text}");
+            assert!(!text.contains("@local"), "{text}");
+        }
+    }
+
+    #[test]
     fn rows_below_the_list_are_counted() {
         let text = render(&fuller(), 80, 14);
         assert!(text.contains("↓ "), "{text}");

@@ -118,6 +118,7 @@ impl App {
     /// A jump finished: say where it went, or keep why it failed in view.
     pub fn jumped(&mut self, result: Result<String, String>) {
         self.going = None;
+        self.toast = None;
         match result {
             Ok(text) => self.say(text),
             Err(why) => self.failed = Some(why),
@@ -500,6 +501,7 @@ pub mod tests {
         assert_eq!(press(&mut app, KeyCode::Enter), None, "no second jump");
         assert_eq!(app.toast(), Some("a jump is already running"));
         app.jumped(Err("the Rex app on studio did not answer within 5s".into()));
+        assert_eq!(app.toast(), None, "the end of the jump clears it");
         assert_eq!(app.going, None);
         assert_eq!(
             app.failed.as_deref(),

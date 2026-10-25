@@ -148,8 +148,9 @@ pub fn labels(row: &Row, short: bool) -> Vec<&str> {
 }
 
 /// WHERE for each row in `max` columns. Rows that would still read the same get told apart:
-/// `@HOST` when they are on different hosts and the host has no column of its own, and `#N`,
-/// the pane's place among its tab's agent panes, when another of them is on the same host.
+/// `@HOST` for a host other than `local` when they are on different hosts and the host has no
+/// column of its own, and `#N`, the pane's place among its tab's agent panes, when another of
+/// them is on the same host. The suffix is never cut; the path gives way, down to `…`.
 pub fn wheres(rows: &[Row], max: usize, short: bool, host_column: bool) -> Vec<String> {
     let first: Vec<String> = rows
         .iter()
@@ -167,7 +168,9 @@ pub fn wheres(rows: &[Row], max: usize, short: bool, host_column: bool) -> Vec<S
                 .map(|(other, _)| other)
                 .collect();
             let mut suffix = String::new();
-            if twins.iter().any(|other| other.pane.host != row.pane.host) {
+            if row.pane.host != "local"
+                && twins.iter().any(|other| other.pane.host != row.pane.host)
+            {
                 suffix.push_str(&format!(" @{}", clean(&row.pane.host)));
             }
             if twins
@@ -182,7 +185,12 @@ pub fn wheres(rows: &[Row], max: usize, short: bool, host_column: bool) -> Vec<S
                 return place.clone();
             }
             let room = max.saturating_sub(suffix.width());
-            format!("{}{suffix}", path(&labels(row, short), room))
+            let place = if room < 5 {
+                "…".to_owned()
+            } else {
+                path(&labels(row, short), room)
+            };
+            format!("{place}{suffix}")
         })
         .collect()
 }
@@ -493,30 +501,33 @@ mod tests {
             wheres(&rows, 40, false, true),
             ["api › build #2", "api › build #1", "api › build › seat-a"]
         );
+        first.pane.host = "local".into();
+        let mut twin = first.clone();
+        twin.pane.block_id = "block:02".into();
         let mut elsewhere = first.clone();
-        elsewhere.pane.host = "studio".into();
-        let rows = vec![first.clone(), second.clone(), elsewhere];
+        elsewhere.pane.host = "mini".into();
+        let rows = vec![first, twin, elsewhere];
         assert_eq!(
             wheres(&rows, 40, true, false),
-            [
-                "api › build @mini #1",
-                "api › build @mini #2",
-                "api › build @studio"
-            ],
-            "no HOST column: the host where hosts differ, and #N where one host has two"
+            ["api › build #1", "api › build #2", "api › build @mini"],
+            "no HOST column: @HOST for another host, never @local, and #N where one host has two"
         );
         assert_eq!(
             wheres(&rows, 40, true, true),
             ["api › build #1", "api › build #2", "api › build"],
             "the HOST column already tells the hosts apart"
         );
-        let narrow = wheres(&rows, 17, true, false);
-        for (row, text) in rows.iter().zip(&narrow) {
-            assert!(text.width() <= 17, "{text}");
-            assert_eq!(text.matches(" › ").count(), 1, "separators stay: {text}");
-            assert!(text.contains(&format!(" @{}", row.pane.host)), "{text}");
+        for max in [3, 8, 12, 17] {
+            let narrow = wheres(&rows, max, true, false);
+            assert!(
+                narrow[0].ends_with(" #1") && narrow[1].ends_with(" #2"),
+                "{narrow:?}"
+            );
+            assert!(
+                narrow[2].ends_with(" @mini"),
+                "the suffix is never cut: {narrow:?}"
+            );
         }
-        assert_ne!(narrow[0], narrow[1], "{narrow:?}");
     }
 
     #[test]
