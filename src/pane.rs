@@ -103,7 +103,7 @@ impl Source {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Pane {
     pub host: String,
     pub session_id: String,

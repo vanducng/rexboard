@@ -32,6 +32,9 @@ enum Request {
     Subscribe,
     Seen {
         key: String,
+        /// Set by a jump, so `next` outside a pane starts after the pane it went to.
+        #[serde(default)]
+        jump: bool,
     },
     Next {
         after: Option<String>,
@@ -177,6 +180,8 @@ struct Reducer {
     announced: bool,
     rows_cache: Option<String>,
     suspects: BTreeSet<(String, String)>,
+    /// The key the last jump went to. Memory only: a restart starts `next` from the top.
+    last_jump: Option<String>,
     rows_due: Option<Instant>,
     save_due: Option<Instant>,
 }
@@ -206,6 +211,7 @@ impl Reducer {
             announced: false,
             rows_cache: None,
             suspects: BTreeSet::new(),
+            last_jump: None,
             rows_due: None,
             save_due: None,
         }
@@ -428,33 +434,49 @@ impl Reducer {
                 self.subscribers.add(reply, self.ready());
                 return;
             }
-            Request::Seen { key } => match split(&key) {
+            Request::Seen { key, jump } => match split(&key) {
                 Some(row) if self.board.mark_seen(&row) => {
+                    if jump {
+                        self.last_jump = Some(key.clone());
+                    }
                     self.rows_changed();
                     json!({ "v": VERSION, "ok": true, "key": key })
                 }
                 _ => error_line("NOT_FOUND", &format!("no pane {key}")),
             },
-            Request::Next { after, back } => self.next(after.as_deref(), back),
+            Request::Next { after, back } => {
+                let after = after.or_else(|| self.last_jump.clone());
+                self.next(after.as_deref(), back)
+            }
             Request::Stop => unreachable!("handled in run"),
         };
         offer(&reply, &line.to_string());
     }
 
+    /// The NEEDS YOU row after `after` (a key, or the block id of the pane asking), unseen
+    /// rows first: a jump marks its row seen, so the queue moves on. Seen blocked or erroring
+    /// rows still need you, so they cycle once nothing is unseen.
     fn next(&self, after: Option<&str>, back: bool) -> Value {
-        let mut rows: Vec<_> = self
+        let needs: Vec<_> = self
             .board
             .rows(chrono::Utc::now())
             .into_iter()
             .filter(|row| row.group == Group::NeedsYou)
             .collect();
+        let mut rows: Vec<_> = needs.iter().filter(|row| !row.seen).cloned().collect();
         if rows.is_empty() {
-            return error_line("NOBODY_NEEDS_YOU", "no pane needs you");
+            rows = needs;
+        }
+        if rows.is_empty() {
+            return error_line("NOBODY_NEEDS_YOU", "nobody needs you");
         }
         if back {
             rows.reverse();
         }
-        let at = after.and_then(|key| rows.iter().position(|row| row.key == key));
+        let at = after.and_then(|id| {
+            rows.iter()
+                .position(|row| row.key == id || row.pane.block_id == id)
+        });
         let pick = at.map_or(0, |i| (i + 1) % rows.len());
         json!({ "v": VERSION, "row": rows[pick] })
     }

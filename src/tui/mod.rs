@@ -4,7 +4,7 @@ mod view;
 
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -12,10 +12,11 @@ use std::time::{Duration, Instant};
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 use serde_json::json;
 
+use crate::board::Row;
 use crate::client::{self, Rows};
 use crate::error::{Error, Result};
-use crate::output::clean;
-use crate::{interrupted, rex, stop_on_signals};
+use crate::output::{clean, labels, path};
+use crate::{interrupted, jump, rex, stop_on_signals};
 
 use app::{App, Effect, Link};
 
@@ -27,20 +28,37 @@ enum Msg {
     Gone(String),
     Peek(String, std::result::Result<Vec<String>, String>),
     Say(String),
+    Jumped(std::result::Result<String, String>),
 }
+
+/// What the process exits with when a signal or a lost terminal ends it.
+static LEAVE_CODE: AtomicI32 = AtomicI32::new(0);
 
 pub fn run() -> Result<()> {
     // SIGTERM or SIGHUP (the board window closing) stops the loop, which puts the terminal back.
     stop_on_signals();
     watchdog();
-    board()
+    board(false).map(drop)
 }
 
-fn board() -> Result<()> {
+/// `rexboard pick`: the list alone. Enter leaves it and goes to the row; esc gives up.
+pub fn pick(json: bool) -> Result<()> {
+    LEAVE_CODE.store(1, Ordering::SeqCst);
+    stop_on_signals();
+    watchdog();
+    let row = board(true)?.ok_or(Error::Cancelled)?;
+    jump::go(&row)?;
+    jump::done(&row, json);
+    Ok(())
+}
+
+/// Runs the board until it quits, or until a pick chooses a row.
+fn board(pick: bool) -> Result<Option<Row>> {
     let (tx, rx) = mpsc::channel();
     let generation = Arc::new(AtomicU64::new(0));
     listen(&tx, &generation);
     let mut app = App::default();
+    app.pick = pick;
     let mut terminal = ratatui::init();
     let _restore = Restore;
     let mut tick = Instant::now();
@@ -57,7 +75,8 @@ fn board() -> Result<()> {
                 match event::read().unwrap_or_else(|_| leave()) {
                     Event::Key(key) if key.kind != KeyEventKind::Release => {
                         match app.handle(key) {
-                            Some(Effect::Quit) => return Ok(()),
+                            Some(Effect::Quit) => return Ok(None),
+                            Some(Effect::Jump(row)) if pick => return Ok(Some(*row)),
                             Some(effect) => act(effect, &tx, &generation),
                             None => {}
                         }
@@ -74,7 +93,7 @@ fn board() -> Result<()> {
                         changed = true;
                     }
                     Err(RecvTimeoutError::Timeout) => break,
-                    Err(RecvTimeoutError::Disconnected) => return Ok(()),
+                    Err(RecvTimeoutError::Disconnected) => return Ok(None),
                 }
             }
             if tick.elapsed() >= Duration::from_secs(1) {
@@ -121,7 +140,7 @@ fn terminal_gone() -> bool {
 fn leave() -> ! {
     let _ = ratatui::try_restore();
     let _ = ratatui::crossterm::execute!(std::io::stdout(), ratatui::crossterm::cursor::Show);
-    std::process::exit(0)
+    std::process::exit(LEAVE_CODE.load(Ordering::SeqCst))
 }
 
 fn apply(app: &mut App, msg: Msg) {
@@ -137,6 +156,7 @@ fn apply(app: &mut App, msg: Msg) {
             }
         }
         Msg::Say(text) => app.say(text),
+        Msg::Jumped(result) => app.jumped(result),
     }
 }
 
@@ -168,6 +188,14 @@ fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
                     Some(err) => format!("{marked} done {rows} marked seen; seen failed: {err}"),
                 };
                 let _ = tx.send(Msg::Say(text));
+            });
+        }
+        Effect::Jump(row) => {
+            thread::spawn(move || {
+                let result = jump::go(&row)
+                    .map(|()| format!("jumped to {}", path(&labels(&row, true), usize::MAX)))
+                    .map_err(|err| err.to_string());
+                let _ = tx.send(Msg::Jumped(result));
             });
         }
         Effect::Peek { key, host, block } => {

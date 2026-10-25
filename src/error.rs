@@ -8,6 +8,8 @@ pub enum Error {
     Usage { message: String, steps: Vec<String> },
     #[error("a command is required")]
     Help,
+    #[error("cancelled")]
+    Cancelled,
     #[error("{0}")]
     RexNotFound(String),
     #[error("{0}")]
@@ -22,6 +24,22 @@ pub enum Error {
     ServeRunning(String),
     #[error("{0}")]
     NotFound(String),
+    #[error("nobody needs you")]
+    NobodyNeedsYou,
+    /// No app, or not exactly one, could take a jump on this host.
+    #[error("{message}")]
+    AmbiguousClient { message: String, steps: Vec<String> },
+    /// Rex failed in a way rexboard can explain; `detail` keeps Rex's own words for --json.
+    #[error("{message}")]
+    RexExplained {
+        message: String,
+        steps: Vec<String>,
+        detail: String,
+    },
+    #[error("{0}")]
+    Config(String),
+    #[error("{0}")]
+    Jump(String),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -49,13 +67,18 @@ impl Error {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Usage { .. } | Self::Help => "USAGE",
+            Self::Cancelled => "CANCELLED",
             Self::RexNotFound(_) => "REX_NOT_FOUND",
-            Self::Rex(_) => "REX",
+            Self::Rex(_) | Self::RexExplained { .. } => "REX",
             Self::HostsUnreachable(_) => "HOSTS_UNREACHABLE",
             Self::ContractMismatch(_) => "CONTRACT_MISMATCH",
             Self::Serve { .. } => "SERVE",
             Self::ServeRunning(_) => "SERVE_RUNNING",
             Self::NotFound(_) => "NOT_FOUND",
+            Self::NobodyNeedsYou => "NOBODY_NEEDS_YOU",
+            Self::AmbiguousClient { .. } => "AMBIGUOUS_CLIENT",
+            Self::Config(_) => "CONFIG",
+            Self::Jump(_) => "JUMP",
             Self::Io(_) => "IO",
         }
     }
@@ -72,6 +95,9 @@ impl Error {
             Self::Serve { steps, .. } => steps.clone(),
             Self::ServeRunning(_) => vec!["rexboard serve --stop".to_owned()],
             Self::NotFound(_) => vec!["rexboard ls --json".to_owned()],
+            Self::NobodyNeedsYou => vec!["rexboard ls".to_owned()],
+            Self::AmbiguousClient { steps, .. } | Self::RexExplained { steps, .. } => steps.clone(),
+            Self::Config(_) | Self::Jump(_) => vec![CONFIG_DOC.to_owned()],
             Self::ContractMismatch(_) => vec![
                 "rexboard --version".to_owned(),
                 "curl -fsSL https://raw.githubusercontent.com/vanducng/rexboard/main/install.sh | sh"
@@ -89,13 +115,15 @@ impl Error {
     }
 
     pub fn quiet(&self) -> bool {
-        matches!(self, Self::Help)
+        matches!(self, Self::Help | Self::Cancelled)
     }
 }
 
+const CONFIG_DOC: &str = "https://github.com/vanducng/rexboard/blob/main/docs/configuration.md";
+
 pub fn report(json: bool, err: &Error) {
     if json {
-        let body = json!({
+        let mut body = json!({
             "ok": false,
             "error": {
                 "code": err.code(),
@@ -103,7 +131,14 @@ pub fn report(json: bool, err: &Error) {
                 "next_steps": err.next_steps(),
             }
         });
+        if let Error::RexExplained { detail, .. } = err {
+            body["error"]["detail"] = json!(detail);
+        }
         eprintln!("{body}");
+        return;
+    }
+    if let Error::NobodyNeedsYou = err {
+        eprintln!("{err}");
         return;
     }
     eprintln!("error: {err}");

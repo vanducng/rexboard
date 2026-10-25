@@ -25,6 +25,8 @@ pub enum Effect {
     },
     /// Mark these unseen `done` rows seen.
     SeenAll(Vec<String>),
+    /// Go to this row's pane.
+    Jump(Box<Row>),
     Reconnect,
     Quit,
 }
@@ -79,6 +81,12 @@ pub struct App {
     pub keys: bool,
     pub toast: Option<(String, Instant)>,
     pub link: Link,
+    /// `rexboard pick`: the list alone; enter goes and esc gives up.
+    pub pick: bool,
+    /// `going to …` while a jump runs; a second Enter starts nothing.
+    pub going: Option<String>,
+    /// Why the last jump failed, until the next key.
+    pub failed: Option<String>,
     needs: BTreeSet<String>,
 }
 
@@ -105,6 +113,16 @@ impl App {
 
     pub fn say(&mut self, text: impl Into<String>) {
         self.toast = Some((text.into(), Instant::now()));
+    }
+
+    /// A jump finished: say where it went, or keep why it failed in view.
+    pub fn jumped(&mut self, result: Result<String, String>) {
+        self.going = None;
+        self.toast = None;
+        match result {
+            Ok(text) => self.say(text),
+            Err(why) => self.failed = Some(why),
+        }
     }
 
     pub fn toast(&self) -> Option<&str> {
@@ -212,6 +230,7 @@ impl App {
     }
 
     pub fn handle(&mut self, key: KeyEvent) -> Option<Effect> {
+        self.failed = None;
         if self.filtering {
             match key.code {
                 KeyCode::Esc => {
@@ -240,6 +259,7 @@ impl App {
                 self.keys = !self.keys;
                 self.peek = None;
             }
+            KeyCode::Esc if self.pick => return Some(Effect::Quit),
             KeyCode::Esc => {
                 self.filter.reset();
                 self.peek = None;
@@ -289,7 +309,7 @@ impl App {
             KeyCode::Char('s') => {
                 return self.current().map(|row| Effect::Seen {
                     key: row.key.clone(),
-                    label: path(&labels(row, &self.rows, true), usize::MAX),
+                    label: path(&labels(row, true), usize::MAX),
                     state: row.pane.state.clone(),
                 });
             }
@@ -311,10 +331,14 @@ impl App {
                 });
                 return Some(Effect::Peek { key, host, block });
             }
+            KeyCode::Enter if self.going.is_some() => self.say("a jump is already running"),
             KeyCode::Enter => {
-                if self.current().is_some() {
-                    self.say("jump arrives in a later version");
-                }
+                let row = self.current()?.clone();
+                self.going = Some(format!(
+                    "going to {}…",
+                    path(&labels(&row, true), usize::MAX)
+                ));
+                return Some(Effect::Jump(Box::new(row)));
             }
             KeyCode::Char('r') => {
                 self.link = Link::Connecting;
@@ -467,6 +491,33 @@ pub mod tests {
     }
 
     #[test]
+    fn enter_says_where_it_goes_and_starts_one_jump_at_a_time() {
+        let mut app = app();
+        assert!(matches!(
+            press(&mut app, KeyCode::Enter),
+            Some(Effect::Jump(row)) if row.key == "mini/seat-b"
+        ));
+        assert_eq!(app.going.as_deref(), Some("going to api › seat-b…"));
+        assert_eq!(press(&mut app, KeyCode::Enter), None, "no second jump");
+        assert_eq!(app.toast(), Some("a jump is already running"));
+        app.jumped(Err("the Rex app on studio did not answer within 5s".into()));
+        assert_eq!(app.toast(), None, "the end of the jump clears it");
+        assert_eq!(app.going, None);
+        assert_eq!(
+            app.failed.as_deref(),
+            Some("the Rex app on studio did not answer within 5s")
+        );
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!(app.failed, None, "the next key clears it");
+        assert!(matches!(
+            press(&mut app, KeyCode::Enter),
+            Some(Effect::Jump(_))
+        ));
+        app.jumped(Ok("jumped to api › claude on local".into()));
+        assert_eq!(app.toast(), Some("jumped to api › claude on local"));
+    }
+
+    #[test]
     fn s_sends_seen_for_the_selected_key() {
         let mut app = app();
         press(&mut app, KeyCode::Char('j'));
@@ -478,8 +529,10 @@ pub mod tests {
                 state: "done".into(),
             })
         );
-        assert_eq!(press(&mut app, KeyCode::Enter), None);
-        assert_eq!(app.toast(), Some("jump arrives in a later version"));
+        assert!(matches!(
+            press(&mut app, KeyCode::Enter),
+            Some(Effect::Jump(row)) if row.key == "local/claude"
+        ));
     }
 
     #[test]
