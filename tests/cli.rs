@@ -106,6 +106,7 @@ fn ls_json_lists_panes_from_both_hosts() {
             "block:web-seat-b",
             "block:api-claude",
             "block:web-codex",
+            "block:web-rig-review",
             "block:api-seat-a",
             "block:web-codex-seat"
         ]
@@ -526,7 +527,7 @@ fn ls_text_shows_group_and_estimated_age() {
     ls().assert()
         .success()
         .stdout(predicate::str::starts_with("GROUP"))
-        .stdout(predicate::str::is_match(r"\nworking +working +≥\d+d +codex").unwrap());
+        .stdout(predicate::str::is_match(r"\nworking +working +≥\d+d\d+h +codex").unwrap());
 }
 
 /// A serve with its own runtime and state dirs, stopped when the test ends.
@@ -903,4 +904,30 @@ fn seen_without_a_host_is_usage() {
         .assert()
         .code(2)
         .stderr(predicate::str::contains("KEY must be HOST/BLOCK_ID"));
+}
+
+#[test]
+fn ls_text_squeezes_long_labels_and_dates_only_reported_rows() {
+    let out = ls().assert().success().get_output().stdout.clone();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("web › 2-openrig:ri…89abcdef#l2 › review.review"),
+        "a long tab label is squeezed in the middle:\n{text}"
+    );
+    let seat = text.lines().find(|l| l.contains("seat-a@demo")).unwrap();
+    assert!(
+        seat.contains("unreported  idle     -  "),
+        "no record, no age: {seat}"
+    );
+    let panes = ls_json(&mut ls());
+    let review = by_block(&panes, "block:web-rig-review");
+    assert_eq!(
+        review["tab"], "2-openrig:rig:demo-team#0123456789abcdef#l2",
+        "--json keeps the full label"
+    );
+    let seat = by_block(&panes, "block:api-seat-a");
+    assert_eq!(
+        seat["since_estimated"], true,
+        "no record: since is a guess, as docs/cli.md says"
+    );
 }

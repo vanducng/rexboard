@@ -140,6 +140,34 @@
                   "records": {}
                 }
               ]
+            },
+            {
+              "window_id": "window:web-rig",
+              "label": "2-openrig:rig:demo-team#0123456789abcdef#l2",
+              "blocks": [
+                {
+                  "block_id": "block:web-rig-review",
+                  "label": "review.review",
+                  "title": "✳ review-review@demo-team",
+                  "process": {
+                    "name": "tmux",
+                    "cwd": "/work/web"
+                  },
+                  "records": [
+                    {
+                      "state": "working",
+                      "app": "claude-code",
+                      "effective_app": "claude-code",
+                      "msg": "Reviewing the parser change",
+                      "owner": {
+                        "name": "tmux",
+                        "pid": 204
+                      },
+                      "updated_at": "2026-01-01T10:03:00+00:00"
+                    }
+                  ]
+                }
+              ]
             }
           ]
         }
