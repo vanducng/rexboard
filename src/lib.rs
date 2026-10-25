@@ -117,8 +117,11 @@ fn watch(args: &WatchArgs) -> Result<()> {
     }
     // Observers run in their own process group, so stop on a signal and let Drop kill them.
     unsafe {
-        libc::signal(libc::SIGINT, interrupted as libc::sighandler_t);
-        libc::signal(libc::SIGTERM, interrupted as libc::sighandler_t);
+        libc::signal(libc::SIGINT, interrupted as *const () as libc::sighandler_t);
+        libc::signal(
+            libc::SIGTERM,
+            interrupted as *const () as libc::sighandler_t,
+        );
     }
     let deadline = args
         .duration
