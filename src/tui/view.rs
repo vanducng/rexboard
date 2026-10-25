@@ -208,7 +208,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
     let area = if board.height >= HEADED {
         let [top, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
         let cells = columns.header().concat();
-        frame.render_widget(Paragraph::new(Line::styled(cells, theme::header())), top);
+        frame.render_widget(Paragraph::new(Line::styled(cells, theme::dim())), top);
         rest
     } else {
         area

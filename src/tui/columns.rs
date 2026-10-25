@@ -13,8 +13,8 @@ pub enum Tier {
     Narrow,
     /// 60-99: adds harness and host.
     Mid,
-    /// 100 and up: adds the state word with its kind, and the tab, with the detail pane on the
-    /// right. TURN joins at 140.
+    /// 100 and up: adds the state (or its kind) and the tab, with the detail pane on the right.
+    /// TURN joins at 140.
     Wide,
 }
 
@@ -77,7 +77,7 @@ const fn column(id: Col, header: &'static str, min_board: u16, width: Width, ton
 /// Every column, left to right.
 pub const COLUMNS: [Column; 8] = [
     column(Col::Glyph, "", 0, Width::Fixed(2), Tone::State),
-    column(Col::State, "STATE", 100, Width::Fixed(13), Tone::State),
+    column(Col::State, "STATE", 100, Width::Fixed(11), Tone::State),
     column(Col::Age, "AGE", 0, Width::Fixed(7), Tone::Soft),
     column(Col::Turn, "TURN", 140, Width::Fixed(7), Tone::Soft),
     column(Col::Harness, "HARNESS", 60, Width::Fixed(8), Tone::Soft),
@@ -105,10 +105,12 @@ impl Columns {
             })
             .sum();
         let rest = list.saturating_sub(lead);
-        let place = if tier == Tier::Wide {
-            rest * 2 / 3
-        } else {
-            rest * 9 / 20
+        // WHERE names the row, so from 100 it keeps v0.1's width (one over 5/9, after STATE
+        // widened) and from 140 TURN's room comes out of MSG.
+        let place = match (tier, board) {
+            (_, 140..) => rest * 2 / 3,
+            (Tier::Wide, _) => (rest * 5 / 9 + 1).min(rest),
+            _ => rest * 9 / 20,
         };
         let cols = shown
             .into_iter()
@@ -167,14 +169,12 @@ impl Columns {
     }
 }
 
-/// The state word, with the first four letters of its kind: `blocked·perm`.
+/// The kind when the row has one (`permission`, `question`), since the glyph already says
+/// blocked; else the state word.
 fn state(row: &Row) -> String {
-    let word = state_word(row);
     match &row.pane.kind {
-        Some(kind) if !row.suspect && !kind.is_empty() => {
-            format!("{word}·{}", kind.chars().take(4).collect::<String>())
-        }
-        _ => word,
+        Some(kind) if !row.suspect && !kind.is_empty() => kind.clone(),
+        _ => state_word(row),
     }
 }
 
@@ -284,20 +284,43 @@ mod tests {
     }
 
     #[test]
-    fn state_carries_its_kind_from_100_columns() {
+    fn state_shows_the_kind_word_from_100_columns() {
         let mut app = App::default();
-        let mut asking = row("local/asking", "blocked", "needs_you", false);
+        let mut asking = row("local/ask", "blocked", "needs_you", false);
         asking.pane.kind = Some("permission".into());
-        app.set_rows(vec![asking], hosts());
-        let text = |width| {
-            let buf = buffer(&app, width, 20);
-            (0..20)
-                .map(|y| line(&buf, y))
-                .collect::<Vec<_>>()
-                .join("\n")
+        let mut choosing = row("local/pick", "blocked", "needs_you", false);
+        choosing.pane.kind = Some("question".into());
+        let plain = row("local/plain", "blocked", "needs_you", false);
+        let mut stale = row("local/stale", "working", "unreported", true);
+        stale.pane.kind = Some("permission".into());
+        stale.suspect = true;
+        app.set_rows(vec![asking, choosing, plain, stale], hosts());
+        let row_at = |width: u16, needle: &str| {
+            let buf = buffer(&app, width, 30);
+            let y = (2..30).find(|&y| line(&buf, y).contains(needle)).unwrap();
+            let list = list_width(&app, width);
+            line(&buf, y).chars().take(list).collect::<String>()
         };
-        assert!(text(100).contains("◉ blocked·perm "), "{}", text(100));
-        assert!(!text(99).contains("blocked·perm"), "{}", text(99));
+        assert!(row_at(100, "ask msg").starts_with("◉ permission "));
+        assert!(row_at(100, "pick msg").starts_with("◉ question "));
+        assert!(row_at(100, "plain msg").starts_with("◉ blocked "));
+        assert!(row_at(100, "stale msg").starts_with("○ idle? "));
+        let narrow = row_at(99, "ask msg");
+        assert!(
+            narrow.starts_with("◉ 5h43m "),
+            "no STATE below 100: {narrow}"
+        );
+        assert!(!narrow.contains("permission") && !narrow.contains("blocked"));
+    }
+
+    #[test]
+    fn where_and_msg_widths_at_120_and_140() {
+        let at = |board: u16| {
+            let columns = Columns::new(board, usize::from(board) - 39);
+            (columns.width(Col::Where), columns.width(Col::Msg))
+        };
+        assert_eq!(at(120), (26, 19), "v0.1's WHERE, one over 5/9");
+        assert_eq!(at(140), (38, 20), "from 140 WHERE takes two thirds");
     }
 
     #[test]
