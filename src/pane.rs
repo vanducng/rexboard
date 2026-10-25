@@ -290,9 +290,16 @@ fn title_state(title: &str) -> Option<&'static str> {
     glyph(title).map(|(state, _)| state)
 }
 
-/// The title without its leading state glyph, for display.
+/// The title without its leading state glyph, for display. The seat status line's other
+/// glyphs are dropped too, though they do not set a state.
 pub fn bare_title(title: &str) -> &str {
-    glyph(title).map_or(title, |(_, rest)| rest)
+    if let Some((_, rest)) = glyph(title) {
+        return rest;
+    }
+    ["◉ ", "● ", "○ ", "✖ "]
+        .iter()
+        .find_map(|g| title.strip_prefix(g))
+        .unwrap_or(title)
 }
 
 #[cfg(test)]
@@ -341,6 +348,14 @@ mod tests {
         assert_eq!(bare_title("✳ seat-a@demo"), "seat-a@demo");
         assert_eq!(bare_title("⠋ seat-a@demo"), "seat-a@demo");
         assert_eq!(bare_title("◐ seat-a@demo"), "seat-a@demo");
+        for g in ["◉", "●", "○", "✖"] {
+            assert_eq!(bare_title(&format!("{g} seat-a@demo")), "seat-a@demo");
+            assert_eq!(
+                title_state(&format!("{g} seat-a@demo")),
+                None,
+                "no state from {g}"
+            );
+        }
         assert_eq!(bare_title("✳seat-a"), "✳seat-a");
         assert_eq!(bare_title("Fix the parser"), "Fix the parser");
     }
