@@ -22,7 +22,6 @@ exclude = ["build-box"]
 | `jump.pre_cmd` | array of strings | none | A command run before each jump, with no shell. It must exit 0 within 5 seconds, or the jump fails with `JUMP` and nothing is selected |
 | `hosts.exclude` | array of strings | `[]` | Remote hosts to leave out of `ls`, `watch` and the board. After a change, run `rexboard serve --stop` so serve rescans |
 
-
 ## Why `jump.pre_cmd`
 
 A jump asks the Rex app to select a session (`client.perform session.select`). The action takes the session and one of its tabs, but no app window: the app switches whichever of its windows has focus. Checked on Rex Beta 0.1.0 (1408), server API revision 7:
