@@ -35,7 +35,7 @@ pub fn table(rows: &[Row], now: DateTime<Utc>, width: Option<usize>) -> String {
                     .ok()
                     .and_then(|group| group.as_str().map(str::to_owned))
                     .unwrap_or_default(),
-                pane.state.clone(),
+                state_word(row),
                 in_state(row, now),
                 harness(row),
                 pane.host.clone(),
@@ -93,6 +93,15 @@ pub fn harness(row: &Row) -> String {
         format!("{name}?")
     } else {
         name.to_owned()
+    }
+}
+
+/// The state to show: `idle?` for a suspect `working` row, whose record is not believed.
+pub fn state_word(row: &Row) -> String {
+    if row.suspect {
+        "idle?".to_owned()
+    } else {
+        row.pane.state.clone()
     }
 }
 
@@ -259,7 +268,7 @@ mod tests {
             "kind": null, "msg": msg, "updated_at": null,
             "source": "native", "children": {}, "since": "2026-01-01T00:00:00.000Z",
             "since_estimated": false, "turn_started": null, "last_turn": null, "seen": true,
-            "stale": false, "group": "working"
+            "stale": false, "suspect": false, "suspect_reason": null, "group": "working"
         }))
         .unwrap()
     }

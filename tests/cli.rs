@@ -420,7 +420,7 @@ fn ls_json_adds_board_fields() {
     );
     assert_eq!(codex["turn_started"], "2026-01-01T10:02:00.000Z");
     assert_eq!(by_block(&panes, "block:api-seat-a")["group"], "unreported");
-    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 23));
+    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 25));
 }
 
 /// A status line for the fixture's idle seat on `host`, sent after the recorded stream ends.
@@ -1023,4 +1023,29 @@ fn board_restores_the_terminal_on_sigterm_and_sighup() {
             "the cursor is shown again"
         );
     }
+}
+
+#[test]
+fn ls_marks_an_old_working_report_on_an_idle_pane_suspect() {
+    let panes = ls_json(&mut ls());
+    let seat = by_block(&panes, "block:web-rig-review");
+    assert_eq!(seat["state"], "working", "the raw state stays");
+    assert_eq!(seat["suspect"], true);
+    assert_eq!(seat["group"], "unreported");
+    assert!(
+        seat["suspect_reason"]
+            .as_str()
+            .unwrap()
+            .ends_with("but the title shows idle"),
+        "{seat}"
+    );
+    assert_eq!(
+        by_block(&panes, "block:web-codex")["suspect"],
+        false,
+        "codex is still in front"
+    );
+    let out = ls().assert().success().get_output().stdout.clone();
+    let text = String::from_utf8(out).unwrap();
+    let line = text.lines().find(|l| l.contains("seat-r")).unwrap();
+    assert!(line.contains("unreported  idle?"), "{line}");
 }

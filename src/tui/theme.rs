@@ -24,6 +24,9 @@ pub fn header() -> Style {
 
 /// The glyph for a row: `○` once a done pane has been seen.
 pub fn glyph(row: &Row) -> &'static str {
+    if row.suspect {
+        return "○";
+    }
     match row.pane.state.as_str() {
         "blocked" => "◉",
         "error" => "✖",
@@ -35,6 +38,9 @@ pub fn glyph(row: &Row) -> &'static str {
 }
 
 pub fn state(row: &Row) -> Style {
+    if row.suspect {
+        return dim();
+    }
     let base = match row.pane.state.as_str() {
         "blocked" | "error" => Style::new().fg(Color::Red),
         "done" if !row.seen => Style::new().fg(Color::Green),

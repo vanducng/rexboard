@@ -9,7 +9,7 @@ use unicode_width::UnicodeWidthStr;
 use super::app::{App, Item, Spot};
 use super::theme;
 use crate::board::Row;
-use crate::output::{fit, harness, in_state, path, what};
+use crate::output::{fit, harness, in_state, path, state_word, what};
 use crate::pane::bare_title;
 
 /// Width of the detail pane when it sits on the right.
@@ -271,7 +271,7 @@ fn row_line(
     now: DateTime<Utc>,
 ) -> Line<'static> {
     let faded = row.stale || !app.connected;
-    let soft = if row.pane.source == "inferred" || faded {
+    let soft = if row.pane.source == "inferred" || row.suspect || faded {
         theme::dim()
     } else {
         Style::new()
@@ -279,7 +279,7 @@ fn row_line(
     let mut cells: Vec<(String, Style)> =
         vec![(format!("{} ", theme::glyph(row)), theme::state(row))];
     if tier == Tier::Wide {
-        cells.push((fit(&row.pane.state, 8) + " ", theme::state(row)));
+        cells.push((fit(&state_word(row), 8) + " ", theme::state(row)));
     }
     cells.push((fit(&in_state(row, now), 6) + " ", soft));
     if tier >= Tier::Mid {
@@ -364,6 +364,13 @@ fn detail(app: &App, now: DateTime<Utc>, width: usize, wide: bool) -> Vec<Line<'
             text.to_owned()
         }
     };
+    if let Some(why) = &row.suspect_reason {
+        lines.extend(
+            wrap(&format!("suspect: {why}"), width.max(1))
+                .into_iter()
+                .map(|line| Line::styled(line, Style::new().fg(Color::Yellow))),
+        );
+    }
     let mut pairs = vec![("state", state)];
     if wide {
         pairs.push(("in state", in_state(row, now)));

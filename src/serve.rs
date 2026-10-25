@@ -176,6 +176,7 @@ struct Reducer {
     started: Instant,
     announced: bool,
     rows_cache: Option<String>,
+    suspects: BTreeSet<(String, String)>,
     rows_due: Option<Instant>,
     save_due: Option<Instant>,
 }
@@ -204,6 +205,7 @@ impl Reducer {
             started: Instant::now(),
             announced: false,
             rows_cache: None,
+            suspects: BTreeSet::new(),
             rows_due: None,
             save_due: None,
         }
@@ -241,6 +243,12 @@ impl Reducer {
             }
             if now.duration_since(beat) >= HEARTBEAT {
                 beat = now;
+                // A working report goes suspect with time alone, with no event to say so.
+                let suspects = self.board.suspects(chrono::Utc::now());
+                if suspects != self.suspects {
+                    self.suspects = suspects;
+                    self.rows_changed();
+                }
                 let line = json!({ "v": VERSION, "heartbeat": true }).to_string();
                 self.subscribers.heartbeat(&line);
                 let pids: Vec<i32> = self
@@ -406,7 +414,7 @@ impl Reducer {
     }
 
     fn rows_line(&self) -> Value {
-        json!({ "v": VERSION, "rows": self.board.rows(), "hosts": self.hosts })
+        json!({ "v": VERSION, "rows": self.board.rows(chrono::Utc::now()), "hosts": self.hosts })
     }
 
     fn request(&mut self, request: Request, reply: SyncSender<String>) {
@@ -436,7 +444,7 @@ impl Reducer {
     fn next(&self, after: Option<&str>, back: bool) -> Value {
         let mut rows: Vec<_> = self
             .board
-            .rows()
+            .rows(chrono::Utc::now())
             .into_iter()
             .filter(|row| row.group == Group::NeedsYou)
             .collect();

@@ -320,7 +320,8 @@ pub mod tests {
             "kind": null, "msg": format!("{block} msg"), "updated_at": "2026-01-01T00:00:00Z",
             "source": "native", "children": {}, "since": "2026-01-01T00:00:00.000Z",
             "since_estimated": false, "turn_started": null, "last_turn": null,
-            "seen": seen, "stale": false, "group": group
+            "seen": seen, "stale": false, "suspect": false, "suspect_reason": null,
+            "group": group
         }))
         .unwrap()
     }

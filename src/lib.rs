@@ -123,7 +123,7 @@ fn ls(args: &LsArgs, json: bool) -> Result<()> {
         eprintln!("{warning}");
     }
     let rows: Vec<_> = board
-        .rows()
+        .rows(now)
         .into_iter()
         .filter(|row| args.all || row.pane.is_agent())
         .collect();
@@ -268,7 +268,7 @@ fn stop_host(failed: &mut BTreeSet<String>, hosts: usize, host: &str, err: Error
 
 fn print_rows(out: &mut impl Write, board: &Board) -> std::io::Result<()> {
     let rows: Vec<_> = board
-        .rows()
+        .rows(chrono::Utc::now())
         .into_iter()
         .filter(|row| row.pane.is_agent())
         .collect();
