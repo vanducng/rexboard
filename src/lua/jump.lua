@@ -59,6 +59,9 @@ local app, why
 if remote then app, why = remote_app() else app, why = local_app() end
 if not app then return why end
 
+-- focus_block acts only on a session this stream is attached to.
+local _, aerr = api.call("session.attach", { session_id = a.session_id })
+if aerr then return fail("session.attach", aerr) end
 local _, ferr = api.call("session.focus_block", { session_id = a.session_id, block_id = a.block_id })
 if ferr then return fail("session.focus_block", ferr) end
 
@@ -67,6 +70,9 @@ local _, perr = api.call("client.perform", {
   action = "session.select",
   args = { session_id = a.session_id, window_id = a.window_id },
   origin = "api",
+  -- Under rexboard's 10s limit on rex do, so an app that does not answer (as on a locked
+  -- screen) fails here with its own reason.
+  timeout_ms = 5000,
 })
 if perr then return fail("session.select", perr) end
 return { ok = true }
