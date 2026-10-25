@@ -57,7 +57,9 @@ The text table has the columns `GROUP`, `STATE`, `AGE` (time in the current stat
 | `last_turn` | integer or null | Seconds from entering `working` to the next `done` or `blocked`. Short when the turn was already running when rexboard started |
 | `seen` | boolean | `false` after the pane enters `done`, `blocked` or `error`; `true` once it enters `working` again. A `done`, `blocked` or `error` first seen in a snapshot starts unseen. `rexboard seen KEY`, or `s` on the board, marks it seen |
 | `stale` | boolean | `true` while the host's observer is down; the next snapshot clears it |
-| `group` | string | `needs_you` (`blocked`, `error`, unseen `done`), `working`, `quiet` (`idle`, seen `done`), or `unreported` (`source` is `inferred`, `state` is `unknown`, or `stale`) |
+| `suspect` | boolean | `true` when the record says `working`, its last report is more than 120 seconds old, and the pane disagrees: its title starts with Claude's idle `✳ `, or a shell (`zsh`, `bash`, `fish`, `sh`) is back in front. A hook that never reported the end of a turn leaves this behind. `state` keeps the record's value; the board and the `ls` table show `idle?` |
+| `suspect_reason` | string or null | Why, as in `reports working since 14:02, but the title shows idle` |
+| `group` | string | `needs_you` (`blocked`, `error`, unseen `done`), `working`, `quiet` (`idle`, seen `done`), or `unreported` (`source` is `inferred`, `state` is `unknown`, `stale`, or `suspect`) |
 
 The pane's main record is the one with no `id`; if every record has one, the most urgent wins.
 
