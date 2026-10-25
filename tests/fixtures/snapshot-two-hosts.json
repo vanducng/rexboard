@@ -132,7 +132,7 @@
                 {
                   "block_id": "block:web-codex-seat",
                   "label": "seat-c",
-                  "title": "api | gpt-x",
+                  "title": "api | gpt-4x",
                   "process": {
                     "name": "tmux",
                     "cwd": "/work/web"

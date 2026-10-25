@@ -195,7 +195,7 @@ pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
         .and_then(|r| r.effective_app.clone().or_else(|| r.app.clone()))
         .or_else(|| process.and_then(process_harness))
         .or_else(|| title_state(&src.title).map(|_| "claude-code".to_owned()))
-        .or_else(|| codex_title(&src.title).then(|| "codex".to_owned()));
+        .or_else(|| codex_title(&src.title, process).then(|| "codex".to_owned()));
     let owner = main
         .and_then(|r| r.owner.as_ref())
         .and_then(|o| o.name.as_deref());
@@ -236,17 +236,20 @@ pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
     }
 }
 
-/// Codex in tmux reports nothing and titles the pane `<dir> | <model>`, as in `api | gpt-x`.
-/// Strict, so a shell command with a pipe never matches.
-fn codex_title(title: &str) -> bool {
+/// Codex in tmux reports nothing and titles the pane `<dir> | <model>`, as in `api | gpt-4x`.
+/// Strict, so a shell command with a pipe (`env | sort`) never matches: the pane must be tmux
+/// and the model must have a digit.
+fn codex_title(title: &str, process: Option<&str>) -> bool {
     let Some((dir, model)) = title.split_once(" | ") else {
         return false;
     };
-    title.matches('|').count() == 1
+    process == Some("tmux")
+        && title.matches('|').count() == 1
         && !dir.is_empty()
         && !dir.contains(char::is_whitespace)
         && !model.is_empty()
         && model.chars().any(|c| c.is_ascii_alphabetic())
+        && model.chars().any(|c| c.is_ascii_digit())
         && model
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
@@ -295,14 +298,23 @@ mod tests {
 
     #[test]
     fn codex_title_is_strict() {
-        assert!(codex_title("api | gpt-x"));
-        assert!(codex_title("work | Model-2.5-Pro"));
-        assert!(!codex_title("tail -f log | grep err"), "a shell pipe");
-        assert!(!codex_title("a | b | c"), "two separators");
-        assert!(!codex_title("api | gpt x"), "a space in the model");
-        assert!(!codex_title("api|gpt-x"), "no spaces around the bar");
-        assert!(!codex_title(" | gpt-x"), "no dir");
-        assert!(!codex_title("api | 6.1"), "a model has letters");
+        let tmux = Some("tmux");
+        assert!(codex_title("api | gpt-x1", tmux));
+        assert!(codex_title("work | Model-2.5-Pro", tmux));
+        assert!(
+            !codex_title("api | gpt-x1", Some("zsh")),
+            "only a tmux pane"
+        );
+        assert!(!codex_title("api | gpt-x1", None), "only a tmux pane");
+        assert!(!codex_title("env | sort", tmux), "a model has a digit");
+        assert!(!codex_title("dmesg | less", tmux), "a model has a digit");
+        assert!(!codex_title("history | tail", tmux), "a model has a digit");
+        assert!(!codex_title("tail -f log | grep err", tmux), "a shell pipe");
+        assert!(!codex_title("a | b1 | c", tmux), "two separators");
+        assert!(!codex_title("api | gpt x1", tmux), "a space in the model");
+        assert!(!codex_title("api|gpt-x1", tmux), "no spaces around the bar");
+        assert!(!codex_title(" | gpt-x1", tmux), "no dir");
+        assert!(!codex_title("api | 6.1", tmux), "a model has letters");
     }
 
     #[test]
