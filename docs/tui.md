@@ -36,6 +36,21 @@ The board is built to live in a narrow column, so the narrow layout is the main 
 
 Long labels are cut to fit: a `session`, `tab` or `pane` label to 24 columns with `…` in the middle, and every cell at its column's edge with `…`. Widths count CJK and emoji as two columns. Colours are ANSI named colours only, so the terminal's theme carries through.
 
+## Views
+
+A view is a way of grouping the rows plus a sort. The view and sort last for the run.
+
+| View | Groups | Order inside a group, with no sort |
+| --- | --- | --- |
+| `status` (the default) | `NEEDS YOU`, `WORKING`, `QUIET`, `UNREPORTED`, as above | As above |
+| `flat` | None: one list with no group headers | The `status` view's order |
+| `harness` | One per harness (`CLAUDE`, `CODEX`), a to z, with `?` (no harness) last | The `status` view's order |
+| `host` | One per host (`LOCAL`, `MINI`), a to z | The `status` view's order |
+
+Shift and a column's letter sorts by that column inside each group: `S` state, `A` age, `T` turn, `R` harness (runtime), `O` host, `N` where (name), `M` msg. The letters follow k9s. The first press sorts `AGE` and `TURN` longest first (`↓`), `STATE` most urgent first (blocked, error, done, working, idle; `↑`) and the text columns a to z (`↑`). The same letter again flips it, and `esc` clears it. A row with no value (no status record to date it, no finished turn) sorts last either way. In the `status` view, `NEEDS YOU` keeps its blocked rows first under any sort.
+
+The column header underlines each column's sort letter (`WHERE` has no `N` to underline) and puts `↑` or `↓` just left of the sorted column's name. When the view is not `status`, or a sort is set, the top bar says so after `rexboard`: `view: flat ↓age`. The selection stays on its row when the view or the sort changes.
+
 ## Keys
 
 | Key | Does |
@@ -46,12 +61,15 @@ Long labels are cut to fit: a `session`, `tab` or `pane` label to 24 columns wit
 | `/` | Filter rows by host, session, tab, pane, title, state, message or harness; `enter` keeps it, `esc` clears it |
 | `space` | Peek: the last 12 lines of the pane, from `rex capture`, with escape sequences removed. It shows in the detail pane, in place of its fields below 100 columns. `space` again closes it |
 | `s` | Mark the selected pane seen, through serve. The message names it `session › pane` (`session › tab` for a generic pane label). A blocked or erroring pane stays in `NEEDS YOU`, and the message says so |
-| `S` | Mark every unseen `done` row the list shows seen (a kept filter narrows it), through serve, and say how many (`9 done rows marked seen`). Blocked and erroring rows are left alone |
+| `ctrl+s` | Mark every unseen `done` row the list shows seen (a kept filter narrows it), through serve, and say how many (`9 done rows marked seen`). Blocked and erroring rows are left alone. Before v0.2 this was `S`, which now sorts by state |
+| `v` | Next view: `status`, `flat`, `harness`, `host`, then `status` again |
+| `:` | Open a view by name. Tab completes a name (`fl` to `flat`), Enter opens it (or the one view the text starts), Esc cancels. An unknown name says `no view "nope"` |
+| `S` `A` `T` `R` `O` `N` `M` | Sort by `STATE`, `AGE`, `TURN`, `HARNESS` (runtime), `HOST`, `WHERE` (name) or `MSG`. The same letter again flips the direction. See [Views](#views) |
 | `z` | Fold the selected row's group, or open the folded group the selection is on. `NEEDS YOU` opens by itself when a new row enters it |
 | `?` | Show every key in the detail pane; `?` or `esc` hides it |
 | `enter` | Go to the pane in the main Rex window, on its host, and mark it seen, as [`rexboard jump`](cli.md#rexboard-jump-next-and-pick) does. The footer says `going to SESSION › PANE…` until the jump ends, then where it went; Enter during a jump says one is already running. A failed jump's reason stays in the footer until the next key, and in full in the detail pane. The board stays open |
 | `r` | Reconnect to serve |
-| `esc` | Clear the filter, close the peek and the key table, and open every folded group |
+| `esc` | Clear the filter and the sort, close the peek and the key table, and open every folded group |
 | `q`, `ctrl-c` | Quit |
 
 The board redraws when serve sends rows, on a key, and once a second for the clock and the times in state. SIGTERM and SIGHUP (closing its window) quit it the same way as `q`, so the terminal is left as it was, and the board exits on its own within a second if its terminal goes away.

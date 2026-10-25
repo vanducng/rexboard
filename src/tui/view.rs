@@ -1,14 +1,15 @@
 use chrono::{DateTime, Local, Utc};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, Item, Link, Spot};
-use super::columns::{Col, Columns, Tier, Tone, tier};
+use super::columns::{Col, Columns, Tier, Tone, column_of, tier};
 use super::theme;
+use super::views::View;
 use crate::board::Row;
 use crate::output::{clean, fit, in_state, name, wheres};
 use crate::pane::bare_title;
@@ -22,14 +23,18 @@ const HEADED: u16 = 12;
 const STOPPED: &str = "serve stopped · r reconnects";
 
 /// The `?` table: every key, in the order an operator reaches for them.
-pub const KEYS: [(&str, &str); 12] = [
+pub const KEYS: [(&str, &str); 16] = [
     ("j/k", "move; g/G first, last"),
     ("1-9", "the nth NEEDS YOU row"),
     ("s", "mark seen"),
-    ("S", "mark shown done rows seen"),
+    ("ctrl+s", "mark shown done rows seen"),
     ("space", "peek at the pane"),
     ("/", "filter; enter keeps it"),
-    ("esc", "clear filter, peek, folds"),
+    ("v", "status, flat, harness, host"),
+    (":", "a view by name; tab completes"),
+    ("S A T", "sort by state, age, turn"),
+    ("R O N M", "by harness, host, where, msg"),
+    ("esc", "clear filter/sort/peek/folds"),
     ("z", "fold or open a group"),
     ("enter", "go to the pane"),
     ("r", "reconnect to serve"),
@@ -72,7 +77,13 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
         } else {
             detail(app, now, usize::from(body.width), false)
         };
-        let height = (lines.len() as u16).min(body.height / 2);
+        // The key table takes what it needs, down to 3 list lines; anything else half the body.
+        let most = if app.keys {
+            body.height.saturating_sub(3)
+        } else {
+            body.height / 2
+        };
+        let height = (lines.len() as u16).min(most);
         let [list_area, rule, detail_area] = Layout::vertical([
             Constraint::Min(3),
             Constraint::Length(u16::from(height > 0)),
@@ -109,6 +120,17 @@ fn count(n: usize, noun: &str) -> String {
     }
 }
 
+/// `view: flat ↓age`, unless the board is on the status view with no sort.
+fn view_label(app: &App) -> Option<String> {
+    if app.view == View::default() && app.sort.is_none() {
+        return None;
+    }
+    let sort = app.sort.map_or_else(String::new, |(id, dir)| {
+        format!(" {}{}", dir.arrow(), column_of(id).header.to_lowercase())
+    });
+    Some(format!("view: {}{sort}", app.view.name))
+}
+
 fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
     let red = Style::new().fg(Color::Red);
     let (alert, alert_style) = match app.link {
@@ -131,6 +153,7 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
         count(app.rows.len(), "agent")
     );
     let healthy = app.hosts.keys().cloned().collect::<Vec<_>>().join(" + ");
+    let label = view_label(app);
     let clock = now.with_timezone(&Local).format("%H:%M").to_string();
     let width = usize::from(area.width);
     // Alerts stay; the host list goes first, then the counts, then the clock.
@@ -144,6 +167,7 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
         .into_iter()
         .find(|&(c, h, k)| {
             let left = 8
+                + label.as_ref().map_or(0, |l| 3 + l.width())
                 + if c { counts.width() } else { 0 }
                 + if alert.is_empty() {
                     0
@@ -160,6 +184,10 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
         })
         .unwrap_or((false, false, false));
     let mut left = vec![Span::styled("rexboard", theme::accent())];
+    if let Some(label) = label {
+        left.push(Span::styled(" · ", theme::dim()));
+        left.push(Span::styled(label, theme::bright()));
+    }
     if with_counts {
         left.push(Span::styled(counts, theme::dim()));
     }
@@ -207,8 +235,26 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
     let columns = Columns::new(board.width, width);
     let area = if board.height >= HEADED {
         let [top, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
-        let cells = columns.header().concat();
-        frame.render_widget(Paragraph::new(Line::styled(cells, theme::dim())), top);
+        let spans: Vec<Span> = columns
+            .header(app.sort)
+            .into_iter()
+            .flat_map(|cell| {
+                let Some(at) = cell.underline else {
+                    return vec![Span::styled(cell.text, theme::dim())];
+                };
+                let (before, rest) = cell.text.split_at(at);
+                let (letter, after) = rest.split_at(1);
+                vec![
+                    Span::styled(before.to_owned(), theme::dim()),
+                    Span::styled(
+                        letter.to_owned(),
+                        theme::dim().add_modifier(Modifier::UNDERLINED),
+                    ),
+                    Span::styled(after.to_owned(), theme::dim()),
+                ]
+            })
+            .collect();
+        frame.render_widget(Paragraph::new(Line::from(spans)), top);
         rest
     } else {
         area
@@ -231,14 +277,14 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
         .iter()
         .skip(offset)
         .take(room)
-        .map(|item| match *item {
+        .map(|item| match item {
             Item::Header {
-                group,
+                bucket,
                 count,
                 folded,
             } => {
-                let mark = if folded { "▸ " } else { "" };
-                let title = format!("{mark}{} ({count}) ", theme::group_title(group));
+                let mark = if *folded { "▸ " } else { "" };
+                let title = format!("{mark}{} ({count}) ", bucket.title());
                 let fill = "┄".repeat(width.saturating_sub(title.width()));
                 let line = Line::styled(format!("{title}{fill}"), theme::header());
                 if is_selected(app, item) {
@@ -247,7 +293,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
                     line
                 }
             }
-            Item::Row(i) => row_line(
+            &Item::Row(i) => row_line(
                 &app.rows[i],
                 &places[i],
                 app,
@@ -281,12 +327,12 @@ fn is_selected(app: &App, item: &Item) -> bool {
         (Item::Row(i), Some(Spot::Row(key))) => &app.rows[*i].key == key,
         (
             Item::Header {
-                group,
+                bucket,
                 folded: true,
                 ..
             },
             Some(Spot::Group(g)),
-        ) => group == g,
+        ) => bucket == g,
         _ => false,
     }
 }
@@ -338,8 +384,8 @@ fn detail(app: &App, now: DateTime<Utc>, width: usize, wide: bool) -> Vec<Line<'
         let mut lines = vec![Line::styled(fit("keys", width), theme::accent())];
         lines.extend(KEYS.iter().map(|(key, what)| {
             Line::from(vec![
-                Span::styled(format!("{key:<6} "), theme::bright()),
-                Span::styled(fit(what, width.saturating_sub(7)), theme::dim()),
+                Span::styled(format!("{key:<7} "), theme::bright()),
+                Span::styled(fit(what, width.saturating_sub(8)), theme::dim()),
             ])
         }));
         return lines;
@@ -347,10 +393,7 @@ fn detail(app: &App, now: DateTime<Utc>, width: usize, wide: bool) -> Vec<Line<'
     let Some(row) = app.current() else {
         return match &app.selected {
             Some(Spot::Group(group)) => vec![Line::styled(
-                fit(
-                    &format!("{} is folded · z opens it", theme::group_title(*group)),
-                    width,
-                ),
+                fit(&format!("{} is folded · z opens it", group.title()), width),
                 theme::dim(),
             )],
             _ => Vec::new(),
@@ -493,6 +536,14 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
 
 fn footer(frame: &mut Frame, area: Rect, app: &App) {
     let width = usize::from(area.width);
+    if app.commanding {
+        let text = format!(": {}▏ · tab completes · esc cancels", app.command.value());
+        frame.render_widget(
+            Paragraph::new(Line::styled(fit(&text, width), theme::bright())),
+            area,
+        );
+        return;
+    }
     if app.filtering {
         let text = format!("/ {}▏", app.filter.value());
         frame.render_widget(
@@ -1007,5 +1058,78 @@ mod tests {
         let text = render(&fuller(), 80, 14);
         assert!(text.contains("↓ "), "{text}");
         assert!(text.contains(" more"), "{text}");
+    }
+
+    #[test]
+    fn every_view_renders_its_groups_under_one_header_at_50_and_120() {
+        for (presses, want, never) in [
+            ("", vec!["NEEDS YOU (2)", "WORKING (2)"], "CLAUDE"),
+            ("v", vec!["seat-b msg"], "NEEDS YOU"),
+            ("vv", vec!["CLAUDE (6)"], "NEEDS YOU"),
+            ("vvv", vec!["LOCAL (3)", "MINI (3)"], "CLAUDE"),
+        ] {
+            for width in [50, 120] {
+                let mut app = fuller();
+                for key in presses.chars() {
+                    press(&mut app, KeyCode::Char(key));
+                }
+                let text = render(&app, width, 30);
+                let lines: Vec<&str> = text.lines().collect();
+                assert!(lines[1].trim_start().starts_with("AGE") || lines[1].contains("STATE"));
+                for want in &want {
+                    assert!(text.contains(want), "{presses:?} {width}: {want}\n{text}");
+                }
+                assert!(!text.contains(never), "{presses:?} {width}:\n{text}");
+                assert_eq!(
+                    text.matches("seat-b msg").count(),
+                    if width >= 100 { 2 } else { 1 },
+                    "each row once (and the detail's msg at 120)\n{text}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_top_bar_names_a_view_or_sort_that_is_not_the_default() {
+        let mut app = fuller();
+        assert!(
+            !render(&app, 120, 30)
+                .lines()
+                .next()
+                .unwrap()
+                .contains("view:")
+        );
+        press(&mut app, KeyCode::Char('v'));
+        press(&mut app, KeyCode::Char('A'));
+        let top = render(&app, 120, 30).lines().next().unwrap().to_owned();
+        assert!(top.starts_with("rexboard · view: flat ↓age · "), "{top}");
+        let narrow = render(&app, 50, 30).lines().next().unwrap().to_owned();
+        assert!(
+            narrow.contains("view: flat ↓age"),
+            "it stays at 50: {narrow}"
+        );
+    }
+
+    #[test]
+    fn the_key_table_names_every_view_and_sort_letter() {
+        for (key, what) in KEYS {
+            assert!(
+                what.width() <= 29,
+                "{key}: {what:?} is cut in the detail pane"
+            );
+        }
+        let mut app = fuller();
+        press(&mut app, KeyCode::Char('?'));
+        let text = render(&app, 120, 30);
+        for want in [
+            "ctrl+s",
+            "v       status, flat, harness, host",
+            ":       a view by name; tab completes",
+            "S A T   sort by state, age, turn",
+            "R O N M by harness, host, where, msg",
+            "esc     clear filter/sort/peek/folds",
+        ] {
+            assert!(text.contains(want), "{want:?}:\n{text}");
+        }
     }
 }

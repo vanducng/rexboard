@@ -1,11 +1,13 @@
 //! The list's columns: one table says which columns a board width shows, how wide each is and
 //! what goes in it, for the rows and their header alike.
 
+use std::cmp::Ordering;
+
 use chrono::{DateTime, Utc};
 
 use super::theme;
 use crate::board::Row;
-use crate::output::{fit, harness, in_state, span, state_word, what};
+use crate::output::{fit, harness, in_state, labels, path, span, state_word, what};
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
 pub enum Tier {
@@ -26,7 +28,7 @@ pub fn tier(width: u16) -> Tier {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Col {
     Glyph,
     State,
@@ -55,36 +57,200 @@ enum Width {
     Msg,
 }
 
+/// A sort's direction: `Up` is a to z, newest or shortest first, and for STATE most urgent first.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Dir {
+    Up,
+    Down,
+}
+
+impl Dir {
+    pub fn arrow(self) -> char {
+        match self {
+            Dir::Up => '↑',
+            Dir::Down => '↓',
+        }
+    }
+
+    pub fn flip(self) -> Dir {
+        match self {
+            Dir::Up => Dir::Down,
+            Dir::Down => Dir::Up,
+        }
+    }
+}
+
+pub type Sort = (Col, Dir);
+
 pub struct Column {
     pub id: Col,
     pub header: &'static str,
+    /// Shift and this letter sorts by the column.
+    pub letter: Option<char>,
+    /// The direction its first press sorts in: the longest wait first for AGE and TURN.
+    pub first: Dir,
     /// The narrowest board that shows it.
     min_board: u16,
     width: Width,
     pub tone: Tone,
 }
 
-const fn column(id: Col, header: &'static str, min_board: u16, width: Width, tone: Tone) -> Column {
+const fn column(
+    id: Col,
+    header: &'static str,
+    letter: Option<char>,
+    first: Dir,
+    min_board: u16,
+    width: Width,
+    tone: Tone,
+) -> Column {
     Column {
         id,
         header,
+        letter,
+        first,
         min_board,
         width,
         tone,
     }
 }
 
-/// Every column, left to right.
+/// Every column, left to right. Sort letters follow k9s: S state, A age, T turn, R harness
+/// (runtime), O host, N where (name), M msg.
 pub const COLUMNS: [Column; 8] = [
-    column(Col::Glyph, "", 0, Width::Fixed(2), Tone::State),
-    column(Col::State, "STATE", 100, Width::Fixed(11), Tone::State),
-    column(Col::Age, "AGE", 0, Width::Fixed(7), Tone::Soft),
-    column(Col::Turn, "TURN", 140, Width::Fixed(7), Tone::Soft),
-    column(Col::Harness, "HARNESS", 60, Width::Fixed(8), Tone::Soft),
-    column(Col::Host, "HOST", 60, Width::Fixed(8), Tone::Dim),
-    column(Col::Where, "WHERE", 0, Width::Where, Tone::Soft),
-    column(Col::Msg, "MSG", 0, Width::Msg, Tone::Soft),
+    column(
+        Col::Glyph,
+        "",
+        None,
+        Dir::Up,
+        0,
+        Width::Fixed(2),
+        Tone::State,
+    ),
+    column(
+        Col::State,
+        "STATE",
+        Some('S'),
+        Dir::Up,
+        100,
+        Width::Fixed(11),
+        Tone::State,
+    ),
+    column(
+        Col::Age,
+        "AGE",
+        Some('A'),
+        Dir::Down,
+        0,
+        Width::Fixed(7),
+        Tone::Soft,
+    ),
+    column(
+        Col::Turn,
+        "TURN",
+        Some('T'),
+        Dir::Down,
+        140,
+        Width::Fixed(7),
+        Tone::Soft,
+    ),
+    column(
+        Col::Harness,
+        "HARNESS",
+        Some('R'),
+        Dir::Up,
+        60,
+        Width::Fixed(8),
+        Tone::Soft,
+    ),
+    column(
+        Col::Host,
+        "HOST",
+        Some('O'),
+        Dir::Up,
+        60,
+        Width::Fixed(8),
+        Tone::Dim,
+    ),
+    column(
+        Col::Where,
+        "WHERE",
+        Some('N'),
+        Dir::Up,
+        0,
+        Width::Where,
+        Tone::Soft,
+    ),
+    column(
+        Col::Msg,
+        "MSG",
+        Some('M'),
+        Dir::Up,
+        0,
+        Width::Msg,
+        Tone::Soft,
+    ),
 ];
+
+pub fn column_of(id: Col) -> &'static Column {
+    COLUMNS
+        .iter()
+        .find(|c| c.id == id)
+        .expect("every Col has a column")
+}
+
+pub fn by_letter(letter: char) -> Option<&'static Column> {
+    COLUMNS.iter().find(|c| c.letter == Some(letter))
+}
+
+/// A header cell: its text, and which of its characters to underline (the sort letter).
+pub struct HeaderCell {
+    pub text: String,
+    pub underline: Option<usize>,
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum SortKey {
+    Num(i64),
+    Text(String),
+}
+
+/// What a column sorts on. None (no record to date it, no turn yet) sorts last either way.
+fn sort_key(id: Col, row: &Row) -> Option<SortKey> {
+    let text = |s: &str| Some(SortKey::Text(s.to_lowercase()));
+    match id {
+        Col::Glyph => None,
+        Col::State => Some(SortKey::Num(match state_word(row).as_str() {
+            "blocked" => 0,
+            "error" => 1,
+            "done" => 2,
+            "working" => 3,
+            "idle" | "idle?" => 4,
+            _ => 5,
+        })),
+        // A bigger age is an older `since`.
+        Col::Age => (row.pane.source != "inferred")
+            .then(|| DateTime::parse_from_rfc3339(&row.since).ok())
+            .flatten()
+            .map(|since| SortKey::Num(-since.timestamp_millis())),
+        Col::Turn => row.last_turn.map(SortKey::Num),
+        Col::Harness => text(&harness(row)),
+        Col::Host => text(&row.pane.host),
+        Col::Where => text(&path(&labels(row, true), usize::MAX)),
+        Col::Msg => text(what(row)),
+    }
+}
+
+/// Orders two rows by a column, with rows that have no value last in both directions.
+pub fn compare(a: &Row, b: &Row, (id, dir): Sort) -> Ordering {
+    match (sort_key(id, a), sort_key(id, b)) {
+        (Some(x), Some(y)) if dir == Dir::Up => x.cmp(&y),
+        (Some(x), Some(y)) => y.cmp(&x),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
 
 /// The columns a board `board` columns wide shows in a list `list` columns wide, each with its
 /// width.
@@ -157,15 +323,34 @@ impl Columns {
             .collect()
     }
 
-    /// The header line's cells, at the same widths as the rows'.
-    pub fn header(&self) -> Vec<String> {
-        self.cols
+    /// The header line's cells, at the same widths as the rows'. Each sort letter is
+    /// underlined, and the sorted column's arrow sits in the gap just left of its name, so no
+    /// name moves.
+    pub fn header(&self, sort: Option<Sort>) -> Vec<HeaderCell> {
+        let mut cells: Vec<HeaderCell> = self
+            .cols
             .iter()
-            .map(|(c, width)| match c.id {
-                Col::Msg => fit(c.header, *width),
-                _ => fit(c.header, width.saturating_sub(1)) + " ",
+            .map(|(c, width)| {
+                let text = match c.id {
+                    Col::Msg => fit(c.header, *width),
+                    _ => fit(c.header, width.saturating_sub(1)) + " ",
+                };
+                let underline = c
+                    .letter
+                    .and_then(|letter| c.header.find(letter))
+                    .filter(|&at| at < text.trim_end().len());
+                HeaderCell { text, underline }
             })
-            .collect()
+            .collect();
+        if let Some((id, dir)) = sort
+            && let Some(at) = self.cols.iter().position(|(c, _)| c.id == id)
+            && at > 0
+        {
+            let before = &mut cells[at - 1].text;
+            before.pop();
+            before.push(dir.arrow());
+        }
+        cells
     }
 }
 
@@ -334,6 +519,37 @@ mod tests {
             line(&buf, 1).starts_with("NEEDS YOU (2)"),
             "the list starts right under the top bar:\n{}",
             line(&buf, 1)
+        );
+    }
+
+    #[test]
+    fn the_sorted_column_gets_an_arrow_in_the_gap_and_each_letter_is_underlined() {
+        let columns = Columns::new(120, 81);
+        let plain: Vec<String> = columns.header(None).into_iter().map(|c| c.text).collect();
+        let cells = columns.header(Some((Col::Age, Dir::Down)));
+        let text: Vec<&str> = cells.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(text[1], "STATE     ↓", "the arrow takes the gap before AGE");
+        assert_eq!(text[2], plain[2], "AGE itself does not move");
+        assert_eq!(
+            text.concat().chars().count(),
+            plain.concat().chars().count()
+        );
+        let underlined: Vec<Option<char>> = cells
+            .iter()
+            .map(|c| c.underline.map(|at| c.text.as_bytes()[at] as char))
+            .collect();
+        assert_eq!(
+            underlined,
+            [
+                None,
+                Some('S'),
+                Some('A'),
+                Some('R'),
+                Some('O'),
+                None,
+                Some('M')
+            ],
+            "WHERE has no N to underline"
         );
     }
 }
