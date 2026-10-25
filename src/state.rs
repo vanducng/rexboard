@@ -39,7 +39,7 @@ impl Paths {
         if socket.as_os_str().len() > SOCKET_MAX {
             return Err(Error::serve_with(
                 format!(
-                    "socket path {} is longer than {SOCKET_MAX} bytes; set a shorter XDG_STATE_HOME (it holds serve.lock and the socket)",
+                    "socket path {} is longer than {SOCKET_MAX} bytes; set a shorter XDG_STATE_HOME everywhere rexboard runs (it holds serve.lock, the socket and state.json)",
                     socket.display()
                 ),
                 &["rexboard ls --direct"],

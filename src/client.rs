@@ -400,22 +400,35 @@ fn alive(pid: i32) -> bool {
 
 pub fn stop_serve(json: bool) -> Result<()> {
     let paths = Paths::find()?;
-    let pid = recorded_pid(&paths);
-    match connect(&paths)? {
+    let lock = paths.lock().display().to_string();
+    let pid = match connect(&paths)? {
         Some(mut stream) => {
+            let pid = recorded_pid(&paths);
             send(&mut stream, &json!({ "cmd": "stop" }))?;
             // serve may close as it stops; the wait below is what proves it stopped.
             let _ = read(&mut BufReader::new(stream), &mut String::new());
+            pid
         }
         // A serve that holds the lock but does not answer (an older build, or a stuck one).
         None if Lock::held(&paths.lock()) => {
-            let Some(pid) = pid else {
-                return Err(Error::serve(format!(
-                    "a serve holds {} but recorded no pid",
-                    paths.lock().display()
-                )));
+            let lsof = format!("lsof {lock}");
+            let Some(pid) = recorded_pid(&paths) else {
+                return Err(Error::serve_with(
+                    format!("a serve holds {lock} but recorded no pid"),
+                    &[lsof.as_str(), "kill <the pid lsof shows>"],
+                ));
             };
+            // The record can lag the lock, so never signal a pid that is not rexboard.
+            if !is_rexboard(pid) {
+                return Err(Error::serve_with(
+                    format!(
+                        "serve.lock names pid {pid}, which is not rexboard; serve may still be starting, retry"
+                    ),
+                    &["rexboard serve --stop", lsof.as_str()],
+                ));
+            }
             unsafe { libc::kill(pid, libc::SIGTERM) };
+            Some(pid)
         }
         None => {
             if json {
@@ -425,7 +438,7 @@ pub fn stop_serve(json: bool) -> Result<()> {
             }
             return Ok(());
         }
-    }
+    };
     let deadline = Instant::now() + Duration::from_secs(5);
     let running = || match pid {
         Some(pid) => alive(pid),
@@ -433,10 +446,20 @@ pub fn stop_serve(json: bool) -> Result<()> {
     };
     while running() {
         if Instant::now() >= deadline {
-            return Err(Error::serve(format!(
-                "serve did not exit within 5s; see {}",
-                paths.log().display()
-            )));
+            let Some(pid) = pid else {
+                return Err(Error::serve(format!(
+                    "serve did not exit within 5s; see {}",
+                    paths.log().display()
+                )));
+            };
+            let kill = format!("kill -9 {pid}");
+            return Err(Error::serve_with(
+                format!(
+                    "serve (pid {pid}) did not exit within 5s; see {}",
+                    paths.log().display()
+                ),
+                &[kill.as_str(), "rexboard ls"],
+            ));
         }
         thread::sleep(Duration::from_millis(20));
     }
@@ -446,4 +469,23 @@ pub fn stop_serve(json: bool) -> Result<()> {
         println!("serve stopped");
     }
     Ok(())
+}
+
+/// Whether pid runs a binary named rexboard.
+fn is_rexboard(pid: i32) -> bool {
+    exe_path(pid).is_some_and(|path| path.file_name().is_some_and(|name| name == "rexboard"))
+}
+
+#[cfg(target_os = "macos")]
+fn exe_path(pid: i32) -> Option<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    let len = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
+    let len = usize::try_from(len).ok().filter(|&len| len > 0)?;
+    Some(std::ffi::OsStr::from_bytes(&buf[..len]).into())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn exe_path(pid: i32) -> Option<std::path::PathBuf> {
+    std::fs::read_link(format!("/proc/{pid}/exe")).ok()
 }

@@ -788,21 +788,46 @@ fn a_held_lock_without_a_socket_names_the_serve_to_stop() {
 #[test]
 fn serve_stop_ends_a_serve_that_holds_the_lock_but_does_not_answer() {
     let serve = Serve::new();
-    let (mut sh, _) = hold_lock(&serve);
+    serve.rows(&[]);
+    let pid = serve.pid();
+    // Still serve, still holding the lock, but nobody can reach it.
+    std::fs::remove_file(serve.socket()).unwrap();
     serve
         .cmd()
         .args(["serve", "--stop"])
         .assert()
         .success()
         .stdout("serve stopped\n");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while sh.try_wait().unwrap().is_none() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the holder still runs"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    assert_ne!(
+        unsafe { libc::kill(pid as i32, 0) },
+        0,
+        "serve {pid} is gone"
+    );
+}
+
+#[test]
+fn serve_stop_signals_nothing_when_the_lock_names_another_program() {
+    let serve = Serve::new();
+    let (mut sh, pid) = hold_lock(&serve);
+    let out = serve
+        .cmd()
+        .args(["serve", "--stop"])
+        .assert()
+        .failure()
+        .get_output()
+        .stderr
+        .clone();
+    let text = String::from_utf8_lossy(&out);
+    let alive = unsafe { libc::kill(pid, 0) } == 0;
+    unsafe { libc::kill(pid, libc::SIGTERM) };
+    sh.wait().unwrap();
+    assert!(alive, "the holder was not signalled");
+    assert!(
+        text.contains(&format!(
+            "serve.lock names pid {pid}, which is not rexboard"
+        )),
+        "{text}"
+    );
 }
 
 #[test]
