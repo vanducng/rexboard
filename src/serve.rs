@@ -173,6 +173,7 @@ struct Reducer {
     waiting: Vec<SyncSender<String>>,
     started: Instant,
     announced: bool,
+    rows_cache: Option<String>,
     rows_due: Option<Instant>,
     save_due: Option<Instant>,
 }
@@ -200,6 +201,7 @@ impl Reducer {
             waiting: Vec::new(),
             started: Instant::now(),
             announced: false,
+            rows_cache: None,
             rows_due: None,
             save_due: None,
         }
@@ -222,8 +224,12 @@ impl Reducer {
                 self.subscribers.owe_all();
             }
             if self.subscribers.owed() {
-                let line = self.rows_line().to_string();
-                self.subscribers.pay(&line);
+                // Serialized once per change, not on every pass while a reader is owed rows.
+                if self.rows_cache.is_none() {
+                    self.rows_cache = Some(self.rows_line().to_string());
+                }
+                let line = self.rows_cache.as_deref().unwrap_or_default();
+                self.subscribers.pay(line);
             }
             if self.save_due.is_some_and(|due| now >= due) {
                 self.save_due = None;
@@ -315,6 +321,7 @@ impl Reducer {
     }
 
     fn set_hosts(&mut self, labels: &[String]) {
+        self.rows_cache = None;
         let mut want: Vec<HostId> = vec!["local".into()];
         want.extend(labels.iter().cloned());
         let gone: Vec<HostId> = self
@@ -341,6 +348,7 @@ impl Reducer {
     }
 
     fn host_event(&mut self, host: &str, event: &HostEvent, paths: &Paths) {
+        self.rows_cache = None;
         if !self.hosts.contains_key(host) || self.hosts[host] == "stopped" {
             return;
         }
@@ -383,6 +391,7 @@ impl Reducer {
     }
 
     fn rows_changed(&mut self) {
+        self.rows_cache = None;
         let now = Instant::now();
         self.rows_due.get_or_insert(now + DEBOUNCE);
         self.save_due.get_or_insert(now + SAVE_EVERY);
