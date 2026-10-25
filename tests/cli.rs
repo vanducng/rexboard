@@ -911,7 +911,7 @@ fn ls_text_squeezes_long_labels_and_dates_only_reported_rows() {
     let out = ls().assert().success().get_output().stdout.clone();
     let text = String::from_utf8(out).unwrap();
     assert!(
-        text.contains("web › 2-openrig:ri…89abcdef#l2 › review.review"),
+        text.contains("web › 2-openrig:ri…89abcdef#l2 › seat-r"),
         "a long tab label is squeezed in the middle:\n{text}"
     );
     let seat = text.lines().find(|l| l.contains("seat-a@demo")).unwrap();
@@ -930,4 +930,97 @@ fn ls_text_squeezes_long_labels_and_dates_only_reported_rows() {
         seat["since_estimated"], true,
         "no record: since is a guess, as docs/cli.md says"
     );
+}
+
+/// Runs `rexboard board` on a fresh pty as its controlling terminal, sends `signal` once the
+/// board is on the alternate screen, and returns everything it wrote plus how it exited.
+fn board_under_pty(signal: libc::c_int) -> (String, std::process::ExitStatus) {
+    use std::io::Read;
+    use std::os::fd::FromRawFd;
+    use std::os::unix::process::CommandExt;
+    let (mut master, mut slave) = (0, 0);
+    let mut size = libc::winsize {
+        ws_row: 24,
+        ws_col: 80,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    let opened = unsafe {
+        libc::openpty(
+            &raw mut master,
+            &raw mut slave,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &raw mut size,
+        )
+    };
+    assert_eq!(opened, 0, "openpty failed");
+    let stdio = || unsafe { std::process::Stdio::from_raw_fd(libc::dup(slave)) };
+    let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_rexboard"));
+    cmd.arg("board")
+        .env("REXBOARD_REX", fixture("fake-rex"))
+        .env("XDG_RUNTIME_DIR", NO_SERVE)
+        .env("XDG_STATE_HOME", NO_SERVE)
+        .env("TMPDIR", NO_SERVE)
+        .env("TERM", "xterm-256color")
+        .stdin(stdio())
+        .stdout(stdio())
+        .stderr(stdio());
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setsid();
+            libc::ioctl(0, libc::TIOCSCTTY as _, 0);
+            Ok(())
+        });
+    }
+    let mut child = cmd.spawn().unwrap();
+    unsafe { libc::close(slave) };
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = seen.clone();
+    std::thread::spawn(move || {
+        let mut file = unsafe { std::fs::File::from_raw_fd(master) };
+        let mut chunk = [0; 4096];
+        while let Ok(n) = file.read(&mut chunk) {
+            if n == 0 {
+                break;
+            }
+            sink.lock().unwrap().extend_from_slice(&chunk[..n]);
+        }
+    });
+    let text = || String::from_utf8_lossy(&seen.lock().unwrap()).into_owned();
+    eventually("the board on the alternate screen", || {
+        text().contains("\x1b[?1049h")
+    });
+    unsafe { libc::kill(child.id() as i32, signal) };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "board did not exit on the signal"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    eventually("the restore sequence", || text().contains("\x1b[?1049l"));
+    (text(), status)
+}
+
+#[test]
+fn board_restores_the_terminal_on_sigterm_and_sighup() {
+    for signal in [libc::SIGTERM, libc::SIGHUP] {
+        let (out, status) = board_under_pty(signal);
+        assert!(status.success(), "signal {signal}: {status:?}");
+        let entered = out.find("\x1b[?1049h").unwrap();
+        let left = out.rfind("\x1b[?1049l").unwrap();
+        assert!(
+            left > entered,
+            "the alternate screen is left after it was entered"
+        );
+        assert!(
+            out[left..].contains("\x1b[?25h"),
+            "the cursor is shown again"
+        );
+    }
 }

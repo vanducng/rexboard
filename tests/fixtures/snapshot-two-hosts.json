@@ -147,8 +147,8 @@
               "blocks": [
                 {
                   "block_id": "block:web-rig-review",
-                  "label": "review.review",
-                  "title": "✳ review-review@demo-team",
+                  "label": "seat-r",
+                  "title": "✳ seat-r@demo-team",
                   "process": {
                     "name": "tmux",
                     "cwd": "/work/web"
