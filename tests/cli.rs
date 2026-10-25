@@ -576,7 +576,6 @@ impl Serve {
     fn envs(&self) -> Vec<(&'static str, String)> {
         let path = |p: std::path::PathBuf| p.to_str().unwrap().to_owned();
         vec![
-            ("XDG_RUNTIME_DIR", path(self.dir.path().join("run"))),
             ("XDG_STATE_HOME", path(self.dir.path().join("state"))),
             ("XDG_CONFIG_HOME", path(self.dir.path().join("config"))),
             ("TMPDIR", path(self.dir.path().to_owned())),
@@ -587,12 +586,12 @@ impl Serve {
 
     fn cmd(&self) -> Command {
         let mut cmd = Command::cargo_bin("rexboard").unwrap();
-        cmd.envs(self.envs());
+        cmd.env_remove("XDG_RUNTIME_DIR").envs(self.envs());
         cmd
     }
 
     fn socket(&self) -> std::path::PathBuf {
-        self.dir.path().join("run/rexboard.sock")
+        self.file("serve.sock")
     }
 
     fn config(&self, toml: &str) {
@@ -689,6 +688,173 @@ fn mini_with_done(serve: &Serve) -> String {
     let path = serve.dir.path().join("observer-mini.ndjson");
     std::fs::write(&path, format!("{snapshot}\n")).unwrap();
     path.to_str().unwrap().to_owned()
+}
+
+#[test]
+fn serve_is_found_from_any_tmpdir() {
+    let serve = Serve::new();
+    let ls = |tmp: &str| {
+        let dir = serve.dir.path().join(tmp);
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = serve
+            .cmd()
+            .env("TMPDIR", &dir)
+            .args(["ls", "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        serde_json::from_slice::<Vec<serde_json::Value>>(&out).unwrap()
+    };
+    assert!(!ls("tmp-a").is_empty());
+    let pid = serve.pid();
+    assert!(
+        !ls("tmp-b").is_empty(),
+        "a caller with another TMPDIR gets rows"
+    );
+    assert_eq!(serve.pid(), pid, "and reaches the same serve");
+    assert!(serve.socket().exists(), "the socket sits beside serve.lock");
+    assert_eq!(
+        serve.observer_starts(),
+        2,
+        "no second serve started observers"
+    );
+}
+
+#[test]
+fn a_dead_serve_leaves_nothing_that_stops_the_next() {
+    let serve = Serve::new();
+    std::fs::create_dir_all(serve.file("")).unwrap();
+    let record = serde_json::json!({ "pid": 999_999, "rex": fixture("fake-rex"), "children": [] });
+    std::fs::write(serve.file("serve.lock"), record.to_string()).unwrap();
+    drop(std::os::unix::net::UnixListener::bind(serve.socket()).unwrap());
+    assert!(serve.socket().exists(), "a socket nobody listens on");
+    assert!(!serve.rows(&[]).is_empty());
+    assert_ne!(serve.pid(), 999_999, "a new serve took the lock");
+}
+
+/// A process that holds serve.lock, as a serve would, with no socket: an older build's serve
+/// listening elsewhere, or a stuck one. It runs under `sh`, which reaps it, so like a real serve
+/// it is not the test's child. Returns `sh` and the holder's pid.
+fn hold_lock(serve: &Serve) -> (std::process::Child, i32) {
+    std::fs::create_dir_all(serve.file("")).unwrap();
+    let lock = serve.file("serve.lock");
+    let perl = r#"use Fcntl ':flock'; open F, '>>', $ARGV[0] or die; flock F, LOCK_EX or die; $| = 1; print "$$\n"; sleep 30"#;
+    let mut sh = std::process::Command::new("sh")
+        .args(["-c", r#"perl -e "$1" "$0" & wait"#])
+        .arg(&lock)
+        .arg(perl)
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    std::io::BufRead::read_line(
+        &mut std::io::BufReader::new(sh.stdout.take().unwrap()),
+        &mut line,
+    )
+    .unwrap();
+    let pid: i32 = line.trim().parse().unwrap();
+    let record = serde_json::json!({ "pid": pid, "rex": fixture("fake-rex"), "children": [] });
+    std::fs::write(&lock, record.to_string()).unwrap();
+    (sh, pid)
+}
+
+#[test]
+fn a_held_lock_without_a_socket_names_the_serve_to_stop() {
+    let serve = Serve::new();
+    let (mut sh, pid) = hold_lock(&serve);
+    let out = serve
+        .cmd()
+        .args(["ls", "--json"])
+        .assert()
+        .failure()
+        .get_output()
+        .stderr
+        .clone();
+    let text = String::from_utf8_lossy(&out);
+    unsafe { libc::kill(pid, libc::SIGTERM) };
+    sh.wait().unwrap();
+    assert!(
+        text.contains(&format!("serve (pid {pid}) holds"))
+            && text.contains("does not answer on")
+            && text.contains("the next command starts a new one"),
+        "{text}"
+    );
+    assert!(text.contains("rexboard serve --stop"), "{text}");
+    assert_eq!(serve.observer_starts(), 0, "no second serve was started");
+}
+
+#[test]
+fn serve_stop_ends_a_serve_that_holds_the_lock_but_does_not_answer() {
+    let serve = Serve::new();
+    serve.rows(&[]);
+    let pid = serve.pid();
+    // Still serve, still holding the lock, but nobody can reach it.
+    std::fs::remove_file(serve.socket()).unwrap();
+    serve
+        .cmd()
+        .args(["serve", "--stop"])
+        .assert()
+        .success()
+        .stdout("serve stopped\n");
+    assert_ne!(
+        unsafe { libc::kill(pid as i32, 0) },
+        0,
+        "serve {pid} is gone"
+    );
+}
+
+#[test]
+fn serve_stop_signals_nothing_when_the_lock_names_another_program() {
+    let serve = Serve::new();
+    let (mut sh, pid) = hold_lock(&serve);
+    let out = serve
+        .cmd()
+        .args(["serve", "--stop"])
+        .assert()
+        .failure()
+        .get_output()
+        .stderr
+        .clone();
+    let text = String::from_utf8_lossy(&out);
+    let alive = unsafe { libc::kill(pid, 0) } == 0;
+    unsafe { libc::kill(pid, libc::SIGTERM) };
+    sh.wait().unwrap();
+    assert!(alive, "the holder was not signalled");
+    assert!(
+        text.contains(&format!(
+            "serve.lock names pid {pid}, which is not rexboard"
+        )),
+        "{text}"
+    );
+}
+
+#[test]
+fn xdg_runtime_dir_does_not_split_callers() {
+    let serve = Serve::new();
+    let run = serve.dir.path().join("run");
+    let ls = |cmd: &mut Command| {
+        let out = cmd
+            .args(["ls", "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        serde_json::from_slice::<Vec<serde_json::Value>>(&out).unwrap()
+    };
+    assert!(!ls(serve.cmd().env("XDG_RUNTIME_DIR", &run)).is_empty());
+    let pid = serve.pid();
+    assert!(
+        !ls(&mut serve.cmd()).is_empty(),
+        "a caller without XDG_RUNTIME_DIR gets rows"
+    );
+    assert_eq!(serve.pid(), pid, "from the same serve");
+    assert!(
+        !run.join("rexboard.sock").exists(),
+        "XDG_RUNTIME_DIR is not used"
+    );
 }
 
 #[test]
@@ -827,6 +993,7 @@ fn seen_command_marks_row_and_subscribers_see_it() {
 #[test]
 fn serve_cleans_stale_socket() {
     let serve = Serve::new();
+    std::fs::create_dir_all(serve.file("")).unwrap();
     drop(std::os::unix::net::UnixListener::bind(serve.socket()).unwrap());
     assert!(serve.socket().exists(), "a socket file nobody listens on");
     let rows = serve.rows(&[]);

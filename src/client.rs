@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use crate::board::Row;
 use crate::cli::{LsArgs, WatchArgs};
 use crate::error::{Error, Result};
-use crate::state::Paths;
+use crate::state::{Lock, Paths};
 use crate::{interrupted, output, rex, serve, stop_on_signals};
 
 const START_WITHIN: Duration = Duration::from_secs(2);
@@ -44,7 +44,7 @@ fn connect(paths: &Paths) -> Result<Option<UnixStream>> {
                 "{} is served by uid {uid}, not you (uid {me})",
                 paths.socket.display()
             ),
-            &["export TMPDIR=\"$HOME/.cache\"", "rexboard ls --direct"],
+            &["unset XDG_STATE_HOME", "rexboard ls --direct"],
         )),
         Err(err) => Err(Error::serve(format!(
             "could not check who serves {}: {err}",
@@ -81,20 +81,36 @@ fn peer_uid(stream: &UnixStream) -> std::io::Result<libc::uid_t> {
     Ok(uid)
 }
 
-/// Connects to serve, starting it first when nobody answers. serve itself clears a stale
-/// socket once it holds the lock, so the client never unlinks one.
+/// Connects to serve, starting it first when nobody answers and no live serve holds the lock.
+/// serve itself clears a stale socket once it holds the lock, so the client never unlinks one.
 pub fn connect_or_start(paths: &Paths) -> Result<UnixStream> {
     if let Some(stream) = connect(paths)? {
         return Ok(stream);
     }
     paths.create()?;
-    start(paths)?;
+    // A serve that holds the lock may still be binding; it gets the same wait as one we start.
+    let held = Lock::held(&paths.lock());
+    if !held {
+        start(paths)?;
+    }
     let deadline = Instant::now() + START_WITHIN;
     loop {
         if let Some(stream) = connect(paths)? {
             return Ok(stream);
         }
         if Instant::now() >= deadline {
+            // Checked again, so a serve that exited during the wait is not named.
+            if held && Lock::held(&paths.lock()) {
+                let pid = recorded_pid(paths).map_or("?".to_owned(), |p| p.to_string());
+                return Err(Error::serve_with(
+                    format!(
+                        "serve (pid {pid}) holds {} but does not answer on {}. It is probably from an older rexboard, or it is stuck. Stop it; the next command starts a new one",
+                        paths.lock().display(),
+                        paths.socket.display()
+                    ),
+                    &["rexboard serve --stop", "rexboard ls"],
+                ));
+            }
             return Err(Error::serve(format!(
                 "serve did not answer on {} within {}s; see {}",
                 paths.socket.display(),
@@ -384,18 +400,51 @@ fn alive(pid: i32) -> bool {
 
 pub fn stop_serve(json: bool) -> Result<()> {
     let paths = Paths::find()?;
-    let Some(mut stream) = connect(&paths)? else {
-        if json {
-            println!("{}", json!({ "ok": true, "running": false }));
-        } else {
-            println!("serve is not running");
+    let lock = paths.lock().display().to_string();
+    let pid = match connect(&paths)? {
+        Some(mut stream) => {
+            let pid = recorded_pid(&paths);
+            send(&mut stream, &json!({ "cmd": "stop" }))?;
+            // serve may close as it stops; the wait below is what proves it stopped.
+            let _ = read(&mut BufReader::new(stream), &mut String::new());
+            pid
         }
-        return Ok(());
+        // A serve that holds the lock but does not answer (an older build, or a stuck one).
+        None if Lock::held(&paths.lock()) => {
+            let lsof = format!("lsof {lock}");
+            let Some(pid) = recorded_pid(&paths) else {
+                return Err(Error::serve_with(
+                    format!("a serve holds {lock} but recorded no pid"),
+                    &[lsof.as_str(), "kill <the pid lsof shows>"],
+                ));
+            };
+            // The record can lag the lock, so never signal a pid that is not rexboard.
+            let Some(exe) = exe_path(pid) else {
+                return Err(Error::serve_with(
+                    format!("cannot read pid {pid}'s executable, so it was not signalled"),
+                    &[lsof.as_str(), "kill <the pid lsof shows>"],
+                ));
+            };
+            if !rexboard_exe(&exe) {
+                return Err(Error::serve_with(
+                    format!(
+                        "serve.lock names pid {pid}, which is not rexboard; serve may still be starting, retry"
+                    ),
+                    &["rexboard serve --stop", lsof.as_str()],
+                ));
+            }
+            unsafe { libc::kill(pid, libc::SIGTERM) };
+            Some(pid)
+        }
+        None => {
+            if json {
+                println!("{}", json!({ "ok": true, "running": false }));
+            } else {
+                println!("serve is not running");
+            }
+            return Ok(());
+        }
     };
-    let pid = recorded_pid(&paths);
-    send(&mut stream, &json!({ "cmd": "stop" }))?;
-    // serve may close as it stops; the wait below is what proves it stopped.
-    let _ = read(&mut BufReader::new(stream), &mut String::new());
     let deadline = Instant::now() + Duration::from_secs(5);
     let running = || match pid {
         Some(pid) => alive(pid),
@@ -403,10 +452,20 @@ pub fn stop_serve(json: bool) -> Result<()> {
     };
     while running() {
         if Instant::now() >= deadline {
-            return Err(Error::serve(format!(
-                "serve did not exit within 5s; see {}",
-                paths.log().display()
-            )));
+            let Some(pid) = pid else {
+                return Err(Error::serve(format!(
+                    "serve did not exit within 5s; see {}",
+                    paths.log().display()
+                )));
+            };
+            let kill = format!("kill -9 {pid}");
+            return Err(Error::serve_with(
+                format!(
+                    "serve (pid {pid}) did not exit within 5s; see {}",
+                    paths.log().display()
+                ),
+                &[kill.as_str(), "rexboard ls"],
+            ));
         }
         thread::sleep(Duration::from_millis(20));
     }
@@ -416,4 +475,42 @@ pub fn stop_serve(json: bool) -> Result<()> {
         println!("serve stopped");
     }
     Ok(())
+}
+
+/// Whether an executable path is rexboard's. Linux shows a binary replaced in place, as
+/// install.sh does, as "rexboard (deleted)".
+fn rexboard_exe(path: &std::path::Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name == "rexboard" || name == "rexboard (deleted)")
+}
+
+#[cfg(target_os = "macos")]
+fn exe_path(pid: i32) -> Option<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    let len = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
+    let len = usize::try_from(len).ok().filter(|&len| len > 0)?;
+    Some(std::ffi::OsStr::from_bytes(&buf[..len]).into())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn exe_path(pid: i32) -> Option<std::path::PathBuf> {
+    std::fs::read_link(format!("/proc/{pid}/exe")).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_rexboard_binaries_are_stopped() {
+        assert!(rexboard_exe(std::path::Path::new(
+            "/usr/local/bin/rexboard"
+        )));
+        assert!(rexboard_exe(std::path::Path::new(
+            "/home/u/.local/bin/rexboard (deleted)"
+        )));
+        assert!(!rexboard_exe(std::path::Path::new("/usr/bin/perl")));
+        assert!(!rexboard_exe(std::path::Path::new("/usr/bin/rexboard-old")));
+    }
 }

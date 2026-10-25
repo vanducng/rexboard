@@ -60,6 +60,11 @@ pub fn run() -> Result<()> {
             paths.lock().display()
         )));
     };
+    // Recorded before anything slow, so serve --stop never finds an old pid under a held lock.
+    lock.write(&Record {
+        pid: std::process::id() as i32,
+        ..Record::default()
+    })?;
     state::sweep(&previous);
     state::roll(&paths.transitions());
     let rex_path = rex::locate()?.display().to_string();
