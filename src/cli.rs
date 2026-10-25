@@ -5,7 +5,7 @@ use clap::{Args, Parser, Subcommand};
     name = "rexboard",
     version,
     about = "Unofficial attention board for agent panes across Rex hosts.",
-    after_help = "Errors: {\"ok\":false,\"error\":{code,message,next_steps}} on stderr with --json. Exit 1: Rex failed. Exit 2: bad usage, or every host is unreachable."
+    after_help = "Errors: {\"ok\":false,\"error\":{code,message,next_steps}} on stderr with --json. Exit 1: Rex or serve failed, or the key was not found. Exit 2: bad usage, or every host is unreachable."
 )]
 pub struct Cli {
     /// Print JSON on stdout, and errors as JSON on stderr.
@@ -21,7 +21,7 @@ pub enum Command {
     Ls(LsArgs),
     /// Stream the agent rows (`--json`) or raw events (`--raw`) from this host and every `rex hosts` entry.
     Watch(WatchArgs),
-    /// Run the board daemon that ls, watch and seen share. Clients start it when it is not running.
+    /// Run the board daemon behind ls, watch --json and seen. They start it when it is not running.
     Serve(ServeArgs),
     /// Mark a pane seen, by the `key` from `ls --json` (HOST/BLOCK_ID).
     Seen {

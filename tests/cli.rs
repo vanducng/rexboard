@@ -775,7 +775,7 @@ fn seen_command_marks_row_and_subscribers_see_it() {
 }
 
 #[test]
-fn client_cleans_stale_socket() {
+fn serve_cleans_stale_socket() {
     let serve = Serve::new();
     drop(std::os::unix::net::UnixListener::bind(serve.socket()).unwrap());
     assert!(serve.socket().exists(), "a socket file nobody listens on");
@@ -853,4 +853,54 @@ fn serve_subscriber_gets_rows_as_soon_as_hosts_report() {
         started.elapsed()
     );
     assert!(!prints[0].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn serve_keeps_memory_of_a_host_that_stays_silent_for_a_run() {
+    let serve = Serve::new();
+    let observer = mini_with_done(&serve);
+    let silent = serve.dir.path().join("silent.ndjson");
+    std::fs::write(&silent, "").unwrap();
+    let run = |mini: &str| -> Vec<serde_json::Value> {
+        let out = serve
+            .cmd()
+            .env("FAKE_REX_OBSERVER_mini", mini)
+            .args(["ls", "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        serde_json::from_slice(&out).unwrap()
+    };
+    run(&observer);
+    serve
+        .cmd()
+        .args(["seen", "mini/block:web-done"])
+        .assert()
+        .success();
+    serve.cmd().args(["serve", "--stop"]).assert().success();
+    let quiet = run(silent.to_str().unwrap());
+    assert!(
+        quiet.iter().all(|row| row["host"] != "mini"),
+        "mini sent nothing this run"
+    );
+    serve.cmd().args(["serve", "--stop"]).assert().success();
+    let state = std::fs::read_to_string(serve.file("state.json")).unwrap();
+    assert!(state.contains(r#""mini/block:web-done":{"#), "{state}");
+    let back = run(&observer);
+    assert_eq!(
+        row(&back, "mini/block:web-done")["seen"],
+        true,
+        "seen survives a silent run"
+    );
+}
+
+#[test]
+fn seen_without_a_host_is_usage() {
+    bin()
+        .args(["seen", "block:abc", "--json"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("KEY must be HOST/BLOCK_ID"));
 }
