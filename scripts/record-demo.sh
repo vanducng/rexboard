@@ -12,7 +12,7 @@ set -euo pipefail
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo=$(CDPATH= cd -- "$here/.." && pwd)
 cols=120
-rows=32
+rows=20
 tmux_socket=zzdemo
 if [[ -x "$HOME/.cargo/bin/cargo" ]]; then
   export PATH="$HOME/.cargo/bin:$PATH"
@@ -156,6 +156,8 @@ if found:
 open(path, "w").write(blob + "\n")
 PY
 cp "$cast" "$repo/docs/assets/demo.cast"
-agg --font-size 14 --idle-time-limit 2 --fps-cap 15 --last-frame-duration 3 \
+# Dracula-like colours, with palette 8 (the board's selected row) a quiet raise over the page.
+theme=282a36,f8f8f2,21222c,ff5555,50fa7b,f1fa8c,8be9fd,ff79c6,8be9fd,f8f8f2,3a3f52,ff6e6e,69ff94,ffffa5,a4ffff,ff92df,a4ffff,ffffff
+agg --theme "$theme" --font-size 14 --idle-time-limit 2 --fps-cap 15 --last-frame-duration 3 \
   "$repo/docs/assets/demo.cast" "$repo/docs/assets/demo.gif" >/dev/null 2>&1
 echo "wrote docs/assets/demo.cast and docs/assets/demo.gif"
