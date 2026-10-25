@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.0](https://github.com/vanducng/rexboard/compare/v0.1.0...v0.2.0) (2026-10-25)
+
+
+### Features
+
+* **tui:** name the board's columns in a header row ([fb944ec](https://github.com/vanducng/rexboard/commit/fb944ec36aef40d19494618b9c84f1679a368619))
+* **tui:** views by status, flat, harness and host, with k9s-style sort ([82f8112](https://github.com/vanducng/rexboard/commit/82f811237ef3c9ae9d972f0699ec7ffd88bebb42))
+* **window:** show the board in the Rex window you are in ([9049b16](https://github.com/vanducng/rexboard/commit/9049b165ebe92ad080c63ad97a1de56b8a050461))
+
+
+### Bug Fixes
+
+* **event:** keep a host alive when Rex sends an observer line rexboard cannot read ([#15](https://github.com/vanducng/rexboard/issues/15)) ([9a23779](https://github.com/vanducng/rexboard/commit/9a23779ed3578193b64b2f5fa56812d5fd81dcea))
+
 ## 0.1.0 (2026-10-25)
 
 
