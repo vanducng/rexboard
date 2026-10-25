@@ -27,7 +27,7 @@ rexboard ls --direct        # one snapshot here, without serve
 
 A pane is listed when it has a status record or a known harness. `--all` adds the rest. `ls` builds its rows the same way as `watch --json`, so they carry the same fields and order: by `group`, then, inside `needs_you`, `blocked` before `error` before unseen `done`, then the longest in its state first. `ls --direct` sees one snapshot, so every `done` is unseen and `last_turn` is `null`.
 
-The text table has the columns `GROUP`, `STATE`, `AGE` (time in the current state as `34s`, `12m`, `5h43m` or `3d4h`; `≥` when estimated; `-` for a pane with no status record, whose time cannot be known), `HARNESS` (`claude`, `codex` and so on, with a `?` when it is read from the title of a pane with no status record; `-` when unknown), `HOST`, `WHERE` (`session › tab › pane`, each label cut to 24 columns with `…` in the middle, so a long OpenRig tab label keeps both ends; a pane labelled `shell`, or with the name of its foreground process, shows as `session › tab` unless another agent pane shares its tab) and `WHAT` (the record's message, else the pane title without its leading state glyph). In a terminal, `WHAT` and then `WHERE` are cut so each line fits its width. `WHERE` is cut tab first, then session, so the last label stays whole and the ` › ` separators stay; a label that would be cut below 6 columns shows as `…` alone. Piped output keeps every column whole. Every cell is printed without escape sequences or control characters, since titles and messages come from the programs in each pane. Widths count wide characters such as CJK and emoji as two columns. `--json` keeps every label and title whole, and the full harness name (`claude-code`).
+The text table has the columns `GROUP`, `STATE`, `AGE` (time in the current state as `34s`, `12m`, `5h43m` or `3d4h`; `≥` when estimated; `-` for a pane with no status record, whose time cannot be known), `HARNESS` (`claude`, `codex` and so on, with a `?` when it is read from the title of a pane with no status record; `-` when unknown), `HOST`, `WHERE` (`session › tab › pane`, each label cut to 24 columns with `…` in the middle, so a long OpenRig tab label keeps both ends; a pane labelled `shell`, or named after its foreground process, tells you nothing, so it shows as `session › tab`) and `WHAT` (the record's message, else the pane title without its leading state glyph). In a terminal, `WHAT` and then `WHERE` are cut so each line fits its width. `WHERE` is cut tab first (a tab cut below 6 columns shows as `…` alone), then the session down to an 8-column stem such as `api-…way`, then the last label; the ` › ` separators stay. Rows that would still read the same end in `#N`, the pane's place among its tab's agent panes, oldest first. Piped output keeps every column whole. Every cell is printed without escape sequences or control characters, since titles and messages come from the programs in each pane. Widths count wide characters such as CJK and emoji as two columns. `--json` keeps every label and title whole, and the full harness name (`claude-code`).
 
 ### JSON fields
 
@@ -183,3 +183,29 @@ rexboard seen mini/block:web-seat-b
 ```
 
 Marks a pane seen, by the `key` from `ls --json`: it leaves `needs_you` if it was an unseen `done`. serve keeps it across restarts until the pane changes state again. An unknown key fails with `NOT_FOUND` (exit 1). A key without `/` fails with `USAGE` (exit 2).
+
+## `rexboard jump`, `next` and `pick`
+
+```bash
+rexboard jump mini/block:web-seat-b   # by the key from ls --json
+rexboard jump 1                       # the first NEEDS YOU row
+rexboard next                         # the next pane that needs you
+rexboard next --back                  # the other way
+rexboard pick                         # choose from the board's list
+```
+
+Each lands the Rex app on the pane, on its host, and marks it seen through serve, as `s` on the board does. A jump:
+
+1. runs `jump.pre_cmd` from [config.toml](configuration.md), if set, since the app selects the session in whichever of its windows has focus;
+2. focuses the pane on the server that owns it (`session.focus_block`);
+3. asks this Mac's Rex app to select the pane's session and tab (`client.perform session.select`). On this host that is the app client named by `REX_CLIENT`, else `client` in config.toml, else the only app connected over the unix socket. On a remote host it is the app connected from this Mac's Tailscale node.
+
+`next` picks from `needs_you` in board order: blocked, then error, then unseen done, each longest waiting first. It starts after the pane it runs in (`REX_BLOCK`), and goes to unseen rows first, so repeated `next` works through the queue; once every row is seen, the blocked and erroring ones cycle. `pick` opens the board's list without the detail pane: Enter jumps and exits 0, esc exits 1.
+
+`jump` and `next` print `jumped to SESSION › TAB › PANE on HOST`; with `--json`, `{"ok":true,"key":...}`.
+
+| Exit | When |
+| --- | --- |
+| 0 | Jumped |
+| 1 | `NOBODY_NEEDS_YOU`: `next`, or `jump N`, with nothing in `needs_you`; prints `nobody needs you`. `NOT_FOUND`: no such key, or no row N. `AMBIGUOUS_CLIENT`: no app client named, and none or more than one on the unix socket; the next steps list each app's label. `JUMP`: `jump.pre_cmd` failed, took more than 5 seconds, or did not run; nothing is selected. `CONFIG`: config.toml cannot be read or has an unknown key, or `client` names no app. `REX`: a step in Rex failed; the message names it. `pick`: esc |
+| 2 | `USAGE`: TARGET is neither a key nor a number, or `pick` without a terminal |
