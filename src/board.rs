@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::collector::HostEvent;
@@ -11,7 +11,7 @@ use crate::pane::{self, Pane, SessionSnap, Source};
 
 pub type RowKey = (String, String);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Group {
     NeedsYou,
@@ -20,8 +20,10 @@ pub enum Group {
     Unreported,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Row {
+    /// `host/block_id`, the key `seen` and `next` take.
+    pub key: String,
     #[serde(flatten)]
     pub pane: Pane,
     pub since: String,
@@ -62,6 +64,7 @@ impl Entry {
 
     fn row(&self) -> Row {
         Row {
+            key: format!("{}/{}", self.pane.host, self.pane.block_id),
             pane: self.pane.clone(),
             since: stamp(self.since),
             since_estimated: self.since_estimated,
@@ -81,8 +84,32 @@ pub struct Board {
     sessions: BTreeMap<(String, String), String>,
     tabs: BTreeMap<(String, String), String>,
     versions: BTreeMap<String, String>,
-    warned: BTreeSet<(String, String)>,
+    warned: BTreeSet<String>,
     warnings: Vec<String>,
+    transitions: Vec<Transition>,
+}
+
+/// What a restart keeps for a pane, in `state.json`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Memory {
+    pub state: String,
+    pub kind: Option<String>,
+    pub since: String,
+    pub since_estimated: bool,
+    pub turn_started: Option<String>,
+    pub last_turn: Option<i64>,
+    pub seen: bool,
+}
+
+/// One state change, appended to `transitions.jsonl`.
+#[derive(Debug, Clone, Serialize)]
+pub struct Transition {
+    pub at: String,
+    pub host: String,
+    pub block_id: String,
+    pub from: String,
+    pub to: String,
+    pub kind: Option<String>,
 }
 
 impl Board {
@@ -320,6 +347,14 @@ impl Board {
         edit(&mut entry.src);
         let pane = self.derive(host, &entry.src);
         if (&pane.state, &pane.kind) != (&entry.pane.state, &entry.pane.kind) {
+            self.transitions.push(Transition {
+                at: stamp(now),
+                host: host.to_owned(),
+                block_id: block_id.to_owned(),
+                from: entry.pane.state.clone(),
+                to: pane.state.clone(),
+                kind: pane.kind.clone(),
+            });
             let was_working = entry.pane.state == "working";
             entry.since = now;
             entry.since_estimated = false;
@@ -352,7 +387,73 @@ impl Board {
         keys
     }
 
-    /// Warnings gathered since the last call, one per host and value.
+    /// Marks a row seen: the person acted on it. False if there is no such row.
+    pub fn mark_seen(&mut self, key: &RowKey) -> bool {
+        self.rows
+            .get_mut(key)
+            .map(|entry| entry.seen = true)
+            .is_some()
+    }
+
+    /// Drops a host that left `rex hosts`.
+    pub fn forget(&mut self, host: &str) -> Vec<RowKey> {
+        self.sessions.retain(|(h, _), _| h != host);
+        self.tabs.retain(|(h, _), _| h != host);
+        self.versions.remove(host);
+        self.remove(host, |_| true)
+    }
+
+    /// Every row's memory, keyed `host/block_id`.
+    pub fn memory(&self) -> BTreeMap<String, Memory> {
+        self.rows
+            .values()
+            .map(|e| {
+                let memory = Memory {
+                    state: e.pane.state.clone(),
+                    kind: e.pane.kind.clone(),
+                    since: stamp(e.since),
+                    since_estimated: e.since_estimated,
+                    turn_started: e.turn_started.map(stamp),
+                    last_turn: e.last_turn,
+                    seen: e.seen,
+                };
+                (format!("{}/{}", e.pane.host, e.pane.block_id), memory)
+            })
+            .collect()
+    }
+
+    /// Puts back what a restart kept for `host`'s panes whose state and kind did not change.
+    pub fn restore(&mut self, host: &str, memory: &BTreeMap<String, Memory>) -> Vec<RowKey> {
+        let mut keys = Vec::new();
+        for (key, entry) in self.rows.iter_mut().filter(|((h, _), _)| h == host) {
+            let Some(m) = memory.get(&format!("{host}/{}", key.1)) else {
+                continue;
+            };
+            if (&m.state, &m.kind) != (&entry.pane.state, &entry.pane.kind) {
+                continue;
+            }
+            let Ok(since) = DateTime::parse_from_rfc3339(&m.since) else {
+                continue;
+            };
+            entry.since = since.with_timezone(&Utc);
+            entry.since_estimated = m.since_estimated;
+            entry.turn_started = m
+                .turn_started
+                .as_deref()
+                .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
+                .map(|t| t.with_timezone(&Utc));
+            entry.last_turn = m.last_turn;
+            entry.seen = m.seen;
+            keys.push(key.clone());
+        }
+        keys
+    }
+
+    pub fn take_transitions(&mut self) -> Vec<Transition> {
+        std::mem::take(&mut self.transitions)
+    }
+
+    /// Warnings gathered since the last call.
     pub fn take_warnings(&mut self) -> Vec<String> {
         std::mem::take(&mut self.warnings)
     }
@@ -372,12 +473,12 @@ impl Board {
         })
     }
 
-    /// An unreadable time counts as missing, with one warning per host and value.
+    /// An unreadable time counts as missing. One warning per host, so a long serve stays quiet.
     fn time(&mut self, host: &str, at: &str) -> Option<DateTime<Utc>> {
         if let Ok(t) = DateTime::parse_from_rfc3339(at) {
             return Some(t.with_timezone(&Utc));
         }
-        if self.warned.insert((host.to_owned(), at.to_owned())) {
+        if self.warned.insert(host.to_owned()) {
             self.warnings.push(format!(
                 "warning: {host}: updated_at {at:?} is not RFC 3339 (Rex {}); time in state is estimated",
                 self.version(host)
@@ -641,11 +742,11 @@ mod tests {
     }
 
     #[test]
-    fn unreadable_updated_at_is_estimated_with_one_warning() {
+    fn unreadable_updated_at_is_estimated_with_one_warning_per_host() {
         let mut board = Board::default();
         let blocks = json!([
             block("block:x", "done", "yesterday"),
-            block("block:y", "done", "yesterday"),
+            block("block:y", "done", "last week"),
         ]);
         board.apply("mini", &snapshot(blocks), at(7)).unwrap();
         let row = row(&board, "block:x");

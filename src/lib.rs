@@ -1,11 +1,14 @@
 mod board;
 mod cli;
+mod client;
 mod collector;
 mod error;
 mod event;
 mod output;
 mod pane;
 mod rex;
+mod serve;
+mod state;
 
 pub use cli::Cli;
 pub use error::{Error, report};
@@ -45,8 +48,15 @@ pub fn execute(cli: &Cli) -> Result<()> {
         return Err(Error::Help);
     };
     match command {
-        Command::Ls(args) => ls(args, cli.json),
+        Command::Ls(args) if args.direct => ls(args, cli.json),
+        Command::Ls(args) => client::ls(args, cli.json),
+        Command::Watch(args) if args.raw || args.direct => watch(args, cli.json),
+        Command::Watch(args) if cli.json => client::watch(args),
         Command::Watch(args) => watch(args, cli.json),
+        Command::Serve(args) if args.stop => client::stop_serve(cli.json),
+        Command::Serve(args) if args.foreground => serve::run(),
+        Command::Serve(_) => client::start_serve(cli.json),
+        Command::Seen { key } => client::seen(key, cli.json),
     }
 }
 
@@ -117,8 +127,20 @@ fn ls(args: &LsArgs, json: bool) -> Result<()> {
 
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 
-extern "C" fn interrupted(_: libc::c_int) {
+extern "C" fn on_signal(_: libc::c_int) {
     INTERRUPTED.store(true, Ordering::SeqCst);
+}
+
+/// SIGINT and SIGTERM set a flag the loops check, so they return and Drop stops the observers.
+pub(crate) fn stop_on_signals() {
+    unsafe {
+        libc::signal(libc::SIGINT, on_signal as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, on_signal as *const () as libc::sighandler_t);
+    }
+}
+
+pub(crate) fn interrupted() -> bool {
+    INTERRUPTED.load(Ordering::SeqCst)
 }
 
 /// Rows print at most this often under a burst of events.
@@ -142,14 +164,7 @@ fn watch(args: &WatchArgs, json: bool) -> Result<()> {
             ));
         }
     }
-    // Observers run in their own process group, so stop on a signal and let Drop kill them.
-    unsafe {
-        libc::signal(libc::SIGINT, interrupted as *const () as libc::sighandler_t);
-        libc::signal(
-            libc::SIGTERM,
-            interrupted as *const () as libc::sighandler_t,
-        );
-    }
+    stop_on_signals();
     let deadline = args
         .duration
         .map(|secs| Instant::now() + Duration::from_secs(secs));
@@ -163,7 +178,7 @@ fn watch(args: &WatchArgs, json: bool) -> Result<()> {
     let mut out = std::io::stdout().lock();
     let mut board = Board::default();
     let mut due: Option<Instant> = None;
-    while !INTERRUPTED.load(Ordering::SeqCst) && deadline.is_none_or(|d| Instant::now() < d) {
+    while !interrupted() && deadline.is_none_or(|d| Instant::now() < d) {
         if due.is_some_and(|due| Instant::now() >= due) {
             due = None;
             if print_rows(&mut out, &board).is_err() {
