@@ -189,9 +189,11 @@ fn is_shell(name: &str) -> bool {
     SHELLS.contains(&name.trim_start_matches('-'))
 }
 
-/// A shell pane's title is empty, the shell's name, or a directory.
+/// A shell pane's title is empty, the shell's name, or a directory, alone or after
+/// `user@host: `.
 fn shell_title(title: &str) -> bool {
-    title.is_empty() || is_shell(title) || title.starts_with('~') || title.starts_with('/')
+    let dir = title;
+    title.is_empty() || is_shell(title) || dir.starts_with(['~', '/'])
 }
 
 fn looks_fresh(session: &Value) -> bool {

@@ -1857,6 +1857,34 @@ fn window_new_never_destroys_a_new_agent_session() {
 }
 
 #[test]
+fn window_new_reads_a_user_at_host_title_as_a_shell_only_with_a_directory() {
+    for (title, destroyed) in [("user@host: ~/src", true), ("user@host: claude", false)] {
+        let dir = tempfile::tempdir().unwrap();
+        let win = session("win", "shy-canyon", "Window 1", title, 1, false);
+        let run = window_cmd(
+            dir.path(),
+            &[
+                vec![board_session()],
+                vec![board_session()],
+                vec![board_session(), win],
+            ],
+        )
+        .args(["window", "--new"])
+        .assert();
+        if destroyed {
+            run.success();
+        } else {
+            run.code(1);
+        }
+        assert_eq!(
+            window_calls(dir.path()).contains(&("destroy".to_owned(), "session:win".to_owned())),
+            destroyed,
+            "{title}"
+        );
+    }
+}
+
+#[test]
 fn window_new_names_the_session_it_could_not_destroy() {
     let dir = tempfile::tempdir().unwrap();
     window_cmd(
