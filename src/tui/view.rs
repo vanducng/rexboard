@@ -17,7 +17,8 @@ use crate::pane::bare_title;
 /// Width of the detail pane when it sits on the right.
 const DETAIL: u16 = 38;
 
-/// Below this many rows the column header is left out, so no row is lost to it.
+/// Below this many rows the column header and the blank row above it are left out, so no row
+/// is lost to them.
 const HEADED: u16 = 12;
 
 const STOPPED: &str = "serve stopped · r reconnects";
@@ -46,8 +47,9 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
     let area = frame.area();
     let tier = tier(area.width);
     let ruled = tier != Tier::Wide && area.height >= 20;
-    let [top, body, above_footer, bottom] = Layout::vertical([
+    let [top, _gap, body, above_footer, bottom] = Layout::vertical([
         Constraint::Length(1),
+        Constraint::Length(u16::from(area.height >= HEADED)),
         Constraint::Min(3),
         Constraint::Length(u16::from(ruled)),
         Constraint::Length(1),
@@ -1087,7 +1089,12 @@ mod tests {
                 }
                 let text = render(&app, width, 30);
                 let lines: Vec<&str> = text.lines().collect();
-                assert!(lines[1].trim_start().starts_with("AGE") || lines[1].contains("STATE"));
+                assert_eq!(
+                    lines[1].trim(),
+                    "",
+                    "{presses:?} {width}: the gap under the top bar"
+                );
+                assert!(lines[2].trim_start().starts_with("AGE") || lines[2].contains("STATE"));
                 for want in &want {
                     assert!(text.contains(want), "{presses:?} {width}: {want}\n{text}");
                 }
