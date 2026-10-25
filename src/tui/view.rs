@@ -7,13 +7,17 @@ use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, Item, Link, Spot};
+use super::columns::{Col, Columns, Tier, Tone, tier};
 use super::theme;
 use crate::board::Row;
-use crate::output::{clean, fit, harness, in_state, name, state_word, what, wheres};
+use crate::output::{clean, fit, in_state, name, wheres};
 use crate::pane::bare_title;
 
 /// Width of the detail pane when it sits on the right.
 const DETAIL: u16 = 38;
+
+/// Below this many rows the column header is left out, so no row is lost to it.
+const HEADED: u16 = 12;
 
 const STOPPED: &str = "serve stopped · r reconnects";
 
@@ -32,24 +36,6 @@ pub const KEYS: [(&str, &str); 12] = [
     ("?", "this table"),
     ("q", "quit"),
 ];
-
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
-enum Tier {
-    /// Under 60 columns: glyph, time in state, session › pane, message.
-    Narrow,
-    /// 60-99: adds harness and host.
-    Mid,
-    /// 100 and up: adds the state word and the tab, with the detail pane on the right.
-    Wide,
-}
-
-fn tier(width: u16) -> Tier {
-    match width {
-        0..60 => Tier::Narrow,
-        60..100 => Tier::Mid,
-        _ => Tier::Wide,
-    }
-}
 
 pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
     let area = frame.area();
@@ -70,7 +56,7 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
             Constraint::Length(DETAIL),
         ])
         .areas(body);
-        list(frame, list_area, app, tier, now);
+        list(frame, list_area, app, area, now);
         let bar = vec![Line::styled("│", theme::dim()); usize::from(rule.height)];
         frame.render_widget(Paragraph::new(bar), rule);
         let padded = Rect {
@@ -93,7 +79,7 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
             Constraint::Length(height),
         ])
         .areas(body);
-        list(frame, list_area, app, tier, now);
+        list(frame, list_area, app, area, now);
         frame.render_widget(rule_line(rule.width), rule);
         // A peek keeps its newest lines when the pane is short.
         let skip = lines.len().saturating_sub(usize::from(height));
@@ -196,7 +182,8 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn list(frame: &mut Frame, area: Rect, app: &App, tier: Tier, now: DateTime<Utc>) {
+/// The list, under a header line naming its columns. `board` is the whole screen.
+fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc>) {
     let items = app.items();
     if items.is_empty() {
         let query = app.filter.value();
@@ -216,6 +203,16 @@ fn list(frame: &mut Frame, area: Rect, app: &App, tier: Tier, now: DateTime<Utc>
         );
         return;
     }
+    let width = usize::from(area.width);
+    let columns = Columns::new(board.width, width);
+    let area = if board.height >= HEADED {
+        let [top, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
+        let cells = columns.header().concat();
+        frame.render_widget(Paragraph::new(Line::styled(cells, theme::dim())), top);
+        rest
+    } else {
+        area
+    };
     let height = usize::from(area.height);
     let room = if items.len() > height {
         height.saturating_sub(1)
@@ -224,12 +221,11 @@ fn list(frame: &mut Frame, area: Rect, app: &App, tier: Tier, now: DateTime<Utc>
     };
     let at = items.iter().position(|item| is_selected(app, item));
     let offset = at.map_or(0, |at| (at + 1).saturating_sub(room));
-    let width = usize::from(area.width);
     let places = wheres(
         &app.rows,
-        where_what(tier, width).0.saturating_sub(1),
-        tier != Tier::Wide,
-        tier >= Tier::Mid,
+        columns.width(Col::Where).saturating_sub(1),
+        columns.tier != Tier::Wide,
+        columns.has(Col::Host),
     );
     let mut lines: Vec<Line> = items
         .iter()
@@ -255,8 +251,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, tier: Tier, now: DateTime<Utc>
                 &app.rows[i],
                 &places[i],
                 app,
-                tier,
-                width,
+                &columns,
                 is_selected(app, item),
                 now,
             ),
@@ -296,33 +291,12 @@ fn is_selected(app: &App, item: &Item) -> bool {
     }
 }
 
-/// The columns before WHERE: the glyph, the state word (wide), time in state, harness and host.
-fn lead_width(tier: Tier) -> usize {
-    match tier {
-        Tier::Narrow => 9,
-        Tier::Mid => 25,
-        Tier::Wide => 34,
-    }
-}
-
-/// How wide WHERE and WHAT are in a row `width` columns wide.
-fn where_what(tier: Tier, width: usize) -> (usize, usize) {
-    let rest = width.saturating_sub(lead_width(tier));
-    let share = if tier == Tier::Wide {
-        rest * 5 / 9
-    } else {
-        rest * 9 / 20
-    };
-    (share, rest - share)
-}
-
 /// One row of the list. `place` is its WHERE, worked out with the other rows.
 fn row_line(
     row: &Row,
     place: &str,
     app: &App,
-    tier: Tier,
-    width: usize,
+    columns: &Columns,
     selected: bool,
     now: DateTime<Utc>,
 ) -> Line<'static> {
@@ -332,27 +306,17 @@ fn row_line(
     } else {
         Style::new()
     };
-    let mut cells: Vec<(String, Style)> =
-        vec![(format!("{} ", theme::glyph(row)), theme::state(row))];
-    if tier == Tier::Wide {
-        cells.push((fit(&state_word(row), 8) + " ", theme::state(row)));
-    }
-    cells.push((fit(&in_state(row, now), 6) + " ", soft));
-    if tier >= Tier::Mid {
-        cells.push((fit(&harness(row), 7) + " ", soft));
-        cells.push((fit(&row.pane.host, 7) + " ", theme::dim()));
-    }
-    debug_assert_eq!(
-        cells.iter().map(|(text, _)| text.width()).sum::<usize>(),
-        lead_width(tier)
-    );
-    let (share, what_width) = where_what(tier, width);
-    let room = share.saturating_sub(1);
-    cells.push((fit(place, room) + " ", soft));
-    cells.push((fit(what(row), what_width), soft));
-    let mut spans: Vec<Span> = cells
+    let mut spans: Vec<Span> = columns
+        .cells(row, place, now)
         .into_iter()
-        .map(|(text, style)| Span::styled(text, style))
+        .map(|(text, tone)| {
+            let style = match tone {
+                Tone::State => theme::state(row),
+                Tone::Soft => soft,
+                Tone::Dim => theme::dim(),
+            };
+            Span::styled(text, style)
+        })
         .collect();
     if faded {
         for span in &mut spans {
@@ -452,7 +416,7 @@ fn detail(app: &App, now: DateTime<Utc>, width: usize, wide: bool) -> Vec<Line<'
     let show = if wide {
         Some(3)
     } else {
-        (msg.width() > where_what(tier(width as u16), width).1).then_some(2)
+        (msg.width() > Columns::new(width as u16, width).width(Col::Msg)).then_some(2)
     };
     if let Some(most) = show {
         let mut wrapped = wrap(&dash(&msg), value.max(1));

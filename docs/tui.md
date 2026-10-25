@@ -8,13 +8,27 @@ The board is built to live in a narrow column, so the narrow layout is the main 
 
 - **Header:** `rexboard`, the number of hosts, panes and agents, the clock and the hosts. A host that is not `up` shows in red with its state (`mini down`), and a stopped serve shows `serve stopped · r reconnects` (while the board first connects, a dim `connecting to serve`). When serve cannot be started, the list says why. When the line is short, the host list goes first, then the counts, then the clock; the red alerts always stay.
 - **Groups**, in order, each with its count and a dashed rule: `NEEDS YOU` (blocked, error, unseen done), `WORKING`, `QUIET` (idle, seen done) and `UNREPORTED` (no status record, unknown state, a host that is down, or a suspect `working` report). Empty groups are not drawn. Inside `NEEDS YOU`, blocked comes first, then error, then unseen done, each oldest first. A folded group shows `▸` before its name.
+- **Column header:** one dim line over the list names each column, at the same widths as the rows (the glyph column has no name). `pick` has it too. On a screen under 12 rows it is left out, so a short screen keeps every line for rows.
 - **Rows:** a glyph, then the columns the width allows:
 
   | Width | Columns |
   | --- | --- |
-  | under 60 | glyph · time in state · session › pane · message |
-  | 60-99 | adds harness and host |
-  | 100 and up | adds the state word and the tab: `session › tab › pane` |
+  | under 60 | `AGE` · `WHERE` (`session › pane`) · `MSG` |
+  | 60-99 | adds `HARNESS` and `HOST` |
+  | 100-139 | adds `STATE`, and the tab in `WHERE`: `session › tab › pane` |
+  | 140 and up | adds `TURN` |
+
+  Each column answers one question:
+
+  | Column | Question | Shows |
+  | --- | --- | --- |
+  | `STATE` | What needs me? | The kind when the row has one (`permission`, `question`), since the red glyph already says blocked; else the state word. A suspect row reads `idle?` |
+  | `AGE` | How long has it been like this? | Time in state |
+  | `TURN` | How long did its last turn take? | The last working turn, `-` before the first one ends |
+  | `HARNESS` | Which agent? | `claude`, `codex`, ... |
+  | `HOST` | Which machine? | The Rex host |
+  | `WHERE` | Which pane? | `session › tab › pane` |
+  | `MSG` | What did it say? | The record's message, else the title |
 
   Glyphs: `◉` blocked, `✖` error, `●` done, `◐` working, `○` idle or seen done, `·` unknown. Blocked and error are red, unseen done green, working yellow, the rest dim. Time in state is `≥5h43m` when estimated and `-` for a pane with no status record. A harness read from the title, with no record, ends in `?` (`claude?`). A `working` report more than 120 seconds old on a pane that looks idle (an idle `✳ ` title, or a shell back in front) is not trusted: the row shows `idle?` (from 100 columns; narrower, its `○` glyph), dim, under `UNREPORTED`, and the detail says `may be stale:` and why. The check cannot see inside tmux: with `tmux` in front the title is tmux's, so only a shell back in front makes such a row suspect. serve checks this every second, since time alone can make a report suspect. Rows of a host that is down, and every row while serve is stopped, are dim. The selected row has a raised background. A pane labelled `shell`, or named after its foreground process, tells you nothing, so its path is `session › tab` (also below 100 columns). When a path is too long, the tab is cut first (to `…` below 6 columns), then the session down to an 8-column stem, then the last label. Rows that would still read the same end in `#N`, the pane's place among its tab's agent panes. Below 60 columns, where there is no host column, a row from a host other than `local` also gets `@HOST` when a twin is on another host; at 50 columns that reads `api…way › pair #1`, `api…way › pair #2` and `ap…y › pair @mini`. The suffix is never cut: the path gives way first, down to `…`. When rows do not fit, the last line says how many are below (`↓ 4 more`).
 - **Detail pane**, for the selected row: at 100 columns and up on the right (38 columns), with the pane label (for a generic one, the title, else the tab), then `state` (with its kind, as in `blocked · permission`, and `(reported)` when the report is suspect), `in state`, `msg` (wrapped to three lines on the right, two underneath), `host`, `session`, `tab`, `title` (without its leading status glyph), `harness`, `source` and `last rpt` (the time of the last report, or `none`). Below 100 columns it sits underneath the list, sized to its content up to half the screen, and leaves out `in state`, and `msg` when the row shows it whole.
@@ -44,4 +58,4 @@ The board redraws when serve sends rows, on a key, and once a second for the clo
 
 ## Pick
 
-`rexboard pick` shows the same list without the detail pane, at every width. Enter goes to the selected pane and exits 0; esc exits 1. `/` filters, as on the board.
+`rexboard pick` shows the same list, with the same column header, without the detail pane, at every width. Enter goes to the selected pane and exits 0; esc exits 1. `/` filters, as on the board.
