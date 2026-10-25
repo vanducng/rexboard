@@ -334,8 +334,59 @@ fn watch_raw_passes_unknown_types_through() {
 fn watch_without_raw_is_usage() {
     bin()
         .env("REXBOARD_REX", fixture("fake-rex"))
-        .args(["watch", "--json"])
+        .arg("watch")
         .assert()
         .code(2)
-        .stderr(predicate::str::contains("rexboard watch --raw"));
+        .stderr(predicate::str::contains("watch needs --raw or --json"));
+}
+
+#[test]
+fn ls_json_adds_board_fields() {
+    let panes = ls_json(&mut ls());
+    let claude = by_block(&panes, "block:api-claude");
+    assert_eq!(claude["since"], "2026-01-01T10:00:00.000Z");
+    assert_eq!(claude["since_estimated"], false);
+    assert_eq!(claude["seen"], false);
+    assert_eq!(claude["stale"], false);
+    assert_eq!(claude["group"], "needs_you");
+    assert_eq!(claude["last_turn"], serde_json::Value::Null);
+    let codex = by_block(&panes, "block:web-codex");
+    assert_eq!(
+        codex["since_estimated"], true,
+        "a seeded working row is a guess"
+    );
+    assert_eq!(codex["turn_started"], "2026-01-01T10:02:00.000Z");
+    assert_eq!(by_block(&panes, "block:api-seat-a")["group"], "no_signal");
+    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 22));
+}
+
+#[test]
+fn watch_json_prints_debounced_rows() {
+    let out = bin()
+        .env("REXBOARD_REX", fixture("fake-rex"))
+        .args(["watch", "--json", "--host", "mini", "--for", "2"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let prints: Vec<Vec<serde_json::Value>> = String::from_utf8(out)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("each line is a JSON array of rows"))
+        .collect();
+    assert!(
+        (1..=2).contains(&prints.len()),
+        "a burst of 14 lines prints once or twice, got {}",
+        prints.len()
+    );
+    let last = prints.last().unwrap();
+    assert_eq!(
+        last.len(),
+        1,
+        "the probe pane closed, only the seat is left"
+    );
+    assert_eq!(last[0]["block_id"], "block:web-seat-b");
+    assert_eq!(last[0]["group"], "no_signal");
+    assert_eq!(last[0]["host"], "mini");
 }

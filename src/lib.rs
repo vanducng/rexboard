@@ -1,3 +1,4 @@
+mod board;
 mod cli;
 mod collector;
 mod error;
@@ -19,6 +20,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use crate::board::Board;
 use crate::cli::{Command, LsArgs, WatchArgs};
 use crate::collector::{Collector, HostEvent};
 use crate::error::Result;
@@ -43,7 +45,7 @@ pub fn execute(cli: &Cli) -> Result<()> {
     };
     match command {
         Command::Ls(args) => ls(args, cli.json),
-        Command::Watch(args) => watch(args),
+        Command::Watch(args) => watch(args, cli.json),
     }
 }
 
@@ -80,14 +82,32 @@ fn ls(args: &LsArgs, json: bool) -> Result<()> {
             host.error.as_deref().unwrap_or_default()
         );
     }
-    let panes = pane::flatten(up, args.all);
+    let mut board = Board::default();
+    let now = chrono::Utc::now();
+    for host in up {
+        let snapshot = Event::Snapshot {
+            sessions: host.sessions,
+            rex_version: Some(version.clone()),
+        };
+        board.apply(
+            &host.host,
+            &HostEvent::Event(snapshot, serde_json::Value::Null),
+            now,
+        )?;
+    }
+    let rows: Vec<_> = board
+        .rows()
+        .into_iter()
+        .filter(|row| args.all || row.pane.is_agent())
+        .collect();
     if json {
         println!(
             "{}",
-            serde_json::to_string(&panes).map_err(std::io::Error::other)?
+            serde_json::to_string(&rows).map_err(std::io::Error::other)?
         );
     } else {
-        print!("{}", output::table(&panes, chrono::Utc::now()));
+        let panes: Vec<_> = rows.into_iter().map(|row| row.pane).collect();
+        print!("{}", output::table(&panes, now));
     }
     Ok(())
 }
@@ -98,11 +118,14 @@ extern "C" fn interrupted(_: libc::c_int) {
     INTERRUPTED.store(true, Ordering::SeqCst);
 }
 
-fn watch(args: &WatchArgs) -> Result<()> {
-    if !args.raw {
+/// Rows print at most this often under a burst of events.
+const DEBOUNCE: Duration = Duration::from_millis(100);
+
+fn watch(args: &WatchArgs, json: bool) -> Result<()> {
+    if !args.raw && !json {
         return Err(Error::usage_with(
-            "watch needs --raw for now",
-            &["rexboard watch --raw"],
+            "watch needs --raw or --json for now",
+            &["rexboard watch --json", "rexboard watch --raw"],
         ));
     }
     let mut hosts: Vec<Option<String>> = vec![None];
@@ -135,12 +158,41 @@ fn watch(args: &WatchArgs) -> Result<()> {
     drop(tx);
     let mut failed = 0;
     let mut out = std::io::stdout().lock();
+    let mut board = Board::default();
+    let mut due: Option<Instant> = None;
     while !INTERRUPTED.load(Ordering::SeqCst) && deadline.is_none_or(|d| Instant::now() < d) {
-        let (host, event) = match rx.recv_timeout(Duration::from_millis(100)) {
+        if due.is_some_and(|due| Instant::now() >= due) {
+            due = None;
+            let rows: Vec<_> = board
+                .rows()
+                .into_iter()
+                .filter(|r| r.pane.is_agent())
+                .collect();
+            let rows = serde_json::to_string(&rows).map_err(std::io::Error::other)?;
+            if writeln!(out, "{rows}").and_then(|()| out.flush()).is_err() {
+                break;
+            }
+        }
+        let wait = due.map_or(Duration::from_millis(100), |due| {
+            due.saturating_duration_since(Instant::now())
+        });
+        let (host, event) = match rx.recv_timeout(wait) {
             Ok(next) => next,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
+        if !args.raw {
+            if let HostEvent::Failed(err) = event {
+                failed += 1;
+                if failed == collectors.len() {
+                    return Err(err);
+                }
+                eprintln!("warning: {host} stopped and will not restart: {err}");
+            } else if !board.apply(&host, &event, chrono::Utc::now())?.is_empty() {
+                due.get_or_insert_with(|| Instant::now() + DEBOUNCE);
+            }
+            continue;
+        }
         let mut line = match event {
             // An unknown type passes through as Rex sent it.
             HostEvent::Event(Event::Unknown, raw) => raw,

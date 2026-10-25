@@ -1,0 +1,24 @@
+{"v":1,"type":"snapshot","rex_version":"0.0.1792787366-g623b2d","sessions":[{"session_id":"session:api","label":"api","windows":[{"window_id":"window:api-main","label":"main","blocks":[{"block_id":"block:api-seat-a","label":"seat-a","title":"✳ seat-a@demo","process":{"name":"tmux","cwd":"/work/api"},"records":{}}]}]}]}
+{"session":{"label":"web","session_id":"session:web","windows":[{"blocks":[{"block_id":"block:web-claude","label":"shell","process":{},"records":{},"title":""}],"label":"main","window_id":"window:web-main"}]},"type":"session_created","v":1}
+{"block_id":"block:web-claude","cwd":"/work/web","name":"zsh","session_id":"session:web","type":"process","v":1}
+{"block_id":"block:web-claude","session_id":"session:web","title":"probe pane","type":"title","v":1}
+{"block_id":"block:web-claude","cwd":"/work/web","name":"bash","session_id":"session:web","type":"process","v":1}
+{"block_id":"block:web-claude","record":{"app":"claude-code","effective_app":"claude-code","msg":"Reading files","owner":{"name":"bash","pid":101},"state":"working","updated_at":"2026-10-25T03:09:07.910414Z"},"record_id":"","session_id":"session:web","type":"status","v":1}
+{"block_id":"block:web-claude","record":{"app":"claude-code","effective_app":"claude-code","msg":"Editing","owner":{"name":"bash","pid":101},"state":"working","updated_at":"2026-10-25T03:09:08.922073Z"},"record_id":"","session_id":"session:web","type":"status","v":1}
+{"block_id":"block:web-claude","record":{"app":"claude-code","effective_app":"claude-code","msg":"Running tests","owner":{"name":"bash","pid":101},"state":"working","updated_at":"2026-10-25T03:09:09.933876Z"},"record_id":"","session_id":"session:web","type":"status","v":1}
+{"block_id":"block:web-claude","record":{"app":"claude-code","effective_app":"claude-code","msg":"Still testing","owner":{"name":"bash","pid":101},"state":"working","updated_at":"2026-10-25T03:09:10.950968Z"},"record_id":"","session_id":"session:web","type":"status","v":1}
+{"block_id":"block:web-claude","record":{"app":"claude-code","effective_app":"claude-code","kind":"permission","msg":"Allow Bash?","owner":{"name":"bash","pid":101},"state":"blocked","updated_at":"2026-10-25T03:09:11.980237Z"},"record_id":"","session_id":"session:web","type":"status","v":1}
+{"block_id":"block:web-claude","record":{"app":"claude-code","effective_app":"claude-code","owner":{"name":"bash","pid":101},"state":"working","updated_at":"2026-10-25T03:09:12.989984Z"},"record_id":"","session_id":"session:web","type":"status","v":1}
+{"block_id":"block:web-claude","record":{"app":"claude-code","effective_app":"claude-code","id":"sub-1","owner":{"name":"bash","pid":101},"state":"working","updated_at":"2026-10-25T03:09:13.998187Z"},"record_id":"sub-1","session_id":"session:web","type":"status","v":1}
+{"block_id":"block:web-claude","record":{"app":"claude-code","effective_app":"claude-code","msg":"Tests pass","owner":{"name":"bash","pid":101},"state":"done","updated_at":"2026-10-25T03:09:15.057153Z"},"record_id":"","session_id":"session:web","type":"status","v":1}
+{"block_id":"block:web-claude","session_id":"session:web","title":"✳ seat-a@demo","type":"title","v":1}
+{"block_id":"block:web-claude","ids":["","sub-1"],"reason":"clear","session_id":"session:web","type":"status_removed","v":1}
+{"block_id":"block:web-claude","record":{"app":"claude-code","effective_app":"claude-code","owner":{"name":"bash","pid":101},"progress":0,"state":"working","updated_at":"2026-10-25T03:09:17.131323Z"},"record_id":"","session_id":"session:web","type":"status","v":1}
+{"block_id":"block:web-claude","record":{"app":"claude-code","effective_app":"claude-code","owner":{"name":"bash","pid":101},"progress":1,"state":"working","updated_at":"2026-10-25T03:09:17.131373Z"},"record_id":"","session_id":"session:web","type":"status","v":1}
+{"block_id":"block:web-claude","record":{"app":"claude-code","effective_app":"claude-code","owner":{"name":"bash","pid":101},"progress":2,"state":"working","updated_at":"2026-10-25T03:09:17.131428Z"},"record_id":"","session_id":"session:web","type":"status","v":1}
+{"block_id":"block:web-claude","ids":[""],"reason":"child_exited","session_id":"session:web","type":"status_removed","v":1}
+{"block_id":"block:web-claude","exit_code":0,"session_id":"session:web","type":"child_exited","v":1}
+{"block_id":"block:web-claude","session_id":"session:web","type":"block_closed","v":1}
+{"session_id":"session:web","type":"window_closed","v":1,"window_id":"window:web-main"}
+{"session_id":"session:web","type":"active_window","v":1,"window_id":null}
+{"session_id":"session:web","type":"session_destroyed","v":1}
