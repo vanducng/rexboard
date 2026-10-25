@@ -419,7 +419,13 @@ pub fn stop_serve(json: bool) -> Result<()> {
                 ));
             };
             // The record can lag the lock, so never signal a pid that is not rexboard.
-            if !is_rexboard(pid) {
+            let Some(exe) = exe_path(pid) else {
+                return Err(Error::serve_with(
+                    format!("cannot read pid {pid}'s executable, so it was not signalled"),
+                    &[lsof.as_str(), "kill <the pid lsof shows>"],
+                ));
+            };
+            if !rexboard_exe(&exe) {
                 return Err(Error::serve_with(
                     format!(
                         "serve.lock names pid {pid}, which is not rexboard; serve may still be starting, retry"
@@ -471,9 +477,11 @@ pub fn stop_serve(json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Whether pid runs a binary named rexboard.
-fn is_rexboard(pid: i32) -> bool {
-    exe_path(pid).is_some_and(|path| path.file_name().is_some_and(|name| name == "rexboard"))
+/// Whether an executable path is rexboard's. Linux shows a binary replaced in place, as
+/// install.sh does, as "rexboard (deleted)".
+fn rexboard_exe(path: &std::path::Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name == "rexboard" || name == "rexboard (deleted)")
 }
 
 #[cfg(target_os = "macos")]
@@ -488,4 +496,21 @@ fn exe_path(pid: i32) -> Option<std::path::PathBuf> {
 #[cfg(not(target_os = "macos"))]
 fn exe_path(pid: i32) -> Option<std::path::PathBuf> {
     std::fs::read_link(format!("/proc/{pid}/exe")).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_rexboard_binaries_are_stopped() {
+        assert!(rexboard_exe(std::path::Path::new(
+            "/usr/local/bin/rexboard"
+        )));
+        assert!(rexboard_exe(std::path::Path::new(
+            "/home/u/.local/bin/rexboard (deleted)"
+        )));
+        assert!(!rexboard_exe(std::path::Path::new("/usr/bin/perl")));
+        assert!(!rexboard_exe(std::path::Path::new("/usr/bin/rexboard-old")));
+    }
 }
