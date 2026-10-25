@@ -356,6 +356,10 @@ impl App {
             self.keep_selection_visible();
             return None;
         }
+        // A key with ctrl or alt after `f` keeps its own meaning, so ctrl+c still quits.
+        if self.picking_status && !(key.modifiers - KeyModifiers::SHIFT).is_empty() {
+            self.picking_status = false;
+        }
         if self.picking_status {
             self.picking_status = false;
             match key.code {
@@ -366,7 +370,7 @@ impl App {
                         // Folded groups would hide the very rows asked for.
                         self.unfold_all();
                     }
-                    None => self.say("f takes w d q p e u; f or esc clears"),
+                    None => self.say("f takes w d q p e u i; f or esc clears"),
                 },
                 _ => {}
             }

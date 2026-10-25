@@ -87,10 +87,11 @@ The board redraws when serve sends rows, on a key, and once a second for the clo
 | `p` | permission | `state` `blocked` with any other `kind` (agents send `permission`) or none |
 | `e` | error | `state` `error` |
 | `u` | unreported | the `UNREPORTED` group: no status record, `unknown`, a stale host or a suspect report |
+| `i` | idle | `state` `idle` |
 
-A row in `UNREPORTED` matches only `u`, so each row matches at most one letter; `idle` rows match none. While `f` waits for its letter, the footer lists the letters with how many rows each would show (`f w working 3 · d done 5 · …`, or `f w3 d5 …` when narrow). `f f` or `esc` clears the filter; any other key leaves it as it was and says which letters `f` takes. The top bar shows the filter after `rexboard` (`only question`, or `view: flat ↓age · only question`).
+A row in `UNREPORTED` matches only `u`, so each row matches exactly one letter. While `f` waits for its letter, the footer lists each status with how many rows it would show, its letter underlined as in the column header: `f working 3 · done 5 · … · f/esc clears`. Narrower, the hint goes and the separators tighten, then it reads `f w3 d5 … · f/esc clears`. `f f` or `esc` clears the filter. Another letter leaves the filter as it was and says which letters `f` takes; a key that is not a character (an arrow, `enter`) does the same without a word. A key with `ctrl` or `alt` keeps its own meaning, so `ctrl+c` still quits. When nothing has the status, the list says `no error rows · f f or esc clears` (`no error rows match "x"` with a `/` text too). The top bar shows the filter after `rexboard` (`only question`, or `view: flat ↓age · only question`).
 
-The filter combines with the `/` text and with every view. Setting it opens folded groups, so the rows asked for are not hidden. `1`-`9` and `ctrl+s` count only the rows the filters show. It works in `pick` too.
+The filter combines with the `/` text and with every view. Setting it opens folded groups, so the rows asked for are not hidden. `1`-`9` and `ctrl+s` count only the rows the filters show. It works in `pick` too, where a plain `esc` exits as usual and `f esc` clears the filter.
 
 ## Pick
 

@@ -11,16 +11,18 @@ pub enum Status {
     Permission,
     Error,
     Unreported,
+    Idle,
 }
 
 /// In the order the footer lists them.
-pub const ALL: [Status; 6] = [
+pub const ALL: [Status; 7] = [
     Status::Working,
     Status::Done,
     Status::Question,
     Status::Permission,
     Status::Error,
     Status::Unreported,
+    Status::Idle,
 ];
 
 impl Status {
@@ -40,6 +42,7 @@ impl Status {
             Self::Permission => "permission",
             Self::Error => "error",
             Self::Unreported => "unreported",
+            Self::Idle => "idle",
         }
     }
 
@@ -57,6 +60,7 @@ impl Status {
             Self::Question => p.state == "blocked" && question,
             Self::Permission => p.state == "blocked" && !question,
             Self::Error => p.state == "error",
+            Self::Idle => p.state == "idle",
             Self::Unreported => false,
         }
     }
@@ -125,6 +129,7 @@ pub mod tests {
             ('p', vec!["mini/allow", "mini/odd"]),
             ('e', vec!["local/err"]),
             ('u', vec!["local/shell", "mini/stale"]),
+            ('i', vec!["local/seat-a"]),
         ] {
             let mut app = every_status();
             pick(&mut app, letter);
@@ -156,7 +161,20 @@ pub mod tests {
         pick(&mut app, 'x');
         assert_eq!(app.status, Some(Status::Working));
         assert!(!app.picking_status);
-        assert_eq!(app.toast(), Some("f takes w d q p e u; f or esc clears"));
+        assert_eq!(app.toast(), Some("f takes w d q p e u i; f or esc clears"));
+    }
+
+    #[test]
+    fn ctrl_keys_after_f_keep_their_meaning() {
+        let mut app = every_status();
+        press(&mut app, KeyCode::Char('f'));
+        let quit = app.handle(ratatui::crossterm::event::KeyEvent::new(
+            KeyCode::Char('c'),
+            ratatui::crossterm::event::KeyModifiers::CONTROL,
+        ));
+        assert!(matches!(quit, Some(crate::tui::app::Effect::Quit)));
+        assert!(!app.picking_status);
+        assert_eq!(app.status, None);
     }
 
     #[test]
@@ -175,12 +193,12 @@ pub mod tests {
     fn counts_follow_the_text_filter() {
         let mut app = every_status();
         let counts = |app: &App| ALL.map(|s| app.status_count(s));
-        assert_eq!(counts(&app), [1, 2, 1, 2, 1, 2]);
+        assert_eq!(counts(&app), [1, 2, 1, 2, 1, 2, 1]);
         press(&mut app, KeyCode::Char('/'));
         press(&mut app, KeyCode::Char('m'));
         press(&mut app, KeyCode::Char('i'));
         press(&mut app, KeyCode::Enter);
-        assert_eq!(counts(&app), [1, 0, 1, 2, 0, 1], "only mini rows");
+        assert_eq!(counts(&app), [1, 0, 1, 2, 0, 1, 0], "only mini rows");
     }
 
     #[test]
