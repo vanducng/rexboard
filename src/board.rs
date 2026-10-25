@@ -34,7 +34,9 @@ pub struct Row {
     pub seen: bool,
     pub stale: bool,
     /// The record says `working`, but it is old and the pane looks idle, so it is not trusted.
+    #[serde(default)]
     pub suspect: bool,
+    #[serde(default)]
     pub suspect_reason: Option<String>,
     pub group: Group,
 }
@@ -65,22 +67,25 @@ impl Entry {
             return None;
         }
         let at = DateTime::parse_from_rfc3339(p.updated_at.as_deref()?).ok()?;
-        if (now - at.with_timezone(&Utc)).num_seconds() <= SUSPECT_AFTER_SECS {
+        let age = now - at.with_timezone(&Utc);
+        if age.num_seconds() <= SUSPECT_AFTER_SECS {
             return None;
         }
-        let since = at.with_timezone(&chrono::Local).format("%H:%M");
-        if p.title.starts_with("✳ ") {
-            return Some(format!(
-                "reports working since {since}, but the title shows idle"
-            ));
+        let at = at
+            .with_timezone(&chrono::Local)
+            .format(if age.num_days() >= 1 {
+                "%b %-d %H:%M"
+            } else {
+                "%H:%M"
+            });
+        // Under tmux the title is tmux's and keeps its idle glyph while the agent works.
+        let process = self.src.process.as_deref();
+        if process != Some("tmux") && p.title.starts_with("✳ ") {
+            return Some(format!("reported working at {at}; the title shows idle"));
         }
-        let shell = self
-            .src
-            .process
-            .as_deref()
-            .filter(|name| SHELLS.contains(name))?;
+        let shell = process.filter(|name| SHELLS.contains(name))?;
         Some(format!(
-            "reports working since {since}, but {shell} is back in front"
+            "reported working at {at}; {shell} is back in front"
         ))
     }
 
@@ -843,6 +848,12 @@ mod tests {
             working(
                 "block:idle-title",
                 "✳ seat-a@demo",
+                "2.1.0",
+                "2026-01-01T00:00:00Z"
+            ),
+            working(
+                "block:under-tmux",
+                "✳ seat-t@demo",
                 "tmux",
                 "2026-01-01T00:00:00Z"
             ),
@@ -870,8 +881,14 @@ mod tests {
             idle.suspect_reason
                 .as_deref()
                 .unwrap()
-                .ends_with("but the title shows idle")
+                .ends_with("; the title shows idle")
         );
+        let tmux = get("block:under-tmux");
+        assert!(
+            !tmux.suspect,
+            "under tmux the title is tmux's, not the agent's"
+        );
+        assert_eq!(tmux.group, Group::Working);
         let shell = get("block:shell");
         assert!(shell.suspect);
         assert!(
@@ -879,7 +896,7 @@ mod tests {
                 .suspect_reason
                 .as_deref()
                 .unwrap()
-                .ends_with("but zsh is back in front")
+                .ends_with("; zsh is back in front")
         );
         let busy = get("block:busy");
         assert!(!busy.suspect, "the harness is still in front");
@@ -889,5 +906,26 @@ mod tests {
             2,
             "serve can see a row turn suspect with time alone"
         );
+        let day_old = board.rows(at(86_400 + 5));
+        let reason = day_old
+            .iter()
+            .find(|r| r.pane.block_id == "block:shell")
+            .and_then(|r| r.suspect_reason.clone())
+            .unwrap();
+        assert!(
+            reason.starts_with("reported working at Jan 1 ")
+                || reason.starts_with("reported working at Dec 31 "),
+            "a report a day old gives its date: {reason}"
+        );
+    }
+
+    #[test]
+    fn rows_from_a_serve_without_suspect_fields_parse() {
+        let row = serde_json::to_value(replay(3).rows(at(3)).remove(0)).unwrap();
+        let mut old = row.as_object().unwrap().clone();
+        old.remove("suspect");
+        old.remove("suspect_reason");
+        let parsed: Row = serde_json::from_value(Value::Object(old)).unwrap();
+        assert!(!parsed.suspect && parsed.suspect_reason.is_none());
     }
 }
