@@ -420,7 +420,8 @@ fn ls_json_adds_board_fields() {
     );
     assert_eq!(codex["turn_started"], "2026-01-01T10:02:00.000Z");
     assert_eq!(by_block(&panes, "block:api-seat-a")["group"], "unreported");
-    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 25));
+    assert_eq!(codex["process"], "codex");
+    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 26));
 }
 
 /// A status line for the fixture's idle seat on `host`, sent after the recorded stream ends.
@@ -932,9 +933,12 @@ fn ls_text_squeezes_long_labels_and_dates_only_reported_rows() {
     );
 }
 
-/// Runs `rexboard board` on a fresh pty as its controlling terminal, sends `signal` once the
+/// Runs `rexboard board` on a fresh pty, sends `signal` (if any) once the
 /// board is on the alternate screen, and returns everything it wrote plus how it exited.
-fn board_under_pty(signal: libc::c_int, hang_up: bool) -> (String, std::process::ExitStatus) {
+fn board_under_pty(
+    signal: Option<libc::c_int>,
+    hang_up: bool,
+) -> (String, std::process::ExitStatus) {
     use std::io::Read;
     use std::os::fd::FromRawFd;
     let (mut master, mut slave) = (0, 0);
@@ -1011,7 +1015,9 @@ fn board_under_pty(signal: libc::c_int, hang_up: bool) -> (String, std::process:
         close.store(true, std::sync::atomic::Ordering::SeqCst);
         reader.join().unwrap();
     }
-    unsafe { libc::kill(child.id() as i32, signal) };
+    if let Some(signal) = signal {
+        unsafe { libc::kill(child.id() as i32, signal) };
+    }
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     let status = loop {
         if let Some(status) = child.try_wait().unwrap() {
@@ -1019,7 +1025,7 @@ fn board_under_pty(signal: libc::c_int, hang_up: bool) -> (String, std::process:
         }
         if std::time::Instant::now() >= deadline {
             let _ = child.kill();
-            panic!("board did not exit within 5s of signal {signal} (hang up: {hang_up})");
+            panic!("board did not exit within 5s of signal {signal:?} (hang up: {hang_up})");
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     };
@@ -1032,7 +1038,7 @@ fn board_under_pty(signal: libc::c_int, hang_up: bool) -> (String, std::process:
 #[test]
 fn board_restores_the_terminal_on_sigterm_and_sighup() {
     for signal in [libc::SIGTERM, libc::SIGHUP] {
-        let (out, status) = board_under_pty(signal, false);
+        let (out, status) = board_under_pty(Some(signal), false);
         assert!(status.success(), "signal {signal}: {status:?}");
         let entered = out.find("\x1b[?1049h").unwrap();
         let left = out.rfind("\x1b[?1049l").unwrap();
@@ -1048,36 +1054,27 @@ fn board_restores_the_terminal_on_sigterm_and_sighup() {
 }
 
 #[test]
-fn ls_marks_an_old_working_report_on_an_idle_pane_suspect() {
+fn ls_does_not_suspect_a_seat_under_tmux_by_its_title() {
+    // tmux owns the title and keeps the idle glyph while the agent works.
     let panes = ls_json(&mut ls());
     let seat = by_block(&panes, "block:web-rig-review");
-    assert_eq!(seat["state"], "working", "the raw state stays");
-    assert_eq!(seat["suspect"], true);
-    assert_eq!(seat["group"], "unreported");
-    assert!(
-        seat["suspect_reason"]
-            .as_str()
-            .unwrap()
-            .ends_with("but the title shows idle"),
-        "{seat}"
-    );
-    assert_eq!(
-        by_block(&panes, "block:web-codex")["suspect"],
-        false,
-        "codex is still in front"
-    );
+    assert_eq!(seat["state"], "working");
+    assert_eq!(seat["suspect"], false, "{seat}");
+    assert_eq!(seat["group"], "working");
     let out = ls().assert().success().get_output().stdout.clone();
     let text = String::from_utf8(out).unwrap();
     let line = text.lines().find(|l| l.contains("seat-r")).unwrap();
-    assert!(line.contains("unreported  idle?"), "{line}");
+    assert!(!line.contains("idle?"), "{line}");
 }
 
 #[test]
 fn board_exits_when_its_terminal_hangs_up() {
-    // Any exit will do: the terminal is gone, so there is nothing to restore or report to.
-    let (_, status) = board_under_pty(libc::SIGHUP, true);
-    assert!(
-        status.code().is_some(),
-        "exited on its own, not killed: {status:?}"
-    );
+    let (_, status) = board_under_pty(Some(libc::SIGHUP), true);
+    assert!(status.success(), "{status:?}");
+}
+
+#[test]
+fn board_exits_when_its_terminal_closes_without_a_sighup() {
+    let (_, status) = board_under_pty(None, true);
+    assert!(status.success(), "{status:?}");
 }
