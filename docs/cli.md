@@ -24,9 +24,9 @@ rexboard ls --json          # an array of panes
 
 One embedded Lua script runs through `rex do -` and reads this host plus every `rex hosts` entry in one call. A call that takes more than 10 seconds fails with `REX`.
 
-A pane is listed when it has a status record or a known harness. `--all` adds the rest. Panes sort by state: `blocked`, `error`, `done`, `working`, `idle`, `unknown`.
+A pane is listed when it has a status record or a known harness. `--all` adds the rest. `ls` builds its rows the same way as `watch --json`, so they carry the same fields and order: by `group`, then, inside `needs_you`, `blocked` before `error` before unseen `done`, then the longest in its state first. `ls` sees one snapshot, so every `done` is unseen and `last_turn` is `null`.
 
-The text table has the columns `STATE`, `AGE` (since `updated_at`, `-` when there is none), `HARNESS` (`-` when unknown), `HOST`, `WHERE` (`session › tab › pane`) and `WHAT` (the record's message, else the pane title without its leading state glyph).
+The text table has the columns `GROUP`, `STATE`, `AGE` (time in the current state, `≥` when estimated), `HARNESS` (`-` when unknown), `HOST`, `WHERE` (`session › tab › pane`) and `WHAT` (the record's message, else the pane title without its leading state glyph).
 
 ### JSON fields
 
@@ -49,6 +49,13 @@ The text table has the columns `STATE`, `AGE` (since `updated_at`, `-` when ther
 | `updated_at` | string or null | RFC 3339 time Rex received the record. It changes on every report, not only on a state change |
 | `source` | string | `native`: the pane reports its own status. `bridge`: the record came through `tmux`. `inferred`: no record, state read from the title |
 | `children` | object | Counts by state of the pane's other records, such as Claude subagents: `{"working": 1}` |
+| `since` | string | RFC 3339 UTC time the pane entered its current `state` and `kind`. A report in the same state keeps it |
+| `since_estimated` | boolean | `true` when rexboard did not see the change: a row first seen in a snapshot that is `working` (its `updated_at` is the last report, not the start) or has no record, or an `updated_at` that is not RFC 3339. That last case also prints `warning: HOST: updated_at "VALUE" is not RFC 3339 (Rex VERSION); time in state is estimated` on stderr, once per host and value |
+| `turn_started` | string or null | When the pane last entered `working` |
+| `last_turn` | integer or null | Seconds from entering `working` to the next `done` or `blocked`. Short when the turn was already running when rexboard started |
+| `seen` | boolean | `false` after the pane enters `done`, `blocked` or `error`; `true` once it enters `working` again. A `done`, `blocked` or `error` first seen in a snapshot starts unseen. Nothing marks a pane seen by hand yet |
+| `stale` | boolean | `true` while the host's observer is down; the next snapshot clears it |
+| `group` | string | `needs_you` (`blocked`, `error`, unseen `done`), `working`, `quiet` (`idle`, seen `done`), or `unreported` (`source` is `inferred`, `state` is `unknown`, or `stale`) |
 
 The pane's main record is the one with no `id`; if every record has one, the most urgent wins.
 
@@ -67,16 +74,21 @@ With `--json`, errors print on stderr as `{"ok":false,"error":{"code":...,"messa
 ## `rexboard watch`
 
 ```bash
+rexboard watch --json               # the agent rows from every host, again after each change
 rexboard watch --raw                # every event from every host, as it happens
 rexboard watch --raw --host mini    # one host: local, or a label from `rex hosts`
 rexboard watch --raw --for 60       # stop after 60 seconds
 ```
 
-`--raw` is required for now; without it, `watch` fails with `USAGE`. A later release adds views on top of this stream.
+`watch` needs `--json` or `--raw` for now; with neither, it fails with `USAGE`. With both, `--raw` wins and errors print as JSON.
 
-rexboard reads the host list once from `rex hosts --json`, adds this host as `local`, and keeps one embedded Lua observer running per host through `rex [-S HOST] do - --all --fail-fast`. A host added after `watch` starts needs a restart. Without `--for`, `watch` runs until Ctrl-C, SIGTERM, or until stdout closes. `--json` only changes how errors print; the stream is always JSON.
+rexboard reads the host list once from `rex hosts --json`, adds this host as `local`, and keeps one embedded Lua observer running per host through `rex [-S HOST] do - --all --fail-fast`. A host added after `watch` starts needs a restart. Without `--for`, `watch` runs until Ctrl-C, SIGTERM, or until stdout closes.
 
-### Lines
+### Rows (`--json`)
+
+Each line is one JSON array: the agent rows from every host, in the same shape and order as `ls --json`. A new line follows each change to any row, at most one every 100ms, so a burst of reports prints once. A host's `down` marks its rows `stale`; its next snapshot replaces them, and `since`, `seen` and the turn fields survive for panes whose `state` and `kind` did not change. A host whose events rexboard cannot read (a record without `state`, a bad block or session shape) stops for good: `warning: HOST stopped and will not restart: ...` on stderr, its rows stay but turn `stale`, and the other hosts keep printing. Pending rows print once more when `watch` stops.
+
+### Lines (`--raw`)
 
 Each line is one JSON object. Every line has these three fields:
 
@@ -133,4 +145,4 @@ A host stops for good when its observer prints a line that is not JSON or a know
 | --- | --- |
 | 0 | `--for` elapsed, Ctrl-C or SIGTERM, or stdout closed |
 | 1 | `REX_NOT_FOUND`: no `rex` CLI. `REX`: `rex hosts` failed, or every host stopped on a bad line. `CONTRACT_MISMATCH`: every host stopped and the last one stopped on a version mismatch; next steps `rexboard --version` and the `install.sh` one-liner |
-| 2 | `USAGE`: no `--raw`, a bad flag, or `--host` names no host |
+| 2 | `USAGE`: neither `--json` nor `--raw`, a bad flag, or `--host` names no host |

@@ -1,9 +1,9 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -18,6 +18,8 @@ pub const OBSERVER: &str = concat!(
     "\n",
     include_str!("lua/observer.lua")
 );
+
+static SPAWN: Mutex<()> = Mutex::new(());
 
 const TICK: Duration = Duration::from_secs(30);
 /// Three missed ticks means the host is gone.
@@ -160,6 +162,9 @@ fn observe(
             Err(RecvTimeoutError::Disconnected) => break "observer exited".to_owned(),
         }
     };
+    if reason == "observer exited" {
+        exit_soon(&mut child);
+    }
     let status = stop_child(&mut child, pgid);
     let mut reason = status.map_or(reason.clone(), |s| format!("{reason} ({s})"));
     if let Some(line) = stderr.join().ok().flatten() {
@@ -186,6 +191,11 @@ fn start(host: Option<&str>) -> Result<Child> {
     if let Some(host) = host {
         cmd.args(["-S", host]);
     }
+    // macOS std makes pipes then sets close-on-exec, so a parallel spawn can inherit this
+    // child's stdin and keep it from ever seeing EOF. One spawn at a time closes that gap.
+    let spawning = SPAWN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut child = cmd
         .args(["do", "-", "--all", "--fail-fast"])
         .stdin(Stdio::piped())
@@ -194,6 +204,7 @@ fn start(host: Option<&str>) -> Result<Child> {
         .process_group(0)
         .spawn()
         .map_err(|err| Error::RexNotFound(format!("could not run {}: {err}", rex.display())))?;
+    drop(spawning);
     let mut stdin = child.stdin.take().expect("piped stdin");
     if let Err(err) = stdin.write_all(OBSERVER.as_bytes()) {
         kill_group(child.id() as i32);
@@ -201,6 +212,16 @@ fn start(host: Option<&str>) -> Result<Child> {
         return Err(err.into());
     }
     Ok(child)
+}
+
+/// stdout can close a moment before the process is reaped; wait up to 1s so the reason has its status.
+fn exit_soon(child: &mut Child) {
+    for _ in 0..100 {
+        if child.try_wait().ok().flatten().is_some() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn stop_child(child: &mut Child, pgid: &AtomicI32) -> Option<std::process::ExitStatus> {

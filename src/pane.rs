@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 
 use serde::de::{Error as _, IgnoredAny, MapAccess, SeqAccess, Unexpected, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Deserialize)]
 pub struct Snapshot {
@@ -15,30 +16,30 @@ pub struct Snapshot {
 pub struct HostSnap {
     pub host: String,
     pub error: Option<String>,
-    #[serde(default, deserialize_with = "seq")]
-    sessions: Vec<SessionSnap>,
-}
-
-#[derive(Debug, Deserialize)]
-struct SessionSnap {
-    session_id: String,
     #[serde(default)]
-    label: String,
-    #[serde(default, deserialize_with = "seq")]
-    windows: Vec<WindowSnap>,
+    pub sessions: Value,
 }
 
 #[derive(Debug, Deserialize)]
-struct WindowSnap {
-    window_id: String,
+pub struct SessionSnap {
+    pub session_id: String,
     #[serde(default)]
-    label: String,
+    pub label: String,
     #[serde(default, deserialize_with = "seq")]
-    blocks: Vec<BlockSnap>,
+    pub windows: Vec<WindowSnap>,
 }
 
 #[derive(Debug, Deserialize)]
-struct BlockSnap {
+pub struct WindowSnap {
+    pub window_id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default, deserialize_with = "seq")]
+    pub blocks: Vec<BlockSnap>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BlockSnap {
     block_id: String,
     #[serde(default)]
     label: String,
@@ -54,24 +55,55 @@ struct Process {
     name: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct Record {
+#[derive(Debug, Clone, Deserialize)]
+pub struct Record {
     id: Option<String>,
-    state: String,
+    pub state: String,
     kind: Option<String>,
     msg: Option<String>,
     app: Option<String>,
     effective_app: Option<String>,
     owner: Option<Owner>,
-    updated_at: Option<String>,
+    pub updated_at: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct Owner {
     name: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+/// What Rex reports for one pane; a `Pane` is derived from it.
+#[derive(Debug, Clone)]
+pub struct Source {
+    pub session_id: String,
+    pub window_id: String,
+    pub block_id: String,
+    pub label: String,
+    pub title: String,
+    pub process: Option<String>,
+    /// Keyed by record id; `""` is the pane's main record.
+    pub records: BTreeMap<String, Record>,
+}
+
+impl Source {
+    pub fn new(session_id: &str, window_id: &str, block: BlockSnap) -> Self {
+        Self {
+            session_id: session_id.to_owned(),
+            window_id: window_id.to_owned(),
+            block_id: block.block_id,
+            label: block.label,
+            title: block.title.unwrap_or_default(),
+            process: block.process.name,
+            records: block
+                .records
+                .into_iter()
+                .map(|r| (r.id.clone().unwrap_or_default(), r))
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct Pane {
     pub host: String,
     pub session_id: String,
@@ -88,6 +120,27 @@ pub struct Pane {
     pub updated_at: Option<String>,
     pub source: &'static str,
     pub children: BTreeMap<String, usize>,
+}
+
+impl Pane {
+    /// A pane with a status record or a known harness; the rest are plain shells.
+    pub fn is_agent(&self) -> bool {
+        self.source != "inferred" || self.harness.is_some()
+    }
+}
+
+pub fn parse_sessions(sessions: &Value) -> serde_json::Result<Vec<SessionSnap>> {
+    #[derive(Deserialize)]
+    struct Sessions(#[serde(deserialize_with = "seq")] Vec<SessionSnap>);
+    Sessions::deserialize(sessions).map(|s| s.0)
+}
+
+pub fn parse_block(block: &Value) -> serde_json::Result<BlockSnap> {
+    BlockSnap::deserialize(block)
+}
+
+pub fn parse_record(record: &Value) -> serde_json::Result<Record> {
+    Record::deserialize(record)
 }
 
 /// Lua encodes an empty table as `{}`, so an empty list can arrive as an object. Anything else is drift.
@@ -126,67 +179,51 @@ pub fn rank(state: &str) -> u8 {
     }
 }
 
-pub fn flatten(hosts: Vec<HostSnap>, all: bool) -> Vec<Pane> {
-    let mut panes = Vec::new();
-    for host in hosts {
-        for mut session in host.sessions {
-            for mut window in std::mem::take(&mut session.windows) {
-                for block in std::mem::take(&mut window.blocks) {
-                    let pane = pane(&host.host, &session, &window, block);
-                    if all || pane.source != "inferred" || pane.harness.is_some() {
-                        panes.push(pane);
-                    }
-                }
-            }
+pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
+    let main = src
+        .records
+        .get("")
+        .or_else(|| src.records.values().min_by_key(|r| rank(&r.state)));
+    let mut children = BTreeMap::new();
+    for record in src.records.values() {
+        if !main.is_some_and(|m| std::ptr::eq(m, record)) {
+            *children.entry(record.state.clone()).or_insert(0) += 1;
         }
     }
-    panes.sort_by_key(|pane| rank(&pane.state));
-    panes
-}
-
-fn pane(host: &str, session: &SessionSnap, window: &WindowSnap, block: BlockSnap) -> Pane {
-    let title = block.title.unwrap_or_default();
-    let mut records = block.records;
-    let main = records
-        .iter()
-        .position(|r| r.id.as_deref().unwrap_or("").is_empty())
-        .or_else(|| (0..records.len()).min_by_key(|&i| rank(&records[i].state)))
-        .map(|i| records.swap_remove(i));
-    let mut children = BTreeMap::new();
-    for record in &records {
-        *children.entry(record.state.clone()).or_insert(0) += 1;
-    }
-    let process = block.process.name.as_deref();
+    let process = src.process.as_deref();
     let harness = main
-        .as_ref()
         .and_then(|r| r.effective_app.clone().or_else(|| r.app.clone()))
         .or_else(|| process.and_then(process_harness))
-        .or_else(|| title_state(&title).map(|_| "claude-code".to_owned()));
+        .or_else(|| title_state(&src.title).map(|_| "claude-code".to_owned()));
     let owner = main
-        .as_ref()
         .and_then(|r| r.owner.as_ref())
         .and_then(|o| o.name.as_deref());
-    let source = match &main {
+    let source = match main {
         None => "inferred",
         Some(_) if owner == Some("tmux") || process == Some("tmux") => "bridge",
         Some(_) => "native",
     };
     let (state, kind, msg, updated_at) = match main {
-        Some(r) => (r.state, r.kind, r.msg, r.updated_at),
+        Some(r) => (
+            r.state.clone(),
+            r.kind.clone(),
+            r.msg.clone(),
+            r.updated_at.clone(),
+        ),
         None => {
-            let state = title_state(&title).unwrap_or("unknown");
+            let state = title_state(&src.title).unwrap_or("unknown");
             (state.to_owned(), None, None, None)
         }
     };
     Pane {
         host: host.to_owned(),
-        session_id: session.session_id.clone(),
-        session: session.label.clone(),
-        window_id: window.window_id.clone(),
-        tab: window.label.clone(),
-        block_id: block.block_id,
-        pane: block.label,
-        title,
+        session_id: src.session_id.clone(),
+        session: session.to_owned(),
+        window_id: src.window_id.clone(),
+        tab: tab.to_owned(),
+        block_id: src.block_id.clone(),
+        pane: src.label.clone(),
+        title: src.title.clone(),
         harness,
         state,
         kind,

@@ -19,7 +19,7 @@ pub struct Cli {
 pub enum Command {
     /// List agent panes on this host and every `rex hosts` entry, most urgent first.
     Ls(LsArgs),
-    /// Stream events from this host and every `rex hosts` entry as they happen.
+    /// Stream the agent rows (`--json`) or raw events (`--raw`) from this host and every `rex hosts` entry.
     Watch(WatchArgs),
 }
 
