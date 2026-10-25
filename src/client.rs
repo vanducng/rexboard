@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use crate::board::Row;
 use crate::cli::{LsArgs, WatchArgs};
 use crate::error::{Error, Result};
-use crate::state::Paths;
+use crate::state::{Lock, Paths};
 use crate::{interrupted, output, rex, serve, stop_on_signals};
 
 const START_WITHIN: Duration = Duration::from_secs(2);
@@ -44,7 +44,7 @@ fn connect(paths: &Paths) -> Result<Option<UnixStream>> {
                 "{} is served by uid {uid}, not you (uid {me})",
                 paths.socket.display()
             ),
-            &["export TMPDIR=\"$HOME/.cache\"", "rexboard ls --direct"],
+            &["unset XDG_RUNTIME_DIR", "rexboard ls --direct"],
         )),
         Err(err) => Err(Error::serve(format!(
             "could not check who serves {}: {err}",
@@ -81,20 +81,37 @@ fn peer_uid(stream: &UnixStream) -> std::io::Result<libc::uid_t> {
     Ok(uid)
 }
 
-/// Connects to serve, starting it first when nobody answers. serve itself clears a stale
-/// socket once it holds the lock, so the client never unlinks one.
+/// Connects to serve, starting it first when nobody answers and no live serve holds the lock.
+/// serve itself clears a stale socket once it holds the lock, so the client never unlinks one.
 pub fn connect_or_start(paths: &Paths) -> Result<UnixStream> {
     if let Some(stream) = connect(paths)? {
         return Ok(stream);
     }
     paths.create()?;
-    start(paths)?;
+    // A serve that holds the lock may still be binding; it gets the same wait as one we start.
+    let held = Lock::held(&paths.lock());
+    if !held {
+        start(paths)?;
+    }
     let deadline = Instant::now() + START_WITHIN;
     loop {
         if let Some(stream) = connect(paths)? {
             return Ok(stream);
         }
         if Instant::now() >= deadline {
+            if held {
+                let pid =
+                    recorded_pid(paths).map_or("<pid in serve.lock>".to_owned(), |p| p.to_string());
+                let kill = format!("kill {pid}");
+                return Err(Error::serve_with(
+                    format!(
+                        "serve (pid {pid}) holds {} but does not answer on {}; it listens elsewhere (an older rexboard, or another XDG_RUNTIME_DIR)",
+                        paths.lock().display(),
+                        paths.socket.display()
+                    ),
+                    &[kill.as_str(), "rexboard ls"],
+                ));
+            }
             return Err(Error::serve(format!(
                 "serve did not answer on {} within {}s; see {}",
                 paths.socket.display(),

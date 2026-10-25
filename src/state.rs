@@ -24,23 +24,9 @@ pub struct Paths {
 }
 
 impl Paths {
+    /// The socket sits beside serve.lock, so every caller finds the one serve whatever its
+    /// TMPDIR. XDG_RUNTIME_DIR, when set and short enough, wins.
     pub fn find() -> Result<Self> {
-        let tmp = std::env::var_os("TMPDIR").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
-        let uid = unsafe { libc::getuid() };
-        let fallback = tmp.join(format!("rexboard-{uid}.sock"));
-        let socket = std::env::var_os("XDG_RUNTIME_DIR")
-            .map(|dir| PathBuf::from(dir).join("rexboard.sock"))
-            .filter(|path| path.as_os_str().len() <= SOCKET_MAX)
-            .unwrap_or(fallback);
-        if socket.as_os_str().len() > SOCKET_MAX {
-            return Err(Error::serve_with(
-                format!(
-                    "socket path {} is longer than {SOCKET_MAX} bytes; set XDG_RUNTIME_DIR or TMPDIR to a shorter directory",
-                    socket.display()
-                ),
-                &["export TMPDIR=/tmp", "rexboard ls --direct"],
-            ));
-        }
         let dir = match std::env::var_os("XDG_STATE_HOME") {
             Some(dir) => PathBuf::from(dir).join("rexboard"),
             None => {
@@ -49,6 +35,19 @@ impl Paths {
                 PathBuf::from(home).join(".local/state/rexboard")
             }
         };
+        let socket = std::env::var_os("XDG_RUNTIME_DIR")
+            .map(|run| PathBuf::from(run).join("rexboard.sock"))
+            .filter(|path| path.as_os_str().len() <= SOCKET_MAX)
+            .unwrap_or_else(|| dir.join("serve.sock"));
+        if socket.as_os_str().len() > SOCKET_MAX {
+            return Err(Error::serve_with(
+                format!(
+                    "socket path {} is longer than {SOCKET_MAX} bytes; set XDG_RUNTIME_DIR to a shorter directory",
+                    socket.display()
+                ),
+                &["export XDG_RUNTIME_DIR=/tmp", "rexboard ls --direct"],
+            ));
+        }
         Ok(Self { socket, dir })
     }
 
@@ -103,17 +102,32 @@ impl Lock {
             .truncate(false)
             .mode(0o600)
             .open(path)?;
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        // A client's held() probe takes the lock for an instant, so a busy lock gets a few tries.
+        let mut tries = 0;
+        while unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             let err = std::io::Error::last_os_error();
-            if err.raw_os_error() == Some(libc::EWOULDBLOCK) {
+            if err.raw_os_error() != Some(libc::EWOULDBLOCK) {
+                return Err(err.into());
+            }
+            tries += 1;
+            if tries == 5 {
                 return Ok(None);
             }
-            return Err(err.into());
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
         let mut text = String::new();
         file.read_to_string(&mut text)?;
         let previous = serde_json::from_str(&text).unwrap_or_default();
         Ok(Some((Self { file }, previous)))
+    }
+
+    /// Whether a running serve holds the lock. A probe that gets it lets go at once.
+    pub fn held(path: &Path) -> bool {
+        let Ok(file) = File::open(path) else {
+            return false;
+        };
+        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) };
+        rc != 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::EWOULDBLOCK)
     }
 
     /// One write at offset 0, then the length, so a reader never sees an empty file.

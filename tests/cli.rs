@@ -558,14 +558,24 @@ fn ls_text_shows_group_and_estimated_age() {
 struct Serve {
     dir: tempfile::TempDir,
     log: std::path::PathBuf,
+    /// With XDG_RUNTIME_DIR set; without it the socket sits beside serve.lock.
+    runtime: bool,
 }
 
 impl Serve {
     fn new() -> Self {
+        Self::with_runtime(true)
+    }
+
+    fn beside_lock() -> Self {
+        Self::with_runtime(false)
+    }
+
+    fn with_runtime(runtime: bool) -> Self {
         let dir = tempfile::Builder::new().prefix("rb").tempdir().unwrap();
         std::fs::create_dir(dir.path().join("run")).unwrap();
         let log = dir.path().join("fake-rex.log");
-        let serve = Self { dir, log };
+        let serve = Self { dir, log, runtime };
         assert!(
             serve.socket().as_os_str().len() <= 103,
             "temp socket path too long"
@@ -575,24 +585,31 @@ impl Serve {
 
     fn envs(&self) -> Vec<(&'static str, String)> {
         let path = |p: std::path::PathBuf| p.to_str().unwrap().to_owned();
-        vec![
-            ("XDG_RUNTIME_DIR", path(self.dir.path().join("run"))),
+        let mut envs = vec![
             ("XDG_STATE_HOME", path(self.dir.path().join("state"))),
             ("XDG_CONFIG_HOME", path(self.dir.path().join("config"))),
             ("TMPDIR", path(self.dir.path().to_owned())),
             ("REXBOARD_REX", path(fixture("fake-rex"))),
             ("FAKE_REX_LOG", path(self.log.clone())),
-        ]
+        ];
+        if self.runtime {
+            envs.push(("XDG_RUNTIME_DIR", path(self.dir.path().join("run"))));
+        }
+        envs
     }
 
     fn cmd(&self) -> Command {
         let mut cmd = Command::cargo_bin("rexboard").unwrap();
-        cmd.envs(self.envs());
+        cmd.env_remove("XDG_RUNTIME_DIR").envs(self.envs());
         cmd
     }
 
     fn socket(&self) -> std::path::PathBuf {
-        self.dir.path().join("run/rexboard.sock")
+        if self.runtime {
+            self.dir.path().join("run/rexboard.sock")
+        } else {
+            self.file("serve.sock")
+        }
     }
 
     fn config(&self, toml: &str) {
@@ -689,6 +706,90 @@ fn mini_with_done(serve: &Serve) -> String {
     let path = serve.dir.path().join("observer-mini.ndjson");
     std::fs::write(&path, format!("{snapshot}\n")).unwrap();
     path.to_str().unwrap().to_owned()
+}
+
+#[test]
+fn serve_is_found_from_any_tmpdir() {
+    let serve = Serve::beside_lock();
+    let ls = |tmp: &str| {
+        let dir = serve.dir.path().join(tmp);
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = serve
+            .cmd()
+            .env("TMPDIR", &dir)
+            .args(["ls", "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        serde_json::from_slice::<Vec<serde_json::Value>>(&out).unwrap()
+    };
+    assert!(!ls("tmp-a").is_empty());
+    let pid = serve.pid();
+    assert!(
+        !ls("tmp-b").is_empty(),
+        "a caller with another TMPDIR gets rows"
+    );
+    assert_eq!(serve.pid(), pid, "and reaches the same serve");
+    assert!(serve.socket().exists(), "the socket sits beside serve.lock");
+    assert_eq!(
+        serve.observer_starts(),
+        2,
+        "no second serve started observers"
+    );
+}
+
+#[test]
+fn a_dead_serve_leaves_nothing_that_stops_the_next() {
+    let serve = Serve::beside_lock();
+    std::fs::create_dir_all(serve.file("")).unwrap();
+    let record = serde_json::json!({ "pid": 999_999, "rex": fixture("fake-rex"), "children": [] });
+    std::fs::write(serve.file("serve.lock"), record.to_string()).unwrap();
+    drop(std::os::unix::net::UnixListener::bind(serve.socket()).unwrap());
+    assert!(serve.socket().exists(), "a socket nobody listens on");
+    assert!(!serve.rows(&[]).is_empty());
+    assert_ne!(serve.pid(), 999_999, "a new serve took the lock");
+}
+
+#[test]
+fn a_held_lock_without_a_socket_names_the_serve_to_stop() {
+    let serve = Serve::beside_lock();
+    std::fs::create_dir_all(serve.file("")).unwrap();
+    let lock = serve.file("serve.lock");
+    let mut holder = std::process::Command::new("perl")
+        .args(["-e", "use Fcntl ':flock'; open F, '>>', $ARGV[0] or die; flock F, LOCK_EX or die; print \"locked\\n\"; $| = 1; sleep 30"])
+        .arg(&lock)
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    std::io::BufRead::read_line(
+        &mut std::io::BufReader::new(holder.stdout.take().unwrap()),
+        &mut line,
+    )
+    .unwrap();
+    let record =
+        serde_json::json!({ "pid": holder.id(), "rex": fixture("fake-rex"), "children": [] });
+    std::fs::write(&lock, record.to_string()).unwrap();
+    let out = serve
+        .cmd()
+        .args(["ls", "--json"])
+        .assert()
+        .failure()
+        .get_output()
+        .stderr
+        .clone();
+    let text = String::from_utf8_lossy(&out);
+    holder.kill().unwrap();
+    holder.wait().unwrap();
+    assert!(
+        text.contains(&format!("serve (pid {}) holds", holder.id()))
+            && text.contains("does not answer on"),
+        "{text}"
+    );
+    assert!(text.contains(&format!("kill {}", holder.id())), "{text}");
+    assert_eq!(serve.observer_starts(), 0, "no second serve was started");
 }
 
 #[test]
