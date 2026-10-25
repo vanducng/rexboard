@@ -28,6 +28,7 @@ enum Msg {
     Gone(String),
     Peek(String, std::result::Result<Vec<String>, String>),
     Say(String),
+    Jumped(std::result::Result<String, String>),
 }
 
 /// What the process exits with when a signal or a lost terminal ends it.
@@ -155,6 +156,7 @@ fn apply(app: &mut App, msg: Msg) {
             }
         }
         Msg::Say(text) => app.say(text),
+        Msg::Jumped(result) => app.jumped(result),
     }
 }
 
@@ -190,11 +192,10 @@ fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
         }
         Effect::Jump(row) => {
             thread::spawn(move || {
-                let text = match jump::go(&row) {
-                    Ok(()) => format!("jumped to {}", jump::name(&row)),
-                    Err(err) => format!("jump failed: {err}"),
-                };
-                let _ = tx.send(Msg::Say(text));
+                let result = jump::go(&row)
+                    .map(|()| format!("jumped to {}", jump::name(&row)))
+                    .map_err(|err| err.to_string());
+                let _ = tx.send(Msg::Jumped(result));
             });
         }
         Effect::Peek { key, host, block } => {

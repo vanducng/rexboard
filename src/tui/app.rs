@@ -83,6 +83,10 @@ pub struct App {
     pub link: Link,
     /// `rexboard pick`: the list alone; enter goes and esc gives up.
     pub pick: bool,
+    /// `going to …` while a jump runs; a second Enter starts nothing.
+    pub going: Option<String>,
+    /// Why the last jump failed, until the next key.
+    pub failed: Option<String>,
     needs: BTreeSet<String>,
 }
 
@@ -109,6 +113,15 @@ impl App {
 
     pub fn say(&mut self, text: impl Into<String>) {
         self.toast = Some((text.into(), Instant::now()));
+    }
+
+    /// A jump finished: say where it went, or keep why it failed in view.
+    pub fn jumped(&mut self, result: Result<String, String>) {
+        self.going = None;
+        match result {
+            Ok(text) => self.say(text),
+            Err(why) => self.failed = Some(why),
+        }
     }
 
     pub fn toast(&self) -> Option<&str> {
@@ -216,6 +229,7 @@ impl App {
     }
 
     pub fn handle(&mut self, key: KeyEvent) -> Option<Effect> {
+        self.failed = None;
         if self.filtering {
             match key.code {
                 KeyCode::Esc => {
@@ -316,10 +330,14 @@ impl App {
                 });
                 return Some(Effect::Peek { key, host, block });
             }
+            KeyCode::Enter if self.going.is_some() => self.say("a jump is already running"),
             KeyCode::Enter => {
-                return self
-                    .current()
-                    .map(|row| Effect::Jump(Box::new(row.clone())));
+                let row = self.current()?.clone();
+                self.going = Some(format!(
+                    "going to {}…",
+                    path(&labels(&row, true), usize::MAX)
+                ));
+                return Some(Effect::Jump(Box::new(row)));
             }
             KeyCode::Char('r') => {
                 self.link = Link::Connecting;
@@ -469,6 +487,32 @@ pub mod tests {
         );
         assert_eq!(press(&mut app, KeyCode::Char('S')), None);
         assert_eq!(app.toast(), Some("no unseen done rows"));
+    }
+
+    #[test]
+    fn enter_says_where_it_goes_and_starts_one_jump_at_a_time() {
+        let mut app = app();
+        assert!(matches!(
+            press(&mut app, KeyCode::Enter),
+            Some(Effect::Jump(row)) if row.key == "mini/seat-b"
+        ));
+        assert_eq!(app.going.as_deref(), Some("going to api › seat-b…"));
+        assert_eq!(press(&mut app, KeyCode::Enter), None, "no second jump");
+        assert_eq!(app.toast(), Some("a jump is already running"));
+        app.jumped(Err("the Rex app on studio did not answer within 5s".into()));
+        assert_eq!(app.going, None);
+        assert_eq!(
+            app.failed.as_deref(),
+            Some("the Rex app on studio did not answer within 5s")
+        );
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!(app.failed, None, "the next key clears it");
+        assert!(matches!(
+            press(&mut app, KeyCode::Enter),
+            Some(Effect::Jump(_))
+        ));
+        app.jumped(Ok("jumped to api › claude on local".into()));
+        assert_eq!(app.toast(), Some("jumped to api › claude on local"));
     }
 
     #[test]

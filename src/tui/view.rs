@@ -385,6 +385,14 @@ fn detail(app: &App, now: DateTime<Utc>, width: usize, wide: bool) -> Vec<Line<'
     };
     let p = &row.pane;
     let mut lines = vec![Line::styled(fit(&name(row), width), theme::accent())];
+    if let Some(why) = &app.failed {
+        // A failed jump is worth reading whole, as a peek error is.
+        lines.extend(
+            wrap(why, width.max(1))
+                .into_iter()
+                .map(|line| Line::styled(line, Style::new().fg(Color::Red))),
+        );
+    }
     let peek = app.peek.as_ref().filter(|peek| peek.key == row.key);
     if let (false, Some(peek)) = (wide, peek) {
         lines.extend(peek_lines(peek, width));
@@ -528,6 +536,19 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
             )),
             area,
         );
+        return;
+    }
+    let held = app
+        .going
+        .as_deref()
+        .map(|text| (text, Style::new().fg(theme::ACCENT)))
+        .or_else(|| {
+            app.failed
+                .as_deref()
+                .map(|text| (text, Style::new().fg(Color::Red)))
+        });
+    if let Some((text, style)) = held {
+        frame.render_widget(Paragraph::new(Line::styled(fit(text, width), style)), area);
         return;
     }
     let mut spans: Vec<Span> = Vec::new();
@@ -924,6 +945,38 @@ mod tests {
             assert!(text.contains(want), "{want:?} missing:\n{text}");
         }
         assert!(!text.contains(" … › … ›"), "{text}");
+    }
+
+    #[test]
+    fn a_failed_jump_stays_in_the_footer_and_wraps_in_the_detail() {
+        let mut app = app();
+        app.going = Some("going to api › seat-b…".into());
+        let text = render(&app, 80, 30);
+        assert!(
+            text.lines()
+                .last()
+                .unwrap()
+                .starts_with("going to api › seat-b…"),
+            "{text}"
+        );
+        app.jumped(Err(
+            "the Rex app on studio did not answer within 5s; it does not answer while the \
+             Mac's screen is locked"
+                .into(),
+        ));
+        let text = render(&app, 80, 30);
+        assert!(
+            text.lines()
+                .last()
+                .unwrap()
+                .starts_with("the Rex app on studio"),
+            "{text}"
+        );
+        assert!(
+            text.contains("screen is locked"),
+            "wrapped whole in the detail:\n{text}"
+        );
+        assert!(!text.contains("jump failed: jump failed"), "{text}");
     }
 
     #[test]
