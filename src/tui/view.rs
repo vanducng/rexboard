@@ -22,7 +22,7 @@ pub const KEYS: [(&str, &str); 12] = [
     ("j/k", "move; g/G first, last"),
     ("1-9", "the nth NEEDS YOU row"),
     ("s", "mark seen"),
-    ("S", "mark every done row seen"),
+    ("S", "mark shown done rows seen"),
     ("space", "peek at the pane"),
     ("/", "filter; enter keeps it"),
     ("esc", "clear filter, peek, folds"),
@@ -413,13 +413,19 @@ fn detail(app: &App, now: DateTime<Utc>, width: usize, wide: bool) -> Vec<Line<'
     let msg = clean(p.msg.as_deref().unwrap_or_default());
     if wide {
         lines.push(pair("in state", &in_state(row, now)));
-        lines.push(pair("msg", &dash(&msg)));
-    } else if msg.width() > where_what(tier(width as u16), width).1 {
-        // The row cut it, and a permission prompt is what you read before acting.
-        let mut wrapped = wrap(&msg, value.max(1));
-        if wrapped.len() > 2 {
-            wrapped.truncate(2);
-            wrapped[1] = fit(&format!("{}…", wrapped[1]), value)
+    }
+    // Wrapped: a permission prompt is what you read before acting. Underneath, only when the
+    // row cut it.
+    let show = if wide {
+        Some(3)
+    } else {
+        (msg.width() > where_what(tier(width as u16), width).1).then_some(2)
+    };
+    if let Some(most) = show {
+        let mut wrapped = wrap(&dash(&msg), value.max(1));
+        if wrapped.len() > most {
+            wrapped.truncate(most);
+            wrapped[most - 1] = fit(&format!("{}…", wrapped[most - 1]), value)
                 .trim_end()
                 .to_owned();
         }
@@ -787,6 +793,30 @@ mod tests {
             !text.lines().any(|l| l.starts_with("msg ")),
             "a message the row shows whole stays out:\n{text}"
         );
+    }
+
+    #[test]
+    fn the_wide_detail_wraps_a_message_to_three_lines() {
+        let mut app = app();
+        let mut rows = app.rows.clone();
+        rows[0].pane.msg = Some(
+            "Allow Bash: cargo test --workspace --all-features -- --test-threads 1 \
+             and then a lot more words that will never fit in three lines of the detail"
+                .into(),
+        );
+        app.set_rows(rows, hosts());
+        let text = render(&app, 140, 40);
+        let detail: Vec<&str> = text
+            .lines()
+            .map(|l| l.split('│').nth(1).unwrap_or("").trim_start())
+            .collect();
+        let at = detail
+            .iter()
+            .position(|l| l.starts_with("msg "))
+            .expect(&text);
+        assert!(detail[at].contains("Allow Bash:"), "{text}");
+        assert!(detail[at + 2].ends_with('…'), "{text}");
+        assert!(detail[at + 3].starts_with("host"), "{text}");
     }
 
     #[test]
