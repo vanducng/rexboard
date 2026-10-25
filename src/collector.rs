@@ -23,6 +23,8 @@ const TICK: Duration = Duration::from_secs(30);
 /// Three missed ticks means the host is gone.
 const SILENCE: Duration = Duration::from_secs(90);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
+/// Unreadable lines logged per host; later ones are skipped silently.
+const MAX_LOGGED_SKIPS: u32 = 5;
 
 pub type HostId = String;
 
@@ -79,9 +81,10 @@ fn supervise(
     let id: HostId = host.clone().unwrap_or_else(|| "local".into());
     let send = |event| tx.send((id.clone(), event)).is_ok();
     let mut backoff = Duration::from_secs(1);
+    let mut skipped = 0;
     while !stop.load(Ordering::SeqCst) {
         let started = Instant::now();
-        let reason = match observe(host.as_deref(), stop, pgid, &send) {
+        let reason = match observe(host.as_deref(), stop, pgid, &mut skipped, &send) {
             Ok(reason) => reason,
             Err(err) => {
                 send(HostEvent::Failed(err));
@@ -109,11 +112,12 @@ fn supervise(
     }
 }
 
-/// Runs one observer until it ends or goes silent, and returns why. Err means the stream is unreadable.
+/// Runs one observer until it ends or goes silent, and returns why. Err means rex is missing or speaks another contract.
 fn observe(
     host: Option<&str>,
     stop: &AtomicBool,
     pgid: &AtomicI32,
+    skipped: &mut u32,
     send: &dyn Fn(HostEvent) -> bool,
 ) -> Result<String> {
     let mut child = match start(host) {
@@ -153,10 +157,11 @@ fn observe(
                         break "stopped".to_owned();
                     }
                 }
-                Err(err) => {
+                Err(err @ Error::ContractMismatch(_)) => {
                     stop_child(&mut child, pgid);
                     return Err(err);
                 }
+                Err(err) => skip(host.unwrap_or("local"), &line, &err, skipped),
             },
             Ok(Err(err)) => break format!("read failed: {err}"),
             Err(RecvTimeoutError::Timeout) => {
@@ -174,6 +179,19 @@ fn observe(
         reason = format!("{reason}: {line}");
     }
     Ok(reason)
+}
+
+/// One unreadable line must not stop the host. The first few go to stderr (serve.log) with their text.
+fn skip(id: &str, line: &str, err: &Error, skipped: &mut u32) {
+    *skipped += 1;
+    if *skipped > MAX_LOGGED_SKIPS {
+        return;
+    }
+    let text: String = line.chars().take(500).collect();
+    eprintln!("warning: {id}: skipped an observer line: {err}: {text}");
+    if *skipped == MAX_LOGGED_SKIPS {
+        eprintln!("warning: {id}: later skipped lines are not logged");
+    }
 }
 
 /// The last non-empty stderr line, skipping the banner `rex do` prints when it starts listening.

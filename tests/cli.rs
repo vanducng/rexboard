@@ -399,6 +399,24 @@ fn watch_raw_passes_unknown_types_through() {
 }
 
 #[test]
+fn watch_raw_skips_an_unreadable_line_and_keeps_the_host() {
+    // Shape Rex sent for a detached block (window_id null) before the observer filtered them.
+    let bad = r#"{"v":1,"type":"block_created","session_id":"session:api","block":{"block_id":"block:api-detached"}}"#;
+    let after = r#"{"v":1,"type":"bell","session_id":"session:api"}"#;
+    let (lines, errors) = watch_until(
+        &["--raw", "--host", "local"],
+        &[("FAKE_REX_APPEND", &format!("{bad}\n{after}"))],
+        |lines| count(lines, "local", "bell") == 1,
+    );
+    assert_eq!(count(&lines, "local", "block_created"), 0);
+    assert!(
+        errors.contains("warning: local: skipped an observer line: unexpected observer line from Rex 0.0.1792787366-g623b2d: missing field `window_id`: {"),
+        "{errors}"
+    );
+    assert!(!errors.contains("will not restart"), "{errors}");
+}
+
+#[test]
 fn watch_without_raw_is_usage() {
     bin()
         .env("REXBOARD_REX", fixture("fake-rex"))

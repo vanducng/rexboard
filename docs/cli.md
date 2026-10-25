@@ -143,7 +143,7 @@ When an observer exits, its output can't be read, or it prints nothing for 90 se
 
 The wait starts at 1 second and doubles up to 30. It goes back to 1 only after a run that lasted at least 30 seconds, so an observer that fails on every event backs off instead of restarting every second. A host that keeps going down never stops `watch`.
 
-A host stops for good when its observer prints a line that is not JSON or a known type with a bad field (`REX`), or a different `v` (`CONTRACT_MISMATCH`). rexboard prints `warning: HOST stopped and will not restart: ...` on stderr, and the other hosts keep streaming.
+A line that is not JSON, or a known type with a bad field, is skipped and the host keeps streaming. The first 5 per host print `warning: HOST: skipped an observer line: ...` with the line on stderr. A different `v` (`CONTRACT_MISMATCH`) stops the host for good: rexboard prints `warning: HOST stopped and will not restart: ...` on stderr, and the other hosts keep streaming.
 
 ### Exit codes and errors
 
