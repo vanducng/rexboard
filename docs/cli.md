@@ -20,11 +20,12 @@ rexboard ls                 # agent panes on every host, most urgent first
 rexboard ls --all           # plain shells too
 rexboard ls --host mini     # one host: local, or a label from `rex hosts`
 rexboard ls --json          # an array of panes
+rexboard ls --direct        # one snapshot here, without serve
 ```
 
-One embedded Lua script runs through `rex do -` and reads this host plus every `rex hosts` entry in one call. A call that takes more than 10 seconds fails with `REX`.
+`ls` asks [`rexboard serve`](#rexboard-serve) for its rows and starts it when nothing answers, so the rows carry the history serve has kept: `since`, `seen` and the turn fields. `--direct` skips serve: one embedded Lua script runs through `rex do -` and reads this host plus every `rex hosts` entry in one call. A call that takes more than 10 seconds fails with `REX`.
 
-A pane is listed when it has a status record or a known harness. `--all` adds the rest. `ls` builds its rows the same way as `watch --json`, so they carry the same fields and order: by `group`, then, inside `needs_you`, `blocked` before `error` before unseen `done`, then the longest in its state first. `ls` sees one snapshot, so every `done` is unseen and `last_turn` is `null`.
+A pane is listed when it has a status record or a known harness. `--all` adds the rest. `ls` builds its rows the same way as `watch --json`, so they carry the same fields and order: by `group`, then, inside `needs_you`, `blocked` before `error` before unseen `done`, then the longest in its state first. `ls --direct` sees one snapshot, so every `done` is unseen and `last_turn` is `null`.
 
 The text table has the columns `GROUP`, `STATE`, `AGE` (time in the current state, `≥` when estimated), `HARNESS` (`-` when unknown), `HOST`, `WHERE` (`session › tab › pane`) and `WHAT` (the record's message, else the pane title without its leading state glyph).
 
@@ -34,6 +35,7 @@ The text table has the columns `GROUP`, `STATE`, `AGE` (time in the current stat
 
 | Field | Type | Meaning |
 | --- | --- | --- |
+| `key` | string | `HOST/BLOCK_ID`, what `rexboard seen` takes |
 | `host` | string | `local`, or the label from `rex hosts` |
 | `session_id` | string | Rex session id |
 | `session` | string | Session label |
@@ -65,8 +67,8 @@ Fields are a contract. New fields may appear. Renaming or removing one is a brea
 
 | Exit | When |
 | --- | --- |
-| 0 | Listed. A host that cannot be reached prints `warning: HOST is unreachable: ...` on stderr, and the rest are listed |
-| 1 | `REX_NOT_FOUND`: no `rex` CLI. `REX`: `rex do` failed, timed out, or returned a snapshot rexboard does not understand; the message names the Rex version |
+| 0 | Listed. A host that cannot be reached prints `warning: HOST is unreachable: ...` on stderr (through serve: `warning: HOST is unreachable (STATE)`, where `STATE` is `starting`, `down` or `stopped`), and the rest are listed |
+| 1 | `REX_NOT_FOUND`: no `rex` CLI. `REX`: `rex do` failed, timed out, or returned a snapshot rexboard does not understand; the message names the Rex version. `SERVE`: serve did not start or answer; the message names `serve.log` |
 | 2 | `HOSTS_UNREACHABLE`: every host failed; next steps `rex hosts` and `rexboard ls`. `USAGE`: a bad flag, or `--host` names no host |
 
 With `--json`, errors print on stderr as `{"ok":false,"error":{"code":...,"message":...,"next_steps":[...]}}`.
@@ -75,6 +77,7 @@ With `--json`, errors print on stderr as `{"ok":false,"error":{"code":...,"messa
 
 ```bash
 rexboard watch --json               # the agent rows from every host, again after each change
+rexboard watch --json --direct      # the same rows from this command's own observers
 rexboard watch --raw                # every event from every host, as it happens
 rexboard watch --raw --host mini    # one host: local, or a label from `rex hosts`
 rexboard watch --raw --for 60       # stop after 60 seconds
@@ -82,7 +85,7 @@ rexboard watch --raw --for 60       # stop after 60 seconds
 
 `watch` needs `--json` or `--raw` for now; with neither, it fails with `USAGE`. With both, `--raw` wins and errors print as JSON.
 
-rexboard reads the host list once from `rex hosts --json`, adds this host as `local`, and keeps one embedded Lua observer running per host through `rex [-S HOST] do - --all --fail-fast`. A host added after `watch` starts needs a restart. Without `--for`, `watch` runs until Ctrl-C, SIGTERM, or until stdout closes.
+`watch --json` subscribes to [`rexboard serve`](#rexboard-serve), starting it when nothing answers, and exits 1 with `SERVE` if serve stops. `--direct`, and `--raw` always, run this command's own observers instead: rexboard reads the host list once from `rex hosts --json`, adds this host as `local`, and keeps one embedded Lua observer running per host through `rex [-S HOST] do - --all --fail-fast`. A host added after a direct `watch` starts needs a restart. Without `--for`, `watch` runs until Ctrl-C, SIGTERM, or until stdout closes.
 
 ### Rows (`--json`)
 
@@ -146,3 +149,25 @@ A host stops for good when its observer prints a line that is not JSON or a know
 | 0 | `--for` elapsed, Ctrl-C or SIGTERM, or stdout closed |
 | 1 | `REX_NOT_FOUND`: no `rex` CLI. `REX`: `rex hosts` failed, or every host stopped on a bad line. `CONTRACT_MISMATCH`: every host stopped and the last one stopped on a version mismatch; next steps `rexboard --version` and the `install.sh` one-liner |
 | 2 | `USAGE`: neither `--json` nor `--raw`, a bad flag, or `--host` names no host |
+
+## `rexboard serve`
+
+```bash
+rexboard serve                # start it in the background, or say it is already running
+rexboard serve --foreground   # run it in this terminal
+rexboard serve --stop         # stop it and its observers
+```
+
+`serve` owns one observer per host and the board, and answers `ls`, `watch --json` and `seen` over a unix socket. Any of those starts it when nothing answers, as `rexboard serve --foreground` in its own session with its output in `serve.log`, and waits up to 2 seconds for it. Only one runs at a time: a second `serve --foreground` fails with `SERVE_RUNNING` (exit 1). It rescans `rex hosts` every 5 minutes.
+
+`serve` keeps `since`, `seen` and the turn fields in `state.json` and puts them back after a restart for every pane whose `state` and `kind` did not change. It appends each state change to `transitions.jsonl`. [System architecture](system-architecture.md) has the protocol and the files.
+
+`serve --stop` exits 0 whether or not serve was running, and waits up to 5 seconds for it to let go of its lock.
+
+## `rexboard seen`
+
+```bash
+rexboard seen mini/block:web-seat-b
+```
+
+Marks a pane seen, by the `key` from `ls --json`: it leaves `needs_you` if it was an unseen `done`. serve keeps it across restarts until the pane changes state again. An unknown key fails with `NOT_FOUND` (exit 1).
