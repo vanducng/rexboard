@@ -192,7 +192,7 @@ fn is_shell(name: &str) -> bool {
 /// A shell pane's title is empty, the shell's name, or a directory, alone or after
 /// `user@host: `.
 fn shell_title(title: &str) -> bool {
-    let dir = title;
+    let dir = title.rsplit(": ").next().unwrap_or(title);
     title.is_empty() || is_shell(title) || dir.starts_with(['~', '/'])
 }
 
