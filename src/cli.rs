@@ -21,6 +21,23 @@ pub enum Command {
     Ls(LsArgs),
     /// Stream the agent rows (`--json`) or raw events (`--raw`) from this host and every `rex hosts` entry.
     Watch(WatchArgs),
+    /// Run the board daemon that ls, watch and seen share. Clients start it when it is not running.
+    Serve(ServeArgs),
+    /// Mark a pane seen, by the `key` from `ls --json` (HOST/BLOCK_ID).
+    Seen {
+        #[arg(value_name = "KEY")]
+        key: String,
+    },
+}
+
+#[derive(Debug, Args)]
+pub struct ServeArgs {
+    /// Run in this terminal instead of in the background.
+    #[arg(long, conflicts_with = "stop")]
+    pub foreground: bool,
+    /// Stop the running serve and its observers.
+    #[arg(long)]
+    pub stop: bool,
 }
 
 #[derive(Debug, Args)]
@@ -34,6 +51,9 @@ pub struct WatchArgs {
     /// Stop after this many seconds. Without it, watch runs until interrupted.
     #[arg(long = "for", value_name = "SECONDS")]
     pub duration: Option<u64>,
+    /// Run this command's own observers instead of going through serve. `--raw` always does.
+    #[arg(long)]
+    pub direct: bool,
 }
 
 #[derive(Debug, Args)]
@@ -44,4 +64,7 @@ pub struct LsArgs {
     /// Only this host: `local`, or a label from `rex hosts`.
     #[arg(long, value_name = "HOST")]
     pub host: Option<String>,
+    /// Take one snapshot here instead of asking serve.
+    #[arg(long)]
+    pub direct: bool,
 }

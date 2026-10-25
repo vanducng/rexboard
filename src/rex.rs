@@ -1,6 +1,7 @@
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -15,6 +16,20 @@ pub const SNAPSHOT: &str = concat!(
     "\n",
     include_str!("lua/snapshot.lua")
 );
+
+static FDS: Mutex<()> = Mutex::new(());
+
+/// macOS std creates pipes and sockets, then sets close-on-exec in a second step, so a child
+/// spawned on another thread in between inherits them. Hold this around every spawn, bind,
+/// accept and connect.
+pub fn fd_guard() -> MutexGuard<'static, ()> {
+    FDS.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+pub fn spawn(cmd: &mut Command) -> std::io::Result<Child> {
+    let _guard = fd_guard();
+    cmd.spawn()
+}
 
 pub fn locate() -> Result<PathBuf> {
     if let Some(path) = std::env::var_os("REXBOARD_REX") {
@@ -54,12 +69,11 @@ pub fn run_script(host: Option<&str>, lua: &str, args: &Value) -> Result<Value> 
     if let Some(host) = host {
         cmd.args(["-S", host]);
     }
-    let mut child = cmd
-        .args(["do", "-", "--json", "--args", &args.to_string()])
+    cmd.args(["do", "-", "--json", "--args", &args.to_string()])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .stderr(Stdio::piped());
+    let mut child = spawn(&mut cmd)
         .map_err(|err| Error::RexNotFound(format!("could not run {}: {err}", rex.display())))?;
     let mut stdin = child.stdin.take().expect("piped stdin");
     let lua = lua.to_owned();

@@ -1,9 +1,9 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -18,8 +18,6 @@ pub const OBSERVER: &str = concat!(
     "\n",
     include_str!("lua/observer.lua")
 );
-
-static SPAWN: Mutex<()> = Mutex::new(());
 
 const TICK: Duration = Duration::from_secs(30);
 /// Three missed ticks means the host is gone.
@@ -51,6 +49,11 @@ impl Collector {
         let (stop2, pgid2) = (stop.clone(), pgid.clone());
         thread::spawn(move || supervise(host, &tx, &stop2, &pgid2));
         Self { stop, pgid }
+    }
+
+    /// The running observer's pid, which is also its process group; 0 between runs.
+    pub fn pid(&self) -> i32 {
+        self.pgid.load(Ordering::SeqCst)
     }
 }
 
@@ -191,20 +194,13 @@ fn start(host: Option<&str>) -> Result<Child> {
     if let Some(host) = host {
         cmd.args(["-S", host]);
     }
-    // macOS std makes pipes then sets close-on-exec, so a parallel spawn can inherit this
-    // child's stdin and keep it from ever seeing EOF. One spawn at a time closes that gap.
-    let spawning = SPAWN
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut child = cmd
-        .args(["do", "-", "--all", "--fail-fast"])
+    cmd.args(["do", "-", "--all", "--fail-fast"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .process_group(0)
-        .spawn()
+        .process_group(0);
+    let mut child = rex::spawn(&mut cmd)
         .map_err(|err| Error::RexNotFound(format!("could not run {}: {err}", rex.display())))?;
-    drop(spawning);
     let mut stdin = child.stdin.take().expect("piped stdin");
     if let Err(err) = stdin.write_all(OBSERVER.as_bytes()) {
         kill_group(child.id() as i32);
@@ -234,10 +230,13 @@ fn stop_child(child: &mut Child, pgid: &AtomicI32) -> Option<std::process::ExitS
 /// Remote host labels from `rex hosts --json`.
 pub fn hosts() -> Result<Vec<String>> {
     let rex = rex::locate()?;
-    let out = Command::new(&rex)
-        .args(["hosts", "--json"])
+    let mut cmd = Command::new(&rex);
+    cmd.args(["hosts", "--json"])
         .stdin(Stdio::null())
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let out = rex::spawn(&mut cmd)
+        .and_then(Child::wait_with_output)
         .map_err(|err| Error::RexNotFound(format!("could not run {}: {err}", rex.display())))?;
     if !out.status.success() {
         let text = String::from_utf8_lossy(&out.stderr);

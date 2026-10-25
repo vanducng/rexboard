@@ -103,7 +103,7 @@ impl Source {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pane {
     pub host: String,
     pub session_id: String,
@@ -118,7 +118,7 @@ pub struct Pane {
     pub kind: Option<String>,
     pub msg: Option<String>,
     pub updated_at: Option<String>,
-    pub source: &'static str,
+    pub source: String,
     pub children: BTreeMap<String, usize>,
 }
 
@@ -202,7 +202,8 @@ pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
         None => "inferred",
         Some(_) if owner == Some("tmux") || process == Some("tmux") => "bridge",
         Some(_) => "native",
-    };
+    }
+    .to_owned();
     let (state, kind, msg, updated_at) = match main {
         Some(r) => (
             r.state.clone(),
