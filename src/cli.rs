@@ -31,6 +31,20 @@ pub enum Command {
         #[arg(value_name = "KEY")]
         key: String,
     },
+    /// Go to a pane in the main Rex window, on its host, and mark it seen.
+    Jump {
+        /// HOST/BLOCK_ID (the `key` from `ls --json`), or N for the nth NEEDS YOU row.
+        #[arg(value_name = "TARGET")]
+        target: String,
+    },
+    /// Go to the next pane that needs you, after this one. Exit 1 when nobody needs you.
+    Next {
+        /// Go the other way.
+        #[arg(long)]
+        back: bool,
+    },
+    /// Pick a pane from the board's list and go to it. Enter goes and exits 0; esc exits 1.
+    Pick,
 }
 
 #[derive(Debug, Args)]

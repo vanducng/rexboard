@@ -20,7 +20,7 @@ pub enum Group {
     Unreported,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Row {
     /// `host/block_id`, the key `seen` and `next` take.
     pub key: String,
