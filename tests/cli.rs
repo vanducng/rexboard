@@ -1462,3 +1462,34 @@ fn jump_without_a_usable_app_says_which_case() {
         "client = \"remote-app\" in config.toml, or REX_CLIENT=remote-app"
     );
 }
+
+#[test]
+fn next_outside_a_pane_starts_after_the_last_jump() {
+    let serve = needing();
+    assert_eq!(serve.next(&[], None), "mini/block:seat-old");
+    assert_eq!(
+        serve.next(&[], None),
+        "mini/block:seat-new",
+        "without REX_BLOCK, the last jump is where it starts"
+    );
+    serve
+        .needing_cmd()
+        .args(["jump", "mini/block:seat-old"])
+        .assert()
+        .success();
+    assert_eq!(
+        serve.next(&[], None),
+        "mini/block:seat-done",
+        "a jump by key moves the start too"
+    );
+    serve
+        .needing_cmd()
+        .args(["seen", "mini/block:seat-new"])
+        .assert()
+        .success();
+    assert_eq!(
+        serve.next(&[], None),
+        "mini/block:seat-old",
+        "s and seen do not move it: all seen, so it wraps from the last jump"
+    );
+}

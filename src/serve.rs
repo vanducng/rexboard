@@ -32,6 +32,9 @@ enum Request {
     Subscribe,
     Seen {
         key: String,
+        /// Set by a jump, so `next` outside a pane starts after the pane it went to.
+        #[serde(default)]
+        jump: bool,
     },
     Next {
         after: Option<String>,
@@ -177,6 +180,8 @@ struct Reducer {
     announced: bool,
     rows_cache: Option<String>,
     suspects: BTreeSet<(String, String)>,
+    /// The key the last jump went to. Memory only: a restart starts `next` from the top.
+    last_jump: Option<String>,
     rows_due: Option<Instant>,
     save_due: Option<Instant>,
 }
@@ -206,6 +211,7 @@ impl Reducer {
             announced: false,
             rows_cache: None,
             suspects: BTreeSet::new(),
+            last_jump: None,
             rows_due: None,
             save_due: None,
         }
@@ -428,14 +434,20 @@ impl Reducer {
                 self.subscribers.add(reply, self.ready());
                 return;
             }
-            Request::Seen { key } => match split(&key) {
+            Request::Seen { key, jump } => match split(&key) {
                 Some(row) if self.board.mark_seen(&row) => {
+                    if jump {
+                        self.last_jump = Some(key.clone());
+                    }
                     self.rows_changed();
                     json!({ "v": VERSION, "ok": true, "key": key })
                 }
                 _ => error_line("NOT_FOUND", &format!("no pane {key}")),
             },
-            Request::Next { after, back } => self.next(after.as_deref(), back),
+            Request::Next { after, back } => {
+                let after = after.or_else(|| self.last_jump.clone());
+                self.next(after.as_deref(), back)
+            }
             Request::Stop => unreachable!("handled in run"),
         };
         offer(&reply, &line.to_string());

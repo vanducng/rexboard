@@ -92,7 +92,7 @@ pub fn go(row: &Row) -> Result<()> {
         }),
     )?;
     check(&reply, &row.key)?;
-    client::call(&json!({ "cmd": "seen", "key": row.key }))?;
+    client::call(&json!({ "cmd": "seen", "key": row.key, "jump": true }))?;
     Ok(())
 }
 
