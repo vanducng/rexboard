@@ -1466,30 +1466,35 @@ fn jump_without_a_usable_app_says_which_case() {
 #[test]
 fn next_outside_a_pane_starts_after_the_last_jump() {
     let serve = needing();
+    for key in ["seat-old", "seat-new", "seat-done"] {
+        serve
+            .needing_cmd()
+            .args(["seen", &format!("mini/block:{key}")])
+            .assert()
+            .success();
+    }
+    // Every row is seen, so the two blocked ones cycle; only memory of the last jump moves on.
     assert_eq!(serve.next(&[], None), "mini/block:seat-old");
-    assert_eq!(
-        serve.next(&[], None),
-        "mini/block:seat-new",
-        "without REX_BLOCK, the last jump is where it starts"
-    );
+    assert_eq!(serve.next(&[], None), "mini/block:seat-new");
+    assert_eq!(serve.next(&[], None), "mini/block:seat-old", "and wraps");
     serve
         .needing_cmd()
-        .args(["jump", "mini/block:seat-old"])
-        .assert()
-        .success();
-    assert_eq!(
-        serve.next(&[], None),
-        "mini/block:seat-done",
-        "a jump by key moves the start too"
-    );
-    serve
-        .needing_cmd()
-        .args(["seen", "mini/block:seat-new"])
+        .args(["jump", "mini/block:seat-new"])
         .assert()
         .success();
     assert_eq!(
         serve.next(&[], None),
         "mini/block:seat-old",
-        "s and seen do not move it: all seen, so it wraps from the last jump"
+        "a jump by key moves the start too"
+    );
+    serve
+        .needing_cmd()
+        .args(["seen", "mini/block:seat-old"])
+        .assert()
+        .success();
+    assert_eq!(
+        serve.next(&[], None),
+        "mini/block:seat-new",
+        "seen alone does not move it"
     );
 }
