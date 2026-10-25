@@ -31,3 +31,14 @@ fn no_command_prints_help_and_exits_2() {
         .code(2)
         .stderr(predicate::str::contains("Usage:"));
 }
+
+#[test]
+fn no_command_with_json_is_usage_json() {
+    bin()
+        .arg("--json")
+        .assert()
+        .code(2)
+        .stderr(
+            "{\"error\":{\"code\":\"USAGE\",\"message\":\"a command is required\",\"next_steps\":[\"rexboard --help\"]},\"ok\":false}\n",
+        );
+}
