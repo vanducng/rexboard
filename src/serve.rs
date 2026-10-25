@@ -169,7 +169,7 @@ struct Reducer {
     restored: BTreeSet<HostId>,
     host_tx: Sender<(HostId, HostEvent)>,
     tx: Sender<Msg>,
-    subscribers: Vec<SyncSender<String>>,
+    subscribers: Subscribers,
     waiting: Vec<SyncSender<String>>,
     started: Instant,
     announced: bool,
@@ -196,7 +196,7 @@ impl Reducer {
             restored: BTreeSet::new(),
             host_tx,
             tx,
-            subscribers: Vec::new(),
+            subscribers: Subscribers::default(),
             waiting: Vec::new(),
             started: Instant::now(),
             announced: false,
@@ -219,8 +219,11 @@ impl Reducer {
             let now = Instant::now();
             if self.rows_due.is_some_and(|due| now >= due) {
                 self.rows_due = None;
+                self.subscribers.owe_all();
+            }
+            if self.subscribers.owed() {
                 let line = self.rows_line().to_string();
-                self.subscribers.retain(|sub| offer(sub, &line));
+                self.subscribers.pay(&line);
             }
             if self.save_due.is_some_and(|due| now >= due) {
                 self.save_due = None;
@@ -231,7 +234,7 @@ impl Reducer {
             if now.duration_since(beat) >= HEARTBEAT {
                 beat = now;
                 let line = json!({ "v": VERSION, "heartbeat": true }).to_string();
-                self.subscribers.retain(|sub| offer(sub, &line));
+                self.subscribers.heartbeat(&line);
                 let pids: Vec<i32> = self
                     .collectors
                     .values()
@@ -250,7 +253,7 @@ impl Reducer {
             if !self.announced && self.ready() {
                 // Subscribers that came before every host reported get rows now.
                 self.announced = true;
-                self.rows_due = Some(now);
+                self.subscribers.owe_all();
                 let line = self.rows_line().to_string();
                 for waiter in self.waiting.drain(..) {
                     offer(&waiter, &line);
@@ -403,10 +406,7 @@ impl Reducer {
             }
             Request::Rows => self.rows_line(),
             Request::Subscribe => {
-                if self.ready() {
-                    offer(&reply, &self.rows_line().to_string());
-                }
-                self.subscribers.push(reply);
+                self.subscribers.add(reply, self.ready());
                 return;
             }
             Request::Seen { key } => match split(&key) {
@@ -441,6 +441,51 @@ impl Reducer {
     }
 }
 
+/// Each subscriber has a few lines of room. A rows line that does not fit stays owed and goes out
+/// as soon as there is room, so a reader that stalls still ends on the current rows.
+#[derive(Default)]
+struct Subscribers {
+    subs: Vec<(SyncSender<String>, bool)>,
+}
+
+impl Subscribers {
+    fn add(&mut self, tx: SyncSender<String>, owed: bool) {
+        self.subs.push((tx, owed));
+    }
+
+    fn owe_all(&mut self) {
+        for (_, owed) in &mut self.subs {
+            *owed = true;
+        }
+    }
+
+    fn owed(&self) -> bool {
+        self.subs.iter().any(|(_, owed)| *owed)
+    }
+
+    /// Sends `rows` to every subscriber owed it that has room.
+    fn pay(&mut self, rows: &str) {
+        self.subs.retain_mut(|(tx, owed)| {
+            if !*owed {
+                return true;
+            }
+            match tx.try_send(rows.to_owned()) {
+                Ok(()) => {
+                    *owed = false;
+                    true
+                }
+                Err(TrySendError::Full(_)) => true,
+                Err(TrySendError::Disconnected(_)) => false,
+            }
+        });
+    }
+
+    /// A subscriber still owed rows gets no heartbeat, so the room goes to the rows.
+    fn heartbeat(&mut self, line: &str) {
+        self.subs.retain(|(tx, owed)| *owed || offer(tx, line));
+    }
+}
+
 /// Sends unless the receiver is full; each rows line is a whole snapshot, so a skipped one is
 /// replaced by the next. False once the receiver is gone.
 fn offer(to: &SyncSender<String>, line: &str) -> bool {
@@ -453,4 +498,52 @@ fn offer(to: &SyncSender<String>, line: &str) -> bool {
 fn split(key: &str) -> Option<(String, String)> {
     key.split_once('/')
         .map(|(host, block)| (host.to_owned(), block.to_owned()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stalled_subscriber_ends_on_the_current_rows() {
+        let (tx, rx) = mpsc::sync_channel(SUBSCRIBER_BUFFER);
+        let mut subs = Subscribers::default();
+        subs.add(tx, true);
+        subs.pay("rows 1");
+        for _ in 0..SUBSCRIBER_BUFFER {
+            subs.heartbeat("beat");
+        }
+        subs.owe_all();
+        subs.pay("rows 2");
+        assert!(
+            subs.owed(),
+            "the reader is stalled, so rows 2 is still owed"
+        );
+        subs.heartbeat("beat");
+        subs.owe_all();
+        subs.pay("rows 3");
+        let drained: Vec<String> = rx.try_iter().collect();
+        assert_eq!(
+            drained.len(),
+            SUBSCRIBER_BUFFER,
+            "the buffer bounds what a stalled reader holds"
+        );
+        assert_eq!(drained[0], "rows 1");
+        subs.heartbeat("beat");
+        assert!(rx.try_recv().is_err(), "no heartbeat while rows are owed");
+        subs.pay("rows 3");
+        assert!(!subs.owed());
+        let last: Vec<String> = rx.try_iter().collect();
+        assert_eq!(last, ["rows 3"], "the reader resumes on the current rows");
+    }
+
+    #[test]
+    fn a_gone_subscriber_is_dropped() {
+        let (tx, rx) = mpsc::sync_channel(SUBSCRIBER_BUFFER);
+        let mut subs = Subscribers::default();
+        subs.add(tx, true);
+        drop(rx);
+        subs.pay("rows");
+        assert!(subs.subs.is_empty());
+    }
 }

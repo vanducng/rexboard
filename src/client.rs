@@ -185,12 +185,20 @@ fn parse(line: &str) -> Result<Value> {
 }
 
 /// One request, one reply.
+/// One request, one reply. A serve that closes without answering, as one that is stopping
+/// does, gets one more try, which starts a new serve if needed.
 pub fn call(request: &Value) -> Result<Value> {
     let paths = Paths::find()?;
-    let mut stream = connect_or_start(&paths)?;
-    send(&mut stream, request)?;
-    read(&mut BufReader::new(stream), &mut String::new())?
-        .ok_or_else(|| Error::serve("serve closed the connection without answering"))
+    for _ in 0..2 {
+        let mut stream = connect_or_start(&paths)?;
+        send(&mut stream, request)?;
+        if let Some(reply) = read(&mut BufReader::new(stream), &mut String::new())? {
+            return Ok(reply);
+        }
+    }
+    Err(Error::serve(
+        "serve closed the connection without answering, twice",
+    ))
 }
 
 fn rows(value: Value) -> Result<Rows> {
