@@ -44,7 +44,7 @@ The text table has the columns `GROUP`, `STATE`, `AGE` (time in the current stat
 | `block_id` | string | Rex block id of the pane |
 | `pane` | string | Block (pane) label |
 | `title` | string | Terminal title, `""` when none |
-| `process` | string or null | The pane's foreground process, as in `zsh`, `tmux` or `2.1.310` |
+| `process` | string or null | The pane's foreground process, as in `zsh`, `tmux`, or a version such as `2.1.310` (Claude Code runs under its version number) |
 | `harness` | string or null | `effective_app` (else `app`) of the record, else the foreground process (`claude`, `codex`, `pi`; a version string like `2.1.310` is `claude-code`), else `claude-code` for a title that starts with a Claude state glyph, else `codex` for a tmux pane titled `DIR | MODEL` (exactly one ` | `, a `DIR` with no spaces, a `MODEL` of letters, digits, `.` and `-` with at least one letter and one digit) |
 | `state` | string | `blocked`, `error`, `done`, `working` or `idle` from the record; with no record, from the title glyph (`✳ ` is `idle`, a braille spinner or `◐`/`◑` is `working`), else `unknown` |
 | `kind` | string or null | The record's `kind`, such as `permission` |
