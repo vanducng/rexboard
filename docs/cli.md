@@ -224,7 +224,7 @@ The board lives in a Rex session labelled `rexboard`, in a tab labelled `board` 
 - With the session there, it asks the app to select it. The app focuses a window that already shows the session.
 - `--new` always opens a new app window and selects the session there.
 
-The app picks the app client the same way a jump does (`REX_CLIENT`, else `client` in [config.toml](configuration.md), else the only app on the unix socket). A new app window comes with a session of its own; rexboard destroys that session by its id once the board shows in the window. If that fails, the command exits 1 naming the session, with `rex kill SESSION` as the next step.
+rexboard picks the app client the same way a jump does (`REX_CLIENT`, else `client` in [config.toml](configuration.md), else the only app on the unix socket). A new app window comes with a session of its own; rexboard destroys that session by its id once the board shows in the window. If that fails, the command exits 1 naming the session, with `rex kill SESSION` as the next step.
 
 Rex does not say which session an app window shows. So when the `rexboard` session exists but no window shows it (its window was closed), plain `rexboard window` shows the board in the focused window. A window manager can avoid that: focus a window titled `board - rexboard` when one exists, and run `rexboard window --new` when none does. Like a jump, opening or selecting needs the app to answer, which it does not while the Mac's screen is locked.
 
