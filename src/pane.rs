@@ -113,6 +113,8 @@ pub struct Pane {
     pub block_id: String,
     pub pane: String,
     pub title: String,
+    /// The foreground process, as in `zsh` or `tmux`.
+    pub process: Option<String>,
     pub harness: Option<String>,
     pub state: String,
     pub kind: Option<String>,
@@ -226,6 +228,7 @@ pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
         block_id: src.block_id.clone(),
         pane: src.label.clone(),
         title: src.title.clone(),
+        process: src.process.clone(),
         harness,
         state,
         kind,

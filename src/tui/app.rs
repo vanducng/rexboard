@@ -6,6 +6,7 @@ use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 
 use crate::board::{Group, Row};
+use crate::output::{labels, path};
 
 const TOAST: Duration = Duration::from_secs(3);
 
@@ -22,6 +23,8 @@ pub enum Effect {
         host: String,
         block: String,
     },
+    /// Mark these unseen `done` rows seen.
+    SeenAll(Vec<String>),
     Reconnect,
     Quit,
 }
@@ -50,6 +53,17 @@ pub struct Peek {
     pub lines: Option<Result<Vec<String>, String>>,
 }
 
+/// Where the board stands with serve.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub enum Link {
+    /// No rows yet: serve may still be starting.
+    #[default]
+    Connecting,
+    Up,
+    /// The connection dropped or never came up, and why.
+    Lost(String),
+}
+
 #[derive(Default)]
 pub struct App {
     /// Agent rows in board order, as serve sends them.
@@ -64,7 +78,7 @@ pub struct App {
     /// The `?` key table is open in the detail pane.
     pub keys: bool,
     pub toast: Option<(String, Instant)>,
-    pub connected: bool,
+    pub link: Link,
     needs: BTreeSet<String>,
 }
 
@@ -75,7 +89,7 @@ impl App {
         self.panes = all.len();
         self.rows = all.into_iter().filter(|row| row.pane.is_agent()).collect();
         self.hosts = hosts;
-        self.connected = true;
+        self.link = Link::Up;
         let needs: BTreeSet<String> = self
             .rows
             .iter()
@@ -259,10 +273,23 @@ impl App {
                     self.selected = pick;
                 }
             }
+            KeyCode::Char('S') => {
+                let keys: Vec<String> = self
+                    .rows
+                    .iter()
+                    .filter(|row| row.pane.state == "done" && !row.seen)
+                    .map(|row| row.key.clone())
+                    .collect();
+                if keys.is_empty() {
+                    self.say("no unseen done rows");
+                    return None;
+                }
+                return Some(Effect::SeenAll(keys));
+            }
             KeyCode::Char('s') => {
                 return self.current().map(|row| Effect::Seen {
                     key: row.key.clone(),
-                    label: row.pane.pane.clone(),
+                    label: path(&labels(row, &self.rows, true), usize::MAX),
                     state: row.pane.state.clone(),
                 });
             }
@@ -289,7 +316,10 @@ impl App {
                     self.say("jump arrives in a later version");
                 }
             }
-            KeyCode::Char('r') => return Some(Effect::Reconnect),
+            KeyCode::Char('r') => {
+                self.link = Link::Connecting;
+                return Some(Effect::Reconnect);
+            }
             _ => {}
         }
         None
@@ -402,6 +432,30 @@ pub mod tests {
     }
 
     #[test]
+    fn capital_s_marks_only_unseen_done_rows() {
+        let mut app = App::default();
+        let mut all = rows();
+        all.push(row("mini/old-done", "done", "needs_you", false));
+        all.push(row("mini/seen-done", "done", "quiet", true));
+        all.push(row("mini/broken", "error", "needs_you", false));
+        app.set_rows(all, hosts());
+        assert_eq!(
+            press(&mut app, KeyCode::Char('S')),
+            Some(Effect::SeenAll(vec![
+                "local/claude".into(),
+                "mini/old-done".into()
+            ])),
+            "never blocked, error or already seen rows"
+        );
+        app.set_rows(
+            vec![row("mini/seat-b", "blocked", "needs_you", false)],
+            hosts(),
+        );
+        assert_eq!(press(&mut app, KeyCode::Char('S')), None);
+        assert_eq!(app.toast(), Some("no unseen done rows"));
+    }
+
+    #[test]
     fn s_sends_seen_for_the_selected_key() {
         let mut app = app();
         press(&mut app, KeyCode::Char('j'));
@@ -409,7 +463,7 @@ pub mod tests {
             press(&mut app, KeyCode::Char('s')),
             Some(Effect::Seen {
                 key: "local/claude".into(),
-                label: "claude".into(),
+                label: "api › claude".into(),
                 state: "done".into(),
             })
         );

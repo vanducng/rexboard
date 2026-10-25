@@ -6,10 +6,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthStr;
 
-use super::app::{App, Item, Spot};
+use super::app::{App, Item, Link, Spot};
 use super::theme;
 use crate::board::Row;
-use crate::output::{fit, harness, in_state, path, state_word, what};
+use crate::output::{clean, fit, harness, in_state, labels, name, path, state_word, what};
 use crate::pane::bare_title;
 
 /// Width of the detail pane when it sits on the right.
@@ -18,10 +18,11 @@ const DETAIL: u16 = 38;
 const STOPPED: &str = "serve stopped · r reconnects";
 
 /// The `?` table: every key, in the order an operator reaches for them.
-pub const KEYS: [(&str, &str); 11] = [
+pub const KEYS: [(&str, &str); 12] = [
     ("j/k", "move; g/G first, last"),
     ("1-9", "the nth NEEDS YOU row"),
     ("s", "mark seen"),
+    ("S", "mark every done row seen"),
     ("space", "peek at the pane"),
     ("/", "filter; enter keeps it"),
     ("esc", "clear filter, peek, folds"),
@@ -110,15 +111,19 @@ fn rule_line(width: u16) -> Paragraph<'static> {
 }
 
 fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
-    let alert = if app.connected {
-        app.hosts
-            .iter()
-            .filter(|(_, state)| *state != "up")
-            .map(|(host, state)| format!("{host} {state}"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    } else {
-        STOPPED.to_owned()
+    let red = Style::new().fg(Color::Red);
+    let (alert, alert_style) = match app.link {
+        Link::Up => (
+            app.hosts
+                .iter()
+                .filter(|(_, state)| *state != "up")
+                .map(|(host, state)| format!("{host} {state}"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            red,
+        ),
+        Link::Connecting => ("connecting to serve".to_owned(), theme::dim()),
+        Link::Lost(_) => (STOPPED.to_owned(), red),
     };
     let counts = format!(
         " · {} hosts · {} panes · {} agents",
@@ -161,13 +166,13 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
     }
     if !alert.is_empty() {
         left.push(Span::styled(" · ", theme::dim()));
-        left.push(Span::styled(alert, Style::new().fg(Color::Red)));
+        left.push(Span::styled(alert, alert_style));
     }
     let mut right = Vec::new();
     if with_clock {
         right.push(Span::styled(clock, theme::dim()));
     }
-    if with_hosts && app.connected && app.hosts.values().all(|s| s == "up") {
+    if with_hosts && app.link == Link::Up && app.hosts.values().all(|s| s == "up") {
         right.push(Span::styled(format!(" · {healthy}"), theme::dim()));
     }
     let used = |spans: &[Span]| spans.iter().map(|s| s.content.width()).sum::<usize>();
@@ -184,10 +189,12 @@ fn list(frame: &mut Frame, area: Rect, app: &App, tier: Tier, now: DateTime<Utc>
         let query = app.filter.value();
         let text = if !query.is_empty() {
             format!("no rows match \"{query}\" · esc clears")
-        } else if app.connected {
-            "no agent panes yet".to_owned()
         } else {
-            "waiting for serve".to_owned()
+            match &app.link {
+                Link::Up => "no agent panes yet".to_owned(),
+                Link::Connecting => "waiting for serve".to_owned(),
+                Link::Lost(why) => why.clone(),
+            }
         };
         let width = usize::from(area.width);
         frame.render_widget(
@@ -262,6 +269,26 @@ fn is_selected(app: &App, item: &Item) -> bool {
     }
 }
 
+/// The columns before WHERE: the glyph, the state word (wide), time in state, harness and host.
+fn lead_width(tier: Tier) -> usize {
+    match tier {
+        Tier::Narrow => 9,
+        Tier::Mid => 25,
+        Tier::Wide => 34,
+    }
+}
+
+/// How wide WHERE and WHAT are in a row `width` columns wide.
+fn where_what(tier: Tier, width: usize) -> (usize, usize) {
+    let rest = width.saturating_sub(lead_width(tier));
+    let share = if tier == Tier::Wide {
+        rest * 5 / 9
+    } else {
+        rest * 9 / 20
+    };
+    (share, rest - share)
+}
+
 fn row_line(
     row: &Row,
     app: &App,
@@ -270,7 +297,7 @@ fn row_line(
     selected: bool,
     now: DateTime<Utc>,
 ) -> Line<'static> {
-    let faded = row.stale || !app.connected;
+    let faded = row.stale || app.link != Link::Up;
     let soft = if row.pane.source == "inferred" || row.suspect || faded {
         theme::dim()
     } else {
@@ -286,17 +313,15 @@ fn row_line(
         cells.push((fit(&harness(row), 7) + " ", soft));
         cells.push((fit(&row.pane.host, 7) + " ", theme::dim()));
     }
-    let fixed: usize = cells.iter().map(|(text, _)| text.width()).sum();
-    let rest = width.saturating_sub(fixed);
-    let p = &row.pane;
-    let (labels, share): (Vec<&str>, usize) = if tier == Tier::Wide {
-        (vec![&p.session, &p.tab, &p.pane], rest * 5 / 9)
-    } else {
-        (vec![&p.session, &p.pane], rest * 9 / 20)
-    };
+    debug_assert_eq!(
+        cells.iter().map(|(text, _)| text.width()).sum::<usize>(),
+        lead_width(tier)
+    );
+    let (share, what_width) = where_what(tier, width);
+    let labels = labels(row, &app.rows, tier != Tier::Wide);
     let room = share.saturating_sub(1);
     cells.push((fit(&path(&labels, room), room) + " ", soft));
-    cells.push((fit(what(row), rest.saturating_sub(share)), soft));
+    cells.push((fit(what(row), what_width), soft));
     let mut spans: Vec<Span> = cells
         .into_iter()
         .map(|(text, style)| Span::styled(text, style))
@@ -340,16 +365,22 @@ fn detail(app: &App, now: DateTime<Utc>, width: usize, wide: bool) -> Vec<Line<'
         };
     };
     let p = &row.pane;
-    let mut lines = vec![Line::styled(fit(&p.pane, width), theme::accent())];
+    let mut lines = vec![Line::styled(
+        fit(&name(row, &app.rows), width),
+        theme::accent(),
+    )];
     let peek = app.peek.as_ref().filter(|peek| peek.key == row.key);
     if let (false, Some(peek)) = (wide, peek) {
         lines.extend(peek_lines(peek, width));
         return lines;
     }
-    let state = match &p.kind {
+    let mut state = match &p.kind {
         Some(kind) => format!("{} · {kind}", p.state),
         None => p.state.clone(),
     };
+    if row.suspect {
+        state.push_str(" (reported)");
+    }
     let reported = p
         .updated_at
         .as_deref()
@@ -366,16 +397,37 @@ fn detail(app: &App, now: DateTime<Utc>, width: usize, wide: bool) -> Vec<Line<'
     };
     if let Some(why) = &row.suspect_reason {
         lines.extend(
-            wrap(&format!("suspect: {why}"), width.max(1))
+            wrap(&format!("may be stale: {why}"), width.max(1))
                 .into_iter()
-                .map(|line| Line::styled(line, Style::new().fg(Color::Yellow))),
+                .map(|line| Line::styled(line, theme::dim())),
         );
     }
-    let mut pairs = vec![("state", state)];
+    let value = width.saturating_sub(10);
+    let pair = |key: &str, val: &str| {
+        Line::from(vec![
+            Span::styled(format!("{key:<9} "), theme::dim()),
+            Span::raw(fit(val, value)),
+        ])
+    };
+    lines.push(pair("state", &state));
+    let msg = clean(p.msg.as_deref().unwrap_or_default());
     if wide {
-        pairs.push(("in state", in_state(row, now)));
-        pairs.push(("msg", dash(p.msg.as_deref().unwrap_or_default())));
+        lines.push(pair("in state", &in_state(row, now)));
+        lines.push(pair("msg", &dash(&msg)));
+    } else if msg.width() > where_what(tier(width as u16), width).1 {
+        // The row cut it, and a permission prompt is what you read before acting.
+        let mut wrapped = wrap(&msg, value.max(1));
+        if wrapped.len() > 2 {
+            wrapped.truncate(2);
+            wrapped[1] = fit(&format!("{}…", wrapped[1]), value)
+                .trim_end()
+                .to_owned();
+        }
+        for (i, line) in wrapped.iter().enumerate() {
+            lines.push(pair(if i == 0 { "msg" } else { "" }, line));
+        }
     }
+    let mut pairs = Vec::new();
     pairs.extend([
         ("host", p.host.clone()),
         ("session", p.session.clone()),
@@ -385,12 +437,8 @@ fn detail(app: &App, now: DateTime<Utc>, width: usize, wide: bool) -> Vec<Line<'
         ("source", p.source.clone()),
         ("last rpt", reported),
     ]);
-    let value = width.saturating_sub(10);
     for (key, val) in pairs {
-        lines.push(Line::from(vec![
-            Span::styled(format!("{key:<9} "), theme::dim()),
-            Span::raw(fit(&val, value)),
-        ]));
+        lines.push(pair(key, &val));
     }
     if p.source == "inferred" {
         lines.push(Line::styled(
@@ -462,6 +510,10 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
     }
     let mut spans: Vec<Span> = Vec::new();
     let mut used = 0;
+    if app.peek.is_some() {
+        used += "space closes · ".width();
+        spans.push(Span::styled("space closes · ", theme::dim()));
+    }
     let query = app.filter.value();
     if !query.is_empty() {
         let kept = fit(&format!("/{query}"), 16).trim_end().to_owned();
@@ -508,7 +560,7 @@ mod tests {
     use ratatui::crossterm::event::KeyCode;
 
     use super::*;
-    use crate::tui::app::tests::{app, press, row};
+    use crate::tui::app::tests::{app, hosts, press, row};
     use crate::tui::app::{App, Peek};
 
     fn fuller() -> App {
@@ -653,7 +705,7 @@ mod tests {
     #[test]
     fn serve_stopped_stays_in_the_narrow_header() {
         let mut app = fuller();
-        app.connected = false;
+        app.link = Link::Lost("serve stopped".into());
         let text = render(&app, 50, 30);
         assert!(
             text.lines()
@@ -662,10 +714,30 @@ mod tests {
                 .contains("serve stopped · r reconnects"),
             "{text}"
         );
-        app.connected = true;
+        app.link = Link::Up;
         app.hosts.insert("mini".into(), "down".into());
         let text = render(&app, 50, 30);
         assert!(text.lines().next().unwrap().contains("mini down"), "{text}");
+    }
+
+    #[test]
+    fn a_board_still_connecting_does_not_say_serve_stopped() {
+        let mut app = App::default();
+        let text = render(&app, 50, 30);
+        let top = text.lines().next().unwrap();
+        assert!(top.contains("connecting to serve"), "{text}");
+        assert!(!text.contains("serve stopped"), "{text}");
+        assert!(text.contains("waiting for serve"), "{text}");
+        app.link = Link::Lost("serve: could not start it".into());
+        let text = render(&app, 50, 30);
+        assert!(
+            text.lines().next().unwrap().contains("serve stopped"),
+            "{text}"
+        );
+        assert!(
+            text.contains("serve: could not start it"),
+            "a failed start says why:\n{text}"
+        );
     }
 
     #[test]
@@ -684,6 +756,65 @@ mod tests {
                 "{key} missing:\n{text}"
             );
         }
+    }
+
+    #[test]
+    fn a_narrow_detail_keeps_a_message_the_row_cuts() {
+        let mut app = app();
+        let mut rows = app.rows.clone();
+        rows[0].pane.msg = Some(
+            "Allow Bash: cargo test --workspace --all-features -- --test-threads 1 \
+             and then a lot more words that will not fit in two lines at all"
+                .into(),
+        );
+        app.set_rows(rows, hosts());
+        let text = render(&app, 50, 30);
+        let at = text
+            .lines()
+            .position(|l| l.starts_with("msg "))
+            .expect(&text);
+        let next = text.lines().nth(at + 1).unwrap();
+        assert!(
+            next.starts_with("          ") && next.ends_with('…'),
+            "{text}"
+        );
+        assert!(
+            text.lines().nth(at + 2).unwrap().starts_with("host"),
+            "{text}"
+        );
+        let text = render(&self::app(), 50, 30);
+        assert!(
+            !text.lines().any(|l| l.starts_with("msg ")),
+            "a message the row shows whole stays out:\n{text}"
+        );
+    }
+
+    #[test]
+    fn a_suspect_row_says_it_may_be_stale() {
+        let mut app = app();
+        let mut rows = app.rows.clone();
+        rows[0].suspect = true;
+        rows[0].pane.state = "working".into();
+        rows[0].pane.kind = None;
+        rows[0].suspect_reason = Some("reported working at 12:27; the title shows idle".into());
+        app.set_rows(rows, hosts());
+        let text = render(&app, 80, 30);
+        assert!(
+            text.contains("may be stale: reported working at 12:27; the title shows idle"),
+            "{text}"
+        );
+        assert!(text.contains("state     working (reported)"), "{text}");
+    }
+
+    #[test]
+    fn an_open_peek_says_how_to_close_it() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char(' '));
+        let text = render(&app, 80, 30);
+        assert!(
+            text.lines().last().unwrap().starts_with("space closes · "),
+            "{text}"
+        );
     }
 
     #[test]

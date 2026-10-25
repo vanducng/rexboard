@@ -17,7 +17,7 @@ use crate::error::{Error, Result};
 use crate::output::clean;
 use crate::{interrupted, rex, stop_on_signals};
 
-use app::{App, Effect};
+use app::{App, Effect, Link};
 
 /// Peek shows this many lines from the end of the pane.
 const PEEK_LINES: usize = 12;
@@ -30,14 +30,10 @@ enum Msg {
 }
 
 pub fn run() -> Result<()> {
-    // SIGTERM or SIGHUP (the board window closing) ends the loop, so Restore puts the terminal back.
+    // SIGTERM or SIGHUP (the board window closing) stops the loop, which puts the terminal back.
     stop_on_signals();
     watchdog();
-    match board() {
-        // The terminal is gone, so there is no one to tell; printing would only panic.
-        Err(_) if unsafe { libc::isatty(0) } == 0 => Ok(()),
-        other => other,
-    }
+    board()
 }
 
 fn board() -> Result<()> {
@@ -49,14 +45,16 @@ fn board() -> Result<()> {
     let _restore = Restore;
     let mut tick = Instant::now();
     loop {
-        terminal.draw(|frame| view::draw(frame, &app, chrono::Utc::now()))?;
+        terminal
+            .draw(|frame| view::draw(frame, &app, chrono::Utc::now()))
+            .unwrap_or_else(|_| leave());
         let mut changed = false;
         while !changed {
             if interrupted() {
-                return Ok(());
+                leave();
             }
-            if event::poll(Duration::from_millis(50))? {
-                match event::read()? {
+            if event::poll(Duration::from_millis(50)).unwrap_or_else(|_| leave()) {
+                match event::read().unwrap_or_else(|_| leave()) {
                     Event::Key(key) if key.kind != KeyEventKind::Release => {
                         match app.handle(key) {
                             Some(Effect::Quit) => return Ok(()),
@@ -89,30 +87,49 @@ fn board() -> Result<()> {
 
 /// Once the terminal hangs up, crossterm's poll spins on EOF reads and never returns to the loop,
 /// so a stop signal or a lost terminal would leave the board burning CPU. This thread ends the
-/// process when the loop has not stopped within a second.
+/// process when the loop has not stopped within a second, or at once when the terminal is gone.
 fn watchdog() {
     thread::spawn(|| {
         let mut asked: Option<Instant> = None;
         loop {
             thread::sleep(Duration::from_millis(250));
-            let gone = unsafe { libc::isatty(0) } == 0;
-            if interrupted() || gone {
-                let since = *asked.get_or_insert_with(Instant::now);
-                if gone || since.elapsed() >= Duration::from_secs(1) {
-                    let _ = ratatui::try_restore();
-                    std::process::exit(0);
-                }
+            if terminal_gone()
+                || interrupted()
+                    && asked.get_or_insert_with(Instant::now).elapsed() >= Duration::from_secs(1)
+            {
+                leave();
             }
         }
     });
+}
+
+/// isatty stays true on macOS after the other end closes, so ask poll for a hang-up instead.
+/// macOS reports POLLHUP only when some event is asked for; nothing is read here.
+fn terminal_gone() -> bool {
+    let mut fd = libc::pollfd {
+        fd: 0,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    (unsafe { libc::poll(&raw mut fd, 1, 0) }) > 0
+        && fd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0
+}
+
+/// Restores the terminal and exits without running destructors: ratatui's Terminal prints on
+/// drop when it cannot show the cursor, and printing to a terminal that is gone panics inside
+/// the panic hook, which aborts. A signal can come just before its terminal goes.
+fn leave() -> ! {
+    let _ = ratatui::try_restore();
+    let _ = ratatui::crossterm::execute!(std::io::stdout(), ratatui::crossterm::cursor::Show);
+    std::process::exit(0)
 }
 
 fn apply(app: &mut App, msg: Msg) {
     match msg {
         Msg::Rows(rows) => app.set_rows(rows.rows, rows.hosts),
         Msg::Gone(why) => {
-            app.connected = false;
-            app.say(why);
+            app.say(format!("{why} · r reconnects"));
+            app.link = Link::Lost(why);
         }
         Msg::Peek(key, lines) => {
             if let Some(peek) = app.peek.as_mut().filter(|peek| peek.key == key) {
@@ -131,6 +148,24 @@ fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
                 let text = match client::call(&json!({ "cmd": "seen", "key": key })) {
                     Ok(_) => seen_message(&label, &state),
                     Err(err) => format!("seen failed: {err}"),
+                };
+                let _ = tx.send(Msg::Say(text));
+            });
+        }
+        Effect::SeenAll(keys) => {
+            thread::spawn(move || {
+                let mut marked = 0;
+                let mut failed = None;
+                for key in keys {
+                    match client::call(&json!({ "cmd": "seen", "key": key })) {
+                        Ok(_) => marked += 1,
+                        Err(err) => failed = Some(err),
+                    }
+                }
+                let rows = if marked == 1 { "row" } else { "rows" };
+                let text = match failed {
+                    None => format!("{marked} done {rows} marked seen"),
+                    Some(err) => format!("{marked} done {rows} marked seen; seen failed: {err}"),
                 };
                 let _ = tx.send(Msg::Say(text));
             });
@@ -168,7 +203,7 @@ fn listen(tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
                 Err(err) => format!("serve: {err}"),
                 Ok(()) => "serve stopped".to_owned(),
             };
-            let _ = tx.send(Msg::Gone(format!("{why} · r reconnects")));
+            let _ = tx.send(Msg::Gone(why));
         }
     });
 }

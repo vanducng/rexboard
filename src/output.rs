@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::board::Row;
-use crate::pane::bare_title;
+use crate::pane::{Pane, bare_title};
 
 /// The widest a `session`, `tab` or `pane` label gets in `session › tab › pane`.
 const SEGMENT_MAX: usize = 24;
@@ -39,7 +39,7 @@ pub fn table(rows: &[Row], now: DateTime<Utc>, width: Option<usize>) -> String {
                 in_state(row, now),
                 harness(row),
                 pane.host.clone(),
-                place(row),
+                place(row, rows),
                 what(row).to_owned(),
             ]
             .map(|cell| clean(&cell))
@@ -61,8 +61,7 @@ pub fn table(rows: &[Row], now: DateTime<Utc>, width: Option<usize>) -> String {
         widths[5] = place;
         widths[6] = what;
         for (cell, row) in cells.iter_mut().zip(rows) {
-            let p = &row.pane;
-            cell[5] = path(&[&p.session, &p.tab, &p.pane], place);
+            cell[5] = path(&labels(row, rows, false), place);
             cell[6] = fit(&cell[6], what).trim_end().to_owned();
         }
     }
@@ -123,15 +122,59 @@ pub fn what(row: &Row) -> &str {
         .unwrap_or_else(|| bare_title(&row.pane.title))
 }
 
-/// `session › tab › pane`, each label capped so one long label cannot swamp the column.
-pub fn place(row: &Row) -> String {
-    let p = &row.pane;
-    [&p.session, &p.tab, &p.pane]
+/// WHERE in full, each label capped so one long label cannot swamp the column.
+pub fn place(row: &Row, rows: &[Row]) -> String {
+    labels(row, rows, false)
+        .iter()
         .map(|label| squeeze(label, SEGMENT_MAX))
+        .collect::<Vec<_>>()
         .join(SEP)
 }
 
-/// Labels joined with ` › ` in at most `max` columns. The pane (last) is what you recognise, so
+/// A pane label that names nothing: `shell`, or what runs in the pane.
+fn generic(pane: &Pane) -> bool {
+    pane.pane == "shell" || pane.process.as_deref() == Some(pane.pane.as_str())
+}
+
+/// The pane label tells this row apart: it is not generic, or another agent shares the tab.
+fn names_pane(row: &Row, rows: &[Row]) -> bool {
+    let p = &row.pane;
+    !generic(p)
+        || rows
+            .iter()
+            .filter(|r| {
+                r.pane.is_agent() && r.pane.host == p.host && r.pane.window_id == p.window_id
+            })
+            .count()
+            > 1
+}
+
+/// WHERE's labels: `session › tab › pane`, or `session › tab` when the pane label is generic.
+/// `short` keeps two labels for narrow rows: `session › pane`, or `session › tab`.
+pub fn labels<'a>(row: &'a Row, rows: &[Row], short: bool) -> Vec<&'a str> {
+    let p = &row.pane;
+    match (names_pane(row, rows), short) {
+        (false, _) => vec![&p.session, &p.tab],
+        (true, false) => vec![&p.session, &p.tab, &p.pane],
+        (true, true) => vec![&p.session, &p.pane],
+    }
+}
+
+/// What to call a row: its pane label, or for a generic one its title, else its tab.
+pub fn name(row: &Row, rows: &[Row]) -> String {
+    let p = &row.pane;
+    let title = bare_title(&p.title);
+    let name = if names_pane(row, rows) {
+        &p.pane
+    } else if title.is_empty() {
+        &p.tab
+    } else {
+        title
+    };
+    clean(name)
+}
+
+/// Labels joined with ` › ` in at most `max` columns. The last label is what you recognise, so
 /// the cuts go to the middle label first, then the first, then the last; separators stay.
 pub fn path(labels: &[&str], max: usize) -> String {
     let whole: Vec<String> = labels.iter().map(|label| clean(label)).collect();
@@ -150,7 +193,12 @@ pub fn path(labels: &[&str], max: usize) -> String {
             break;
         }
         let keep = parts[i].width().saturating_sub(over).max(1);
-        parts[i] = squeeze(&whole[i], keep);
+        // A label cut to a few columns reads as noise; `…` alone says one is there.
+        parts[i] = if keep < 6 && i != last {
+            "…".to_owned()
+        } else {
+            squeeze(&whole[i], keep)
+        };
     }
     let joined = parts.join(SEP);
     if joined.width() <= max {
@@ -326,6 +374,46 @@ mod tests {
         assert_eq!(path(&labels, 16), "api › … › seat-d");
         assert_eq!(path(&labels, 14), "… › … › seat-d");
         assert_eq!(path(&["web", "shell"], 9), "… › shell");
+        assert_eq!(
+            path(&labels, 20),
+            "api › … › seat-d",
+            "a tab cut below 6 columns is `…` alone"
+        );
+    }
+
+    #[test]
+    fn a_generic_pane_label_gives_way_to_the_tab() {
+        let mut shell = row("shell", "", "Allow Bash?");
+        (shell.pane.session, shell.pane.tab) = ("api".into(), "build".into());
+        let mut codex = shell.clone();
+        (codex.pane.block_id, codex.pane.pane, codex.pane.title) =
+            ("c".into(), "codex".into(), "Fix the parser".into());
+        codex.pane.process = Some("codex".into());
+        codex.pane.window_id = "other".into();
+        let rows = vec![shell.clone(), codex.clone()];
+        assert_eq!(place(&shell, &rows), "api › build");
+        assert_eq!(labels(&shell, &rows, true), ["api", "build"]);
+        assert_eq!(name(&shell, &rows), "build", "no title: the tab");
+        assert_eq!(
+            place(&codex, &rows),
+            "api › build",
+            "named after its process"
+        );
+        assert_eq!(
+            name(&codex, &rows),
+            "Fix the parser",
+            "the title when there is one"
+        );
+        let mut seat = shell.clone();
+        (seat.pane.block_id, seat.pane.pane) = ("s".into(), "seat-a".into());
+        let shared = vec![shell.clone(), seat.clone()];
+        assert_eq!(
+            place(&shell, &shared),
+            "api › build › shell",
+            "two agents in one tab keep their pane labels"
+        );
+        assert_eq!(labels(&seat, &shared, true), ["api", "seat-a"]);
+        assert_eq!(name(&shell, &shared), "shell");
     }
 
     #[test]
