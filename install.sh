@@ -15,7 +15,7 @@ fail() {
 case "$(uname -s)/$(uname -m)" in
   Darwin/arm64) target=aarch64-apple-darwin ;;
   Linux/x86_64) target=x86_64-unknown-linux-gnu ;;
-  *) fail "no release build for $(uname -s) $(uname -m); build it with: cargo install --git https://github.com/$repo" ;;
+  *) fail "no release build for $(uname -s) $(uname -m); build it with: cargo install --locked --git https://github.com/$repo" ;;
 esac
 
 tag=${REXBOARD_VERSION:-}

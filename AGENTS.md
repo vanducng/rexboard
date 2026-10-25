@@ -27,4 +27,4 @@ This repo is public. Use generic names only in code, tests, fixtures, docs, scre
 
 ## Releases
 
-Do not commit `target/` or tokens. `publish = false`. Releases come from release-please: merge its release PR to bump the version and tag `vX.Y.Z`; `.github/workflows/release.yml` then builds and attaches the archives. Do not edit `CHANGELOG.md` or bump `Cargo.toml` by hand.
+Do not commit `target/` or tokens. The crate is not published to crates.io (`publish = false`). Releases come from release-please: merge its release PR to bump the version and tag `vX.Y.Z`; `.github/workflows/release.yml` then builds and attaches the archives. Do not edit `CHANGELOG.md` or bump `Cargo.toml` by hand.

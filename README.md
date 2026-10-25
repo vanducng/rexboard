@@ -4,7 +4,7 @@ An attention board for coding-agent panes across Rex hosts: which agent is worki
 
 Unofficial. Not affiliated with Superlogical or Rex.
 
-This is an early scaffold. The binary only prints its version for now.
+This is an early scaffold. The binary only prints its help and version for now; the board arrives in later releases.
 
 ## Install
 
@@ -17,7 +17,7 @@ This installs the latest release for macOS on Apple silicon or Linux x86_64 into
 Or build from source with Rust 1.88 or newer:
 
 ```bash
-cargo install --git https://github.com/vanducng/rexboard
+cargo install --locked --git https://github.com/vanducng/rexboard
 ```
 
 ## Docs
