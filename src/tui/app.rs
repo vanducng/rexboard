@@ -6,6 +6,7 @@ use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 
 use super::columns::{Sort, by_letter};
+use super::status::Status;
 use super::views::{Bucket, View, arrange, bucket, views};
 use crate::board::{Group, Row};
 use crate::output::{labels, path};
@@ -77,6 +78,10 @@ pub struct App {
     pub selected: Option<Spot>,
     pub filter: Input,
     pub filtering: bool,
+    /// `f` and a letter: only rows with that status show.
+    pub status: Option<Status>,
+    /// `f` was pressed and waits for its letter.
+    pub picking_status: bool,
     /// The `:` prompt: a view name being typed.
     pub command: Input,
     pub commanding: bool,
@@ -140,7 +145,20 @@ impl App {
             .map(|(text, _)| text.as_str())
     }
 
+    /// Whether the row passes the status filter and the `/` text.
     fn matches(&self, row: &Row) -> bool {
+        self.status.is_none_or(|status| status.matches(row)) && self.matches_text(row)
+    }
+
+    /// Rows the `/` text keeps, with any status; the counts `f` shows.
+    pub fn status_count(&self, status: Status) -> usize {
+        self.rows
+            .iter()
+            .filter(|row| status.matches(row) && self.matches_text(row))
+            .count()
+    }
+
+    fn matches_text(&self, row: &Row) -> bool {
         let query = self.filter.value().to_lowercase();
         if query.is_empty() {
             return true;
@@ -338,6 +356,23 @@ impl App {
             self.keep_selection_visible();
             return None;
         }
+        if self.picking_status {
+            self.picking_status = false;
+            match key.code {
+                KeyCode::Char('f') | KeyCode::Esc => self.status = None,
+                KeyCode::Char(c) => match Status::from_letter(c) {
+                    Some(status) => {
+                        self.status = Some(status);
+                        // Folded groups would hide the very rows asked for.
+                        self.unfold_all();
+                    }
+                    None => self.say("f takes w d q p e u; f or esc clears"),
+                },
+                _ => {}
+            }
+            self.keep_selection_visible();
+            return None;
+        }
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             return match key.code {
                 KeyCode::Char('c') => Some(Effect::Quit),
@@ -352,6 +387,7 @@ impl App {
             KeyCode::Char('g') | KeyCode::Home => self.selected = self.spots().first().cloned(),
             KeyCode::Char('G') | KeyCode::End => self.selected = self.spots().last().cloned(),
             KeyCode::Char('/') => self.filtering = true,
+            KeyCode::Char('f') => self.picking_status = true,
             KeyCode::Char(':') => {
                 self.command.reset();
                 self.commanding = true;
@@ -369,6 +405,7 @@ impl App {
             KeyCode::Esc if self.pick => return Some(Effect::Quit),
             KeyCode::Esc => {
                 self.filter.reset();
+                self.status = None;
                 self.peek = None;
                 self.keys = false;
                 self.sort = None;

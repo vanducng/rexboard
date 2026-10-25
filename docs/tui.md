@@ -59,6 +59,7 @@ The column header underlines each column's sort letter and puts `↑` or `↓` j
 | `g` / `G` | First / last |
 | `1`-`9` | Select the nth `NEEDS YOU` row, counted in the order shown (so a sort changes which row a digit picks), opening its group if it is folded |
 | `/` | Filter rows by host, session, tab, pane, title, state, message or harness; `enter` keeps it, `esc` clears it |
+| `f`, then a letter | Show one status only (see [Status filter](#status-filter)). `f f` or `esc` clears it |
 | `space` | Peek: the last 12 lines of the pane, from `rex capture`, with escape sequences removed. It shows in the detail pane, in place of its fields below 100 columns. `space` again closes it |
 | `s` | Mark the selected pane seen, through serve. The message names it `session › pane` (`session › tab` for a generic pane label). A blocked or erroring pane stays in `NEEDS YOU`, and the message says so |
 | `ctrl+s` | Mark every unseen `done` row the list shows seen (a kept filter narrows it), through serve, and say how many (`9 done rows marked seen`). Blocked and erroring rows are left alone. Before v0.2 this was `S`, which now sorts by state; the `?` table says `(was S)`, and the first `S` of a run says `sorted by state · bulk seen is ctrl+s now` |
@@ -69,10 +70,27 @@ The column header underlines each column's sort letter and puts `↑` or `↓` j
 | `?` | Show every key in the detail pane; `?` or `esc` hides it |
 | `enter` | Go to the pane in the main Rex window, on its host, and mark it seen, as [`rexboard jump`](cli.md#rexboard-jump-next-and-pick) does. The footer says `going to SESSION › PANE…` until the jump ends, then where it went; Enter during a jump says one is already running. A failed jump's reason stays in the footer until the next key, and in full in the detail pane. The board stays open |
 | `r` | Reconnect to serve |
-| `esc` | Clear the filter and the sort, close the peek and the key table, and open every folded group |
+| `esc` | Clear the `/` filter, the status filter and the sort, close the peek and the key table, and open every folded group |
 | `q`, `ctrl-c` | Quit |
 
 The board redraws when serve sends rows, on a key, and once a second for the clock and the times in state. SIGTERM and SIGHUP (closing its window) quit it the same way as `q`, so the terminal is left as it was, and the board exits on its own within a second if its terminal goes away.
+
+## Status filter
+
+`f` then one letter shows only the rows with that status:
+
+| Letter | Shows | Rows |
+| --- | --- | --- |
+| `w` | working | the `WORKING` group: `state` `working`, trusted |
+| `d` | done | `state` `done`, seen or not |
+| `q` | question | `state` `blocked` with `kind` `question` |
+| `p` | permission | `state` `blocked` with any other `kind` (agents send `permission`) or none |
+| `e` | error | `state` `error` |
+| `u` | unreported | the `UNREPORTED` group: no status record, `unknown`, a stale host or a suspect report |
+
+A row in `UNREPORTED` matches only `u`, so each row matches at most one letter; `idle` rows match none. While `f` waits for its letter, the footer lists the letters with how many rows each would show (`f w working 3 · d done 5 · …`, or `f w3 d5 …` when narrow). `f f` or `esc` clears the filter; any other key leaves it as it was and says which letters `f` takes. The top bar shows the filter after `rexboard` (`only question`, or `view: flat ↓age · only question`).
+
+The filter combines with the `/` text and with every view. Setting it opens folded groups, so the rows asked for are not hidden. `1`-`9` and `ctrl+s` count only the rows the filters show. It works in `pick` too.
 
 ## Pick
 
