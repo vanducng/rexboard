@@ -12,6 +12,7 @@ mod rex;
 mod serve;
 mod state;
 mod tui;
+mod window;
 
 pub use cli::Cli;
 pub use error::{Error, report};
@@ -65,6 +66,7 @@ pub fn execute(cli: &Cli) -> Result<()> {
         Command::Seen { key } => client::seen(key, cli.json),
         Command::Jump { target } => jump::jump(target, cli.json),
         Command::Next { back } => jump::next(*back, cli.json),
+        Command::Window { new, print_title } => window::window(*new, *print_title, cli.json),
         Command::Board | Command::Pick => {
             if !stdout().is_terminal() || !stdin().is_terminal() {
                 return Err(Error::usage_with(

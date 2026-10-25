@@ -1498,3 +1498,425 @@ fn next_outside_a_pane_starts_after_the_last_jump() {
         "seen alone does not move it"
     );
 }
+
+/// A local session for the window tests: `label`, with `blocks` panes in one tab, the first
+/// titled `title`, and a status record when `reported`.
+fn session(
+    id: &str,
+    label: &str,
+    tab: &str,
+    title: &str,
+    blocks: usize,
+    reported: bool,
+) -> serde_json::Value {
+    let pane = |n: usize| {
+        let records = if reported && n == 0 {
+            serde_json::json!([{ "state": "idle", "app": "claude-code",
+                                 "updated_at": "2026-01-01T00:00:00Z" }])
+        } else {
+            serde_json::json!({})
+        };
+        serde_json::json!({ "block_id": format!("block:{id}-{n}"), "label": "shell",
+            "title": if n == 0 { title } else { "" }, "process": { "name": "zsh" },
+            "records": records })
+    };
+    serde_json::json!({ "session_id": format!("session:{id}"), "label": label, "windows": [
+        { "window_id": format!("window:{id}"), "label": tab,
+          "blocks": (0..blocks).map(pane).collect::<Vec<_>>() }] })
+}
+
+fn board_session() -> serde_json::Value {
+    session("board", "rexboard", "board", "board", 1, false)
+}
+
+fn fresh_session(id: &str) -> serde_json::Value {
+    session(id, "shy-canyon", "Window 1", "zsh", 1, false)
+}
+
+/// Writes the snapshots fake-rex prints, one per call, in order: `1.json`, `2.json`, ...
+fn snapshots(dir: &std::path::Path, states: &[Vec<serde_json::Value>]) -> std::path::PathBuf {
+    let base: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(fixture("snapshot-two-hosts.json")).unwrap())
+            .unwrap();
+    let seq = dir.join("snapshots");
+    std::fs::create_dir_all(&seq).unwrap();
+    for (n, extra) in states.iter().enumerate() {
+        let mut snapshot = base.clone();
+        snapshot["hosts"][0]["sessions"]
+            .as_array_mut()
+            .unwrap()
+            .extend(extra.iter().cloned());
+        std::fs::write(seq.join(format!("{}.json", n + 1)), snapshot.to_string()).unwrap();
+    }
+    seq
+}
+
+/// A `rexboard window` command against fake-rex with these snapshot states.
+fn window_cmd(dir: &std::path::Path, states: &[Vec<serde_json::Value>]) -> Command {
+    let mut cmd = bin();
+    cmd.env("REXBOARD_REX", fixture("fake-rex"))
+        .env("FAKE_REX_LOG", dir.join("rex.log"))
+        .env("FAKE_REX_STATE", dir)
+        .env("FAKE_REX_FIXTURES", snapshots(dir, states))
+        .env_remove("REX_CLIENT");
+    cmd
+}
+
+/// The window script calls, in order, as `(mode, session_id)`.
+fn window_calls(dir: &std::path::Path) -> Vec<(String, String)> {
+    std::fs::read_to_string(dir.join("rex.log"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| line.strip_prefix("do - --json --args "))
+        .filter_map(|args| serde_json::from_str::<serde_json::Value>(args).ok())
+        .filter_map(|args| {
+            let mode = args["mode"].as_str()?.to_owned();
+            Some((mode, args["session_id"].as_str().unwrap_or("").to_owned()))
+        })
+        .collect()
+}
+
+fn made_with_rex_new(dir: &std::path::Path) -> Option<String> {
+    std::fs::read_to_string(dir.join("rex.log"))
+        .unwrap_or_default()
+        .lines()
+        .find(|line| line.starts_with("new "))
+        .map(str::to_owned)
+}
+
+fn calls(list: &[(&str, &str)]) -> Vec<(String, String)> {
+    list.iter()
+        .map(|(m, s)| ((*m).to_owned(), (*s).to_owned()))
+        .collect()
+}
+
+#[test]
+fn window_print_title_matches_session_and_tab() {
+    let dir = tempfile::tempdir().unwrap();
+    window_cmd(dir.path(), &[vec![]])
+        .args(["window", "--print-title"])
+        .assert()
+        .success()
+        .stdout("board - rexboard\n");
+    // No board yet: rex new makes it, then a new window opens for it.
+    window_cmd(
+        dir.path(),
+        &[
+            vec![],
+            vec![board_session()],
+            vec![board_session()],
+            vec![board_session(), fresh_session("win")],
+        ],
+    )
+    .arg("window")
+    .assert()
+    .success()
+    .stdout("opened the board window: board - rexboard\n");
+    let new = made_with_rex_new(dir.path()).expect("the session is made");
+    let words: Vec<&str> = new.split_whitespace().collect();
+    assert_eq!(
+        &words[..5],
+        ["new", "rexboard", "--window", "board", "--"],
+        "{new}"
+    );
+    assert!(
+        words[5].ends_with("rexboard") && words[6] == "board",
+        "{new}"
+    );
+    assert_eq!(format!("{} - {}", words[3], words[1]), "board - rexboard");
+    assert_eq!(
+        window_calls(dir.path()),
+        calls(&[
+            ("open", ""),
+            ("select", "session:board"),
+            ("destroy", "session:win")
+        ])
+    );
+}
+
+#[test]
+fn window_reuses_existing_rexboard_session() {
+    let dir = tempfile::tempdir().unwrap();
+    window_cmd(dir.path(), &[vec![board_session()]])
+        .arg("window")
+        .assert()
+        .success()
+        .stdout("showed the board: board - rexboard\n");
+    assert_eq!(made_with_rex_new(dir.path()), None);
+    assert_eq!(
+        window_calls(dir.path()),
+        calls(&[("select", "session:board")])
+    );
+}
+
+#[test]
+fn window_never_takes_a_users_own_rexboard_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let mine = session("mine", "rexboard", "notes", "vim", 1, false);
+    window_cmd(
+        dir.path(),
+        &[
+            vec![mine.clone()],
+            vec![mine.clone(), board_session()],
+            vec![mine.clone(), board_session()],
+            vec![mine, board_session(), fresh_session("win")],
+        ],
+    )
+    .arg("window")
+    .assert()
+    .success();
+    assert!(
+        made_with_rex_new(dir.path()).is_some(),
+        "the board's own session is made"
+    );
+    assert!(
+        window_calls(dir.path())
+            .iter()
+            .all(|(_, id)| id != "session:mine"),
+        "{:?}",
+        window_calls(dir.path())
+    );
+}
+
+#[test]
+fn window_new_destroys_the_session_the_app_names() {
+    let dir = tempfile::tempdir().unwrap();
+    window_cmd(dir.path(), &[vec![board_session()]])
+        .env(
+            "FAKE_REX_OPEN_REPLY",
+            r#"{"ok":true,"reply":{"session_id":"session:named"}}"#,
+        )
+        .args(["window", "--new"])
+        .assert()
+        .success();
+    assert_eq!(
+        window_calls(dir.path()),
+        calls(&[
+            ("open", ""),
+            ("select", "session:board"),
+            ("destroy", "session:named")
+        ])
+    );
+}
+
+#[test]
+fn window_new_ignores_a_named_session_that_is_not_new() {
+    for named in ["session:mine", "session:board"] {
+        let dir = tempfile::tempdir().unwrap();
+        let mine = session("mine", "api", "build", "zsh", 1, false);
+        window_cmd(
+            dir.path(),
+            &[
+                vec![board_session(), mine.clone()],
+                vec![board_session(), mine.clone()],
+                vec![board_session(), mine, fresh_session("win")],
+            ],
+        )
+        .env(
+            "FAKE_REX_OPEN_REPLY",
+            format!(r#"{{"ok":true,"reply":{{"session_id":"{named}"}}}}"#),
+        )
+        .args(["window", "--new"])
+        .assert()
+        .success();
+        assert_eq!(
+            window_calls(dir.path()),
+            calls(&[
+                ("open", ""),
+                ("select", "session:board"),
+                ("destroy", "session:win")
+            ]),
+            "{named}"
+        );
+    }
+}
+
+#[test]
+fn window_new_destroys_one_fresh_session() {
+    let dir = tempfile::tempdir().unwrap();
+    window_cmd(
+        dir.path(),
+        &[
+            vec![board_session()],
+            vec![board_session()],
+            vec![board_session(), fresh_session("win")],
+        ],
+    )
+    .args(["window", "--new"])
+    .assert()
+    .success();
+    assert_eq!(
+        window_calls(dir.path()).last().unwrap(),
+        &("destroy".to_owned(), "session:win".to_owned())
+    );
+}
+
+#[test]
+fn window_new_waits_for_a_late_session() {
+    let dir = tempfile::tempdir().unwrap();
+    window_cmd(
+        dir.path(),
+        &[
+            vec![board_session()],
+            vec![board_session()],
+            vec![board_session()],
+            vec![board_session()],
+            vec![board_session(), fresh_session("late")],
+        ],
+    )
+    .args(["window", "--new"])
+    .assert()
+    .success();
+    assert_eq!(
+        window_calls(dir.path()).last().unwrap(),
+        &("destroy".to_owned(), "session:late".to_owned())
+    );
+}
+
+#[test]
+fn window_new_destroys_nothing_with_two_new_sessions() {
+    let dir = tempfile::tempdir().unwrap();
+    window_cmd(
+        dir.path(),
+        &[
+            vec![board_session()],
+            vec![board_session()],
+            vec![board_session(), fresh_session("one"), fresh_session("two")],
+        ],
+    )
+    .args(["--json", "window", "--new"])
+    .assert()
+    .code(1)
+    .stderr(predicate::str::contains("session:one"))
+    .stderr(predicate::str::contains("session:two"))
+    .stderr(predicate::str::contains("nothing was destroyed"));
+    assert!(
+        window_calls(dir.path())
+            .iter()
+            .all(|(mode, _)| mode != "destroy")
+    );
+}
+
+#[test]
+fn window_new_destroys_nothing_when_the_new_session_is_not_fresh() {
+    let dir = tempfile::tempdir().unwrap();
+    for busy in [
+        session("busy", "api", "build", "zsh", 2, false),
+        session("busy", "api", "build", "zsh", 1, true),
+    ] {
+        let dir = tempfile::tempdir_in(dir.path()).unwrap();
+        window_cmd(
+            dir.path(),
+            &[
+                vec![board_session()],
+                vec![board_session()],
+                vec![board_session(), busy],
+            ],
+        )
+        .args(["window", "--new"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "does not look like the new window's own",
+        ));
+        assert!(
+            window_calls(dir.path())
+                .iter()
+                .all(|(mode, _)| mode != "destroy")
+        );
+    }
+}
+
+#[test]
+fn window_new_never_destroys_a_new_agent_session() {
+    for process in ["2.1.0", "codex"] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut agent = fresh_session("agent");
+        agent["windows"][0]["blocks"][0]["process"]["name"] = process.into();
+        window_cmd(
+            dir.path(),
+            &[
+                vec![board_session()],
+                vec![board_session()],
+                vec![board_session(), agent],
+            ],
+        )
+        .args(["window", "--new"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "does not look like the new window's own",
+        ));
+        assert!(
+            window_calls(dir.path())
+                .iter()
+                .all(|(mode, _)| mode != "destroy"),
+            "{process}"
+        );
+    }
+}
+
+#[test]
+fn window_new_reads_a_user_at_host_title_as_a_shell_only_with_a_directory() {
+    for (title, destroyed) in [("user@host: ~/src", true), ("user@host: claude", false)] {
+        let dir = tempfile::tempdir().unwrap();
+        let win = session("win", "shy-canyon", "Window 1", title, 1, false);
+        let run = window_cmd(
+            dir.path(),
+            &[
+                vec![board_session()],
+                vec![board_session()],
+                vec![board_session(), win],
+            ],
+        )
+        .args(["window", "--new"])
+        .assert();
+        if destroyed {
+            run.success();
+        } else {
+            run.code(1);
+        }
+        assert_eq!(
+            window_calls(dir.path()).contains(&("destroy".to_owned(), "session:win".to_owned())),
+            destroyed,
+            "{title}"
+        );
+    }
+}
+
+#[test]
+fn window_new_names_the_session_it_could_not_destroy() {
+    let dir = tempfile::tempdir().unwrap();
+    window_cmd(
+        dir.path(),
+        &[
+            vec![board_session()],
+            vec![board_session()],
+            vec![board_session(), fresh_session("win")],
+        ],
+    )
+    .env(
+        "FAKE_REX_DESTROY_REPLY",
+        r#"{"ok":false,"step":"session.destroy","error":"busy"}"#,
+    )
+    .args(["window", "--new"])
+    .assert()
+    .code(1)
+    .stderr(predicate::str::contains("session:win"))
+    .stderr(predicate::str::contains("rex kill session:win"));
+}
+
+#[test]
+fn window_new_destroys_nothing_when_no_session_shows_up() {
+    let dir = tempfile::tempdir().unwrap();
+    window_cmd(dir.path(), &[vec![board_session()]])
+        .args(["window", "--new"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("did not show up within 2s"));
+    assert!(
+        window_calls(dir.path())
+            .iter()
+            .all(|(mode, _)| mode != "destroy")
+    );
+}

@@ -114,6 +114,15 @@ fn rule_line(width: u16) -> Paragraph<'static> {
     Paragraph::new("─".repeat(usize::from(width))).style(theme::dim())
 }
 
+/// `1 host`, `2 hosts`.
+fn count(n: usize, noun: &str) -> String {
+    if n == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{n} {noun}s")
+    }
+}
+
 fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
     let red = Style::new().fg(Color::Red);
     let (alert, alert_style) = match app.link {
@@ -130,10 +139,10 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
         Link::Lost(_) => (STOPPED.to_owned(), red),
     };
     let counts = format!(
-        " · {} hosts · {} panes · {} agents",
-        app.hosts.len(),
-        app.panes,
-        app.rows.len()
+        " · {} · {} · {}",
+        count(app.hosts.len(), "host"),
+        count(app.panes, "pane"),
+        count(app.rows.len(), "agent")
     );
     let healthy = app.hosts.keys().cloned().collect::<Vec<_>>().join(" + ");
     let clock = now.with_timezone(&Local).format("%H:%M").to_string();
@@ -1008,6 +1017,25 @@ mod tests {
             assert!(lines.iter().any(|l| l.contains(" @mini")), "{text}");
             assert!(!text.contains("@local"), "{text}");
         }
+    }
+
+    #[test]
+    fn the_header_counts_one_host_in_the_singular() {
+        let mut app = App::default();
+        let mut hosts = std::collections::BTreeMap::new();
+        hosts.insert("local".to_owned(), "up".to_owned());
+        app.set_rows(
+            vec![row("local/block:one", "working", "working", true)],
+            hosts,
+        );
+        let top = render(&app, 140, 10).lines().next().unwrap().to_owned();
+        assert!(top.contains("1 host · 1 pane · 1 agent"), "{top}");
+        let top = render(&self::app(), 140, 10)
+            .lines()
+            .next()
+            .unwrap()
+            .to_owned();
+        assert!(top.contains("2 hosts · 4 panes · 4 agents"), "{top}");
     }
 
     #[test]

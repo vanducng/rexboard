@@ -9,6 +9,7 @@ Unofficial attention board for agent panes across Rex hosts. The binary is `rexb
 - `src/lib.rs` dispatches commands. `src/main.rs` only parses and reports errors.
 - `src/cli.rs` is the clap surface. `src/error.rs` holds the error type and prints it, as JSON with `--json`.
 - `install.sh` installs a release.
+- `scripts/record-demo.sh` records the README demo, `docs/assets/demo.cast` and `demo.gif`, on a private, throwaway Rex server. Re-record with it rather than by hand, so the demo never sees real panes.
 - `tests/cli.rs` runs the binary.
 
 ## Checks
@@ -19,11 +20,11 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-User docs live in `docs/`: development and deployment. Keep `README.md` a short hub.
+User docs live in `docs/`: cli, tui, configuration, system architecture, development and deployment. Keep `README.md` a short hub.
 
 ## Privacy
 
-This repo is public. Use generic names only in code, tests, fixtures, docs, screenshots and commit messages: hosts like `studio` and `mini`, sessions like `api` and `web`. Never commit tailnet hostnames, real session, tab or pane labels, home paths, or transcripts. Scrub recorded fixtures before committing.
+This repo is public. Use generic names only in code, tests, fixtures, docs, screenshots and commit messages: hosts like `studio` and `mini`, sessions like `api` and `web`. Never commit tailnet hostnames, real session, tab or pane labels, home paths, or transcripts. Scrub recorded fixtures before committing. The demo script refuses a cast with home or temp paths, and with any string from the file `REXBOARD_DEMO_DENY` names; give it your real labels.
 
 ## Releases
 
