@@ -1,14 +1,14 @@
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(
     name = "rexboard",
     version,
     about = "Unofficial attention board for agent panes across Rex hosts.",
-    after_help = "Errors: {\"ok\":false,\"error\":{code,message,next_steps}} on stderr with --json. Usage errors exit 2."
+    after_help = "Errors: {\"ok\":false,\"error\":{code,message,next_steps}} on stderr with --json. Exit 1: Rex failed. Exit 2: bad usage, or every host is unreachable."
 )]
 pub struct Cli {
-    /// Print one JSON object on stdout, and errors as JSON on stderr.
+    /// Print JSON on stdout, and errors as JSON on stderr.
     #[arg(long, global = true)]
     pub json: bool,
     #[command(subcommand)]
@@ -16,4 +16,17 @@ pub struct Cli {
 }
 
 #[derive(Debug, Subcommand)]
-pub enum Command {}
+pub enum Command {
+    /// List agent panes on this host and every `rex hosts` entry, most urgent first.
+    Ls(LsArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct LsArgs {
+    /// Include plain shells, not just panes with a status record or a known harness.
+    #[arg(long)]
+    pub all: bool,
+    /// Only this host: `local`, or a label from `rex hosts`.
+    #[arg(long, value_name = "HOST")]
+    pub host: Option<String>,
+}
