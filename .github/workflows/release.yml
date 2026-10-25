@@ -1,0 +1,111 @@
+name: release
+
+# A tag created with GITHUB_TOKEN starts no new run, so release-please and the build share this one.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to rebuild and upload, like v0.2.0
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    if: github.event_name == 'push' && github.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    outputs:
+      created: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: .release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  tag:
+    needs: release-please
+    if: >-
+      always() && (needs.release-please.outputs.created == 'true'
+      || github.ref_type == 'tag' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.pick.outputs.name }}
+    steps:
+      - id: pick
+        env:
+          FROM_RELEASE: ${{ needs.release-please.outputs.tag }}
+          FROM_INPUT: ${{ inputs.tag }}
+        run: |
+          name="${FROM_RELEASE:-${FROM_INPUT:-$GITHUB_REF_NAME}}"
+          [[ "$name" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]] || { echo "not a release tag: $name" >&2; exit 1; }
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: tag
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ needs.tag.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.name }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build
+        run: cargo build --release --locked
+      - name: version matches the tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          got="$(target/release/rexboard --version)"
+          [[ "$got" == "rexboard ${TAG#v}" ]] || { echo "binary says '$got', tag is $TAG" >&2; exit 1; }
+      - name: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="rexboard-${TAG}-${{ matrix.target }}"
+          stage="${RUNNER_TEMP}/${name}"
+          mkdir -p "${stage}"
+          cp target/release/rexboard README.md LICENSE "${stage}/"
+          tar -C "${RUNNER_TEMP}" -czf "${RUNNER_TEMP}/${name}.tar.gz" "${name}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ runner.temp }}/rexboard-*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: [tag, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: checksums
+        run: cd dist && sha256sum rexboard-*.tar.gz > SHA256SUMS && cat SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.tag.outputs.name }}
+          generate_release_notes: true
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
