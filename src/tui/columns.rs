@@ -105,11 +105,11 @@ impl Columns {
             })
             .sum();
         let rest = list.saturating_sub(lead);
-        // WHERE names the row, so from 100 it keeps v0.1's width (one over 5/9, after STATE
-        // widened) and from 140 TURN's room comes out of MSG.
+        // WHERE names the row, so from 100 it keeps v0.1's width (5/9 of what v0.1 left, which
+        // was 2 more before STATE widened) and from 140 TURN's room comes out of MSG.
         let place = match (tier, board) {
             (_, 140..) => rest * 2 / 3,
-            (Tier::Wide, _) => (rest * 5 / 9 + 1).min(rest),
+            (Tier::Wide, _) => ((rest + 2) * 5 / 9).min(rest),
             _ => rest * 9 / 20,
         };
         let cols = shown
@@ -314,12 +314,13 @@ mod tests {
     }
 
     #[test]
-    fn where_and_msg_widths_at_120_and_140() {
+    fn where_keeps_v0_1_width_from_100_and_takes_two_thirds_from_140() {
         let at = |board: u16| {
             let columns = Columns::new(board, usize::from(board) - 39);
             (columns.width(Col::Where), columns.width(Col::Msg))
         };
-        assert_eq!(at(120), (26, 19), "v0.1's WHERE, one over 5/9");
+        assert_eq!(at(100), (15, 10), "v0.1's WHERE at 100");
+        assert_eq!(at(120), (26, 19), "v0.1's WHERE at 120");
         assert_eq!(at(140), (38, 20), "from 140 WHERE takes two thirds");
     }
 
