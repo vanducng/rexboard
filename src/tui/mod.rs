@@ -32,6 +32,15 @@ enum Msg {
 pub fn run() -> Result<()> {
     // SIGTERM or SIGHUP (the board window closing) ends the loop, so Restore puts the terminal back.
     stop_on_signals();
+    watchdog();
+    match board() {
+        // The terminal is gone, so there is no one to tell; printing would only panic.
+        Err(_) if unsafe { libc::isatty(0) } == 0 => Ok(()),
+        other => other,
+    }
+}
+
+fn board() -> Result<()> {
     let (tx, rx) = mpsc::channel();
     let generation = Arc::new(AtomicU64::new(0));
     listen(&tx, &generation);
@@ -76,6 +85,26 @@ pub fn run() -> Result<()> {
             }
         }
     }
+}
+
+/// Once the terminal hangs up, crossterm's poll spins on EOF reads and never returns to the loop,
+/// so a stop signal or a lost terminal would leave the board burning CPU. This thread ends the
+/// process when the loop has not stopped within a second.
+fn watchdog() {
+    thread::spawn(|| {
+        let mut asked: Option<Instant> = None;
+        loop {
+            thread::sleep(Duration::from_millis(250));
+            let gone = unsafe { libc::isatty(0) } == 0;
+            if interrupted() || gone {
+                let since = *asked.get_or_insert_with(Instant::now);
+                if gone || since.elapsed() >= Duration::from_secs(1) {
+                    let _ = ratatui::try_restore();
+                    std::process::exit(0);
+                }
+            }
+        }
+    });
 }
 
 fn apply(app: &mut App, msg: Msg) {
@@ -183,7 +212,8 @@ struct Restore;
 
 impl Drop for Restore {
     fn drop(&mut self) {
-        ratatui::restore();
+        // try_restore: restore() prints its error, which panics once the terminal is gone.
+        let _ = ratatui::try_restore();
     }
 }
 
