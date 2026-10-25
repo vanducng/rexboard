@@ -24,8 +24,8 @@ pub struct Paths {
 }
 
 impl Paths {
-    /// The socket sits beside serve.lock, so every caller finds the one serve whatever its
-    /// TMPDIR. XDG_RUNTIME_DIR, when set and short enough, wins.
+    /// The socket sits beside serve.lock, so it depends only on what the lock depends on and
+    /// every caller finds the one serve, whatever its TMPDIR or XDG_RUNTIME_DIR.
     pub fn find() -> Result<Self> {
         let dir = match std::env::var_os("XDG_STATE_HOME") {
             Some(dir) => PathBuf::from(dir).join("rexboard"),
@@ -35,17 +35,14 @@ impl Paths {
                 PathBuf::from(home).join(".local/state/rexboard")
             }
         };
-        let socket = std::env::var_os("XDG_RUNTIME_DIR")
-            .map(|run| PathBuf::from(run).join("rexboard.sock"))
-            .filter(|path| path.as_os_str().len() <= SOCKET_MAX)
-            .unwrap_or_else(|| dir.join("serve.sock"));
+        let socket = dir.join("serve.sock");
         if socket.as_os_str().len() > SOCKET_MAX {
             return Err(Error::serve_with(
                 format!(
-                    "socket path {} is longer than {SOCKET_MAX} bytes; set XDG_RUNTIME_DIR to a shorter directory",
+                    "socket path {} is longer than {SOCKET_MAX} bytes; set a shorter XDG_STATE_HOME (it holds serve.lock and the socket)",
                     socket.display()
                 ),
-                &["export XDG_RUNTIME_DIR=/tmp", "rexboard ls --direct"],
+                &["rexboard ls --direct"],
             ));
         }
         Ok(Self { socket, dir })

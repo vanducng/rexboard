@@ -170,11 +170,13 @@ rexboard serve --foreground   # run it in this terminal
 rexboard serve --stop         # stop it and its observers
 ```
 
-`serve` owns one observer per host and the board, and answers `ls`, `watch --json` and `seen` over a unix socket. Any of those starts it when nothing answers, as `rexboard serve --foreground` in its own session with its output in `serve.log`, and waits up to 2 seconds for it. The socket sits beside `serve.lock` in the state dir (or in `XDG_RUNTIME_DIR` when that is set), so a caller finds the running serve whatever its `TMPDIR`. When a serve holds the lock but does not answer there (one from rexboard 0.2.0 or older listens under its `TMPDIR`; one started with another `XDG_RUNTIME_DIR` listens there), the error names its pid to stop: `serve (pid N) holds .../serve.lock but does not answer on ...`, with `kill N` as the next step. serve keeps the environment of the command that started it. After changing `REXBOARD_REX` or `REX_BIN_DIR`, run `rexboard serve --stop`. Only one runs at a time: a second `serve --foreground` fails with `SERVE_RUNNING` (exit 1). It rescans `rex hosts` every 5 minutes.
+`serve` owns one observer per host and the board, and answers `ls`, `watch --json` and `seen` over a unix socket. Any of those starts it when nothing answers, as `rexboard serve --foreground` in its own session with its output in `serve.log`, and waits up to 2 seconds for it. The socket, `serve.sock`, sits beside `serve.lock` in the state dir, so every caller finds the running serve whatever its `TMPDIR` or `XDG_RUNTIME_DIR`. If the path is longer than 103 bytes, commands fail with `SERVE`: set a shorter `XDG_STATE_HOME`. serve keeps the environment of the command that started it. After changing `REXBOARD_REX` or `REX_BIN_DIR`, run `rexboard serve --stop`. Only one runs at a time: a second `serve --foreground` fails with `SERVE_RUNNING` (exit 1). It rescans `rex hosts` every 5 minutes.
 
 `serve` keeps `since`, `seen` and the turn fields in `state.json` and puts them back after a restart for every pane whose `state` and `kind` did not change. It appends each state change to `transitions.jsonl`. [System architecture](system-architecture.md) has the protocol and the files.
 
-`serve --stop` exits 0 whether or not serve was running. It waits up to 5 seconds for serve's process to exit, then fails with `SERVE`. `serve --json` prints `pid` as a number, `null` when unknown.
+**After upgrading from 0.2.0 or older:** the old serve listens under its own `TMPDIR`, so commands fail with `serve (pid N) holds .../serve.lock but does not answer on .../serve.sock`. Run `rexboard serve --stop` once; the next command starts a new serve. A stuck serve gives the same error and the same fix.
+
+`serve --stop` exits 0 whether or not serve was running. A serve that holds the lock but does not answer gets SIGTERM. It waits up to 5 seconds for serve's process to exit, then fails with `SERVE`. `serve --json` prints `pid` as a number, `null` when unknown.
 
 ## `rexboard seen`
 

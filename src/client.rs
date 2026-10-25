@@ -44,7 +44,7 @@ fn connect(paths: &Paths) -> Result<Option<UnixStream>> {
                 "{} is served by uid {uid}, not you (uid {me})",
                 paths.socket.display()
             ),
-            &["unset XDG_RUNTIME_DIR", "rexboard ls --direct"],
+            &["unset XDG_STATE_HOME", "rexboard ls --direct"],
         )),
         Err(err) => Err(Error::serve(format!(
             "could not check who serves {}: {err}",
@@ -99,17 +99,16 @@ pub fn connect_or_start(paths: &Paths) -> Result<UnixStream> {
             return Ok(stream);
         }
         if Instant::now() >= deadline {
-            if held {
-                let pid =
-                    recorded_pid(paths).map_or("<pid in serve.lock>".to_owned(), |p| p.to_string());
-                let kill = format!("kill {pid}");
+            // Checked again, so a serve that exited during the wait is not named.
+            if held && Lock::held(&paths.lock()) {
+                let pid = recorded_pid(paths).map_or("?".to_owned(), |p| p.to_string());
                 return Err(Error::serve_with(
                     format!(
-                        "serve (pid {pid}) holds {} but does not answer on {}; it listens elsewhere (an older rexboard, or another XDG_RUNTIME_DIR)",
+                        "serve (pid {pid}) holds {} but does not answer on {}. It is probably from an older rexboard, or it is stuck. Stop it; the next command starts a new one",
                         paths.lock().display(),
                         paths.socket.display()
                     ),
-                    &[kill.as_str(), "rexboard ls"],
+                    &["rexboard serve --stop", "rexboard ls"],
                 ));
             }
             return Err(Error::serve(format!(
@@ -401,18 +400,32 @@ fn alive(pid: i32) -> bool {
 
 pub fn stop_serve(json: bool) -> Result<()> {
     let paths = Paths::find()?;
-    let Some(mut stream) = connect(&paths)? else {
-        if json {
-            println!("{}", json!({ "ok": true, "running": false }));
-        } else {
-            println!("serve is not running");
-        }
-        return Ok(());
-    };
     let pid = recorded_pid(&paths);
-    send(&mut stream, &json!({ "cmd": "stop" }))?;
-    // serve may close as it stops; the wait below is what proves it stopped.
-    let _ = read(&mut BufReader::new(stream), &mut String::new());
+    match connect(&paths)? {
+        Some(mut stream) => {
+            send(&mut stream, &json!({ "cmd": "stop" }))?;
+            // serve may close as it stops; the wait below is what proves it stopped.
+            let _ = read(&mut BufReader::new(stream), &mut String::new());
+        }
+        // A serve that holds the lock but does not answer (an older build, or a stuck one).
+        None if Lock::held(&paths.lock()) => {
+            let Some(pid) = pid else {
+                return Err(Error::serve(format!(
+                    "a serve holds {} but recorded no pid",
+                    paths.lock().display()
+                )));
+            };
+            unsafe { libc::kill(pid, libc::SIGTERM) };
+        }
+        None => {
+            if json {
+                println!("{}", json!({ "ok": true, "running": false }));
+            } else {
+                println!("serve is not running");
+            }
+            return Ok(());
+        }
+    }
     let deadline = Instant::now() + Duration::from_secs(5);
     let running = || match pid {
         Some(pid) => alive(pid),

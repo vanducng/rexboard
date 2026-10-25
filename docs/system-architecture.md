@@ -35,7 +35,7 @@ serve uses std threads and channels; there is no async runtime. Collectors, the 
 
 | Path | What |
 | --- | --- |
-| `$XDG_RUNTIME_DIR/rexboard.sock`, else `serve.sock` beside `serve.lock` | The socket, mode 0600. It does not depend on `TMPDIR`, so every caller finds the one serve. A path over 103 bytes falls back to the state dir, then fails with `SERVE` (set a shorter `XDG_RUNTIME_DIR`). A client refuses a socket served by another uid |
+| `serve.sock`, beside `serve.lock` | The socket, mode 0600. It depends only on the state dir, not on `TMPDIR` or `XDG_RUNTIME_DIR`, so every caller finds the one serve. A path over 103 bytes fails with `SERVE` (set a shorter `XDG_STATE_HOME`). A client refuses a socket served by another uid |
 | `$XDG_STATE_HOME/rexboard/` (default `~/.local/state/rexboard/`) | The state dir, mode 0700 |
 | `serve.lock` | The `flock` that keeps serve to one instance, plus `{pid, rex, children}`: serve's pid, the `rex` path and its observers' pids |
 | `state.json` | `{"v":1,"panes":{KEY:{state,kind,since,since_estimated,turn_started,last_turn,seen}}}`, written through a temp file and a rename at most once a second, and on stop. Entries for a host that has not sent its first snapshot this run are kept as loaded |
