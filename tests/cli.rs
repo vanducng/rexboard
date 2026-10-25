@@ -9,6 +9,7 @@ fn bin() -> Command {
     let mut cmd = Command::cargo_bin("rexboard").expect("binary");
     cmd.env("XDG_RUNTIME_DIR", NO_SERVE)
         .env("XDG_STATE_HOME", NO_SERVE)
+        .env("XDG_CONFIG_HOME", NO_SERVE)
         .env("TMPDIR", NO_SERVE);
     cmd
 }
@@ -172,7 +173,11 @@ fn ls_unreachable_host_warns_and_lists_the_rest() {
         .clone();
     let text = String::from_utf8(out).unwrap();
     assert!(text.starts_with("GROUP"), "{text}");
-    assert!(text.contains("api › main › shell"), "{text}");
+    let done = text.lines().find(|l| l.contains("Tests pass")).unwrap();
+    assert!(
+        done.contains("api › main ") && !done.contains("shell"),
+        "a generic pane label gives way to the tab: {done}"
+    );
     assert!(!text.contains("mini"), "{text}");
 }
 
@@ -555,6 +560,7 @@ impl Serve {
         vec![
             ("XDG_RUNTIME_DIR", path(self.dir.path().join("run"))),
             ("XDG_STATE_HOME", path(self.dir.path().join("state"))),
+            ("XDG_CONFIG_HOME", path(self.dir.path().join("config"))),
             ("TMPDIR", path(self.dir.path().to_owned())),
             ("REXBOARD_REX", path(fixture("fake-rex"))),
             ("FAKE_REX_LOG", path(self.log.clone())),
@@ -569,6 +575,30 @@ impl Serve {
 
     fn socket(&self) -> std::path::PathBuf {
         self.dir.path().join("run/rexboard.sock")
+    }
+
+    fn config(&self, toml: &str) {
+        let dir = self.dir.path().join("config/rexboard");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("config.toml"), toml).unwrap();
+    }
+
+    fn log_lines(&self) -> Vec<String> {
+        std::fs::read_to_string(&self.log)
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// The args of each jump script run, from the fake-rex log.
+    fn jumps(&self) -> Vec<serde_json::Value> {
+        self.log_lines()
+            .iter()
+            .filter_map(|line| line.strip_prefix("do - --json --args "))
+            .filter_map(|args| serde_json::from_str::<serde_json::Value>(args).ok())
+            .filter(|args| args.get("block_id").is_some())
+            .collect()
     }
 
     fn file(&self, name: &str) -> std::path::PathBuf {
@@ -1077,4 +1107,286 @@ fn board_exits_when_its_terminal_hangs_up() {
 fn board_exits_when_its_terminal_closes_without_a_sighup() {
     let (_, status) = board_under_pty(None, true);
     assert!(status.success(), "{status:?}");
+}
+
+/// A mini observer stream whose snapshot holds two blocked panes (the older first) and an
+/// unseen done pane, in two tabs of one session.
+fn mini_needing(serve: &Serve) {
+    let blocked = |id: &str, at: &str| {
+        serde_json::json!({ "block_id": id, "label": id.trim_start_matches("block:"),
+        "title": "", "process": { "name": "2.1.0" },
+        "records": [{ "state": "blocked", "kind": "permission", "app": "claude-code",
+                      "msg": "Allow Bash?", "updated_at": at }] })
+    };
+    let snapshot = serde_json::json!({ "v": 1, "type": "snapshot", "rex_version": "0.0.1-test",
+        "sessions": [{ "session_id": "session:web", "label": "web", "windows": [
+            { "window_id": "window:web-a", "label": "build", "blocks": [
+                blocked("block:seat-old", "2026-01-01T00:00:00Z"),
+                blocked("block:seat-new", "2026-01-01T00:05:00Z") ] },
+            { "window_id": "window:web-b", "label": "docs", "blocks": [
+                { "block_id": "block:seat-done", "label": "seat-done", "title": "", "process": {},
+                  "records": [{ "state": "done", "app": "claude-code", "msg": "Docs pass",
+                                "updated_at": "2026-01-01T00:10:00Z" }] } ] } ] }] });
+    let path = serve.dir.path().join("observer-mini-needing.ndjson");
+    std::fs::write(path, format!("{snapshot}\n")).unwrap();
+}
+
+/// A serve whose local host is quiet and whose mini needs you three times, once mini's
+/// snapshot is in.
+fn needing() -> Serve {
+    let serve = Serve::new();
+    std::fs::write(
+        serve.dir.path().join("observer-studio-quiet.ndjson"),
+        "{\"v\":1,\"type\":\"snapshot\",\"rex_version\":\"0.0.1-test\",\"sessions\":[]}\n",
+    )
+    .unwrap();
+    mini_needing(&serve);
+    eventually("mini's rows", || serve.needing_rows().len() == 3);
+    serve
+}
+
+impl Serve {
+    /// A command with the `needing()` observers, outside any pane.
+    fn needing_cmd(&self) -> Command {
+        let mut cmd = self.cmd();
+        cmd.env(
+            "FAKE_REX_OBSERVER_studio",
+            self.dir.path().join("observer-studio-quiet.ndjson"),
+        )
+        .env(
+            "FAKE_REX_OBSERVER_mini",
+            self.dir.path().join("observer-mini-needing.ndjson"),
+        )
+        .env_remove("REX_BLOCK")
+        .env_remove("REX_CLIENT");
+        cmd
+    }
+
+    fn next(&self, args: &[&str], from: Option<&str>) -> String {
+        let mut cmd = self.needing_cmd();
+        if let Some(block) = from {
+            cmd.env("REX_BLOCK", block);
+        }
+        let out = cmd
+            .args(["--json", "next"])
+            .args(args)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let reply: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        reply["key"].as_str().unwrap().to_owned()
+    }
+
+    fn needing_rows(&self) -> Vec<serde_json::Value> {
+        let out = self
+            .needing_cmd()
+            .args(["ls", "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        serde_json::from_slice(&out).unwrap()
+    }
+}
+
+#[test]
+fn jump_builds_remote_select_for_remote_host() {
+    let serve = needing();
+    let out = serve
+        .needing_cmd()
+        .args(["jump", "mini/block:seat-new"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "jumped to web › build › seat-new on mini\n"
+    );
+    let jumps = serve.jumps();
+    assert_eq!(jumps.len(), 1, "{jumps:?}");
+    assert_eq!(
+        jumps[0],
+        serde_json::json!({ "host": "mini", "session_id": "session:web",
+            "window_id": "window:web-a", "block_id": "block:seat-new", "app_client": null })
+    );
+}
+
+#[test]
+fn jump_runs_pre_cmd_before_select() {
+    let serve = needing();
+    let log = serve.log.to_str().unwrap().to_owned();
+    serve.config(&format!(
+        "client = \"main-app\"\n[jump]\npre_cmd = [\"sh\", \"-c\", \"echo pre-cmd >> {log}\"]\n"
+    ));
+    serve.needing_cmd().args(["jump", "1"]).assert().success();
+    let lines = serve.log_lines();
+    let pre = lines
+        .iter()
+        .position(|l| l == "pre-cmd")
+        .expect("pre_cmd ran");
+    let select = lines
+        .iter()
+        .position(|l| l.starts_with("do - --json --args") && l.contains("block_id"))
+        .expect("the jump script ran");
+    assert!(pre < select, "pre_cmd runs first: {lines:#?}");
+    assert_eq!(
+        serve.jumps()[0]["block_id"],
+        "block:seat-old",
+        "1 is the first NEEDS YOU row"
+    );
+    assert_eq!(
+        serve.jumps()[0]["app_client"],
+        "main-app",
+        "the client from config.toml"
+    );
+
+    serve.config("[jump]\npre_cmd = [\"false\"]\n");
+    serve
+        .needing_cmd()
+        .args(["--json", "jump", "1"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("\"code\":\"JUMP\""));
+    assert_eq!(serve.jumps().len(), 1, "a failed pre_cmd stops the jump");
+}
+
+#[test]
+fn jump_marks_seen() {
+    let serve = needing();
+    let before = serve.needing_rows();
+    assert_eq!(row(&before, "mini/block:seat-done")["group"], "needs_you");
+    serve
+        .needing_cmd()
+        .args(["jump", "mini/block:seat-done"])
+        .assert()
+        .success();
+    let after = serve.needing_rows();
+    assert_eq!(row(&after, "mini/block:seat-done")["seen"], true);
+    assert_eq!(row(&after, "mini/block:seat-done")["group"], "quiet");
+    serve
+        .needing_cmd()
+        .args(["--json", "jump", "mini/block:nope"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("\"code\":\"NOT_FOUND\""));
+}
+
+#[test]
+fn jump_ambiguous_client_lists_labels() {
+    let serve = needing();
+    serve
+        .needing_cmd()
+        .env(
+            "FAKE_REX_JUMP_REPLY",
+            r#"{"ok":false,"code":"ambiguous_client","labels":["studio-app","spare-app"]}"#,
+        )
+        .args(["--json", "jump", "1"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("\"code\":\"AMBIGUOUS_CLIENT\""))
+        .stderr(predicate::str::contains("studio-app"))
+        .stderr(predicate::str::contains("spare-app"));
+    assert_eq!(
+        row(&serve.needing_rows(), "mini/block:seat-old")["seen"],
+        false,
+        "a jump that did not land marks nothing seen"
+    );
+}
+
+#[test]
+fn next_cycles_needs_you_in_order_and_wraps() {
+    let serve = needing();
+    assert_eq!(
+        serve.next(&[], None),
+        "mini/block:seat-old",
+        "the longest waiting first"
+    );
+    assert_eq!(
+        serve.next(&[], Some("block:seat-old")),
+        "mini/block:seat-new"
+    );
+    assert_eq!(
+        serve.next(&[], Some("block:seat-new")),
+        "mini/block:seat-done"
+    );
+    assert_eq!(
+        serve.next(&[], Some("block:seat-done")),
+        "mini/block:seat-old",
+        "all seen: the blocked panes still need you, from the top"
+    );
+    assert_eq!(
+        serve.next(&["--back"], Some("block:seat-old")),
+        "mini/block:seat-new"
+    );
+}
+
+#[test]
+fn next_skips_seen_done() {
+    let serve = needing();
+    serve
+        .needing_cmd()
+        .args(["seen", "mini/block:seat-done"])
+        .assert()
+        .success();
+    assert_eq!(
+        serve.next(&[], Some("block:seat-new")),
+        "mini/block:seat-old"
+    );
+}
+
+#[test]
+fn next_with_nobody_waiting_says_so() {
+    let serve = Serve::new();
+    let observer = mini_with_done(&serve);
+    let cmd = || {
+        let mut cmd = serve.cmd();
+        cmd.env("FAKE_REX_OBSERVER_mini", &observer)
+            .env_remove("REX_BLOCK");
+        cmd
+    };
+    eventually("mini's done row", || {
+        let out = cmd().args(["ls", "--json"]).output().unwrap().stdout;
+        String::from_utf8_lossy(&out).contains("block:web-done")
+    });
+    cmd()
+        .args(["seen", "mini/block:web-done"])
+        .assert()
+        .success();
+    cmd()
+        .arg("next")
+        .assert()
+        .code(1)
+        .stderr("nobody needs you\n");
+    cmd()
+        .args(["--json", "next"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("\"code\":\"NOBODY_NEEDS_YOU\""));
+}
+
+#[test]
+fn config_excludes_hosts_and_rejects_unknown_keys() {
+    let serve = Serve::new();
+    serve.config("[hosts]\nexclude = [\"mini\"]\n");
+    let rows = serve.rows(&[]);
+    assert!(rows.iter().all(|r| r["host"] == "local"), "{rows:?}");
+    serve
+        .cmd()
+        .args(["ls", "--host", "mini"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("no host named mini"));
+    serve.config("colour = \"red\"\n");
+    serve
+        .cmd()
+        .args(["--json", "ls", "--direct"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("\"code\":\"CONFIG\""))
+        .stderr(predicate::str::contains("colour"));
 }
