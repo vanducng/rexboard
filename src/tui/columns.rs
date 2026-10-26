@@ -997,7 +997,8 @@ mod tests {
         let buf = buffer(&app, width, 30);
         (3..30)
             .map(|y| line(&buf, y))
-            .filter(|l| l.contains("seat") && !l.starts_with("━━"))
+            // The card's lines start with its bar or a space; list rows with their state.
+            .filter(|l| l.contains("seat") && !l.starts_with(['━', ' ']))
             .collect()
     }
 
@@ -1078,7 +1079,7 @@ mod tests {
         let buf = buffer(&app, 161, 30);
         let rows: Vec<String> = (3..30)
             .map(|y| line(&buf, y))
-            .filter(|l| l.contains("seat") && !l.starts_with("━━"))
+            .filter(|l| l.contains("seat") && !l.starts_with(['━', ' ']))
             .collect();
         assert_eq!(rows.len(), 2, "{rows:#?}");
         let columns = Columns::new(161, 161, &[]);

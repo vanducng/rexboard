@@ -43,6 +43,8 @@ pub struct Screen {
     pub fingerprint: Option<String>,
     /// The input line already holds typed text, which a reply would join.
     pub draft: bool,
+    /// How many of the last lines are the dialog, from its opening, when there is one.
+    pub dialog: Option<usize>,
 }
 
 impl Screen {
@@ -64,6 +66,7 @@ impl Screen {
             let top = opening(&lines, first);
             return Self {
                 fingerprint: Some(whole(&raw[top..=last])),
+                dialog: Some(lines.len() - top),
                 lines,
                 options,
                 draft: false,
@@ -81,6 +84,7 @@ impl Screen {
             draft: typed && vt.is_none_or(vt_typed),
             lines,
             options: Vec::new(),
+            dialog: None,
         }
     }
 }
@@ -253,6 +257,19 @@ mod tests {
             .iter()
             .map(|c| (c.digit, c.label.as_str()))
             .collect()
+    }
+
+    #[test]
+    fn a_dialog_counts_its_lines_from_the_rule_above_it() {
+        let dialog = fixture("claude-permission.txt");
+        let text = format!("earlier\n{}\n{dialog}", "─".repeat(40));
+        let lines = dialog.trim_end().lines().count();
+        assert_eq!(Screen::parse(&text, None).dialog, Some(lines));
+        assert_eq!(
+            Screen::parse("$ ls\n❯ ", None).dialog,
+            None,
+            "an input line is no dialog"
+        );
     }
 
     #[test]
