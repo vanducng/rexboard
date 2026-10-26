@@ -191,7 +191,7 @@ fn keys(app: &App) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::app::tests::app;
+    use crate::tui::app::testkit::app;
 
     #[test]
     fn a_filter_keeps_what_the_boards_slash_keeps_unknown_keys_as_text() {

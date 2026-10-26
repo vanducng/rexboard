@@ -189,17 +189,7 @@ fn watch(args: &WatchArgs, json: bool) -> Result<()> {
             &["rexboard watch --json", "rexboard watch --raw"],
         ));
     }
-    let mut hosts: Vec<Option<String>> = vec![None];
-    hosts.extend(collector::hosts()?.into_iter().map(Some));
-    if let Some(want) = &args.host {
-        hosts.retain(|host| host.as_deref().unwrap_or("local") == want);
-        if hosts.is_empty() {
-            return Err(Error::usage_with(
-                format!("no host named {want}"),
-                &["rex hosts", "rexboard watch --raw"],
-            ));
-        }
-    }
+    let hosts = watch_hosts(args.host.as_deref())?;
     stop_on_signals();
     let deadline = args
         .duration
@@ -258,19 +248,9 @@ fn watch(args: &WatchArgs, json: bool) -> Result<()> {
             }
             continue;
         }
-        let mut line = match event {
-            // An unknown type passes through as Rex sent it.
-            HostEvent::Event(Event::Unknown, raw) => raw,
-            HostEvent::Event(event, _) => {
-                serde_json::to_value(event).map_err(std::io::Error::other)?
-            }
-            HostEvent::Down { reason, retry_in } => {
-                json!({ "type": "down", "reason": reason, "retry_in_s": retry_in.as_secs() })
-            }
-            HostEvent::Failed(_) => continue,
+        let Some(line) = raw_line(&host, event)? else {
+            continue;
         };
-        line["host"] = json!(host);
-        line["v"] = json!(event::VERSION);
         if writeln!(out, "{line}").and_then(|()| out.flush()).is_err() {
             return Ok(());
         }
@@ -279,6 +259,39 @@ fn watch(args: &WatchArgs, json: bool) -> Result<()> {
         let _ = print_rows(&mut out, &board);
     }
     Ok(())
+}
+
+/// Local and every remote host, or only the one `--host` names.
+fn watch_hosts(want: Option<&str>) -> Result<Vec<Option<String>>> {
+    let mut hosts: Vec<Option<String>> = vec![None];
+    hosts.extend(collector::hosts()?.into_iter().map(Some));
+    if let Some(want) = want {
+        hosts.retain(|host| host.as_deref().unwrap_or("local") == want);
+        if hosts.is_empty() {
+            return Err(Error::usage_with(
+                format!("no host named {want}"),
+                &["rex hosts", "rexboard watch --raw"],
+            ));
+        }
+    }
+    Ok(hosts)
+}
+
+/// A `--raw` line: the event, or a host going down, with its host and the version. A failed
+/// host has none.
+fn raw_line(host: &str, event: HostEvent) -> Result<Option<serde_json::Value>> {
+    let mut line = match event {
+        // An unknown type passes through as Rex sent it.
+        HostEvent::Event(Event::Unknown, raw) => raw,
+        HostEvent::Event(event, _) => serde_json::to_value(event).map_err(std::io::Error::other)?,
+        HostEvent::Down { reason, retry_in } => {
+            json!({ "type": "down", "reason": reason, "retry_in_s": retry_in.as_secs() })
+        }
+        HostEvent::Failed(_) => return Ok(None),
+    };
+    line["host"] = json!(host);
+    line["v"] = json!(event::VERSION);
+    Ok(Some(line))
 }
 
 /// One host's bad line stops that host only; watch fails once every host has.

@@ -59,7 +59,9 @@ rexboard reaches Rex only through the `rex` command: `rex do` for the scripts, `
 | `src/lua/tail.lua` | Defines `tail(a)`: the last `a.max_bytes` of a pane, starting at a whole line, through `format` and `blob_read`, as `text` or `vt` |
 | `src/lua/jump.lua` | Finds this Mac's Rex app, attaches to the pane's session, focuses the pane on its own server, and asks the app to select the session |
 | `src/lua/send.lua` | After `tail.lua`: re-checks that the pane still shows the report, the agent and the dialog or input line the board read, then sends; a refusal sends nothing |
-| `src/tui/` | The board and `pick`, a client of serve's rows |
+| `src/tui/` | The board and `pick`, a client of serve's rows. `mod.rs` keeps the terminal and the loop |
+| `src/tui/effects.rs` | The board's effects and their threads: reads of panes, jumps, closes, answers and seen, the messages they send back, and serve's rows as they change |
+| `src/tui/app/` | The board's state and keys, one file per job: `mod.rs` (the `App` and its dispatch, `act`), `filter.rs` (the `/` text and `f` status), `select.rs` (where the selection rests and how it moves, folds, clicks), `views.rs` (views, the `:` line, sorting and extension fields), `pane_keys.rs` (`enter` and `-` jump, `dd` close, `yy` and `yp` copy), `full.rs` (the full view's state and keys), `answer.rs` (answer mode on the board), `card.rs` (whether the card shows and the tail it reads), and `testkit.rs` (the tests' shared fixtures) |
 | `src/tui/keys.rs` | The keymap: one table per layer (the board, the full view) of key sequences, what they do, and how `?` and the footers name them. Dispatch, `?` and every footer read it, and tests check that no key is bound twice and every key does something |
 | `src/tui/query.rs` | The board's views, `/` filter, `f` status and `o` sort run headless for `ls --view/--filter/--status/--sort` and `seen --all-done`, so the CLI lists what the board would |
 | `src/tui/columns.rs`, `views.rs`, `status.rs` | Which columns a width shows; views (a grouping plus a sort); the `f` status filter |

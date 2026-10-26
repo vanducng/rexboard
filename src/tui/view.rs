@@ -9,11 +9,11 @@ use unicode_width::UnicodeWidthStr;
 use ratatui::crossterm::event::KeyCode;
 
 use super::app::{App, Item, Link, Spot};
-use super::columns::{Col, Columns, Tier, Tone, column_of, tier};
+use super::columns::{Col, Columns, Sort, Tier, Tone, column_of, tier};
 use super::keys::{self, Act};
 use super::status::ALL;
 use super::theme;
-use super::views::{Key, View};
+use super::views::{Bucket, Key, View};
 use crate::board::Row;
 use crate::output::{blocks, fit, wheres};
 
@@ -351,27 +351,12 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
 fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc>) {
     let items = app.items();
     if items.is_empty() {
-        let query = app.filter.value();
-        let text = if let Some(status) = app.status {
-            if query.is_empty() {
-                format!("no {} rows · ff or esc clears", status.name())
-            } else {
-                format!("no {} rows match \"{query}\" · esc clears", status.name())
-            }
-        } else if let Some(key) = app.unknown_key() {
-            format!("no key {key} · esc clears")
-        } else if !query.is_empty() {
-            format!("no rows match \"{query}\" · esc clears")
-        } else {
-            match &app.link {
-                Link::Up => "no agent panes yet".to_owned(),
-                Link::Connecting => "waiting for serve".to_owned(),
-                Link::Lost(why) => why.clone(),
-            }
-        };
         let width = usize::from(area.width);
         frame.render_widget(
-            Paragraph::new(Line::styled(fit(&text, width), theme::quiet())),
+            Paragraph::new(Line::styled(
+                fit(&empty_message(app), width),
+                theme::quiet(),
+            )),
             area,
         );
         return;
@@ -380,23 +365,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
     let columns = Columns::new(board.width, width, &app.field_columns());
     let area = if board.height >= HEADED {
         let [top, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
-        let spans: Vec<Span> = columns
-            .header(app.sort)
-            .into_iter()
-            .flat_map(|cell| {
-                let Some(at) = cell.underline else {
-                    return vec![Span::styled(cell.text, theme::quiet())];
-                };
-                let (before, rest) = cell.text.split_at(at);
-                let (letter, after) = rest.split_at(1);
-                vec![
-                    Span::styled(before.to_owned(), theme::quiet()),
-                    Span::styled(letter.to_owned(), theme::letter(theme::quiet())),
-                    Span::styled(after.to_owned(), theme::quiet()),
-                ]
-            })
-            .collect();
-        frame.render_widget(Paragraph::new(Line::from(spans)), top);
+        frame.render_widget(Paragraph::new(column_header(&columns, app.sort)), top);
         rest
     } else {
         area
@@ -408,16 +377,8 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
         height
     };
     let at = items.iter().position(|item| is_selected(app, item));
-    // The list keeps its place while the selection is in view, so a clicked row stays under the
-    // pointer; past the top it scrolls to put the selection first, past the bottom last.
     let (_, kept, _) = app.drawn.get();
-    let kept = kept.min(items.len().saturating_sub(room));
-    let offset = match at {
-        Some(at) if at < kept => at,
-        Some(at) if at < kept + room => kept,
-        Some(at) => (at + 1).saturating_sub(room),
-        None => 0,
-    };
+    let offset = scroll_offset(at, kept, items.len(), room);
     app.drawn.set((area.y, offset, room));
     let places = if columns.has(Col::Where) {
         wheres(
@@ -444,17 +405,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
                 bucket,
                 count,
                 folded,
-            } => {
-                let mark = if *folded { theme::FOLDED } else { "" };
-                let title = format!("{mark}{} ({count}) ", bucket.title());
-                let fill = theme::GROUP_FILL.repeat(width.saturating_sub(title.width()));
-                let line = Line::styled(format!("{title}{fill}"), theme::header());
-                if is_selected(app, item) {
-                    line.style(theme::selected(theme::header()))
-                } else {
-                    line
-                }
-            }
+            } => group_header_line(bucket, *count, *folded, is_selected(app, item), width),
             &Item::Row(i) => row_line(
                 &app.rows[i],
                 &places[i],
@@ -465,9 +416,98 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
             ),
         })
         .collect();
-    let below: usize = items
+    if room < height {
+        lines.push(Line::styled(
+            format!(
+                "{} {} more",
+                theme::MORE,
+                hidden_below(&items, offset + room)
+            ),
+            theme::quiet(),
+        ));
+    }
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// What an empty list says: why nothing matches, or how serve is.
+fn empty_message(app: &App) -> String {
+    let query = app.filter.value();
+    if let Some(status) = app.status {
+        if query.is_empty() {
+            format!("no {} rows · ff or esc clears", status.name())
+        } else {
+            format!("no {} rows match \"{query}\" · esc clears", status.name())
+        }
+    } else if let Some(key) = app.unknown_key() {
+        format!("no key {key} · esc clears")
+    } else if !query.is_empty() {
+        format!("no rows match \"{query}\" · esc clears")
+    } else {
+        match &app.link {
+            Link::Up => "no agent panes yet".to_owned(),
+            Link::Connecting => "waiting for serve".to_owned(),
+            Link::Lost(why) => why.clone(),
+        }
+    }
+}
+
+/// The column header, each sort letter underlined.
+fn column_header(columns: &Columns, sort: Option<Sort>) -> Line<'static> {
+    let spans: Vec<Span> = columns
+        .header(sort)
+        .into_iter()
+        .flat_map(|cell| {
+            let Some(at) = cell.underline else {
+                return vec![Span::styled(cell.text, theme::quiet())];
+            };
+            let (before, rest) = cell.text.split_at(at);
+            let (letter, after) = rest.split_at(1);
+            vec![
+                Span::styled(before.to_owned(), theme::quiet()),
+                Span::styled(letter.to_owned(), theme::letter(theme::quiet())),
+                Span::styled(after.to_owned(), theme::quiet()),
+            ]
+        })
+        .collect();
+    Line::from(spans)
+}
+
+/// The first item shown. The list keeps its place while the selection is in view, so a clicked
+/// row stays under the pointer; past the top it scrolls to put the selection first, past the
+/// bottom last.
+fn scroll_offset(at: Option<usize>, kept: usize, len: usize, room: usize) -> usize {
+    let kept = kept.min(len.saturating_sub(room));
+    match at {
+        Some(at) if at < kept => at,
+        Some(at) if at < kept + room => kept,
+        Some(at) => (at + 1).saturating_sub(room),
+        None => 0,
+    }
+}
+
+fn group_header_line(
+    bucket: &Bucket,
+    count: usize,
+    folded: bool,
+    selected: bool,
+    width: usize,
+) -> Line<'static> {
+    let mark = if folded { theme::FOLDED } else { "" };
+    let title = format!("{mark}{} ({count}) ", bucket.title());
+    let fill = theme::GROUP_FILL.repeat(width.saturating_sub(title.width()));
+    let line = Line::styled(format!("{title}{fill}"), theme::header());
+    if selected {
+        line.style(theme::selected(theme::header()))
+    } else {
+        line
+    }
+}
+
+/// The rows past `from` that the list cannot show, counting a folded group's rows.
+fn hidden_below(items: &[Item], from: usize) -> usize {
+    items
         .iter()
-        .skip(offset + room)
+        .skip(from)
         .map(|item| match item {
             Item::Row(_) => 1,
             Item::Header {
@@ -477,14 +517,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
             } => *count,
             Item::Header { .. } => 0,
         })
-        .sum();
-    if room < height {
-        lines.push(Line::styled(
-            format!("{} {below} more", theme::MORE),
-            theme::quiet(),
-        ));
-    }
-    frame.render_widget(Paragraph::new(lines), area);
+        .sum()
 }
 
 fn is_selected(app: &App, item: &Item) -> bool {
@@ -552,52 +585,41 @@ pub(super) fn note(app: &App) -> Option<(&str, Style)> {
 
 fn footer(frame: &mut Frame, area: Rect, app: &App) {
     let width = usize::from(area.width);
+    let line = footer_overlay(app, width).unwrap_or_else(|| key_bar(app, width));
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+/// What takes the footer over, in order: the `:` and `/` prompts, a prefix waiting for its next
+/// key, answer mode, `dd`'s question, then a note.
+fn footer_overlay(app: &App, width: usize) -> Option<Line<'static>> {
     if app.commanding {
         let text = format!(
             ": {}{} · tab completes · esc cancels",
             app.command.value(),
             theme::CURSOR
         );
-        frame.render_widget(
-            Paragraph::new(Line::styled(fit(&text, width), theme::strong())),
-            area,
-        );
-        return;
+        return Some(Line::styled(fit(&text, width), theme::strong()));
     }
     if app.filtering {
         let text = format!("/ {}{}", app.filter.value(), theme::CURSOR);
-        frame.render_widget(
-            Paragraph::new(Line::styled(fit(&text, width), theme::strong())),
-            area,
-        );
-        return;
+        return Some(Line::styled(fit(&text, width), theme::strong()));
     }
     match app.pending {
-        Some('f') => {
-            frame.render_widget(Paragraph::new(status_keys(app, width)), area);
-            return;
-        }
-        Some(prefix) => {
-            frame.render_widget(Paragraph::new(prefix_keys(app, prefix, width)), area);
-            return;
-        }
+        Some('f') => return Some(status_keys(app, width)),
+        Some(prefix) => return Some(prefix_keys(app, prefix, width)),
         None => {}
     }
     if let Some(answer) = &app.answer {
-        frame.render_widget(Paragraph::new(answer.footer(width)), area);
-        return;
+        return Some(answer.footer(width));
     }
     if let Some(question) = app.close_question(width) {
-        frame.render_widget(
-            Paragraph::new(Line::styled(fit(&question, width), theme::alert_label())),
-            area,
-        );
-        return;
+        return Some(Line::styled(fit(&question, width), theme::alert_label()));
     }
-    if let Some((text, style)) = note(app) {
-        frame.render_widget(Paragraph::new(Line::styled(fit(text, width), style)), area);
-        return;
-    }
+    note(app).map(|(text, style)| Line::styled(fit(text, width), style))
+}
+
+/// The keys, most needed first, with a kept `/` filter before them and quit at the right edge.
+fn key_bar(app: &App, width: usize) -> Line<'static> {
     let mut spans: Vec<Span> = Vec::new();
     let mut used = 0;
     let query = app.filter.value();
@@ -607,9 +629,8 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled(kept, theme::strong()));
         spans.push(Span::styled(" · esc clears · ", theme::quiet()));
     }
-    // The essentials first, so a narrow board keeps them; then `tab next`, which works through
-    // the rows that need you, and `v view` last, one `?` away. `v view` shows after `/ filter`.
-    // While the card is hidden, `c card` says so, and `space full` shows after it when it fits.
+    // `keys::FOOTER` ranks the keys, and a hidden card adds `c card`; once fitted, `v` shows
+    // after `/` and `space` after `c`.
     let keys: Vec<(&str, &str)> = if app.pick {
         vec![("enter", "go"), ("j/k", "move"), ("/", "filter")]
     } else {
@@ -661,105 +682,21 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
     ));
     spans.push(Span::styled(quit_key, theme::strong()));
     spans.push(Span::styled(quit_what, theme::quiet()));
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    Line::from(spans)
 }
 
 #[cfg(test)]
 mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
-    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use ratatui::style::{Color, Modifier};
+    use ratatui::crossterm::event::KeyCode;
 
     use super::*;
-    use crate::tui::app::tests::{app, hosts, press, row};
+    use crate::tui::app::testkit::*;
 
-    /// The rows `?` lists for the board.
-    pub fn listed() -> Vec<(&'static str, &'static str)> {
-        keys::BOARD
-            .iter()
-            .filter(|entry| !entry.keys.is_empty())
-            .map(|entry| (entry.keys, entry.help))
-            .collect()
-    }
     use std::time::{Duration, Instant};
 
-    use crate::tui::app::{App, Effect, Peek, Spot};
-
-    /// One row in each look the state table has.
-    fn every_state() -> App {
-        let with = |key: &str, state: &str, group: &str, change: &dyn Fn(&mut Row)| {
-            let mut row = row(key, state, group, false);
-            change(&mut row);
-            row
-        };
-        let rows = vec![
-            with("local/allow", "blocked", "needs_you", &|r| {
-                r.pane.kind = Some("permission".into())
-            }),
-            with("mini/ask", "blocked", "needs_you", &|r| {
-                r.pane.kind = Some("question".into())
-            }),
-            with("local/broke", "error", "needs_you", &|_| {}),
-            with("mini/fresh", "done", "needs_you", &|_| {}),
-            with("local/busy", "working", "working", &|_| {}),
-            with("local/read", "done", "quiet", &|r| r.seen = true),
-            with("mini/rest", "idle", "quiet", &|_| {}),
-            with("local/doubt", "working", "unreported", &|r| {
-                r.suspect = true;
-                r.suspect_reason = Some("reported working at 05:30; zsh is back in front".into());
-            }),
-            with("local/guess", "working", "unreported", &|r| {
-                r.pane.source = "inferred".into()
-            }),
-            with("mini/blank", "unknown", "unreported", &|_| {}),
-            with("studio/away", "working", "unreported", &|r| r.stale = true),
-        ];
-        let mut hosts = crate::tui::app::tests::hosts();
-        hosts.insert("studio".into(), "down".into());
-        let mut app = App::default();
-        app.set_rows(rows, hosts);
-        app
-    }
-
-    fn fuller() -> App {
-        let mut app = app();
-        let mut estimated = row("mini/rig", "working", "working", true);
-        estimated.since_estimated = true;
-        estimated.pane.tab = "2-toolrig:rig:demo-team#0123456789abcdef#l2".into();
-        estimated.pane.title = "修复解析器🙂 wide title".into();
-        estimated.pane.msg = None;
-        let mut rows = app.rows.clone();
-        rows.insert(3, estimated);
-        let mut seat = row("local/inferred", "unknown", "unreported", true);
-        seat.pane.source = "inferred".into();
-        rows.push(seat);
-        app.set_rows(rows, app.hosts.clone());
-        app
-    }
-
-    fn render(app: &App, width: u16, height: u16) -> String {
-        let now = DateTime::parse_from_rfc3339("2026-01-01T05:43:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-        terminal.draw(|frame| draw(frame, app, now)).unwrap();
-        let buffer = terminal.backend().buffer();
-        (0..height)
-            .map(|y| {
-                (0..width)
-                    .map(|x| buffer[(x, y)].symbol())
-                    .collect::<String>()
-                    .trim_end()
-                    .to_owned()
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    fn screen(width: u16, height: u16) -> String {
-        render(&fuller(), width, height)
-    }
+    use crate::tui::app::{App, Effect, Spot};
 
     #[test]
     fn renders_groups_counts_and_estimates_at_50_80_and_140() {
@@ -1172,7 +1109,7 @@ mod tests {
                 .contains("view:")
         );
         press(&mut app, KeyCode::Char('v'));
-        crate::tui::app::tests::sort(&mut app, 'a');
+        crate::tui::app::testkit::sort(&mut app, 'a');
         let top = render(&app, 120, 30).lines().next().unwrap().to_owned();
         assert!(top.starts_with("rexboard · view: table ↓age · "), "{top}");
         let narrow = render(&app, 50, 30).lines().next().unwrap().to_owned();
@@ -1276,7 +1213,7 @@ mod tests {
             }
         }
         press(&mut app, KeyCode::Char('v'));
-        crate::tui::app::tests::sort(&mut app, 'a');
+        crate::tui::app::testkit::sort(&mut app, 'a');
         let top = render(&app, 120, 30).lines().next().unwrap().to_owned();
         assert!(
             top.starts_with("rexboard · view: table ↓age · only question · "),
@@ -1349,118 +1286,6 @@ mod tests {
         );
     }
 
-    /// The card's rows: from its bar to the line above the footer.
-    fn card_of(text: &str) -> Vec<String> {
-        let lines: Vec<&str> = text.lines().collect();
-        let bar = lines.iter().position(|l| l.starts_with("━━")).expect(text);
-        lines[bar..lines.len() - 1]
-            .iter()
-            .map(|l| (*l).to_owned())
-            .collect()
-    }
-
-    /// The list's row lines: between the column header and the card's bar.
-    fn list_rows(text: &str) -> usize {
-        let lines: Vec<&str> = text.lines().collect();
-        let bar = lines
-            .iter()
-            .position(|l| l.starts_with("━━"))
-            .unwrap_or(lines.len() - 1);
-        bar.saturating_sub(3)
-    }
-
-    fn asking(msg: &str) -> App {
-        let mut app = fuller();
-        let mut rows = app.rows.clone();
-        rows[0].pane.kind = Some("permission".into());
-        rows[0].pane.msg = Some(msg.into());
-        app.set_rows(rows, hosts());
-        app
-    }
-
-    #[test]
-    fn the_card_says_who_where_how_and_what_at_80_140_and_200() {
-        let app = asking("Bash: git push origin main --force-with-lease");
-        for (width, height) in [(80u16, 30u16), (140, 30), (200, 40), (140, 60)] {
-            let text = render(&app, width, height);
-            let card = card_of(&text);
-            assert!(
-                card[0].starts_with("━━ ! blocked · permission · seat-b · waiting 5h43m ━"),
-                "{width}: the bar says only what, who and how long:\n{text}"
-            );
-            assert!(
-                card[0].ends_with("━━"),
-                "{width}: the bar is full width:\n{text}"
-            );
-            assert_eq!(
-                card[1], " Bash: git push origin main --force-with-lease",
-                "{width}"
-            );
-            assert!(!text.contains('│'), "{width}: no pane on the right");
-            let words = |l: &String| l.split_whitespace().collect::<Vec<_>>().join(" ");
-            let facts: Vec<String> = card[2..].iter().map(words).collect();
-            assert_eq!(
-                facts,
-                [
-                    "",
-                    "where api › main › seat-b",
-                    "host mini harness claude",
-                    "title seat-b title source native"
-                ],
-                "{width}: one blank line, then the facts, where first, each once:\n{text}"
-            );
-            let lines: Vec<&str> = text.lines().collect();
-            assert_eq!(
-                words(&lines[lines.len() - 2].to_owned()),
-                "title seat-b title source native",
-                "{width}: the card sits on the footer:\n{text}"
-            );
-            assert!(
-                lines[lines.len() - 8].trim().is_empty(),
-                "{width}: the room it does not need opens above it:\n{text}"
-            );
-            assert!(list_rows(&text) >= 3, "{width}:\n{text}");
-        }
-    }
-
-    #[test]
-    fn a_done_row_shows_its_headline_then_its_body_at_most_120_wide() {
-        let mut app = fuller();
-        let long = "word ".repeat(80);
-        let mut rows = app.rows.clone();
-        let done = rows.iter_mut().find(|r| r.key == "local/claude").unwrap();
-        done.pane.msg = Some(format!(
-            "Opened PR #31; CI is green. ⏎ {long} ⏎ Next step is yours."
-        ));
-        done.last_turn = Some(372);
-        app.set_rows(rows, hosts());
-        app.selected = Some(Spot::Row("local/claude".into()));
-        let text = render(&app, 200, 40);
-        let card = card_of(&text);
-        assert!(
-            card[0].contains(" · ended 5h43m ago ━") && !card[0].contains("turn"),
-            "{}",
-            card[0]
-        );
-        assert!(
-            card.iter()
-                .any(|l| l.starts_with(" host ") && l.trim_end().ends_with("turn    6m")),
-            "the turn is a fact: {text}"
-        );
-        assert_eq!(card[1], " Opened PR #31; CI is green.");
-        assert!(card[2].starts_with("   word word"), "{text}");
-        assert!(card[1..].iter().all(|l| l.width() <= 120), "{text}");
-        assert!(text.contains("   Next step is yours."), "{text}");
-        let list = text
-            .lines()
-            .find(|l| l.contains(" claude ") && l.contains("Opened"))
-            .unwrap();
-        assert!(
-            list.trim_end().ends_with("CI is green."),
-            "MSG is the first line: {list}"
-        );
-    }
-
     #[test]
     fn the_key_table_sits_on_the_footer_and_the_list_keeps_the_rest() {
         let mut app = fuller();
@@ -1483,579 +1308,6 @@ mod tests {
                 "{width}x{height}: the list has every row above it"
             );
         }
-    }
-
-    #[test]
-    fn a_long_message_gives_way_to_the_facts() {
-        let mut app = fuller();
-        let mut rows = app.rows.clone();
-        let done = rows.iter_mut().find(|r| r.key == "local/claude").unwrap();
-        done.pane.msg = Some(format!("Opened PR #31. ⏎ {}", "word ".repeat(400)));
-        app.set_rows(rows, hosts());
-        app.selected = Some(Spot::Row("local/claude".into()));
-        let text = render(&app, 80, 30);
-        let lines: Vec<&str> = text.lines().collect();
-        let place = lines
-            .iter()
-            .position(|l| l.starts_with(" where "))
-            .expect(&text);
-        assert!(lines[place - 1].trim().is_empty(), "{text}");
-        assert!(
-            lines[place - 2].ends_with("word…"),
-            "the cut is marked:\n{text}"
-        );
-        assert!(
-            lines[lines.len() - 2].contains("source"),
-            "the facts end the card:\n{text}"
-        );
-    }
-
-    #[test]
-    fn the_facts_share_rows_when_wide_and_take_one_each_when_narrow() {
-        let app = asking("Bash: ls");
-        let facts = |width: u16| -> Vec<String> {
-            let text = render(&app, width, 30);
-            let card = card_of(&text);
-            let blank = card.iter().position(|l| l.trim().is_empty()).unwrap();
-            card[blank + 1..]
-                .iter()
-                .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
-                .collect()
-        };
-        assert_eq!(
-            facts(80),
-            [
-                "where api › main › seat-b",
-                "host mini harness claude",
-                "title seat-b title source native"
-            ]
-        );
-        assert_eq!(
-            facts(36),
-            [
-                "where api › main › seat-b",
-                "host mini",
-                "harness claude",
-                "title seat-b title",
-                "source native"
-            ]
-        );
-    }
-
-    #[test]
-    fn nerd_icons_label_each_fact_with_one_cell_at_60_100_and_140() {
-        let mut app = asking("Bash: ls");
-        let private = |c: char| ('\u{e000}'..='\u{f8ff}').contains(&c);
-        for nerd in [false, true] {
-            app.nerd = nerd;
-            for width in [60u16, 100, 140] {
-                let text = render(&app, width, 30);
-                assert!(
-                    text.lines().all(|l| l.width() <= usize::from(width)),
-                    "{width}:\n{text}"
-                );
-                let card = card_of(&text);
-                let blank = card.iter().position(|l| l.trim().is_empty()).unwrap();
-                let facts = &card[blank + 1..];
-                if !nerd {
-                    assert!(facts[0].starts_with(" where "), "{width}:\n{text}");
-                    assert!(!text.chars().any(private), "{width}: words only");
-                    continue;
-                }
-                for line in facts {
-                    let mut chars = line.chars();
-                    assert_eq!(chars.next(), Some(' '), "{line}");
-                    assert!(chars.next().is_some_and(private), "a glyph leads: {line}");
-                    assert_eq!(chars.next(), Some(' '), "one cell, then the value: {line}");
-                }
-                let place = facts.iter().find(|l| l.contains(" › ")).unwrap();
-                assert_eq!(
-                    place.chars().filter(|c| private(*c)).count(),
-                    3,
-                    "the session, window and block each lead: {place}"
-                );
-                assert!(place.ends_with("seat-b"), "{place}");
-                assert!(!text.contains(" host "), "{width}: no word labels:\n{text}");
-            }
-        }
-    }
-
-    #[test]
-    fn a_blocked_rows_tail_keeps_the_whole_dialog_and_the_facts_take_what_is_left() {
-        let mut app = asking("Bash: touch zz-probe-file-2");
-        let screen = include_str!("../../tests/fixtures/screens/claude-permission.txt");
-        // A real pane: plenty of earlier output, then the rule Claude draws above its dialog.
-        let mut lines: Vec<String> = (1..=200).map(|n| format!("earlier output {n}")).collect();
-        lines.push("─".repeat(80));
-        lines.extend(screen.lines().map(str::to_owned));
-        app.peek = Some(Peek {
-            key: "mini/seat-b".into(),
-            lines: Some(Ok(lines)),
-            at: Some(Utc::now()),
-            updated_at: None,
-        });
-        let ask = [
-            "Do you want to proceed?",
-            "❯ 1. Yes",
-            "2. Yes, and always",
-            "4. No",
-            "Esc to cancel",
-        ];
-        for (width, height, facts) in [(80u16, 30u16, false), (140, 60, true), (200, 60, true)] {
-            let text = render(&app, width, height);
-            for line in ask {
-                assert!(text.contains(line), "{width}x{height}: {line}:\n{text}");
-            }
-            // A 30-row card has room for the question and its options, as before the facts;
-            // a taller one shows the dialog from its opening.
-            assert_eq!(
-                text.contains("Bash command"),
-                facts,
-                "{width}x{height}:\n{text}"
-            );
-            assert!(
-                !text.contains("earlier output"),
-                "{width}x{height}: only the dialog:\n{text}"
-            );
-            assert_eq!(
-                text.contains(" where "),
-                facts,
-                "{width}x{height}: the facts take the rows left:\n{text}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_blocked_ask_is_never_cut_and_the_list_keeps_3_rows() {
-        let ask = (1..=6)
-            .map(|n| format!("line {n} of the question"))
-            .collect::<Vec<_>>()
-            .join(" ⏎ ");
-        let app = asking(&ask);
-        let text = render(&app, 80, 30);
-        for n in 1..=6 {
-            assert!(
-                text.contains(&format!("line {n} of the question")),
-                "{text}"
-            );
-        }
-        assert!(list_rows(&text) >= 3, "{text}");
-        let long = (1..=40)
-            .map(|n| format!("step {n}"))
-            .collect::<Vec<_>>()
-            .join(" ⏎ ");
-        let text = render(&asking(&long), 80, 30);
-        assert_eq!(
-            list_rows(&text),
-            3,
-            "the ask grows to the list's floor:\n{text}"
-        );
-    }
-
-    /// The board with seat-b's full view open and `lines` read from its pane at 05:42:59.
-    fn full_of(lines: Vec<String>) -> App {
-        let mut app = fuller();
-        press(&mut app, KeyCode::Char(' '));
-        app.peeked("mini/seat-b", Ok(lines));
-        app.peek.as_mut().unwrap().at = Some(
-            DateTime::parse_from_rfc3339("2026-01-01T05:42:59Z")
-                .unwrap()
-                .with_timezone(&Utc),
-        );
-        app
-    }
-
-    /// The full view of `lines` at `width` by 30, cell by cell.
-    fn full_cells(lines: &[&str], width: u16) -> ratatui::buffer::Buffer {
-        let app = full_of(lines.iter().map(|l| (*l).to_owned()).collect());
-        let now = DateTime::parse_from_rfc3339("2026-01-01T05:43:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
-        terminal.draw(|frame| draw(frame, &app, now)).unwrap();
-        terminal.backend().buffer().clone()
-    }
-
-    fn row_text(buffer: &ratatui::buffer::Buffer, y: u16) -> String {
-        (0..buffer.area.width)
-            .map(|x| buffer[(x, y)].symbol())
-            .collect::<String>()
-            .trim_end()
-            .to_owned()
-    }
-
-    const DIFF: [&str; 3] = [
-        "\x1b[31m- removed\x1b[0m",
-        "\x1b[32m+ added\x1b[0m \x1b[1;3;4;7mloud\x1b[22;23;24;27m quiet",
-        "\x1b[38;5;244m@@ -1 +1 @@\x1b[0m   ",
-    ];
-
-    #[test]
-    fn full_view_draws_the_panes_colours_and_modifiers() {
-        let buffer = full_cells(&DIFF, 80);
-        assert_eq!(row_text(&buffer, 1), "- removed");
-        assert_eq!(row_text(&buffer, 2), "+ added loud quiet");
-        assert_eq!(
-            row_text(&buffer, 3),
-            "@@ -1 +1 @@",
-            "padding after the text is dropped"
-        );
-        assert_eq!(buffer[(0, 1)].fg, Color::Indexed(1));
-        assert_eq!(buffer[(2, 2)].fg, Color::Indexed(2));
-        let loud = buffer[(8, 2)].modifier;
-        for m in [
-            Modifier::BOLD,
-            Modifier::ITALIC,
-            Modifier::UNDERLINED,
-            Modifier::REVERSED,
-        ] {
-            assert!(loud.contains(m), "{m:?} in {loud:?}");
-        }
-        assert!(buffer[(13, 2)].modifier.is_empty(), "turned off again");
-        assert_eq!(buffer[(13, 2)].fg, Color::Reset, "reset by 0 before it");
-        assert_eq!(buffer[(0, 3)].fg, Color::Indexed(244));
-    }
-
-    #[test]
-    fn full_view_cuts_a_coloured_line_at_80_without_splitting_its_escapes() {
-        let long = format!("\x1b[48;2;0;64;0m+ {}\x1b[0m\x1b[31mtail", "x".repeat(120));
-        let buffer = full_cells(&[&long], 80);
-        let text = row_text(&buffer, 1);
-        assert_eq!(text.chars().count(), 80);
-        assert!(text.starts_with("+ xxx") && text.ends_with("x…"), "{text}");
-        assert!(!text.contains('\x1b') && !text.contains("[0m"), "{text}");
-        assert_eq!(buffer[(0, 1)].bg, Color::Rgb(0, 64, 0));
-        assert_eq!(
-            buffer[(78, 1)].bg,
-            Color::Rgb(0, 64, 0),
-            "the colour runs to the cut"
-        );
-        assert_eq!(buffer[(79, 1)].symbol(), "…");
-        assert!(buffer[(79, 1)].modifier.contains(Modifier::DIM));
-        assert_eq!(
-            buffer[(79, 1)].bg,
-            Color::Rgb(0, 64, 0),
-            "the mark sits on the row's band, with no notch"
-        );
-        let plain = full_cells(&[&format!("{} end", "x".repeat(120))], 80);
-        assert_eq!(
-            plain[(79, 1)].bg,
-            Color::Reset,
-            "an uncoloured row's mark has no background"
-        );
-        let padded = format!("\x1b[48;2;0;64;0m+ added{}\x1b[0m", " ".repeat(150));
-        let buffer = full_cells(&[&padded], 80);
-        assert_eq!(
-            row_text(&buffer, 1),
-            "+ added",
-            "no mark when only padding is past the edge"
-        );
-        assert_eq!(
-            buffer[(79, 1)].bg,
-            Color::Rgb(0, 64, 0),
-            "the background runs to the edge"
-        );
-        let wide = full_cells(&[&long], 200);
-        assert!(row_text(&wide, 1).ends_with("xtail"), "uncut when it fits");
-        assert_eq!(wide[(122, 1)].fg, Color::Indexed(1));
-    }
-
-    #[test]
-    fn full_view_reads_with_colours_and_the_card_shows_them_plain() {
-        let mut app = fuller();
-        let effect = press(&mut app, KeyCode::Char(' '));
-        assert!(
-            matches!(effect, Some(Effect::Peek { vt: true, .. })),
-            "{effect:?}"
-        );
-        app.peeked(
-            "mini/seat-b",
-            Ok(DIFF.iter().map(|l| (*l).to_owned()).collect()),
-        );
-        let t0 = app.full.as_ref().unwrap().asked;
-        assert!(matches!(
-            app.live(t0 + crate::tui::full::EVERY),
-            Some(Effect::Peek { vt: true, .. })
-        ));
-        press(&mut app, KeyCode::Esc);
-        let text = render(&app, 80, 30);
-        assert!(
-            text.contains("- removed") && text.contains("+ added loud quiet"),
-            "{text}"
-        );
-        assert!(!text.contains('\x1b') && !text.contains("[31m"), "{text}");
-        let mut board = fuller();
-        board.selected = Some(Spot::Row("mini/seat-b".into()));
-        let t = Instant::now();
-        board.note_card(t);
-        let tail = board.auto_tail(t + Duration::from_secs(1));
-        assert!(
-            matches!(tail, Some(Effect::Peek { vt: false, .. })),
-            "the card's own tail stays text: {tail:?}"
-        );
-    }
-
-    fn numbered(n: usize) -> Vec<String> {
-        (1..=n).map(|n| format!("peek line {n}")).collect()
-    }
-
-    #[test]
-    fn space_opens_the_full_view_and_space_or_esc_returns() {
-        let mut app = fuller();
-        let effect = press(&mut app, KeyCode::Char(' '));
-        assert!(
-            matches!(effect, Some(Effect::Peek { ref key, .. }) if key == "mini/seat-b"),
-            "{effect:?}"
-        );
-        let text = render(&app, 80, 30);
-        assert!(!text.contains("NEEDS YOU"), "no list:\n{text}");
-        assert!(
-            text.lines().next().unwrap().ends_with(" capturing… ━━"),
-            "{text}"
-        );
-        assert!(text.contains(" capturing…\n"), "{text}");
-        assert_eq!(press(&mut app, KeyCode::Char(' ')), None);
-        assert!(app.full.is_none() && render(&app, 80, 30).contains("NEEDS YOU"));
-        press(&mut app, KeyCode::Char(' '));
-        press(&mut app, KeyCode::Esc);
-        assert!(app.full.is_none(), "esc returns too");
-    }
-
-    #[test]
-    fn full_view_takes_the_terminal_and_cuts_long_lines_at_80_140_and_200() {
-        let long = format!("start {} end", "x".repeat(300));
-        let mut lines = numbered(60);
-        lines.push(long);
-        lines.push("last line".into());
-        let app = full_of(lines);
-        for width in [80u16, 140, 200] {
-            let text = render(&app, width, 30);
-            let rows: Vec<&str> = text.lines().collect();
-            assert_eq!(rows.len(), 30);
-            assert!(
-                rows[0].starts_with("━━") && rows[0].contains("seat-b"),
-                "{text}"
-            );
-            assert!(
-                rows[0].ends_with(" live · 1s · following ━━"),
-                "{}",
-                rows[0]
-            );
-            let footer = match width {
-                80 => "space back · j/k scroll · a answer · enter jump · gg/G top, bottom",
-                _ => {
-                    "space back · j/k scroll · a answer · enter jump · gg/G top, bottom · ctrl-d/u half page · ctrl-f/b page"
-                }
-            };
-            assert_eq!(rows[29], footer, "whole keys only");
-            assert_eq!(rows[28], "last line", "the newest line sits on the bottom");
-            assert!(
-                rows[27].starts_with("start x") && rows[27].ends_with("x…"),
-                "cut, not wrapped, and marked: {}",
-                rows[27]
-            );
-            assert_eq!(
-                rows[27].width(),
-                usize::from(width),
-                "full width, no 120 cap"
-            );
-            assert_eq!(rows[26], "peek line 60");
-            assert_eq!(rows[1], "peek line 35", "28 rows of body");
-            assert!(!text.contains(" end"), "{text}");
-        }
-    }
-
-    #[test]
-    fn full_view_scrolling_pauses_on_the_lines_it_had_and_g_follows_again() {
-        let mut app = full_of(numbered(200));
-        app.height = 30;
-        press(&mut app, KeyCode::Char('k'));
-        let text = render(&app, 80, 30);
-        assert!(
-            text.lines().next().unwrap().contains("paused · G follows"),
-            "{text}"
-        );
-        assert_eq!(text.lines().nth(28), Some("peek line 199"));
-        app.peeked("mini/seat-b", Ok(numbered(201)));
-        let text = render(&app, 80, 30);
-        assert!(
-            text.lines()
-                .next()
-                .unwrap()
-                .contains(" paused · newer below · G follows ━━"),
-            "{text}"
-        );
-        assert!(!text.contains("peek line 201"), "held while paused");
-        press(&mut app, KeyCode::PageUp);
-        assert_eq!(render(&app, 80, 30).lines().nth(28), Some("peek line 171"));
-        crate::tui::app::tests::key(
-            &mut app,
-            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL),
-        );
-        assert_eq!(
-            render(&app, 80, 30).lines().nth(28),
-            Some("peek line 143"),
-            "ctrl-b pages too"
-        );
-        crate::tui::app::tests::key(
-            &mut app,
-            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
-        );
-        assert_eq!(
-            render(&app, 80, 30).lines().nth(28),
-            Some("peek line 157"),
-            "ctrl-d half a page"
-        );
-        crate::tui::app::tests::key(
-            &mut app,
-            KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL),
-        );
-        assert_eq!(
-            render(&app, 80, 30).lines().nth(28),
-            Some("peek line 156"),
-            "ctrl-y a line"
-        );
-        press(&mut app, KeyCode::Char('g'));
-        press(&mut app, KeyCode::Char('g'));
-        assert_eq!(render(&app, 80, 30).lines().nth(1), Some("peek line 1"));
-        press(&mut app, KeyCode::Char('j'));
-        assert_eq!(render(&app, 80, 30).lines().nth(1), Some("peek line 2"));
-        press(&mut app, KeyCode::Char('G'));
-        let text = render(&app, 80, 30);
-        assert_eq!(
-            text.lines().nth(28),
-            Some("peek line 201"),
-            "follows the newest read"
-        );
-        assert!(text.lines().next().unwrap().contains("following"), "{text}");
-    }
-
-    #[test]
-    fn full_view_keeps_its_lines_when_a_read_fails() {
-        let mut app = full_of(numbered(40));
-        app.peeked("mini/seat-b", Err("rex timed out".into()));
-        let text = render(&app, 80, 30);
-        assert!(
-            text.lines()
-                .next()
-                .unwrap()
-                .ends_with(" rex timed out · 1s old · retrying ━━"),
-            "{text}"
-        );
-        assert_eq!(text.lines().nth(28), Some("peek line 40"));
-        app.peeked("mini/seat-b", Ok(numbered(41)));
-        let text = render(&app, 80, 30);
-        assert!(
-            !text.contains("retrying") && text.contains("peek line 41"),
-            "{text}"
-        );
-    }
-
-    #[test]
-    fn full_view_reads_its_row_every_two_seconds_and_stops_on_close() {
-        use crate::tui::full::EVERY;
-        let mut app = fuller();
-        press(&mut app, KeyCode::Char(' '));
-        let t0 = app.full.as_ref().unwrap().asked;
-        assert_eq!(app.live(t0 + EVERY * 5), None, "never two reads at once");
-        app.peeked("mini/seat-b", Ok(numbered(3)));
-        assert_eq!(app.live(t0 + Duration::from_secs(1)), None);
-        let effect = app.live(t0 + EVERY);
-        assert!(
-            matches!(effect, Some(Effect::Peek { ref key, .. }) if key == "mini/seat-b"),
-            "{effect:?}"
-        );
-        assert_eq!(app.live(t0 + EVERY * 2), None, "the read is out");
-        assert_eq!(
-            app.auto_tail(t0 + EVERY * 30),
-            None,
-            "the view does its own reads"
-        );
-        app.peeked("mini/seat-b", Ok(numbered(4)));
-        assert!(app.live(t0 + EVERY * 2).is_some());
-        press(&mut app, KeyCode::Esc);
-        app.peeked("mini/seat-b", Ok(numbered(5)));
-        assert_eq!(app.live(t0 + EVERY * 60), None, "closed, it reads no more");
-    }
-
-    #[test]
-    fn full_view_keys_answer_jump_go_back_and_leave_the_board_keys_alone() {
-        let mut app = full_of(numbered(3));
-        assert_eq!(
-            press(&mut app, KeyCode::Char('s')),
-            None,
-            "s does not mark seen"
-        );
-        assert!(app.full.is_some());
-        assert!(
-            matches!(press(&mut app, KeyCode::Enter), Some(Effect::Jump(row)) if row.key == "mini/seat-b")
-        );
-        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert_eq!(app.handle(ctrl_c), Some(Effect::Quit));
-        assert_eq!(press(&mut app, KeyCode::Char('q')), None, "q goes back");
-        assert!(app.full.is_none());
-        assert_eq!(
-            press(&mut app, KeyCode::Char('q')),
-            Some(Effect::Quit),
-            "then quits"
-        );
-        press(&mut app, KeyCode::Char(' '));
-        press(&mut app, KeyCode::Char('a'));
-        assert!(app.full.is_none());
-        assert_eq!(
-            app.answer.as_ref().map(|answer| answer.row.key.as_str()),
-            Some("mini/seat-b")
-        );
-    }
-
-    #[test]
-    fn full_view_says_why_a_first_read_failed_and_shows_a_failed_jump() {
-        let mut app = fuller();
-        press(&mut app, KeyCode::Char(' '));
-        app.peeked("mini/seat-b", Err("rex timed out".into()));
-        let text = render(&app, 80, 30);
-        assert!(
-            text.lines()
-                .next()
-                .unwrap()
-                .ends_with(" rex timed out · retrying ━━"),
-            "{text}"
-        );
-        assert_eq!(text.lines().nth(1), Some(" rex timed out"));
-        assert!(
-            app.live(app.full.as_ref().unwrap().asked + crate::tui::full::EVERY)
-                .is_some()
-        );
-        app.failed = Some("that pane is gone".into());
-        assert_eq!(
-            render(&app, 80, 30).lines().last(),
-            Some("that pane is gone")
-        );
-    }
-
-    #[test]
-    fn full_view_cuts_a_long_failure_so_the_name_keeps_its_room() {
-        let mut app = full_of(numbered(3));
-        app.peeked(
-            "mini/seat-b",
-            Err(format!("peek failed: {}", "detail ".repeat(20))),
-        );
-        let bar = render(&app, 80, 30).lines().next().unwrap().to_owned();
-        assert!(bar.contains("seat-b"), "{bar}");
-        assert!(bar.ends_with("… · 1s old · retrying ━━"), "{bar}");
-    }
-
-    #[test]
-    fn full_view_closes_when_its_row_goes() {
-        let mut app = full_of(numbered(3));
-        let rows = app
-            .rows
-            .iter()
-            .filter(|row| row.key != "mini/seat-b")
-            .cloned()
-            .collect();
-        app.set_rows(rows, hosts());
-        assert!(app.full.is_none() && render(&app, 80, 30).contains("WORKING"));
     }
 
     #[test]
@@ -2155,242 +1407,8 @@ mod tests {
         press(&mut app, KeyCode::Char('c'));
         assert!(!app.hidden, "c after f belongs to f");
         assert_eq!(app.toast(), Some("f takes w d q p e u i; ff clears"));
-        crate::tui::app::tests::sort(&mut app, 's');
+        crate::tui::app::testkit::sort(&mut app, 's');
         assert!(app.sort.is_some(), "o s sorts");
-    }
-
-    #[test]
-    fn the_bar_says_how_fresh_the_tail_is() {
-        let mut app = fuller();
-        let at = DateTime::parse_from_rfc3339("2026-01-01T05:42:52Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        app.peek = Some(Peek {
-            key: "mini/seat-b".into(),
-            lines: Some(Ok(vec!["tail line".into()])),
-            at: Some(at),
-            updated_at: Some("2026-01-01T00:00:00Z".into()),
-        });
-        let time = at.with_timezone(&Local).format("%H:%M:%S").to_string();
-        let text = render(&app, 140, 30);
-        assert!(
-            card_of(&text)[0].ends_with(&format!(" captured {time} · 8s ━━")),
-            "{text}"
-        );
-        assert!(
-            text.contains(" │ tail line"),
-            "the tail sits behind a gutter:\n{text}"
-        );
-        app.peek.as_mut().unwrap().updated_at = Some("2025-12-31T23:00:00Z".into());
-        let text = render(&app, 140, 30);
-        assert!(
-            card_of(&text)[0].ends_with(" newer report · space refreshes ━━"),
-            "{text}"
-        );
-    }
-
-    #[test]
-    fn a_long_window_gives_way_in_where_and_the_block_never() {
-        let mut app = asking("Bash: ls");
-        let mut rows = app.rows.clone();
-        rows[0].pane.tab = "2-toolrig:rig:demo-team#fedcba9876543210#l2".into();
-        app.set_rows(rows, hosts());
-        let text = render(&app, 80, 30);
-        let place = text
-            .lines()
-            .find(|l| l.starts_with(" where "))
-            .expect(&text);
-        assert!(
-            place.contains("2-toolrig:ri…") && place.ends_with(" › seat-b"),
-            "the window gives way in the middle, the block never: {place}"
-        );
-        app.peek = Some(Peek {
-            key: "mini/seat-b".into(),
-            lines: Some(Ok(vec!["tail line".into()])),
-            at: Some(Utc::now()),
-            updated_at: None,
-        });
-        let text = render(&app, 80, 30);
-        let bar = &card_of(&text)[0];
-        assert!(
-            bar.starts_with("━━ ! blocked · permission · seat-b · waiting ")
-                && bar.contains("captured"),
-            "the place gives way too: {bar}"
-        );
-    }
-
-    #[test]
-    fn a_row_with_no_record_says_so_and_how_to_look() {
-        let mut app = fuller();
-        let mut rows = app.rows.clone();
-        rows.iter_mut()
-            .find(|r| r.key == "local/inferred")
-            .unwrap()
-            .pane
-            .msg = None;
-        app.set_rows(rows, hosts());
-        app.selected = Some(Spot::Row("local/inferred".into()));
-        let card = card_of(&render(&app, 80, 30));
-        assert_eq!(card[1], " no status from this pane");
-        assert_eq!(card[2], "   space captures the screen");
-    }
-
-    const PERMISSION: &str = "⏺ Bash(git push origin main --force-with-lease)\n Bash command\n   git push origin main --force-with-lease\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and don't ask again for git push commands in /work/project\n   3. No, and tell Claude what to do differently\n\n Esc to cancel · Tab to amend\n";
-
-    fn answering(text: &str) -> App {
-        let mut app = fuller();
-        let Some(Effect::Read { key, .. }) = press(&mut app, KeyCode::Char('a')) else {
-            panic!("a reads the pane");
-        };
-        app.screen(&key, Ok(crate::tui::screen::Screen::parse(text, None)));
-        app
-    }
-
-    #[test]
-    fn answer_mode_shows_a_red_bar_the_options_and_its_own_footer_at_80_and_140() {
-        let app = answering(PERMISSION);
-        for width in [80, 140] {
-            let text = render(&app, width, 24);
-            let card = card_of(&text);
-            assert!(
-                card[0].starts_with("━━ ANSWER → seat-b · api › main · mini · claude "),
-                "{text}"
-            );
-            assert!(card[0].contains("captured"), "{text}");
-            assert!(card.iter().any(|l| l == " │  ❯ 1. Yes"), "{text}");
-            assert!(
-                card.iter()
-                    .any(|l| l.contains("2. Yes, and don't ask") && l.ends_with("press 2 twice")),
-                "{text}"
-            );
-            assert!(
-                !text.contains("Esc to cancel"),
-                "chrome below the options is cut: {text}"
-            );
-            assert_eq!(
-                card.last().unwrap(),
-                " ›",
-                "no cursor under a dialog: {text}"
-            );
-            let footer = text.lines().last().unwrap();
-            assert!(
-                footer.starts_with("1-3 pick · esc back to board"),
-                "{footer}"
-            );
-            assert_eq!(
-                footer.contains("board keys are off"),
-                width == 140,
-                "the promise shows when it fits: {footer}"
-            );
-        }
-    }
-
-    #[test]
-    fn answer_mode_says_why_a_key_did_nothing_and_shows_a_pending_double_press() {
-        let mut app = answering(PERMISSION);
-        press(&mut app, KeyCode::Char('x'));
-        let text = render(&app, 100, 24);
-        assert!(
-            text.contains(" pick a number; this dialog takes no text"),
-            "{text}"
-        );
-        press(&mut app, KeyCode::Char('2'));
-        let text = render(&app, 100, 24);
-        assert!(
-            text.contains(" press 2 again to send it: Yes, and don't ask again"),
-            "{text}"
-        );
-    }
-
-    #[test]
-    fn after_a_send_the_card_drops_the_tail_from_before_the_answer() {
-        let mut app = answering(PERMISSION);
-        app.peek = Some(Peek {
-            key: "mini/seat-b".into(),
-            lines: Some(Ok(PERMISSION.lines().map(str::to_owned).collect())),
-            at: Some(Utc::now()),
-            updated_at: None,
-        });
-        press(&mut app, KeyCode::Char('1'));
-        app.sent("mini/seat-b", "1 (Yes)", Ok(()));
-        assert!(app.peek.is_none());
-        let card = card_of(&render(&app, 140, 24)).join("\n");
-        assert!(!card.contains("Do you want to proceed"), "{card}");
-        assert!(card.contains(" sent 1 (Yes) → seat-b "), "{card}");
-    }
-
-    #[test]
-    fn after_a_send_the_bar_says_what_went_where() {
-        let mut app = answering(PERMISSION);
-        press(&mut app, KeyCode::Char('1'));
-        app.sent("mini/seat-b", "1 (Yes)", Ok(()));
-        let text = render(&app, 140, 24);
-        let bar = &card_of(&text)[0];
-        assert!(bar.contains(" sent 1 (Yes) → seat-b "), "{bar}");
-    }
-
-    #[test]
-    fn answer_a_short_board_shows_every_option_or_refuses_the_hidden_ones() {
-        let four = include_str!("../../tests/fixtures/screens/claude-permission.txt");
-        for text in [PERMISSION, four] {
-            for (height, refused) in [(12, false), (9, false), (13, true), (6, false)] {
-                let mut app = answering(text);
-                if refused {
-                    app.answer.as_mut().unwrap().error =
-                        Some("the screen changed since it was read; nothing sent".into());
-                }
-                let screen = render(&app, 80, height);
-                let footer = screen.lines().last().unwrap().to_owned();
-                let digits: Vec<char> = app
-                    .answer
-                    .as_ref()
-                    .unwrap()
-                    .screen
-                    .as_ref()
-                    .unwrap()
-                    .options
-                    .iter()
-                    .map(|c| c.digit)
-                    .collect();
-                let picks = footer
-                    .split(" pick")
-                    .next()
-                    .filter(|_| footer.contains(" pick"));
-                let shown: Vec<char> = match picks.map(|p| p.split_once('-')) {
-                    Some(Some((a, b))) => {
-                        let (a, b) = (a.chars().next().unwrap(), b.chars().next().unwrap());
-                        digits
-                            .iter()
-                            .copied()
-                            .filter(|d| (a..=b).contains(d))
-                            .collect()
-                    }
-                    Some(None) => picks.unwrap().chars().take(1).collect(),
-                    None => Vec::new(),
-                };
-                if height >= 12 {
-                    assert_eq!(shown, digits, "every option fits at 80x{height}: {screen}");
-                }
-                for digit in digits {
-                    let drawn = screen.lines().any(|l| l.contains(&format!("{digit}. ")));
-                    let mut copy = answering(text);
-                    render(&copy, 80, height);
-                    let sent = press(&mut copy, KeyCode::Char(digit));
-                    if shown.contains(&digit) {
-                        assert!(drawn, "{digit} is in the footer, so on the card: {screen}");
-                    } else {
-                        assert_eq!(sent, None, "{digit} is off screen at 80x{height}");
-                        let why = copy.answer.as_ref().unwrap().error.clone().unwrap();
-                        assert_eq!(
-                            why,
-                            format!(
-                                "option {digit} is off screen; make the board taller or jump to it"
-                            )
-                        );
-                    }
-                }
-            }
-        }
     }
 
     /// Every cell's symbol and style, one line per row, the style written where it changes.
@@ -2418,28 +1436,6 @@ mod tests {
         out
     }
 
-    #[test]
-    fn the_bar_draws_its_glyph_in_the_state_face_and_only_the_label_bold() {
-        use ratatui::style::Modifier;
-        let now = DateTime::parse_from_rfc3339("2026-01-01T05:43:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let app = every_state();
-        for key in ["local/busy", "local/allow"] {
-            let row = app.rows.iter().find(|row| row.key == key).unwrap();
-            let bar = crate::tui::card::bar(row, None, now, 80, false);
-            let glyph = theme::glyph(row, now);
-            let mark = bar.spans.iter().find(|s| s.content == glyph).unwrap();
-            assert_eq!(mark.style, theme::state(row), "{key}: the list's face");
-            let label = bar
-                .spans
-                .iter()
-                .find(|s| s.content.contains(" · "))
-                .unwrap();
-            assert!(label.style.add_modifier.contains(Modifier::BOLD), "{key}");
-        }
-    }
-
     /// The board's looks across its screens, cell by cell: a change of look shows as a diff of
     /// the fixture, recorded with UPDATE_STYLE_SNAPSHOT=1.
     #[test]
@@ -2453,7 +1449,7 @@ mod tests {
         ];
         let mut table = fuller();
         press(&mut table, KeyCode::Char('v'));
-        crate::tui::app::tests::sort(&mut table, 'a');
+        crate::tui::app::testkit::sort(&mut table, 'a');
         screens.push(("table sorted 140", table, 140, 30));
         let mut keys = fuller();
         press(&mut keys, KeyCode::Char('?'));
@@ -2517,8 +1513,8 @@ mod tests {
             app.answer.as_mut().unwrap().captured = Some(at.with_timezone(&Utc));
             app
         };
-        screens.push(("answer 80", pinned(answering(PERMISSION)), 80, 30));
-        let mut refused = pinned(answering(PERMISSION));
+        screens.push(("answer 80", pinned(answer_mode_on(PERMISSION)), 80, 30));
+        let mut refused = pinned(answer_mode_on(PERMISSION));
         refused.answer.as_mut().unwrap().error = Some("the screen changed; nothing sent".into());
         screens.push(("answer refused 80", refused, 80, 30));
         let long = format!("\x1b[48;2;0;64;0m+ {}\x1b[0m", "x".repeat(120));
@@ -2573,11 +1569,11 @@ mod extension_tests {
     use ratatui::backend::TestBackend;
     use ratatui::crossterm::event::KeyCode;
 
-    use super::tests::listed;
     use super::*;
     use crate::client::{ExtRun, Field};
     use crate::tui::app::App;
-    use crate::tui::app::tests::{app, hosts, press};
+    use crate::tui::app::testkit::listed;
+    use crate::tui::app::testkit::{app, hosts, press};
     use crate::tui::columns::{Col, Columns, Dir};
 
     fn field(id: &str, title: &str) -> Field {
@@ -2710,7 +1706,7 @@ mod extension_tests {
             .unwrap();
         assert_eq!(project.underline, Some(0));
         press(&mut app, KeyCode::Char('v'));
-        crate::tui::app::tests::sort(&mut app, 'r');
+        crate::tui::app::testkit::sort(&mut app, 'r');
         assert_eq!(app.sort, Some((Col::Field("fake.rig"), Dir::Up)));
         assert_eq!(
             keys(&app),
@@ -2798,13 +1794,13 @@ mod extension_tests {
         let rows = key_rows(&app);
         let at = rows.iter().position(|(k, _)| k == "o r p l").unwrap();
         assert_eq!(rows[at - 1].0, "o", "right after the sort row");
-        let mut one = crate::tui::app::tests::app();
+        let mut one = crate::tui::app::testkit::app();
         one.set_extensions(vec![field("fake.rig", "RIG")], BTreeMap::new());
         assert!(
             key_rows(&one).contains(&("o r".to_owned(), "sort by rig (fake)".to_owned())),
             "the source while it fits"
         );
-        let mut plain = crate::tui::app::tests::app();
+        let mut plain = crate::tui::app::testkit::app();
         press(&mut plain, KeyCode::Char('?'));
         assert_eq!(
             key_rows(&plain).len(),
@@ -2891,7 +1887,7 @@ mod extension_tests {
         app.set_extensions(Vec::new(), BTreeMap::new());
         assert_eq!(app.view.name, "status");
         assert_eq!(app.sort, None);
-        let mut plain = crate::tui::app::tests::app();
+        let mut plain = crate::tui::app::testkit::app();
         let before: Vec<String> = [50, 80, 120, 140, 200]
             .map(|w| render(&plain, w, 30))
             .into();
