@@ -209,6 +209,12 @@ fn error_line(code: &str, message: &str) -> Value {
     json!({ "v": VERSION, "error": { "code": code, "message": message } })
 }
 
+/// Why a host is down, as kept and sent with every rows line: cut as the log cuts a bad line,
+/// since a dying observer's last stderr line can be any length.
+fn capped(reason: &str) -> String {
+    reason.chars().take(500).collect()
+}
+
 struct Reducer {
     board: Board,
     memory: BTreeMap<String, Memory>,
@@ -436,7 +442,7 @@ impl Reducer {
                     match event {
                         HostEvent::Down { reason, .. } => {
                             self.hosts.insert(host.to_owned(), "down");
-                            self.host_errors.insert(host.to_owned(), reason.clone());
+                            self.host_errors.insert(host.to_owned(), capped(reason));
                         }
                         HostEvent::Event(Event::Snapshot { .. }, _) => {
                             if self.restored.insert(host.to_owned()) {
@@ -471,7 +477,8 @@ impl Reducer {
     fn stop_host(&mut self, host: &str, err: &Error) -> Vec<(String, String)> {
         eprintln!("warning: {host} stopped and will not restart: {err}");
         self.hosts.insert(host.to_owned(), "stopped");
-        self.host_errors.insert(host.to_owned(), err.to_string());
+        self.host_errors
+            .insert(host.to_owned(), capped(&err.to_string()));
         self.board.mark_stale(host)
     }
 

@@ -2775,7 +2775,10 @@ fn hosts_says_each_hosts_state_rows_and_why_it_is_down() {
     down.cmd()
         .envs([
             ("FAKE_REX_EXIT_AFTER", "0"),
-            ("FAKE_REX_STDERR", "observer.lua:3: boom"),
+            (
+                "FAKE_REX_STDERR",
+                &format!("observer.lua:3: boom {}", "x".repeat(2000)),
+            ),
         ])
         .args(["serve"])
         .assert()
@@ -2798,10 +2801,12 @@ fn hosts_says_each_hosts_state_rows_and_why_it_is_down() {
             .find(|h| h["host"] == "local")
             .unwrap();
         if local["state"] == "down" {
-            assert_eq!(
-                local["error"],
-                "observer exited (exit status: 1): observer.lua:3: boom"
+            let error = local["error"].as_str().unwrap();
+            assert!(
+                error.starts_with("observer exited (exit status: 1): observer.lua:3: boom x"),
+                "{error}"
             );
+            assert_eq!(error.chars().count(), 500, "a long stderr line is cut");
             break;
         }
         assert!(std::time::Instant::now() < deadline, "{hosts}");
