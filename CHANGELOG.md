@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0](https://github.com/vanducng/rexboard/compare/v0.3.0...v0.4.0) (2026-10-26)
+
+
+### Features
+
+* **cli:** rexboard upgrade upgrades the way rexboard was installed ([#36](https://github.com/vanducng/rexboard/issues/36)) ([e7bec12](https://github.com/vanducng/rexboard/commit/e7bec1204f7d9ae29ee8c8f4a427ee39dfbc1b62))
+* **tui:** c hides and shows the detail pane ([#33](https://github.com/vanducng/rexboard/issues/33)) ([e81e033](https://github.com/vanducng/rexboard/commit/e81e0330fdbdf5763cde5357cb470e95a29da76f))
+
+
+### Bug Fixes
+
+* **serve:** restart an older or silent serve after an upgrade ([#31](https://github.com/vanducng/rexboard/issues/31)) ([37557f4](https://github.com/vanducng/rexboard/commit/37557f408080503cabcda5452b247511dd419b3b))
+* **tui:** show c pane at 80 columns while the pane is hidden ([#35](https://github.com/vanducng/rexboard/issues/35)) ([f6aed9c](https://github.com/vanducng/rexboard/commit/f6aed9cbdcb3bb9604b0db1293cfeef92ba1ef37))
+
 ## [0.3.0](https://github.com/vanducng/rexboard/compare/v0.2.0...v0.3.0) (2026-10-26)
 
 
