@@ -4,7 +4,7 @@ rexboard reads Rex, remembers what Rex does not, and shows it. Only a jump write
 
 <img alt="rexboard architecture: rexboard is one Rust binary and Rex runs its Lua scripts. On local (this Mac) and mini, rex do runs observer.lua, which streams NDJSON to rexboard serve; serve keeps state on disk and answers the CLI (ls, watch, seen) and the ratatui board over a unix socket. A jump, the one write to Rex, runs jump.lua: session.focus_block on the pane's host, then client.perform session.select on the Rex app" src="assets/architecture.svg" width="100%">
 
-Each host runs one observer, `rex [-S HOST] do - --all`, whose NDJSON lines ([CLI](cli.md)) feed serve's collectors and its one reducer thread. Two reads bypass serve: the board's peek runs `tail.lua` through `rex [-S HOST] do -` straight against the pane's host, `ls --direct` takes its own snapshot, and `watch --raw` and `watch --direct` run their own observers.
+Each host runs one observer, `rex [-S HOST] do - --all`, whose NDJSON lines ([CLI](cli.md)) feed serve's collectors and its one reducer thread. Some reads bypass serve: the board's peek runs `tail.lua` through `rex [-S HOST] do -` straight against the pane's host, `ls --direct` takes its own snapshot, and `watch --raw` and `watch --direct` run their own observers.
 
 The image follows the reader's light or dark setting by itself. Its source is [assets/architecture.html](assets/architecture.html): after editing it, copy its `<svg>` element out with
 
@@ -63,7 +63,7 @@ serve uses std threads and channels; there is no async runtime. Collectors, the 
 | `state.json` | `{"v":1,"panes":{KEY:{state,kind,since,since_estimated,turn_started,last_turn,seen}}}`, written through a temp file and a rename at most once a second, and on stop. Entries for a host that has not sent its first snapshot this run are kept as loaded |
 | `transitions.jsonl` | One line per state change: `{at, host, block_id, from, to, kind}`. Over 5 MB at serve start, it moves to `transitions.jsonl.1`, replacing the older one |
 | `serve.log` | serve's output when a command started it. A client clears it first when it is over 1 MB |
-| `tui.json` | The board's own settings on this machine: `{"detail": SHARE}`, the detail pane's share of the width. Written by the board, not serve, on each `<` or `>`; a missing or unreadable file means the default third |
+| `tui.json` | The board's own settings on this machine: `{"detail": SHARE, "detail_hidden": BOOL}`, the detail pane's share of the width and whether `c` hid it. Written by the board, not serve, on each `<`, `>` or `c`; a missing or unreadable file means the default third, shown |
 
 On start, serve takes the lock, removes a stale socket, then stops observers a dead serve left behind. A recorded pid is stopped only if it is still its own process group, its parent is init or the recorded serve, and its command is the recorded `rex` running `do - --all --fail-fast`. Anything else is skipped and logged, because the pid may now belong to another program.
 

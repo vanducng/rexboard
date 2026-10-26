@@ -50,7 +50,7 @@ The text table has the columns `GROUP`, `STATE`, `AGE` (time in the current stat
 | `kind` | string or null | The record's `kind`, such as `permission` |
 | `msg` | string or null | The record's message |
 | `updated_at` | string or null | RFC 3339 time Rex received the record. It changes on every report, not only on a state change |
-| `source` | string | `native`: the pane reports its own status. `bridge`: the record came through `tmux`. `inferred`: no record, state read from the title |
+| `source` | string | `native`: the agent in the pane reports its own status. `bridge`: the record came through tmux (tmux wrote it, or is the pane's foreground process). `inferred`: no record, state read from the title. See [Agent status](agent-status.md) |
 | `children` | object | Counts by state of the pane's other records, such as Claude subagents: `{"working": 1}` |
 | `since` | string | RFC 3339 UTC time the pane entered its current `state` and `kind`. A report in the same state keeps it |
 | `since_estimated` | boolean | `true` when rexboard did not see the change: a row first seen in a snapshot that is `working` (its `updated_at` is the last report, not the start) or has no record, or an `updated_at` that is not RFC 3339. That last case also prints `warning: HOST: updated_at "VALUE" is not RFC 3339 (Rex VERSION); time in state is estimated` on stderr, once per host. A row with no record still carries a `since` in `--json`; the text table and the board show its age as `-` |
