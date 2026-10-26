@@ -27,7 +27,7 @@ impl App {
 
     /// The board's own pane, which it never answers or closes.
     pub(super) fn is_own(&self, row: &Row) -> bool {
-        row.pane.host == "local" && self.own.as_deref() == Some(row.pane.block_id.as_str())
+        is_own(row, self.own.as_deref())
     }
 
     /// `-`: back to the pane before the last jump, as `cd -` does.
@@ -44,8 +44,8 @@ impl App {
         let Some(row) = self.current() else {
             return;
         };
-        if self.is_own(row) || row.pane.process.as_deref() == Some("rexboard") {
-            self.failed = Some("that pane runs the board; it stays open".into());
+        if self.is_own(row) || runs_rexboard(row) {
+            self.failed = Some(RUNS_THE_BOARD.into());
             return;
         }
         self.closing = Some((row.clone(), now));
@@ -73,18 +73,9 @@ impl App {
     /// what closing it ends, in `width` columns. Only the place gives way.
     pub fn close_question(&self, width: usize) -> Option<String> {
         let (row, _) = self.closing.as_ref()?;
-        let state = match (row.pane.state.as_str(), row.pane.kind.as_deref()) {
-            ("blocked", Some(kind)) if !kind.is_empty() => format!(" (blocked · {kind})"),
-            (state @ ("blocked" | "working"), _) => format!(" ({state})"),
-            _ => String::new(),
-        };
-        let tmux = if row.pane.process.as_deref() == Some("tmux") {
-            " (tmux keeps running)"
-        } else {
-            ""
-        };
+        let tmux = tmux_note(row);
         let full = self.place(row, usize::MAX);
-        let ending = format!(", ending {}{state}", harness(row));
+        let ending = ending(row);
         // A narrow footer drops what it ends before it cuts the place.
         let rest = [ending.as_str(), ""]
             .into_iter()
@@ -144,6 +135,36 @@ impl App {
             format!("\"{text}\"")
         };
         Some(Effect::Copy { text, shown })
+    }
+}
+
+pub(crate) const RUNS_THE_BOARD: &str = "that pane runs the board; it stays open";
+
+/// The pane whose REX_BLOCK is `own`, on this host: the board's, or the caller's for the CLI.
+pub(crate) fn is_own(row: &Row, own: Option<&str>) -> bool {
+    row.pane.host == "local" && own == Some(row.pane.block_id.as_str())
+}
+
+pub(crate) fn runs_rexboard(row: &Row) -> bool {
+    row.pane.process.as_deref() == Some("rexboard")
+}
+
+/// What closing `row` ends, as `dd`'s question says it: `, ending claude (blocked · permission)`.
+pub(crate) fn ending(row: &Row) -> String {
+    let state = match (row.pane.state.as_str(), row.pane.kind.as_deref()) {
+        ("blocked", Some(kind)) if !kind.is_empty() => format!(" (blocked · {kind})"),
+        (state @ ("blocked" | "working"), _) => format!(" ({state})"),
+        _ => String::new(),
+    };
+    format!(", ending {}{state}", harness(row))
+}
+
+/// Closing a tmux client leaves its session running, which the question says.
+pub(crate) fn tmux_note(row: &Row) -> &'static str {
+    if row.pane.process.as_deref() == Some("tmux") {
+        " (tmux keeps running)"
+    } else {
+        ""
     }
 }
 

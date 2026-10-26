@@ -2517,6 +2517,12 @@ fn mini_mixed(serve: &Serve) -> String {
 fn mixed_serve() -> Serve {
     let serve = Serve::new();
     let observer = mini_mixed(&serve);
+    serve_mini(&serve, &observer);
+    serve
+}
+
+/// Starts `serve` with `observer` as mini's, and waits for its three rows.
+fn serve_mini(serve: &Serve, observer: &str) {
     serve
         .cmd()
         .env("FAKE_REX_OBSERVER_mini", observer)
@@ -2531,7 +2537,6 @@ fn mixed_serve() -> Serve {
         );
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    serve
 }
 
 fn keys(rows: &[serde_json::Value]) -> Vec<&str> {
@@ -2744,6 +2749,387 @@ fn seen_all_done_marks_the_unseen_done_rows_its_filters_keep() {
         .assert()
         .code(2)
         .stderr(predicate::str::contains("<KEY>"));
+}
+
+/// The fake's tail reply for a pane showing `screen`, a fixture under `screens/`.
+fn screen_reply(screen: &str) -> String {
+    let text = std::fs::read_to_string(fixture(&format!("screens/{screen}"))).unwrap();
+    serde_json::json!({ "ok": true, "text": text, "total": text.len(), "cut": false }).to_string()
+}
+
+fn sends(serve: &Serve) -> Vec<serde_json::Value> {
+    serve
+        .log_lines()
+        .iter()
+        .filter_map(|line| line.split_once(" --args ").map(|(_, args)| args))
+        .filter_map(|args| serde_json::from_str::<serde_json::Value>(args).ok())
+        .filter(|args| args.get("action").is_some())
+        .collect()
+}
+
+/// What `show KEY --json` reads off a pane showing `reply`: its dialog id and options.
+fn shown_screen(serve: &Serve, key: &str, reply: &str) -> serde_json::Value {
+    let out = serve
+        .cmd()
+        .env("FAKE_REX_TAIL_REPLY", reply)
+        .args(["show", key, "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    serde_json::from_slice(&out).unwrap()
+}
+
+fn dialog_of(serve: &Serve, key: &str, reply: &str) -> String {
+    shown_screen(serve, key, reply)["dialog"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+#[test]
+fn answer_picks_an_option_only_after_the_boards_checks() {
+    let serve = mixed_serve();
+    let key = "mini/block:web-ask";
+    let screen = screen_reply("claude-permission.txt");
+    let shown = shown_screen(&serve, key, &screen);
+    assert_eq!(
+        shown["options"][1],
+        serde_json::json!({ "digit": 2, "label": "Yes, and always allow access to /work/project from this project", "lasting": true })
+    );
+    let id = shown["dialog"].as_str().unwrap().to_owned();
+    assert_eq!(id.len(), 12, "{id}");
+    let answer = |args: &[&str]| {
+        let mut cmd = serve.cmd();
+        cmd.env("FAKE_REX_TAIL_REPLY", &screen)
+            .args(["answer", key, "--json", "--dialog", &id])
+            .args(args);
+        cmd
+    };
+    let refused = |args: &[&str], why: &str, step: &str| {
+        answer(args)
+            .assert()
+            .code(1)
+            .stderr(
+                predicate::str::contains("\"code\":\"REFUSED\"").and(predicate::str::contains(why)),
+            )
+            .stderr(predicate::str::contains(step));
+    };
+    refused(
+        &["--pick", "7"],
+        "there is no option 7; nothing sent; options: 1 Yes · 2 Yes, and always",
+        &format!("rexboard answer {key} --pick 1 --dialog {id}"),
+    );
+    answer(&["--pick", "7"])
+        .assert()
+        .stderr(predicate::str::contains(
+            "\"options\":[{\"digit\":1,\"label\":\"Yes\",\"lasting\":false}",
+        ));
+    refused(
+        &["--pick", "2"],
+        "option 2 (Yes, and always allow access to /work/project from this project) grants something for later; add --confirm",
+        &format!("rexboard answer {key} --pick 2 --confirm --dialog {id}"),
+    );
+    refused(
+        &["--text", "hi"],
+        "a dialog is up and takes no text; pick a number; nothing sent; options: 1 Yes",
+        &format!("rexboard answer {key} --pick 1 --dialog {id}"),
+    );
+    refused(
+        &["--pick", "1", "--expect", "blocked:permission"],
+        "mini/block:web-ask is blocked:question, not blocked:permission; nothing sent",
+        &format!("\"next_steps\":[\"rexboard show {key}\"]"),
+    );
+    assert!(sends(&serve).is_empty(), "no refusal reached send.lua");
+    answer(&["--pick", "1", "--text", "x"]).assert().code(2);
+    answer(&[]).assert().code(2);
+    answer(&["--pick", "0"]).assert().code(2);
+    serve
+        .cmd()
+        .args(["answer", key, "--pick", "1"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("--dialog <ID>"));
+    let out = answer(&["--pick", "1", "--expect", "blocked:question"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&out).unwrap(),
+        serde_json::json!({ "ok": true, "key": key, "sent": { "pick": 1, "label": "Yes" } })
+    );
+    let sent = sends(&serve);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(
+        sent[0]["action"],
+        serde_json::json!({ "pick": "1" }),
+        "a digit, no Enter"
+    );
+    assert_eq!(sent[0]["block_id"], "block:web-ask");
+    assert_eq!(sent[0]["expect"]["state"], "blocked");
+    assert_eq!(sent[0]["expect"]["kind"], "question");
+    assert!(
+        sent[0]["expect"]["fingerprint"]
+            .as_str()
+            .unwrap()
+            .contains("Do you want to proceed?"),
+        "the whole dialog is checked again on the pane"
+    );
+    assert!(
+        serve
+            .log_lines()
+            .iter()
+            .any(|l| l.starts_with("-S mini do -")),
+        "sent on the row's host"
+    );
+    let row = serve
+        .rows(&[])
+        .into_iter()
+        .find(|r| r["key"] == key)
+        .unwrap();
+    assert_eq!(row["seen"], true, "a reply marks it seen, as on the board");
+    answer(&["--pick", "2", "--confirm"]).assert().success();
+    answer(&["--pick", "1"])
+        .env(
+            "FAKE_REX_SEND_REPLY",
+            r#"{"ok":false,"code":"prompt_changed"}"#,
+        )
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "the screen changed since it was read; nothing sent",
+        ))
+        .stderr(predicate::str::contains(format!(
+            "rexboard show {key} --json"
+        )));
+}
+
+#[test]
+fn answer_goes_only_to_the_dialog_its_caller_read() {
+    let serve = mixed_serve();
+    let key = "mini/block:web-ask";
+    let first = screen_reply("claude-permission.txt");
+    let id = dialog_of(&serve, key, &first);
+    let fixture = std::fs::read_to_string(fixture("screens/claude-permission.txt")).unwrap();
+    let next = fixture.replace("touch zz-probe-file-2", "rm -rf build");
+    assert_ne!(next, fixture);
+    let second = serde_json::json!({ "ok": true, "text": next, "total": next.len(), "cut": false })
+        .to_string();
+    let other = shown_screen(&serve, key, &second);
+    assert_eq!(
+        other["options"],
+        shown_screen(&serve, key, &first)["options"],
+        "the same options"
+    );
+    assert_ne!(other["dialog"], id, "another dialog, another id");
+    for args in [&["--pick", "1"][..], &["--pick", "2", "--confirm"][..]] {
+        serve
+            .cmd()
+            .env("FAKE_REX_TAIL_REPLY", &second)
+            .args([
+                "answer",
+                key,
+                "--dialog",
+                &id,
+                "--expect",
+                "blocked:question",
+                "--json",
+            ])
+            .args(args)
+            .assert()
+            .code(1)
+            .stderr(predicate::str::contains(
+                "the dialog changed since you read it; nothing sent",
+            ))
+            .stderr(predicate::str::contains(format!(
+                "rexboard show {key} --json"
+            )));
+    }
+    assert!(sends(&serve).is_empty(), "send.lua never ran");
+}
+
+#[test]
+fn answer_text_goes_only_to_an_empty_input_line() {
+    let serve = mixed_serve();
+    let key = "mini/block:web-done";
+    let idle = screen_reply("claude-idle.txt");
+    let id = dialog_of(&serve, key, &idle);
+    let answer = |reply: &str, text: &str| {
+        let mut cmd = serve.cmd();
+        cmd.env("FAKE_REX_TAIL_REPLY", reply)
+            .args(["answer", key, "--dialog", &id, "--text", text]);
+        cmd
+    };
+    answer(&idle, "run the tests")
+        .assert()
+        .success()
+        .stdout("sent \"run the tests\" to web › main › seat-d on mini\n");
+    assert_eq!(
+        sends(&serve)[0]["action"],
+        serde_json::json!({ "text": "run the tests" })
+    );
+    answer(&idle, "  ").assert().code(2);
+    answer(&screen_reply("claude-permission.txt"), "run the tests")
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "the dialog changed since you read it",
+        ));
+    answer(&idle, "x")
+        .env("REX_BLOCK", "block:web-done")
+        .assert()
+        .success();
+    serve
+        .cmd()
+        .args([
+            "answer",
+            "mini/block:nope",
+            "--text",
+            "x",
+            "--dialog",
+            &id,
+            "--json",
+        ])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("\"code\":\"NOT_FOUND\""));
+}
+
+#[test]
+fn a_newer_report_changes_an_input_lines_id_but_not_a_dialogs() {
+    let serve = mixed_serve();
+    let (idle, ask) = ("mini/block:web-done", "mini/block:web-ask");
+    let prompt = screen_reply("claude-idle.txt");
+    let dialog = screen_reply("claude-permission.txt");
+    let (prompt_id, dialog_id) = (
+        dialog_of(&serve, idle, &prompt),
+        dialog_of(&serve, ask, &dialog),
+    );
+    serve.cmd().args(["serve", "--stop"]).assert().success();
+    let observer = mini_mixed(&serve);
+    let later = std::fs::read_to_string(&observer)
+        .unwrap()
+        .replace("2026-01-01T00:00:00Z", "2026-01-01T00:05:00Z");
+    std::fs::write(&observer, later).unwrap();
+    serve_mini(&serve, &observer);
+    serve
+        .cmd()
+        .env("FAKE_REX_TAIL_REPLY", &prompt)
+        .args([
+            "answer",
+            idle,
+            "--dialog",
+            &prompt_id,
+            "--text",
+            "run the tests",
+        ])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "the input line changed since you read it; nothing sent",
+        ));
+    assert!(
+        sends(&serve).is_empty(),
+        "a newer turn's prompt is not the one read"
+    );
+    assert_ne!(dialog_of(&serve, idle, &prompt), prompt_id);
+    assert_eq!(
+        dialog_of(&serve, ask, &dialog),
+        dialog_id,
+        "a second report of the same dialog keeps its id"
+    );
+}
+
+#[test]
+fn show_prints_the_row_when_its_screen_cannot_be_read() {
+    let serve = mixed_serve();
+    let failing = r#"{"ok":false,"step":"blob_read","error":"timeout"}"#;
+    let shown = shown_screen(&serve, "mini/block:web-ask", failing);
+    assert_eq!(shown["key"], "mini/block:web-ask");
+    assert_eq!(shown["dialog"], serde_json::Value::Null);
+    assert_eq!(shown["options"], serde_json::json!([]));
+    assert!(
+        shown["screen_error"].as_str().unwrap().contains("timeout"),
+        "{shown}"
+    );
+    serve
+        .cmd()
+        .env("FAKE_REX_TAIL_REPLY", failing)
+        .args(["show", "mini/block:web-ask", "--tail", "5", "--json"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("\"code\":\"REX\""));
+}
+
+#[test]
+fn close_asks_on_a_terminal_and_needs_yes_without_one() {
+    let serve = mixed_serve();
+    serve
+        .cmd()
+        .args(["close", "mini/block:web-ask", "--json"])
+        .assert()
+        .code(2)
+        .stderr(
+            predicate::str::contains("\"code\":\"USAGE\"")
+                .and(predicate::str::contains(
+                    "close web › main › seat-q on mini, ending claude (blocked · question)? Without a terminal to ask on, --yes closes it",
+                ))
+                .and(predicate::str::contains("rexboard close mini/block:web-ask --yes")),
+        );
+    assert!(
+        !serve.log_lines().iter().any(|l| l.contains("block close")),
+        "nothing closed"
+    );
+    serve
+        .cmd()
+        .args(["close", "mini/block:web-ask", "--yes", "--json"])
+        .assert()
+        .success()
+        .stdout("{\"closed\":true,\"key\":\"mini/block:web-ask\",\"ok\":true}\n");
+    assert!(
+        serve
+            .log_lines()
+            .iter()
+            .any(|l| l == "-S mini block close block:web-ask"),
+        "{:?}",
+        serve.log_lines()
+    );
+    serve
+        .cmd()
+        .env("FAKE_REX_CLOSE_STDERR", "error: block not found")
+        .args(["close", "mini/block:web-done", "--yes"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "close failed: error: block not found",
+        ));
+    serve
+        .cmd()
+        .env("TMUX", "/tmp/tmux-501/default,1,0")
+        .env("REX_BLOCK", "block:web-ask")
+        .args(["close", "local/block:api-seat-a", "--yes", "--json"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "you are inside tmux and this pane runs tmux, so it may be the one you are in; it stays open",
+        ))
+        .stderr(predicate::str::contains("\"next_steps\":[]"));
+    assert!(
+        !serve
+            .log_lines()
+            .iter()
+            .any(|l| l.contains("block close block:api-seat-a")),
+        "nothing closed"
+    );
+    serve
+        .cmd()
+        .env_remove("TMUX")
+        .args(["close", "local/block:api-seat-a", "--yes"])
+        .assert()
+        .success();
 }
 
 #[test]

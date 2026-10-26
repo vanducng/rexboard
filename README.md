@@ -28,7 +28,7 @@ On the board, `j`/`k` move, `n` goes to the next row that needs you, `enter` jum
 
 A pane needs you when it is blocked, has an error, or is done and you have not seen it. Going to it, or `m`, marks it seen. Its state is what its agent reports to Rex: Claude Code and Codex report on their own in a Rex pane, an agent inside tmux needs a hook, and a pane that reports nothing is read from its title. [Agent status](docs/agent-status.md) says what to check when a row looks wrong.
 
-rexboard only reads Rex, except to jump to a pane and, from the board, to answer or close one.
+rexboard only reads Rex, except to jump to a pane and to answer or close one, from the board or the CLI.
 
 ## Docs
 
