@@ -9,11 +9,11 @@ use unicode_width::UnicodeWidthStr;
 use ratatui::crossterm::event::KeyCode;
 
 use super::app::{App, Item, Link, Spot};
-use super::columns::{Col, Columns, Tier, Tone, column_of, tier};
+use super::columns::{Col, Columns, Sort, Tier, Tone, column_of, tier};
 use super::keys::{self, Act};
 use super::status::ALL;
 use super::theme;
-use super::views::{Key, View};
+use super::views::{Bucket, Key, View};
 use crate::board::Row;
 use crate::output::{blocks, fit, wheres};
 
@@ -351,27 +351,12 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
 fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc>) {
     let items = app.items();
     if items.is_empty() {
-        let query = app.filter.value();
-        let text = if let Some(status) = app.status {
-            if query.is_empty() {
-                format!("no {} rows · ff or esc clears", status.name())
-            } else {
-                format!("no {} rows match \"{query}\" · esc clears", status.name())
-            }
-        } else if let Some(key) = app.unknown_key() {
-            format!("no key {key} · esc clears")
-        } else if !query.is_empty() {
-            format!("no rows match \"{query}\" · esc clears")
-        } else {
-            match &app.link {
-                Link::Up => "no agent panes yet".to_owned(),
-                Link::Connecting => "waiting for serve".to_owned(),
-                Link::Lost(why) => why.clone(),
-            }
-        };
         let width = usize::from(area.width);
         frame.render_widget(
-            Paragraph::new(Line::styled(fit(&text, width), theme::quiet())),
+            Paragraph::new(Line::styled(
+                fit(&empty_message(app), width),
+                theme::quiet(),
+            )),
             area,
         );
         return;
@@ -380,23 +365,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
     let columns = Columns::new(board.width, width, &app.field_columns());
     let area = if board.height >= HEADED {
         let [top, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
-        let spans: Vec<Span> = columns
-            .header(app.sort)
-            .into_iter()
-            .flat_map(|cell| {
-                let Some(at) = cell.underline else {
-                    return vec![Span::styled(cell.text, theme::quiet())];
-                };
-                let (before, rest) = cell.text.split_at(at);
-                let (letter, after) = rest.split_at(1);
-                vec![
-                    Span::styled(before.to_owned(), theme::quiet()),
-                    Span::styled(letter.to_owned(), theme::letter(theme::quiet())),
-                    Span::styled(after.to_owned(), theme::quiet()),
-                ]
-            })
-            .collect();
-        frame.render_widget(Paragraph::new(Line::from(spans)), top);
+        frame.render_widget(Paragraph::new(column_header(&columns, app.sort)), top);
         rest
     } else {
         area
@@ -408,16 +377,8 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
         height
     };
     let at = items.iter().position(|item| is_selected(app, item));
-    // The list keeps its place while the selection is in view, so a clicked row stays under the
-    // pointer; past the top it scrolls to put the selection first, past the bottom last.
     let (_, kept, _) = app.drawn.get();
-    let kept = kept.min(items.len().saturating_sub(room));
-    let offset = match at {
-        Some(at) if at < kept => at,
-        Some(at) if at < kept + room => kept,
-        Some(at) => (at + 1).saturating_sub(room),
-        None => 0,
-    };
+    let offset = scroll_offset(at, kept, items.len(), room);
     app.drawn.set((area.y, offset, room));
     let places = if columns.has(Col::Where) {
         wheres(
@@ -444,17 +405,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
                 bucket,
                 count,
                 folded,
-            } => {
-                let mark = if *folded { theme::FOLDED } else { "" };
-                let title = format!("{mark}{} ({count}) ", bucket.title());
-                let fill = theme::GROUP_FILL.repeat(width.saturating_sub(title.width()));
-                let line = Line::styled(format!("{title}{fill}"), theme::header());
-                if is_selected(app, item) {
-                    line.style(theme::selected(theme::header()))
-                } else {
-                    line
-                }
-            }
+            } => group_header_line(bucket, *count, *folded, is_selected(app, item), width),
             &Item::Row(i) => row_line(
                 &app.rows[i],
                 &places[i],
@@ -465,9 +416,98 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
             ),
         })
         .collect();
-    let below: usize = items
+    if room < height {
+        lines.push(Line::styled(
+            format!(
+                "{} {} more",
+                theme::MORE,
+                hidden_below(&items, offset + room)
+            ),
+            theme::quiet(),
+        ));
+    }
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// What an empty list says: why nothing matches, or how serve is.
+fn empty_message(app: &App) -> String {
+    let query = app.filter.value();
+    if let Some(status) = app.status {
+        if query.is_empty() {
+            format!("no {} rows · ff or esc clears", status.name())
+        } else {
+            format!("no {} rows match \"{query}\" · esc clears", status.name())
+        }
+    } else if let Some(key) = app.unknown_key() {
+        format!("no key {key} · esc clears")
+    } else if !query.is_empty() {
+        format!("no rows match \"{query}\" · esc clears")
+    } else {
+        match &app.link {
+            Link::Up => "no agent panes yet".to_owned(),
+            Link::Connecting => "waiting for serve".to_owned(),
+            Link::Lost(why) => why.clone(),
+        }
+    }
+}
+
+/// The column header, each sort letter underlined.
+fn column_header(columns: &Columns, sort: Option<Sort>) -> Line<'static> {
+    let spans: Vec<Span> = columns
+        .header(sort)
+        .into_iter()
+        .flat_map(|cell| {
+            let Some(at) = cell.underline else {
+                return vec![Span::styled(cell.text, theme::quiet())];
+            };
+            let (before, rest) = cell.text.split_at(at);
+            let (letter, after) = rest.split_at(1);
+            vec![
+                Span::styled(before.to_owned(), theme::quiet()),
+                Span::styled(letter.to_owned(), theme::letter(theme::quiet())),
+                Span::styled(after.to_owned(), theme::quiet()),
+            ]
+        })
+        .collect();
+    Line::from(spans)
+}
+
+/// The first item shown. The list keeps its place while the selection is in view, so a clicked
+/// row stays under the pointer; past the top it scrolls to put the selection first, past the
+/// bottom last.
+fn scroll_offset(at: Option<usize>, kept: usize, len: usize, room: usize) -> usize {
+    let kept = kept.min(len.saturating_sub(room));
+    match at {
+        Some(at) if at < kept => at,
+        Some(at) if at < kept + room => kept,
+        Some(at) => (at + 1).saturating_sub(room),
+        None => 0,
+    }
+}
+
+fn group_header_line(
+    bucket: &Bucket,
+    count: usize,
+    folded: bool,
+    selected: bool,
+    width: usize,
+) -> Line<'static> {
+    let mark = if folded { theme::FOLDED } else { "" };
+    let title = format!("{mark}{} ({count}) ", bucket.title());
+    let fill = theme::GROUP_FILL.repeat(width.saturating_sub(title.width()));
+    let line = Line::styled(format!("{title}{fill}"), theme::header());
+    if selected {
+        line.style(theme::selected(theme::header()))
+    } else {
+        line
+    }
+}
+
+/// The rows past `from` that the list cannot show, counting a folded group's rows.
+fn hidden_below(items: &[Item], from: usize) -> usize {
+    items
         .iter()
-        .skip(offset + room)
+        .skip(from)
         .map(|item| match item {
             Item::Row(_) => 1,
             Item::Header {
@@ -477,14 +517,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
             } => *count,
             Item::Header { .. } => 0,
         })
-        .sum();
-    if room < height {
-        lines.push(Line::styled(
-            format!("{} {below} more", theme::MORE),
-            theme::quiet(),
-        ));
-    }
-    frame.render_widget(Paragraph::new(lines), area);
+        .sum()
 }
 
 fn is_selected(app: &App, item: &Item) -> bool {
