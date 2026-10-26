@@ -117,9 +117,16 @@ pub fn upgrade(sys: &mut impl System, exe: &Path, current: &str, check: bool) ->
             latest,
         });
     }
+    let mut refreshed = true;
     let (installed, how) = match method(exe) {
         Method::Other { why, run } => return Err(Error::upgrade(why, &[&run])),
         Method::Brew { installed } => {
+            // brew refreshes its taps only once a day by itself, so a release from today is not
+            // in the local tap until it is told to.
+            if let Err(err) = sys.run("brew", &["update", "--quiet"], &[]) {
+                eprintln!("warning: {err}; upgrading from the tap as it is");
+                refreshed = false;
+            }
             sys.run("brew", &["upgrade", FORMULA], &[])?;
             (installed, "brew")
         }
@@ -131,13 +138,23 @@ pub fn upgrade(sys: &mut impl System, exe: &Path, current: &str, check: bool) ->
     let to = sys.version_of(&installed).unwrap_or_default();
     if !older(current, &to) {
         if how == "brew" && to == current {
-            return Err(Error::upgrade(
-                format!(
-                    "after brew upgrade, rexboard is still {current}: the tap may not have \
-                     {latest} yet; it follows a release by a few minutes"
-                ),
-                &["brew update", "rexboard upgrade"],
-            ));
+            return Err(if refreshed {
+                Error::upgrade(
+                    format!(
+                        "after brew update and brew upgrade, rexboard is still {current}: the \
+                         tap does not have {latest} yet; it follows a release by a few minutes"
+                    ),
+                    &["rexboard upgrade"],
+                )
+            } else {
+                Error::upgrade(
+                    format!(
+                        "brew update failed (its output is above), so the tap may be stale; \
+                         rexboard is still {current}"
+                    ),
+                    &["brew update", "rexboard upgrade"],
+                )
+            });
         }
         let said = if to.is_empty() { "no version" } else { &to };
         return Err(Error::upgrade(
@@ -317,6 +334,8 @@ mod tests {
         after: Option<&'static str>,
         writable: bool,
         fails: bool,
+        /// Only a run whose first argument is this fails.
+        fails_on: Option<&'static str>,
         ran: Vec<String>,
         stops: usize,
     }
@@ -327,6 +346,7 @@ mod tests {
             after,
             writable: true,
             fails: false,
+            fails_on: None,
             ran: Vec::new(),
             stops: 0,
         }
@@ -344,7 +364,7 @@ mod tests {
                 envs.collect::<String>(),
                 args.join(" ")
             ));
-            if self.fails {
+            if self.fails || self.fails_on == args.first().copied() {
                 return Err(Error::upgrade(format!("{program} failed"), &[]));
             }
             Ok(())
@@ -476,8 +496,41 @@ mod tests {
                 serve_stopped: true
             }
         );
-        assert_eq!(sys.ran, ["brew upgrade vanducng/tap/rexboard"]);
+        assert_eq!(
+            sys.ran,
+            ["brew update --quiet", "brew upgrade vanducng/tap/rexboard"],
+            "the tap is refreshed first"
+        );
         assert_eq!(sys.stops, 1);
+    }
+
+    #[test]
+    fn a_failed_tap_refresh_that_leaves_the_old_version_says_the_tap_may_be_stale() {
+        let mut sys = fake("0.4.0", Some("0.3.0"));
+        sys.fails_on = Some("update");
+        let exe = Path::new("/opt/homebrew/Cellar/rexboard/0.3.0/bin/rexboard");
+        let err = upgrade(&mut sys, exe, "0.3.0", false).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "brew update failed (its output is above), so the tap may be stale; rexboard is still 0.3.0"
+        );
+        assert_eq!(err.next_steps(), ["brew update", "rexboard upgrade"]);
+        assert_eq!(sys.stops, 0);
+    }
+
+    #[test]
+    fn a_failed_tap_refresh_still_upgrades() {
+        let mut sys = fake("0.4.0", Some("0.4.0"));
+        sys.fails_on = Some("update");
+        let exe = Path::new("/opt/homebrew/Cellar/rexboard/0.3.0/bin/rexboard");
+        assert!(matches!(
+            upgrade(&mut sys, exe, "0.3.0", false).unwrap(),
+            Outcome::Upgraded { .. }
+        ));
+        assert_eq!(
+            sys.ran,
+            ["brew update --quiet", "brew upgrade vanducng/tap/rexboard"]
+        );
     }
 
     #[test]
@@ -590,11 +643,11 @@ mod tests {
         let err = upgrade(&mut sys, exe, "0.3.0", false).unwrap_err();
         assert!(
             err.to_string().contains(
-                "rexboard is still 0.3.0: the tap may not have 0.4.0 yet; it follows a release by a few minutes"
+                "after brew update and brew upgrade, rexboard is still 0.3.0: the tap does not have 0.4.0 yet; it follows a release by a few minutes"
             ),
             "{err}"
         );
-        assert_eq!(err.next_steps(), ["brew update", "rexboard upgrade"]);
+        assert_eq!(err.next_steps(), ["rexboard upgrade"]);
         assert_eq!(sys.stops, 0);
         let mut sys = fake("0.4.0", None);
         sys.fails = true;
