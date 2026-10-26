@@ -45,6 +45,14 @@ pub enum Command {
     },
     /// Pick a pane from the board's list and go to it. Enter goes and exits 0; esc exits 1.
     Pick,
+    /// Upgrade rexboard the way it was installed (Homebrew, or install.sh), then stop serve so the
+    /// next command runs the new one.
+    #[command(alias = "update")]
+    Upgrade {
+        /// Only say whether a newer release is out.
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 #[derive(Debug, Args)]

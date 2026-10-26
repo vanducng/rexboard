@@ -49,6 +49,8 @@ brew install vanducng/tap/rexboard
 brew upgrade rexboard
 ```
 
+`rexboard upgrade` does the same for either install method, and stops serve so the next command runs the new one (see [`rexboard upgrade`](cli.md#rexboard-upgrade)).
+
 After an upgrade, the next command finds the older serve and restarts it on the new version, once, so nothing needs stopping by hand (see [`rexboard serve`](cli.md#rexboard-serve)).
 
 Without Homebrew, or for a release other than the latest (the tap keeps only the latest), `install.sh` at the repo root is the installer. Switching from it to Homebrew, remove `~/.local/bin/rexboard` first, so the two do not shadow each other:

@@ -38,6 +38,9 @@ pub enum Error {
     },
     #[error("{0}")]
     Config(String),
+    /// The upgrade could not run, or did not take.
+    #[error("{message}")]
+    Upgrade { message: String, steps: Vec<String> },
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -50,6 +53,13 @@ impl Error {
 
     pub fn serve_with(message: impl Into<String>, steps: &[&str]) -> Self {
         Self::Serve {
+            message: message.into(),
+            steps: steps.iter().map(|s| (*s).to_owned()).collect(),
+        }
+    }
+
+    pub fn upgrade(message: impl Into<String>, steps: &[&str]) -> Self {
+        Self::Upgrade {
             message: message.into(),
             steps: steps.iter().map(|s| (*s).to_owned()).collect(),
         }
@@ -76,6 +86,7 @@ impl Error {
             Self::NobodyNeedsYou => "NOBODY_NEEDS_YOU",
             Self::AmbiguousClient { .. } => "AMBIGUOUS_CLIENT",
             Self::Config(_) => "CONFIG",
+            Self::Upgrade { .. } => "UPGRADE",
             Self::Io(_) => "IO",
         }
     }
@@ -93,11 +104,17 @@ impl Error {
             Self::ServeRunning(_) => vec!["rexboard serve --stop".to_owned()],
             Self::NotFound(_) => vec!["rexboard ls --json".to_owned()],
             Self::NobodyNeedsYou => vec!["rexboard ls".to_owned()],
-            Self::AmbiguousClient { steps, .. } | Self::RexExplained { steps, .. } => steps.clone(),
+            Self::AmbiguousClient { steps, .. }
+            | Self::RexExplained { steps, .. }
+            | Self::Upgrade { steps, .. }
+                if !steps.is_empty() =>
+            {
+                steps.clone()
+            }
             Self::Config(_) => vec![CONFIG_DOC.to_owned()],
             Self::ContractMismatch(_) => vec![
                 "rexboard --version".to_owned(),
-                "brew upgrade rexboard".to_owned(),
+                "rexboard upgrade".to_owned(),
             ],
             _ => vec!["rexboard --help".to_owned()],
         }
