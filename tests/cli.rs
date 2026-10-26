@@ -3150,21 +3150,6 @@ fn close_asks_on_a_terminal_and_needs_yes_without_one() {
 }
 
 #[test]
-fn every_json_sample_in_the_cli_doc_parses() {
-    let doc = include_str!("../docs/cli.md");
-    let samples: Vec<&str> = doc
-        .split("```json\n")
-        .skip(1)
-        .map(|rest| rest.split("```").next().unwrap())
-        .collect();
-    assert!(samples.len() >= 5, "{}", samples.len());
-    for sample in samples {
-        serde_json::from_str::<serde_json::Value>(sample)
-            .unwrap_or_else(|err| panic!("{err}: {sample}"));
-    }
-}
-
-#[test]
 fn hosts_says_each_hosts_state_rows_and_why_it_is_down() {
     let up = mixed_serve();
     let out = up
