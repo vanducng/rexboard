@@ -21,6 +21,7 @@ use crate::send::{Action, Expect};
 
 mod filter;
 mod select;
+mod views;
 
 const TOAST: Duration = Duration::from_secs(3);
 /// Keys this close together are typing or a paste, not a person answering a question.
@@ -292,154 +293,6 @@ impl App {
             .as_ref()
             .filter(|(_, at)| at.elapsed() < TOAST)
             .map(|(text, _)| text.as_str())
-    }
-
-    /// New fields and runs from serve. A view or sort on a field that is gone goes back to the
-    /// default.
-    pub fn set_extensions(&mut self, fields: Vec<Field>, runs: BTreeMap<String, ExtRun>) {
-        self.ext_runs = runs;
-        if self.fields.iter().map(|(f, _)| f).eq(&fields) {
-            return;
-        }
-        let mut taken = Vec::new();
-        self.fields = fields
-            .into_iter()
-            .map(|field| {
-                let letter = free_letter(&field.name, &taken);
-                taken.extend(letter);
-                (field, letter)
-            })
-            .collect();
-        if !self.views().contains(&self.view) {
-            self.view = View::default();
-        }
-        if let Some((Col::Field(id), _)) = self.sort
-            && !self.fields.iter().any(|(f, _)| f.id == id)
-        {
-            self.sort = None;
-        }
-    }
-
-    /// The columns of the fields, but for the one the view groups by, whose group header says it.
-    pub fn field_columns(&self) -> Vec<&'static Column> {
-        self.fields
-            .iter()
-            .map(|(f, letter)| field_column(f, *letter))
-            .filter(|c| {
-                self.view
-                    .group_by
-                    .is_none_or(|key| key != Key::Field(id_of(c)))
-            })
-            .collect()
-    }
-
-    /// The views `v` cycles through: the built-in ones, then one per field, by its name, or by
-    /// its id when a built-in view has that name.
-    pub fn views(&self) -> Vec<View> {
-        let mut all = views();
-        for (field, letter) in &self.fields {
-            let name = if all.iter().any(|v| v.name == field.name) {
-                field.id.clone()
-            } else {
-                field.name.clone()
-            };
-            let id = id_of(field_column(field, *letter));
-            all.push(View {
-                name,
-                group_by: Some(Key::Field(id)),
-            });
-        }
-        all
-    }
-
-    /// The column a sort letter names: a built-in one, or a field's.
-    fn column_by_letter(&self, letter: char) -> Option<&'static Column> {
-        by_letter(letter).or_else(|| {
-            let (field, _) = self.fields.iter().find(|(_, l)| *l == Some(letter))?;
-            Some(field_column(field, Some(letter)))
-        })
-    }
-
-    /// Switches to `view`; the selection keeps its row.
-    fn show(&mut self, view: View) {
-        if let Some(Spot::Group(_)) = self.selected {
-            self.unfold_all();
-        }
-        self.view = view;
-        if self.clicks() && !self.told_table {
-            self.told_table = true;
-            self.say("click a header to sort · hold Option (iTerm2) or Shift to select text");
-        }
-        // A row in a group this view keeps folded rests on that group's header, as `z` does.
-        if let Some(group) = self.current().and_then(|row| bucket(&self.view, row))
-            && self.folded.contains(&group)
-        {
-            self.selected = Some(Spot::Group(group));
-        }
-        self.keep_selection_visible();
-    }
-
-    /// The `:` prompt's Tab: the one view name the typed text starts, else the longest prefix
-    /// the names share.
-    fn complete(&mut self) {
-        let typed = self.command.value().to_owned();
-        let names: Vec<String> = self
-            .views()
-            .into_iter()
-            .map(|v| v.name)
-            .filter(|name| name.starts_with(&typed))
-            .collect();
-        let Some(first) = names.first() else {
-            return;
-        };
-        let common = names.iter().fold(first.clone(), |acc, name| {
-            acc.chars()
-                .zip(name.chars())
-                .take_while(|(a, b)| a == b)
-                .map(|(a, _)| a)
-                .collect()
-        });
-        self.command = Input::new(common);
-    }
-
-    /// The `:` prompt's Enter: `seen` marks every done row shown seen, `q` quits, else a view's
-    /// name, or the start of exactly one.
-    fn open(&mut self) -> Option<Effect> {
-        match self.command.value().trim() {
-            "seen" => return self.seen_all(),
-            "q" | "q!" | "quit" => return Some(Effect::Quit),
-            _ => {}
-        }
-        let typed = match self.command.value().trim() {
-            // `flat` was the table view's name before v0.3.
-            "flat" => "table".to_owned(),
-            typed => typed.to_owned(),
-        };
-        let all = self.views();
-        let found = all.iter().find(|v| v.name == typed).cloned().or_else(|| {
-            let mut starts = all.iter().filter(|v| v.name.starts_with(&typed));
-            match (starts.next(), starts.next()) {
-                (Some(one), None) if !typed.is_empty() => Some(one.clone()),
-                _ => None,
-            }
-        });
-        match found {
-            Some(view) => self.show(view),
-            None => self.say(format!("no view \"{typed}\"")),
-        }
-        None
-    }
-
-    /// `o` and a column's letter: sort by it, flip it if it is the sort, clear it the third time.
-    fn sort_by(&mut self, letter: char) {
-        let Some(column) = self.column_by_letter(letter) else {
-            return;
-        };
-        self.sort = match self.sort {
-            Some((id, dir)) if id == column.id && dir == column.first => Some((id, dir.flip())),
-            Some((id, _)) if id == column.id => None,
-            _ => Some((column.id, column.first)),
-        };
     }
 
     /// Whether the card shows under the list: unless `c` hid it, and always while it holds the
@@ -818,16 +671,6 @@ impl App {
         None
     }
 
-    /// The sort letters `o` takes, built-in then the fields'.
-    pub fn sort_letters(&self) -> Vec<String> {
-        super::columns::COLUMNS
-            .iter()
-            .filter_map(|c| c.letter)
-            .chain(self.fields.iter().filter_map(|(_, l)| *l))
-            .map(String::from)
-            .collect()
-    }
-
     fn act(&mut self, act: Act, k: K, now: Instant) -> Option<Effect> {
         // `pick` only picks: nothing that leaves the list or acts on a pane but going to it.
         if self.pick
@@ -1085,21 +928,6 @@ impl App {
         answer.error = Some(why);
         Some(read(&answer.row))
     }
-
-    /// `ctrl+s`: every unseen `done` row the list shows, to be marked seen.
-    fn seen_all(&mut self) -> Option<Effect> {
-        let keys: Vec<String> = self
-            .rows
-            .iter()
-            .filter(|row| row.pane.state == "done" && !row.seen && self.matches(row))
-            .map(|row| row.key.clone())
-            .collect();
-        if keys.is_empty() {
-            self.say("no unseen done rows");
-            return None;
-        }
-        Some(Effect::SeenAll(keys))
-    }
 }
 
 /// Whether report `a` came after `b`.
@@ -1145,7 +973,6 @@ pub mod testkit;
 mod tests {
     use super::testkit::*;
     use super::*;
-    use crate::tui::columns::{Col, Dir};
 
     #[test]
     fn full_view_a_and_enter_act_on_the_viewed_row_not_the_boards_selection() {
@@ -1597,43 +1424,6 @@ mod tests {
         app.set_rows(rows().split_off(1), hosts());
         assert!(app.full.is_none());
         assert_eq!(app.toast(), Some("seat-b left the board"));
-    }
-
-    #[test]
-    fn colon_seen_marks_only_unseen_done_rows_and_o_s_sorts() {
-        let mut app = App::default();
-        let mut all = rows();
-        all.push(row("mini/old-done", "done", "needs_you", false));
-        all.push(row("mini/seen-done", "done", "quiet", true));
-        all.push(row("mini/broken", "error", "needs_you", false));
-        app.set_rows(all, hosts());
-        assert_eq!(typed(&mut app, "os").pop().flatten(), None, "o s sorts");
-        assert_eq!(app.sort, Some((Col::State, Dir::Up)));
-        assert_eq!(
-            seen_all(&mut app),
-            Some(Effect::SeenAll(vec![
-                "local/claude".into(),
-                "mini/old-done".into()
-            ])),
-            "never blocked, error or already seen rows"
-        );
-        press(&mut app, KeyCode::Char('/'));
-        for c in "old".chars() {
-            press(&mut app, KeyCode::Char(c));
-        }
-        press(&mut app, KeyCode::Enter);
-        assert_eq!(
-            seen_all(&mut app),
-            Some(Effect::SeenAll(vec!["mini/old-done".into()])),
-            "a kept filter narrows it to the rows shown"
-        );
-        press(&mut app, KeyCode::Esc);
-        app.set_rows(
-            vec![row("mini/seat-b", "blocked", "needs_you", false)],
-            hosts(),
-        );
-        assert_eq!(seen_all(&mut app), None);
-        assert_eq!(app.toast(), Some("no unseen done rows"));
     }
 
     #[test]
