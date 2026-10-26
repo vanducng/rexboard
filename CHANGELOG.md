@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.3.0](https://github.com/vanducng/rexboard/compare/v0.2.0...v0.3.0) (2026-10-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **window:** `rexboard window` and `jump.pre_cmd` are removed, along with the `JUMP` error code that only pre_cmd raised. Run `rexboard` in the Rex tab you want the board in; a jump opens the agent's session in that same window. An old `[jump]` table is ignored.
+
+### Features
+
+* **tui:** a table view sorted by any column, by key or header click ([495b3c5](https://github.com/vanducng/rexboard/commit/495b3c564cfa516fb4f9cc0e79ade09162525f28))
+* **tui:** fill the detail pane with the peek's newest lines, wrapped from the bottom ([#24](https://github.com/vanducng/rexboard/issues/24)) ([a3b24f7](https://github.com/vanducng/rexboard/commit/a3b24f7fbbc34e57caba3cc7fb77a56beb50aa19))
+* **tui:** filter the board to one status with f and a letter ([#20](https://github.com/vanducng/rexboard/issues/20)) ([e50bdc1](https://github.com/vanducng/rexboard/commit/e50bdc1d2ad87e4fa40c2ac5e0bc179f9bad8b28))
+* **tui:** put a blank row between the board's title and its column header ([#17](https://github.com/vanducng/rexboard/issues/17)) ([2457d0b](https://github.com/vanducng/rexboard/commit/2457d0b17ff74f0714b5dc3571934c317f12f2db))
+* **tui:** split WHERE into SESSION, WINDOW and BLOCK on a wide list ([#26](https://github.com/vanducng/rexboard/issues/26)) ([5fc01a1](https://github.com/vanducng/rexboard/commit/5fc01a12bbd8a036db02dd8eb52c51fb75ca201f))
+* **tui:** widen the detail pane to a third and let &lt; and &gt; resize it ([#21](https://github.com/vanducng/rexboard/issues/21)) ([2b09a32](https://github.com/vanducng/rexboard/commit/2b09a32cdc98bc1f2025e98e992a62a2837a432c))
+
+
+### Bug Fixes
+
+* **serve:** put the socket beside serve.lock so every caller finds the one serve ([#19](https://github.com/vanducng/rexboard/issues/19)) ([bc82864](https://github.com/vanducng/rexboard/commit/bc828644afe3e1ebeea0f2d0d0ce961441b1224c))
+* **tui:** stop table-view redraws on mouse motion, keep a clicked row in place, and stop the wheel at the ends ([#29](https://github.com/vanducng/rexboard/issues/29)) ([4769a60](https://github.com/vanducng/rexboard/commit/4769a6018e73fb06b69878ecdfd35cd52ec39cea))
+
+
+### Code Refactoring
+
+* **window:** remove the window command, jump.pre_cmd and the board's terminal title ([#25](https://github.com/vanducng/rexboard/issues/25)) ([d1e76cc](https://github.com/vanducng/rexboard/commit/d1e76ccd420f5dcb4754f61dac5a37d6f3638a5a))
+
 ## [0.2.0](https://github.com/vanducng/rexboard/compare/v0.1.0...v0.2.0) (2026-10-25)
 
 
