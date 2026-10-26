@@ -184,7 +184,7 @@ rexboard serve --foreground   # run it in this terminal
 rexboard serve --stop         # stop it and its observers
 ```
 
-`serve` owns one observer per host and the board, and answers `ls`, `watch --json`, `seen`, `show`, `views`, `jump`, `next`, `pick`, the board and `ext test` over a unix socket. Any of those starts it when nothing answers, as `rexboard serve --foreground` in its own session with its output in `serve.log`, and waits up to 2 seconds for it. Only one runs at a time: a second `serve --foreground` fails with `SERVE_RUNNING` (exit 1). It rescans `rex hosts` every 5 minutes.
+`serve` owns one observer per host and the board, and answers `ls`, `watch --json`, `seen`, `show`, `views`, `hosts`, `jump`, `next`, `pick`, the board and `ext test` over a unix socket. Any of those starts it when nothing answers, as `rexboard serve --foreground` in its own session with its output in `serve.log`, and waits up to 2 seconds for it. Only one runs at a time: a second `serve --foreground` fails with `SERVE_RUNNING` (exit 1). It rescans `rex hosts` every 5 minutes.
 
 The socket, `serve.sock`, sits beside `serve.lock` in the state dir, so every caller finds the running serve whatever its `TMPDIR` or `XDG_RUNTIME_DIR`. If that path is longer than 103 bytes, commands fail with `SERVE`: set a shorter `XDG_STATE_HOME` everywhere rexboard runs (it also holds `state.json`). serve keeps the environment of the command that started it, so after changing `REXBOARD_REX` or `REX_BIN_DIR`, run `rexboard serve --stop`.
 
@@ -247,6 +247,18 @@ The views `ls --view` and the board's `v` take, in the board's order: the built-
 
 ```json
 [{"group_by":"status","name":"status"},{"group_by":null,"name":"table"},{"group_by":"harness","name":"harness"},{"group_by":"host","name":"host"}]
+```
+
+## `rexboard hosts`
+
+```bash
+rexboard hosts
+```
+
+The hosts serve watches, as the board's top bar sees them: this host as `local` and every `rex hosts` entry, each with its state (`starting`, `up`, `down` or `stopped`), how many agent rows it has, and why it is down or stopped, until it is up again. `down` retries by itself; `stopped` does not (see [Down and restart](#down-and-restart)). With `--json`:
+
+```json
+[{"error":null,"host":"local","rows":4,"state":"up"},{"error":"observer exited (exit status: 1): observer.lua:12: attempt to index a nil value","host":"mini","rows":0,"state":"down"}]
 ```
 
 ## `rexboard jump`, `next` and `pick`

@@ -69,6 +69,7 @@ pub fn execute(cli: &Cli) -> Result<()> {
         Command::Seen(args) => client::seen(args, cli.json),
         Command::Show { key, tail } => show::show(key, *tail, cli.json),
         Command::Views => show::views(cli.json),
+        Command::Hosts => show::hosts(cli.json),
         Command::Jump { target } => jump::jump(target, cli.json),
         Command::Next { back } => jump::next(*back, cli.json),
         Command::Upgrade { check } => upgrade::run(*check, cli.json),

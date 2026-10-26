@@ -41,6 +41,9 @@ pub struct Rows {
     /// How each enabled extension's last run went.
     #[serde(default)]
     pub extensions: BTreeMap<String, ExtRun>,
+    /// Why a host is down or stopped.
+    #[serde(default)]
+    pub host_errors: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]

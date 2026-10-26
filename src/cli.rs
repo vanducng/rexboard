@@ -41,6 +41,8 @@ pub enum Command {
     },
     /// List the views `ls --view` and the board's `v` take, and what each groups by.
     Views,
+    /// List the hosts serve watches: each one's state, agent rows and last error.
+    Hosts,
     /// Go to a pane in the Rex window you are in, on its host, and mark it seen.
     Jump {
         /// HOST/BLOCK_ID (the `key` from `ls --json`), N for the nth NEEDS YOU row, or `-` for the

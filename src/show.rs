@@ -1,4 +1,5 @@
-//! `rexboard show` and `rexboard views`: what the board's card and `v` show, for agents.
+//! `rexboard show`, `views` and `hosts`: what the board's card, `v` and top bar show, for
+//! agents.
 
 use chrono::Utc;
 use serde_json::json;
@@ -107,6 +108,44 @@ pub fn views(json: bool) -> Result<()> {
             Some(by) => println!("{name:<width$}  groups by {by}"),
             None => println!("{name:<width$}  one list"),
         }
+    }
+    Ok(())
+}
+
+pub fn hosts(json: bool) -> Result<()> {
+    let rows = client::current()?;
+    let list: Vec<(&String, &String, usize, Option<&String>)> = rows
+        .hosts
+        .iter()
+        .map(|(host, state)| {
+            let agents = rows
+                .rows
+                .iter()
+                .filter(|row| &row.pane.host == host && row.pane.is_agent())
+                .count();
+            (host, state, agents, rows.host_errors.get(host))
+        })
+        .collect();
+    if json {
+        let list: Vec<_> = list
+            .iter()
+            .map(|(host, state, agents, error)| {
+                json!({ "host": host, "state": state, "rows": agents, "error": error })
+            })
+            .collect();
+        println!("{}", json!(list));
+        return Ok(());
+    }
+    let width = list
+        .iter()
+        .map(|(host, ..)| host.len())
+        .max()
+        .unwrap_or(0)
+        .max(4);
+    println!("{:<width$}  {:<8}  {:>4}  ERROR", "HOST", "STATE", "ROWS");
+    for (host, state, agents, error) in list {
+        let error = error.map_or("-".to_owned(), |e| clean(e));
+        println!("{host:<width$}  {state:<8}  {agents:>4}  {error}");
     }
     Ok(())
 }

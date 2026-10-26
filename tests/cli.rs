@@ -2744,3 +2744,67 @@ fn every_json_sample_in_the_cli_doc_parses() {
             .unwrap_or_else(|err| panic!("{err}: {sample}"));
     }
 }
+
+#[test]
+fn hosts_says_each_hosts_state_rows_and_why_it_is_down() {
+    let up = mixed_serve();
+    let out = up
+        .cmd()
+        .args(["hosts", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let hosts: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        hosts,
+        serde_json::json!([
+            { "host": "local", "state": "up", "rows": 1, "error": null },
+            { "host": "mini", "state": "up", "rows": 3, "error": null },
+        ])
+    );
+    up.cmd()
+        .args(["hosts"])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with(
+            "HOST   STATE     ROWS  ERROR\nlocal  up           1  -\n",
+        ));
+    let down = Serve::new();
+    down.cmd()
+        .envs([
+            ("FAKE_REX_EXIT_AFTER", "0"),
+            ("FAKE_REX_STDERR", "observer.lua:3: boom"),
+        ])
+        .args(["serve"])
+        .assert()
+        .success();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let out = down
+            .cmd()
+            .args(["hosts", "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let hosts: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        let local = hosts
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|h| h["host"] == "local")
+            .unwrap();
+        if local["state"] == "down" {
+            assert_eq!(
+                local["error"],
+                "observer exited (exit status: 1): observer.lua:3: boom"
+            );
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "{hosts}");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}

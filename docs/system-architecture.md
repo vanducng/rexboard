@@ -51,7 +51,7 @@ rexboard reaches Rex only through the `rex` command: `rex do` for the scripts, `
 | `src/output.rs` | Text for the `ls` table and the board: labels and paths cut to fit, `#N` for twins, widths, ages |
 | `src/rex.rs` | Finds `rex`, runs one-shot scripts, and holds the one lock around every spawn, bind, accept and connect |
 | `src/jump.rs` | `jump`, `next` and `pick`'s jump: runs `jump.lua`, then marks the row seen through serve; turns Rex's failures into plain errors |
-| `src/show.rs` | `show` and `views`: what the board's card and `v` show, for the CLI; `show --tail` reads the pane through the board's own tail |
+| `src/show.rs` | `show`, `views` and `hosts`: what the board's card, `v` and top bar show, for the CLI; `show --tail` reads the pane through the board's own tail, and `hosts` reads serve's host states and their last errors |
 | `src/send.rs` | Runs `send.lua` for an answer, within 5s, and turns its refusals into plain reasons; runs `rex block close` for a close |
 | `src/upgrade.rs` | `rexboard upgrade`: finds how this binary was installed and upgrades it the same way |
 | `src/config.rs` | `config.toml` |
@@ -95,7 +95,7 @@ One JSON request per line on the socket; every reply line carries `"v": 1`.
 
 | Request | Reply |
 | --- | --- |
-| `{"cmd":"rows"}` | `{"v":1,"rows":[ROW...],"hosts":{HOST:STATE},"extensions":{...},"fields":[...]}`. `STATE` is `starting`, `up`, `down` or `stopped`. `extensions` is each extension's last run, and `fields` the declared fields (`{id, name, title}`) in `enabled` order, sent before any run so the board can show them. Right after serve starts, the reply waits up to 5s for every host's first snapshot |
+| `{"cmd":"rows"}` | `{"v":1,"rows":[ROW...],"hosts":{HOST:STATE},"host_errors":{HOST:WHY},"extensions":{...},"fields":[...]}`. `STATE` is `starting`, `up`, `down` or `stopped`; `host_errors` says why for a host that is down or stopped, until it is up again. `extensions` is each extension's last run, and `fields` the declared fields (`{id, name, title}`) in `enabled` order, sent before any run so the board can show them. Right after serve starts, the reply waits up to 5s for every host's first snapshot |
 | `{"cmd":"subscribe"}` | The same `rows` line now and on every change (at most every 100ms), plus `{"v":1,"heartbeat":true}` every second. Each subscriber has room for 4 lines; a reader that falls behind misses lines rather than growing serve, and the next `rows` line is a full snapshot again |
 | `{"cmd":"seen","key":"HOST/BLOCK_ID","jump":false}` | `{"v":1,"ok":true,"key":KEY}`. `jump: true` (from a jump) also makes it where `next` without `after` starts |
 | `{"cmd":"next","after":KEY,"back":false}` | `{"v":1,"row":ROW}`: the next `needs_you` row after `after` (a key or a block id; else the last jump's pane; else the first), unseen rows first and all of them once every row is seen, wrapping; `back` goes the other way |
