@@ -285,9 +285,13 @@ fn capture(host: &str, block: &str) -> Result<Vec<String>> {
 }
 
 /// The last lines of captured pane text, with every escape sequence and control character
-/// removed: the text comes from whatever runs in that pane.
+/// removed: the text comes from whatever runs in that pane. Trailing blanks go too, so a padded
+/// line does not wrap into empty rows.
 fn peek_lines(text: &str) -> Vec<String> {
-    let lines: Vec<String> = text.lines().map(clean).collect();
+    let lines: Vec<String> = text
+        .lines()
+        .map(|line| clean(line).trim_end().to_owned())
+        .collect();
     lines[lines.len().saturating_sub(PEEK_LINES)..].to_vec()
 }
 
@@ -312,6 +316,17 @@ impl Drop for Restore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_line_padded_with_blanks_takes_one_row() {
+        let lines = peek_lines(&format!("foo{}\n", " ".repeat(120)));
+        assert_eq!(lines, ["foo"]);
+        assert_eq!(
+            crate::output::chop(&lines[0], 45).len(),
+            1,
+            "one row at 45 columns"
+        );
+    }
 
     #[test]
     fn peek_lines_keep_the_last_200_without_escape_sequences() {
