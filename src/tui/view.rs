@@ -607,9 +607,8 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled(kept, theme::strong()));
         spans.push(Span::styled(" · esc clears · ", theme::quiet()));
     }
-    // The essentials first, so a narrow board keeps them; then `tab next`, which works through
-    // the rows that need you, and `v view` last, one `?` away. `v view` shows after `/ filter`.
-    // While the card is hidden, `c card` says so, and `space full` shows after it when it fits.
+    // `keys::FOOTER` ranks the keys, and a hidden card adds `c card`; once fitted, `v` shows
+    // after `/` and `space` after `c`.
     let keys: Vec<(&str, &str)> = if app.pick {
         vec![("enter", "go"), ("j/k", "move"), ("/", "filter")]
     } else {
