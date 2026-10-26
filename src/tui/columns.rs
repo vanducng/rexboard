@@ -1000,7 +1000,7 @@ mod tests {
         let mut long = placed(
             "local/blk-1",
             "web-frontend-service",
-            "2-openrig:rig:demo-team#0123456789abcdef#l2",
+            "2-toolrig:rig:demo-team#0123456789abcdef#l2",
         );
         long.pane.pane = "seat".into();
         let mut twin = long.clone();

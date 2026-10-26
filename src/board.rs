@@ -7,6 +7,8 @@ use serde_json::Value;
 use crate::collector::HostEvent;
 use crate::error::{Error, Result};
 use crate::event::{Event, LabelKind};
+use crate::extension::contract::Item;
+use crate::extension::field_id;
 use crate::pane::{self, Pane, SessionSnap, Source};
 
 pub type RowKey = (String, String);
@@ -39,6 +41,9 @@ pub struct Row {
     #[serde(default)]
     pub suspect_reason: Option<String>,
     pub group: Group,
+    /// Extension fields, by id (`<extension>.<field>`).
+    #[serde(default)]
+    pub ext: BTreeMap<String, String>,
 }
 
 /// How old a `working` report can get before a pane that looks idle makes it suspect.
@@ -56,6 +61,7 @@ struct Entry {
     last_turn: Option<i64>,
     seen: bool,
     stale: bool,
+    ext: BTreeMap<String, String>,
 }
 
 impl Entry {
@@ -120,6 +126,7 @@ impl Entry {
             suspect: suspect_reason.is_some(),
             suspect_reason,
             group: self.group(now),
+            ext: self.ext.clone(),
         }
     }
 }
@@ -315,6 +322,19 @@ impl Board {
         for session in sessions {
             keys.extend(self.add_session(host, session, now, true)?);
         }
+        // A snapshot knows nothing of extensions, so their fields and status carry over until
+        // their next run.
+        for (key, prev) in &old {
+            let Some(entry) = self.rows.get_mut(key) else {
+                continue;
+            };
+            entry.ext.clone_from(&prev.ext);
+            if prev.src.fallback.is_some() {
+                entry.src.fallback.clone_from(&prev.src.fallback);
+                let pane = self.derive(host, &self.rows[key].src);
+                self.rows.get_mut(key).expect("listed row").pane = pane;
+            }
+        }
         for (key, prev) in old {
             if let Some(entry) = self.rows.get_mut(&key)
                 && (&entry.pane.state, &entry.pane.kind) == (&prev.pane.state, &prev.pane.kind)
@@ -380,6 +400,7 @@ impl Board {
             last_turn: None,
             seen: !matches!(pane.state.as_str(), "done" | "blocked" | "error"),
             stale: false,
+            ext: BTreeMap::new(),
             src,
             pane,
         };
@@ -431,6 +452,52 @@ impl Board {
         entry.stale = false;
         self.rows.insert(key.clone(), entry);
         vec![key]
+    }
+
+    /// An extension's latest answer: its fields replace the ones it gave before, and its status,
+    /// when the manifest provides one, becomes the fallback of a row with no native record.
+    /// Another extension's fallback is kept until it lets go. Returns the rows that changed.
+    pub fn extension(
+        &mut self,
+        name: &str,
+        results: &BTreeMap<String, Item>,
+        provides_status: bool,
+        now: DateTime<Utc>,
+    ) -> Vec<RowKey> {
+        let prefix = format!("{name}.");
+        let keys: Vec<RowKey> = self.rows.keys().cloned().collect();
+        let mut changed = Vec::new();
+        for key in keys {
+            let item = results.get(&format!("{}/{}", key.0, key.1));
+            let entry = self.rows.get_mut(&key).expect("listed row");
+            let mut fields = entry.ext.clone();
+            fields.retain(|id, _| !id.starts_with(&prefix));
+            for (field, value) in item.iter().flat_map(|item| &item.fields) {
+                fields.insert(field_id(name, field), value.clone());
+            }
+            let fields_changed = fields != entry.ext;
+            entry.ext = fields;
+            let mine = item
+                .and_then(|item| item.status.clone())
+                .filter(|_| provides_status)
+                .map(|status| (name.to_owned(), status));
+            let held_by_other = entry
+                .src
+                .fallback
+                .as_ref()
+                .is_some_and(|(holder, _)| holder != name);
+            let fallback = if held_by_other {
+                entry.src.fallback.clone()
+            } else {
+                mine
+            };
+            if fallback != entry.src.fallback {
+                changed.extend(self.change(&key.0, &key.1, now, |src| src.fallback = fallback));
+            } else if fields_changed {
+                changed.push(key);
+            }
+        }
+        changed
     }
 
     /// Marks every row of `host` stale, so they move to `unreported` without being dropped.

@@ -83,6 +83,8 @@ pub struct Source {
     pub process: Option<String>,
     /// Keyed by record id; `""` is the pane's main record.
     pub records: BTreeMap<String, Record>,
+    /// An extension's status and its name, used only while the pane has no record of its own.
+    pub fallback: Option<(String, crate::extension::contract::Status)>,
 }
 
 impl Source {
@@ -99,6 +101,7 @@ impl Source {
                 .into_iter()
                 .map(|r| (r.id.clone().unwrap_or_default(), r))
                 .collect(),
+            fallback: None,
         }
     }
 }
@@ -208,8 +211,10 @@ pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
     let owner = main
         .and_then(|r| r.owner.as_ref())
         .and_then(|o| o.name.as_deref());
+    // Native records always win over an extension's status.
+    let fallback = src.fallback.as_ref().filter(|_| src.records.is_empty());
     let source = match main {
-        None => "inferred",
+        None => fallback.map_or("inferred", |(name, _)| name.as_str()),
         Some(_) if owner == Some("tmux") || process == Some("tmux") => "bridge",
         Some(_) => "native",
     }
@@ -224,10 +229,18 @@ pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
                 .or_else(|| turn_msg(r, turn)),
             r.updated_at.clone(),
         ),
-        None => {
-            let state = title_state(&src.title).unwrap_or("unknown");
-            (state.to_owned(), None, None, None)
-        }
+        None => match fallback {
+            Some((_, status)) => (
+                status.state.clone(),
+                status.kind.clone(),
+                status.msg.clone().filter(|msg| !msg.is_empty()),
+                None,
+            ),
+            None => {
+                let state = title_state(&src.title).unwrap_or("unknown");
+                (state.to_owned(), None, None, None)
+            }
+        },
     };
     Pane {
         host: host.to_owned(),
