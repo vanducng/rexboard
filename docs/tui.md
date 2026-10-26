@@ -62,7 +62,8 @@ Each field an enabled [extension](extensions.md) declares gets a view, a column 
 
 - **View:** one per field, after `host` in the `v` cycle and open from `:` by the field's name. A field named like a built-in view (`host`) is opened by its id (`fake.host`). Its column is hidden there, since the group header shows the value.
 - **Column:** after `HOST`, titled from the manifest (`RIG`), in `enabled` order and then each manifest's, from 120 columns; below 160 columns only the first two fields get one. A row with no value shows `-`, and sorts last.
-- **Name:** a field goes by its short name (`rig`), unless two enabled extensions declare the same name; then both go by their id (`fake.rig`, `other.rig`), in views, columns and filters alike.
+- **Name:** the view, the filter key and the card use the field's `name`, and the column its `title`, so a manifest that keeps the title the name in capitals has a column that says what to type. A field goes by its short name (`rig`), unless two enabled extensions declare the same name; then both go by their id (`fake.rig`, `other.rig`), in views, filters and the card alike.
+- **Keys:** while there are fields, `?` adds a row after `E N B` with their sort letters and names, and each extension when it fits: `I P  by rig, project`, or `I  by rig (fake)`.
 - **Card:** every field of the selected row, one line per extension under the title and `source` line: `fake · rig api · owner ana`, or `lane desk` for an extension whose one field has its name. Fields without a column show here too.
 - **Alert:** an extension whose last run failed shows in red in the top bar, as a host that is down does. `rexboard ext ls` says why.
 
@@ -77,13 +78,13 @@ In the `table` view a click on a column's header sorts by that column, as its le
 | `j` / `k`, arrows | Move between rows and folded groups; the ends wrap |
 | `g` / `G` | First / last |
 | `1`-`9` | Select the nth `NEEDS YOU` row, counted in the order shown (so a sort changes which row a digit picks), opening its group if it is folded |
-| `/` | Filter rows by host, session, window, block, title, state, message or harness; `enter` keeps it, `esc` clears it. A `key:value` term matches one key: `host`, `state`, `harness`, `session`, `window` (or `tab`), `block` (or `pane`), or an extension field by its name or id. Terms and the rest of the text must all match, ignoring case, so `rig:api state:blocked` keeps the blocked rows whose `rig` contains `api`, and `fake.rig:api` works too. A row with no value never matches its key. A word with `:` whose key is none of these is plain text |
+| `/` | Filter rows by host, session, window, block, title, state, message or harness; `enter` keeps it, `esc` clears it. A `key:value` term matches one key: `host`, `state`, `harness`, `session`, `window` (or `tab`), `block` (or `pane`), or an extension field by its name or id. Terms and the rest of the text must all match, ignoring case, so `rig:api state:blocked` keeps the blocked rows whose `rig` contains `api`, and `fake.rig:api` works too. A row with no value never matches its key. A word with `:` whose key is none of these is plain text, and when nothing matches the list says `no key projct · esc clears` |
 | `f`, then a letter | Show one status only (see [Status filter](#status-filter)). `f f` or `esc` clears it |
 | `space` | Open the [full view](#full-view) of the selected row's pane, read again every 2 seconds while it is open. `space` again or `esc` returns |
 | `tab` | The next row that needs you, after the selected one, round to the first. Leaving a `done` row whose card showed for at least a second marks it seen; a blocked or erroring row is never marked |
 | `s` | Mark the selected pane seen, through serve. The message names it `session › block` (`session › window` for a generic block label). A blocked or erroring pane stays in `NEEDS YOU`, and the message says so |
 | `ctrl+s` | Mark every unseen `done` row the list shows seen (a kept filter narrows it), through serve, and say how many (`9 done rows marked seen`). Blocked and erroring rows are left alone. Before v0.2 this was `S`, which now sorts by state; the `?` table says `(was S)`, and the first `S` of a run says `sorted by state · bulk seen is ctrl+s now` |
-| `v` | Next view: `status`, `table`, `harness`, `host`, one per extension field, then `status` again |
+| `v` | Next view: `status`, `table`, `harness`, `host`, one per extension field, then `status` again. `?` says `status → host, then fields` |
 | `:` | Open a view by name. Tab completes a name (`ta` to `table`), Enter opens it (or the one view the text starts), Esc cancels. An unknown name says `no view "nope"` |
 | `S` `A` `T` `R` `O` `W` `E` `N` `B` `M` | Sort by `STATE`, `AGE`, `TURN`, `HARNESS` (runtime), `HOST`, `WHERE`, `SESSION`, `WINDOW`, `BLOCK` or `MSG`. The same letter again flips the direction, and a third time clears the sort. See [Views](#views) |
 | click, wheel | In the `table` view: a click on a column header sorts by it, as its letter does; a click on a row selects it; the wheel moves the selection |

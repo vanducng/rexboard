@@ -8,7 +8,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, Peek, Spot};
 use super::theme;
-use super::view::KEYS;
+use super::view::key_rows;
 use crate::board::Row;
 use crate::output::{
     BREAK, age, chop, clean, fit, harness, in_state, name, path, span, state_word,
@@ -27,7 +27,7 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
         return answer.lines(now, width, room);
     }
     if app.keys {
-        return keys(width);
+        return keys(app, width);
     }
     let Some(row) = app.current() else {
         return match &app.selected {
@@ -254,14 +254,15 @@ pub fn tail(peek: &Peek, width: usize, room: usize) -> Vec<Line<'static>> {
 }
 
 /// The `?` table, in as many columns as fit, filled down each column.
-fn keys(width: usize) -> Vec<Line<'static>> {
+fn keys(app: &App, width: usize) -> Vec<Line<'static>> {
+    let all = key_rows(app);
     let columns = (width / KEY_COLUMN).max(1);
-    let rows = KEYS.len().div_ceil(columns);
+    let rows = all.len().div_ceil(columns);
     let mut lines = vec![Line::styled(fit(" keys", width), theme::accent())];
     for r in 0..rows {
         let mut spans = Vec::new();
         for c in 0..columns {
-            let Some((key, what)) = KEYS.get(c * rows + r) else {
+            let Some((key, what)) = all.get(c * rows + r) else {
                 break;
             };
             spans.push(Span::styled(format!(" {key:<7} "), theme::bright()));

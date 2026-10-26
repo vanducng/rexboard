@@ -32,9 +32,9 @@ pub const KEYS: [(&str, &str); 22] = [
     ("ctrl+s", "mark done rows seen (was S)"),
     ("space", "full view of the pane, live"),
     ("tab", "the next row that needs you"),
-    ("/", "filter; enter keeps it"),
+    ("/", "filter, key:value; enter keeps"),
     ("f", "one status: w d q p e u i"),
-    ("v", "status, table, harness, host"),
+    ("v", "status → host, then fields"),
     (":", "a view by name; tab completes"),
     ("S A T", "sort by state, age, turn"),
     ("R O W M", "by harness, host, where, msg"),
@@ -49,6 +49,47 @@ pub const KEYS: [(&str, &str); 22] = [
     ("?", "this table"),
     ("q", "quit"),
 ];
+
+/// The `?` table: KEYS, and while extensions declare fields, a row for their sort letters
+/// after the built-in ones, naming each field and, when it differs, its extension.
+pub fn key_rows(app: &App) -> Vec<(String, String)> {
+    let mut rows: Vec<(String, String)> = KEYS
+        .iter()
+        .map(|(k, w)| ((*k).to_owned(), (*w).to_owned()))
+        .collect();
+    if app.fields.is_empty() {
+        return rows;
+    }
+    let letters: Vec<String> = app
+        .fields
+        .iter()
+        .filter_map(|(_, l)| *l)
+        .map(String::from)
+        .collect();
+    let named = |sources: bool| {
+        let names: Vec<String> = app
+            .fields
+            .iter()
+            .map(|(f, _)| match f.id.split_once('.') {
+                Some((ext, _)) if sources && ext != f.name => format!("{} ({ext})", f.name),
+                _ => f.name.clone(),
+            })
+            .collect();
+        format!("by {}", names.join(", "))
+    };
+    let what = Some(named(true))
+        .filter(|w| w.width() <= KEY_WIDTH)
+        .unwrap_or_else(|| named(false));
+    let after = rows
+        .iter()
+        .position(|(k, _)| k == "E N B")
+        .map_or(rows.len(), |i| i + 1);
+    rows.insert(after, (letters.join(" "), what));
+    rows
+}
+
+/// The most a `?` description shows uncut.
+pub const KEY_WIDTH: usize = 30;
 
 pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
     if let Some(full) = &app.full
@@ -294,6 +335,8 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
             } else {
                 format!("no {} rows match \"{query}\" · esc clears", status.name())
             }
+        } else if let Some(key) = app.unknown_key() {
+            format!("no key {key} · esc clears")
         } else if !query.is_empty() {
             format!("no rows match \"{query}\" · esc clears")
         } else {
@@ -1009,7 +1052,7 @@ mod tests {
     fn the_key_table_names_every_view_and_sort_letter() {
         for (key, what) in KEYS {
             assert!(
-                what.width() <= 29,
+                what.width() <= KEY_WIDTH,
                 "{key}: {what:?} is cut in the key table"
             );
         }
@@ -1018,7 +1061,8 @@ mod tests {
         let text = render(&app, 120, 30);
         for want in [
             "ctrl+s",
-            "v       status, table, harness, host",
+            "v       status → host, then fields",
+            "/       filter, key:value; enter keeps",
             ":       a view by name; tab completes",
             "S A T   sort by state, age, turn",
             "R O W M by harness, host, where, msg",
@@ -2216,6 +2260,47 @@ mod extension_tests {
             "{}",
             top(&app, 50)
         );
+    }
+
+    #[test]
+    fn the_key_table_gets_a_row_for_the_fields_only_while_there_are_some() {
+        let mut app = with_fields(&[field("lane.lane", "LANE")]);
+        press(&mut app, KeyCode::Char('?'));
+        let text = render(&app, 120, 30);
+        assert!(
+            text.lines()
+                .any(|l| l.contains("I P L   by rig, project, lane")),
+            "the names alone when the sources would be cut:\n{text}"
+        );
+        let rows = key_rows(&app);
+        let at = rows.iter().position(|(k, _)| k == "I P L").unwrap();
+        assert_eq!(
+            rows[at - 1].0,
+            "E N B",
+            "right after the built-in sort letters"
+        );
+        let mut one = crate::tui::app::tests::app();
+        one.set_extensions(vec![field("fake.rig", "RIG")], BTreeMap::new());
+        assert!(
+            key_rows(&one).contains(&("I".to_owned(), "by rig (fake)".to_owned())),
+            "the source while it fits"
+        );
+        let mut plain = crate::tui::app::tests::app();
+        press(&mut plain, KeyCode::Char('?'));
+        assert_eq!(
+            key_rows(&plain).len(),
+            KEYS.len(),
+            "no row without extensions"
+        );
+    }
+
+    #[test]
+    fn a_filter_with_a_key_nothing_has_says_so() {
+        let mut app = with_fields(&[]);
+        app.filter = "projct:api".to_owned().into();
+        assert!(render(&app, 80, 30).contains("no key projct · esc clears"));
+        app.filter = "project:zzz".to_owned().into();
+        assert!(render(&app, 80, 30).contains("no rows match \"project:zzz\" · esc clears"));
     }
 
     #[test]

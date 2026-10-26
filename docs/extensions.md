@@ -37,7 +37,7 @@ every = 10               # seconds between runs, at least 2
 timeout = 5              # seconds, at least 1 and less than every; a slower run is killed
 [[fields]]
 name = "project"         # [a-z0-9-]+, stored on a row as session-prefix.project
-title = "PROJECT"
+title = "PROJECT"        # the column's header; keep it the name in capitals, so it says what to type
 [provides]
 status = false           # true lets it give rows with no record a status
 ```

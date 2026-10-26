@@ -290,6 +290,18 @@ impl App {
             .any(|field| field.to_lowercase().contains(&free))
     }
 
+    /// The first `key:` in the `/` text that names no key, for saying so when nothing matches.
+    pub fn unknown_key(&self) -> Option<String> {
+        let probe = self.rows.first()?;
+        self.filter
+            .value()
+            .to_lowercase()
+            .split_whitespace()
+            .filter_map(|term| term.split_once(':'))
+            .find(|(key, _)| !key.is_empty() && self.value_of(probe, key).is_none())
+            .map(|(key, _)| key.to_owned())
+    }
+
     /// What filter key `key` reads on a row: None when no key has that name, Some(None) when
     /// the row has no value for it.
     fn value_of<'a>(&self, row: &'a Row, key: &str) -> Option<Option<&'a str>> {
