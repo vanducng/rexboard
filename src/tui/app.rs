@@ -38,6 +38,8 @@ pub enum Effect {
         host: String,
         session: String,
         block: String,
+        /// With the pane's colours, for the full view; the card reads plain text.
+        vt: bool,
     },
     /// Read a pane for answer mode: its tail, and its input line with styles.
     Read {
@@ -591,7 +593,7 @@ impl App {
     /// Asks for the current row's tail; the card shows it when it comes.
     fn tail(&mut self) -> Option<Effect> {
         let row = self.current()?;
-        let effect = peek(row);
+        let effect = peek(row, self.full.is_some());
         self.peek = Some(Peek {
             key: row.key.clone(),
             lines: None,
@@ -616,7 +618,7 @@ impl App {
         let row = self.rows.iter().find(|row| row.key == full.key)?;
         full.asked = now;
         full.reading = true;
-        Some(peek(row))
+        Some(peek(row, true))
     }
 
     /// A read came back. While the view is open a failed read keeps the lines it had and says
@@ -1115,12 +1117,13 @@ fn id_of(column: &Column) -> &'static str {
     }
 }
 
-fn peek(row: &Row) -> Effect {
+fn peek(row: &Row, vt: bool) -> Effect {
     Effect::Peek {
         key: row.key.clone(),
         host: row.pane.host.clone(),
         session: row.pane.session_id.clone(),
         block: row.pane.block_id.clone(),
+        vt,
     }
 }
 

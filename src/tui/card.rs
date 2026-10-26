@@ -236,7 +236,8 @@ pub fn tail(peek: &Peek, width: usize, room: usize) -> Vec<Line<'static>> {
                     break;
                 }
                 rows.extend(
-                    chop(line, width.saturating_sub(GUTTER.width()).max(1))
+                    // The full view's reads keep the pane's colours, which the card drops.
+                    chop(&clean(line), width.saturating_sub(GUTTER.width()).max(1))
                         .into_iter()
                         .rev(),
                 );
