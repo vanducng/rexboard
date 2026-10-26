@@ -71,7 +71,7 @@ The column header underlines each column's sort letter and puts `↑` or `↓` j
 | `z` | Fold the selected row's group, or open the folded group the selection is on. `NEEDS YOU` opens by itself when a new row enters it |
 | `<` / `>` | Narrow / widen the detail pane by 5% of the width, from 100 columns. The width is kept per machine (see [Detail width](#detail-width)) |
 | `?` | Show every key in the detail pane; `?` or `esc` hides it |
-| `enter` | Go to the pane in the main Rex window, on its host, and mark it seen, as [`rexboard jump`](cli.md#rexboard-jump-next-and-pick) does. The footer says `going to SESSION › PANE…` until the jump ends, then where it went; Enter during a jump says one is already running. A failed jump's reason stays in the footer until the next key, and in full in the detail pane. The board stays open |
+| `enter` | Go to the pane in the Rex window you are in, on its host, and mark it seen, as [`rexboard jump`](cli.md#rexboard-jump-next-and-pick) does. The footer says `going to SESSION › PANE…` until the jump ends, then where it went; Enter during a jump says one is already running. A failed jump's reason stays in the footer until the next key, and in full in the detail pane. The board stays open |
 | `r` | Reconnect to serve |
 | `esc` | Clear the `/` filter, the status filter and the sort, close the peek and the key table, and open every folded group |
 | `q`, `ctrl-c` | Quit |

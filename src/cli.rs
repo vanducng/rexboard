@@ -31,7 +31,7 @@ pub enum Command {
         #[arg(value_name = "KEY")]
         key: String,
     },
-    /// Go to a pane in the main Rex window, on its host, and mark it seen.
+    /// Go to a pane in the Rex window you are in, on its host, and mark it seen.
     Jump {
         /// HOST/BLOCK_ID (the `key` from `ls --json`), or N for the nth NEEDS YOU row.
         #[arg(value_name = "TARGET")]
@@ -45,15 +45,6 @@ pub enum Command {
     },
     /// Pick a pane from the board's list and go to it. Enter goes and exits 0; esc exits 1.
     Pick,
-    /// Show the board in the focused Rex app window (`--new`: its own window, titled `board - rexboard`).
-    Window {
-        /// Always open a new app window for the board, even when its session exists.
-        #[arg(long)]
-        new: bool,
-        /// Print the window title a window manager can match, and do nothing else.
-        #[arg(long, conflicts_with = "new")]
-        print_title: bool,
-    },
 }
 
 #[derive(Debug, Args)]

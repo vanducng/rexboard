@@ -6,13 +6,23 @@ An attention board for coding-agent panes across [Rex](https://www.superlogical.
 
 ## Install
 
-Needs Rex, with its `rex` CLI on your PATH. Jumps and `rexboard window` also need the Rex app.
+Needs Rex, with its `rex` CLI on your PATH. Jumps also need the Rex app. Prebuilt for macOS on Apple silicon and Linux x86_64; elsewhere, build from source (below).
+
+With Homebrew:
+
+```bash
+brew install vanducng/tap/rexboard
+```
+
+Without it, this installs the latest release into `~/.local/bin`, after checking it against the release's `SHA256SUMS`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vanducng/rexboard/main/install.sh | sh
 ```
 
-This installs the latest release for macOS on Apple silicon or Linux x86_64 into `~/.local/bin`, after checking it against the release's `SHA256SUMS`. Or build from source with Rust 1.88 or newer:
+Switching from that to Homebrew? Remove `~/.local/bin/rexboard` first, so the two do not shadow each other.
+
+Build from source with Rust 1.88 or newer:
 
 ```bash
 cargo install --locked --git https://github.com/vanducng/rexboard
@@ -22,7 +32,6 @@ cargo install --locked --git https://github.com/vanducng/rexboard
 
 ```bash
 rexboard                 # the board, in this terminal
-rexboard window          # the board in the Rex window you are in
 rexboard ls --json       # every agent pane, most urgent first, as JSON
 rexboard next            # go to the next pane that needs you
 rexboard pick            # choose a pane from the list and go to it
@@ -36,9 +45,9 @@ A pane needs you when it is blocked (often on a permission prompt), has an error
 
 ## How it works
 
-<img alt="rexboard architecture: local (this Mac) and mini each run one observer that feeds rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket; a jump, one of two writes to Rex, runs jump.pre_cmd if set, focuses the pane on its host and asks the Rex app to show its session" src="docs/assets/architecture.svg" width="100%">
+<img alt="rexboard architecture: local (this Mac) and mini each run one observer that feeds rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket; a jump, the one write to Rex, focuses the pane on its host and asks the Rex app to show its session" src="docs/assets/architecture.svg" width="100%">
 
-rexboard reads Rex. Two commands write to it: a jump (blue) focuses the pane on its host and asks the Rex app to show it, and `rexboard window` makes the board's own session and shows it in the focused window.
+rexboard reads Rex. Only a jump (blue) writes to it: it focuses the pane on its host and asks the Rex app to show it.
 
 ## Docs
 
@@ -46,7 +55,7 @@ rexboard reads Rex. Two commands write to it: a jump (blue) focuses the pane on 
 | --- | --- |
 | [CLI](docs/cli.md) | Every command, its output, fields and exit codes |
 | [TUI](docs/tui.md) | The board's layout and keys, and `pick` |
-| [Configuration](docs/configuration.md) | `config.toml`: the app client, `jump.pre_cmd` (for a board in its own window) and excluded hosts |
+| [Configuration](docs/configuration.md) | `config.toml`: the app client and excluded hosts |
 | [System architecture](docs/system-architecture.md) | serve, the observers, the protocol and the files |
 | [Development](docs/development-guidelines.md) | Setup, checks, layout, conventions, tests |
 | [Deployment](docs/deployment.md) | CI, release-please, release assets, install, rollback |
