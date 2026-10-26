@@ -25,8 +25,9 @@ use crate::{interrupted, jump, rex, stop_on_signals};
 
 use app::{App, Effect, Link};
 
-/// Peek shows this many lines from the end of the pane.
-const PEEK_LINES: usize = 12;
+/// Peek keeps this many lines from the end of the pane, enough for a 200-row pane; each draw shows
+/// the newest that fit, so a resize needs no new capture.
+const PEEK_LINES: usize = 200;
 
 enum Msg {
     Rows(Rows),
@@ -160,6 +161,7 @@ fn apply(app: &mut App, msg: Msg) {
         Msg::Peek(key, lines) => {
             if let Some(peek) = app.peek.as_mut().filter(|peek| peek.key == key) {
                 peek.lines = Some(lines);
+                peek.at = Some(chrono::Utc::now());
             }
         }
         Msg::Say(text) => app.say(text),
@@ -283,9 +285,13 @@ fn capture(host: &str, block: &str) -> Result<Vec<String>> {
 }
 
 /// The last lines of captured pane text, with every escape sequence and control character
-/// removed: the text comes from whatever runs in that pane.
+/// removed: the text comes from whatever runs in that pane. Trailing blanks go too, so a padded
+/// line does not wrap into empty rows.
 fn peek_lines(text: &str) -> Vec<String> {
-    let lines: Vec<String> = text.lines().map(clean).collect();
+    let lines: Vec<String> = text
+        .lines()
+        .map(|line| clean(line).trim_end().to_owned())
+        .collect();
     lines[lines.len().saturating_sub(PEEK_LINES)..].to_vec()
 }
 
@@ -312,8 +318,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn peek_lines_keep_the_last_twelve_without_escape_sequences() {
-        let mut text: String = (1..=20).map(|n| format!("line {n}\n")).collect();
+    fn a_line_padded_with_blanks_takes_one_row() {
+        let lines = peek_lines(&format!("foo{}\n", " ".repeat(120)));
+        assert_eq!(lines, ["foo"]);
+        assert_eq!(
+            crate::output::chop(&lines[0], 45).len(),
+            1,
+            "one row at 45 columns"
+        );
+    }
+
+    #[test]
+    fn peek_lines_keep_the_last_200_without_escape_sequences() {
+        let mut text: String = (1..=250).map(|n| format!("line {n}\n")).collect();
         text.push_str("\x1b[31mRED\x1b[0m\n");
         text.push_str("clip \x1b]52;c;aGVsbG8=\x07end\n");
         text.push_str("title \x1b]0;set by the pane\x1b\\end\n");

@@ -58,6 +58,8 @@ pub struct Peek {
     pub key: String,
     /// None while capturing; the lines, or why the capture failed.
     pub lines: Option<Result<Vec<String>, String>>,
+    /// When the capture came back.
+    pub at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Where the board stands with serve.
@@ -478,6 +480,7 @@ impl App {
                 self.peek = Some(Peek {
                     key: key.clone(),
                     lines: None,
+                    at: None,
                 });
                 return Some(Effect::Peek { key, host, block });
             }

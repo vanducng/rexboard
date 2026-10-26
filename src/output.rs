@@ -338,6 +338,22 @@ pub fn fit(text: &str, max: usize) -> String {
     format!("{cut}{}", " ".repeat(pad))
 }
 
+/// `text` in rows of at most `max` columns, never splitting a wide character.
+pub fn chop(text: &str, max: usize) -> Vec<String> {
+    let mut rows = vec![String::new()];
+    let mut used = 0;
+    for c in text.chars() {
+        let w = c.width().unwrap_or(0);
+        if used + w > max && used > 0 {
+            rows.push(String::new());
+            used = 0;
+        }
+        used += w;
+        rows.last_mut().expect("one row").push(c);
+    }
+    rows
+}
+
 /// The longest prefix of `chars` that fits in `max` columns.
 fn take(chars: impl Iterator<Item = char>, max: usize) -> String {
     let mut out = String::new();
@@ -374,6 +390,12 @@ pub fn span(secs: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chop_never_splits_a_wide_character() {
+        assert_eq!(chop("ab修复c", 3), ["ab", "修", "复c"]);
+        assert_eq!(chop("", 3), [""]);
+    }
 
     fn row(pane: &str, title: &str, msg: &str) -> Row {
         serde_json::from_value(serde_json::json!({

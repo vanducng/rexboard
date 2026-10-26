@@ -6,7 +6,7 @@
 #   do -         prints a recorded snapshot, or for the jump script $FAKE_REX_JUMP_REPLY
 #                (default {"ok":true})
 #   hosts        lists one remote host, mini
-#   capture      prints a few lines of generic pane text
+#   capture      prints a few lines of generic pane text, or the file $FAKE_REX_CAPTURE names when set
 #   FAKE_REX_ENV_LOG  each call appends the REX_BLOCK, REX_SESSION and REX_CLIENT it sees (- if unset)
 if [ -n "${FAKE_REX_LOG:-}" ]; then
   printf '%s\n' "$*" >>"$FAKE_REX_LOG"
@@ -49,6 +49,10 @@ case " $* " in
     esac
     ;;
   *" capture "*)
+    if [ -n "${FAKE_REX_CAPTURE:-}" ]; then
+      cat "$FAKE_REX_CAPTURE"
+      exit 0
+    fi
     printf '%s\n' '$ cargo test' 'running 12 tests' 'test parser::empty ... ok' \
       'test parser::nested ... ok' 'test result: ok. 12 passed' '' 'Allow Bash: cargo test? (y/n)'
     ;;
