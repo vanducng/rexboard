@@ -88,7 +88,7 @@ case "$seat" in
   seat-a)
     title "⠋ seat-a@demo"; printf '● Fixing the nested parser case.\n\n'
     report working "Fixing the nested parser case"
-    at 7
+    at 5
     printf '● Bash(cargo test --workspace --features full)\n\n'
     printf ' Bash command\n\n   cargo test --workspace --features full\n   Run the full test suite\n\n'
     printf ' Do you want to proceed?\n'
@@ -111,19 +111,43 @@ case "$seat" in
     printf 'Enter to select · ↑/↓ to navigate · Esc to cancel\n'
     report blocked "Which test runner should the web package use? ⏎ 1. vitest: fast, native ESM ⏎ 2. jest: familiar, more plugins" question ;;
   seat-d)
-    # A coloured diff that keeps growing, for the live full view.
+    # A coloured diff that grows while the full view follows it, then a done report.
     title "⠋ seat-d@demo"; report working "Updating the style docs"
-    printf '\033[1mdiff --git a/docs/tui.md b/docs/tui.md\033[0m\n\033[36m@@ -36,6 +36,9 @@ ## Style\033[0m\n'
+    printf '\033[1mdiff --git a/docs/tui.md b/docs/tui.md\033[0m\n\033[36m@@ -36,6 +36,18 @@ ## Style\033[0m\n'
     printf ' One table says how each state looks.\n'
     printf '\033[31m-  Glyphs: blocked, error, done, working, idle.\033[0m\n'
-    printf '\033[32m+  ! blocked   ? question   ✗ error\033[0m\n'
-    printf '\033[32m+  ✓ done      ○ idle       · unknown\033[0m\n'
-    printf '\033[32m+  A braille spinner while working.\033[0m\n'
     at 0
-    for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    while IFS= read -r line; do
       sleep 1.5
-      printf '\033[32m+  Rule %d: one cell wide, never an emoji.\033[0m\n' "$n"
-    done ;;
+      case "$line" in
+        +*) printf '\033[32m%s\033[0m\n' "$line" ;;
+        -*) printf '\033[31m%s\033[0m\n' "$line" ;;
+        @*) printf '\033[36m%s\033[0m\n' "$line" ;;
+        *) printf '%s\n' "$line" ;;
+      esac
+    done <<'DIFF'
++| State    | Shape | Colour |
++|----------|-------|--------|
++| blocked  | !     | red    |
++| question | ?     | red    |
++| error    | ✗     | red    |
++| done     | ✓     | green  |
++| working  | ⠹     | yellow |
++| idle     | ○     | dim    |
+ 
+-Spinners turn once a second.
++Working rows spin a braille dot every 80 ms.
++Reduced motion holds it still as ⠿.
+@@ -58,4 +70,9 @@ ## Turn card
+ Set it in tui.json:
++
++```json
++{ "motion": "reduced" }
++```
++Or for one run: REXBOARD_REDUCED_MOTION=1
+DIFF
+    sleep 0.3; title "✳ seat-d@demo"
+    report done "Style docs updated ⏎ A shape table and a reduced motion note in docs/tui.md." ;;
   seat-e)
     title "✳ seat-e@demo"; printf 'Ready.\n' ;;
   seat-f)
@@ -172,18 +196,19 @@ k() { for key in "$@"; do tmux -L "$tmux_socket" send-keys -t demo "$key"; sleep
 for _ in $(seq 1 100); do tmux -L "$tmux_socket" capture-pane -p -t demo 2>/dev/null | grep -q 'NEEDS YOU' && break; sleep 0.1; done
 sleep 1.5
 touch "$go"
-# The spinners and every shape; a done row's card, then `m` marks it seen; `z` shows what may
-# follow it, `za` folds the group and opens it again; the permission row's ask, `a` on its own,
-# `2` once to show that a lasting option asks again, then `1` answers it from the board; the docs
-# row's live, coloured full view following its diff, `q` back, then `dd` and `y` close it.
+# The spinners and every shape; a done row's card, then `m` marks it seen; the permission row's
+# ask, `a` on its own, `2` once to show that a lasting option asks again, then `1` answers it from
+# the board; `z` shows what may follow it and `za` folds a group and opens it again; `/docs`
+# narrows the list to the docs row, whose live, coloured full view follows its diff; `q` back as
+# it finishes, then `dd` asks before `y` closes it.
 # Every opener (`a`, the first `d`) comes after a pause, as the typing guard asks.
-sleep 2.5; k 3; sleep 2.5
-k m; sleep 1.5
-k z; sleep 1.5; k a; sleep 1.5; k z a; sleep 1
+sleep 2.5; k 3; sleep 2.2
+k m; sleep 1.2
 k 2; sleep 2
-k a; sleep 3; k 2; sleep 2; k 1; sleep 3
-k / d o c s Enter; sleep 0.5; k Space; sleep 4.5; k q; sleep 1
-k d d; sleep 1.5; k y; sleep 2; k Escape; sleep 1.5
+k a; sleep 3; k 2; sleep 2; k 1; sleep 2.5
+k z; sleep 1.5; k a; sleep 1.2; k z a; sleep 0.8
+k / d o c s Enter; sleep 1.5; k Space; sleep 4; k q; sleep 1.2
+k d d; sleep 3; k y; sleep 1.8; k Escape; sleep 1.5
 k q
 for _ in $(seq 1 100); do tmux -L "$tmux_socket" has-session -t demo 2>/dev/null || break; sleep 0.1; done
 
