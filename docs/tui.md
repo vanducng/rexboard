@@ -150,7 +150,7 @@ A pane that is gone says `the pane is gone; nothing sent`. Only then does the ke
 
 Two failures are not refusals. `the pane did not answer within 5s, so it may or may not have the key; look before sending again` means the script ran out of time and the key may have gone out. `the text was pasted but Enter did not go through; it is in the pane's input line, so jump to it` means the paste landed and its Enter did not. Any other failure before the send ends `; nothing sent`. A line is also refused when the input line already holds typed text, which the reply would join (`the input line already has text, which a reply would join; nothing sent`). A dim placeholder or suggested prompt does not count as typed.
 
-After a send the board returns to the same row, marks it seen, and the card's bar says what went where: `sent 1 (Yes) → seat-a 11:22:04`, until the row needs you again with a newer report. Nothing moves on by itself; `tab` goes to the next row that needs you.
+After a send the board returns to the same row, marks it seen, drops the pane's tail read before the answer (it shows the question just answered), and the card's bar says what went where: `sent 1 (Yes) → seat-a 11:22:04`, until the row needs you again with a newer report. Nothing moves on by itself; `tab` goes to the next row that needs you.
 
 Options are read for Claude Code's dialogs (permission prompts and questions). Other harnesses get line replies at an input line they show; a dialog the board does not recognise offers nothing to send, so jump to it.
 

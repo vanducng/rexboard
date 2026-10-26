@@ -834,6 +834,8 @@ impl App {
                     Some(answer) => Some(answer.updated_at),
                     None => latest.as_ref().and_then(|row| row.pane.updated_at.clone()),
                 };
+                // A tail from before the answer shows the question it answered.
+                self.peek.take_if(|peek| peek.key == key);
                 let to = latest.as_ref().map_or_else(|| key.to_owned(), name);
                 let at = chrono::Local::now().format("%H:%M:%S");
                 self.sent = Some(Sent {
