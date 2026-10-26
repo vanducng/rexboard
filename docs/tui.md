@@ -16,7 +16,9 @@ The board is built to live in a narrow column, so the narrow layout is the main 
   | under 60 | `AGE` · `WHERE` (`session › pane`) · `MSG` |
   | 60-99 | adds `HARNESS` and `HOST` |
   | 100-139 | adds `STATE`, and the tab in `WHERE`: `session › tab › pane` |
-  | 140 and up | adds `TURN` |
+  | 140 and up | adds `TURN` once the list has 101 columns beside the detail pane: from 140 with a 38-column pane, from 152 with the default third |
+
+  Beside the detail pane the list picks these columns by its own width, as if the pane were 38 columns, so a wider pane never squeezes `WHERE` and `MSG` below their widths at 100 columns.
 
   Each column answers one question:
 
@@ -47,7 +49,7 @@ A view is a way of grouping the rows plus a sort. The view and sort last for the
 | `harness` | One per harness (`CLAUDE`, `CODEX`), a to z, with `?` (no harness) last | The `status` view's order |
 | `host` | One per host (`LOCAL`, `MINI`), a to z | The `status` view's order |
 
-Shift and a column's letter sorts by that column inside each group: `S` state, `A` age, `T` turn, `R` harness (runtime), `O` host, `W` where, `M` msg. Sorting works as in k9s: Shift and the letter, again to flip. The first press sorts `AGE` and `TURN` longest first (`↓`), `STATE` most urgent first (blocked, error, done, working, idle; `↑`) and the text columns a to z (`↑`). The same letter again flips it, and `esc` clears it. A row with no value (no status record to date it, no finished turn) sorts last either way. In the `status` view, `NEEDS YOU` keeps its blocked rows first under any sort. `T` sorts by turn even below 140 columns, where the `TURN` column is not drawn. In the `host` view rows leave out `@HOST`, since their group names the host.
+Shift and a column's letter sorts by that column inside each group: `S` state, `A` age, `T` turn, `R` harness (runtime), `O` host, `W` where, `M` msg. Sorting works as in k9s: Shift and the letter, again to flip. The first press sorts `AGE` and `TURN` longest first (`↓`), `STATE` most urgent first (blocked, error, done, working, idle; `↑`) and the text columns a to z (`↑`). The same letter again flips it, and `esc` clears it. A row with no value (no status record to date it, no finished turn) sorts last either way. In the `status` view, `NEEDS YOU` keeps its blocked rows first under any sort. `T` sorts by turn even when the `TURN` column is not drawn. In the `host` view rows leave out `@HOST`, since their group names the host.
 
 The column header underlines each column's sort letter and puts `↑` or `↓` just left of the sorted column's name. When the view is not `status`, or a sort is set, the top bar says so after `rexboard`: `view: flat ↓age`. The selection stays on its row when the view or the sort changes.
 
@@ -78,9 +80,9 @@ The board redraws when serve sends rows, on a key, and once a second for the clo
 
 ## Detail width
 
-From 100 columns the detail pane sits on the right. It starts at a third of the width, but never under 38 columns: 38 at 100 columns, 46 at 140, 66 at 200. `<` narrows it and `>` widens it by 5% of the width per press. It stays between 38 columns and what leaves the list the 61 columns of its 100-column layout, so at 100 columns it is always 38, and at 140 it runs from 38 to 78. A press at either end changes nothing.
+From 100 columns the detail pane sits on the right. It starts at a third of the width, but never under 38 columns: 38 at 100 columns, 46 at 140, 66 at 200. `<` narrows it and `>` widens it by 5% of the width per press. It never leaves the list fewer than 61 columns, the list's width at 100 columns, so at 100 columns the pane is always 38, and at 140 it runs from 38 to 78. A press at either end changes nothing and says `the detail pane is as wide as it goes` or `the detail pane is as narrow as it goes`.
 
-The width is kept as a share of the board's width, so it follows the window when that resizes. It lives in `tui.json` beside serve's `state.json` (`~/.local/state/rexboard/tui.json`, or under `XDG_STATE_HOME`), is read when the board starts and written on each press. A missing or unreadable `tui.json` means the default third. Below 100 columns, where the pane sits under the list, `<` and `>` only say so; `pick` has no pane and ignores them.
+The width is kept as a share of the board's width, so it follows the window when that resizes. It lives in `tui.json` beside serve's `state.json` (`~/.local/state/rexboard/tui.json`, or under `XDG_STATE_HOME`), is read when the board starts and written on each press. A missing or unreadable `tui.json` means the default third. Below 100 columns, where the pane sits under the list, `<` and `>` only say `< and > size the detail pane on boards wider than 100 columns`; `pick` has no pane and ignores them.
 
 ## Status filter
 

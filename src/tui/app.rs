@@ -495,12 +495,22 @@ impl App {
                 return Some(Effect::Reconnect);
             }
             KeyCode::Char(c @ ('<' | '>')) if self.width >= 100 && !self.pick => {
-                let share = super::detail::step(self.width, self.detail, c == '>');
+                let wider = c == '>';
+                let share = super::detail::step(self.width, self.detail, wider);
+                let width = |share| super::detail::width(self.width, share);
+                if width(Some(share)) == width(self.detail) {
+                    self.say(if wider {
+                        "the detail pane is as wide as it goes"
+                    } else {
+                        "the detail pane is as narrow as it goes"
+                    });
+                    return None;
+                }
                 self.detail = Some(share);
                 return Some(Effect::SaveDetail(share));
             }
             KeyCode::Char('<' | '>') if !self.pick => {
-                self.say("< and > size the detail pane from 100 columns");
+                self.say("< and > size the detail pane on boards wider than 100 columns");
             }
             _ => {}
         }

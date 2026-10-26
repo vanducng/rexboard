@@ -23,6 +23,19 @@ pub fn width(board: u16, share: Option<f64>) -> u16 {
     want.clamp(MIN, most)
 }
 
+/// The width whose column set a list `list` wide gets. Beside the pane that is the list plus the
+/// narrowest pane and its rule, so a list squeezed to 61 columns keeps the 100-column set and
+/// TURN shows only when the list itself has room; with no pane on the right it is the board.
+pub fn columns_board(board: u16, list: usize, pick: bool) -> u16 {
+    if board >= 100 && !pick {
+        u16::try_from(list)
+            .unwrap_or(u16::MAX)
+            .saturating_add(MIN + 1)
+    } else {
+        board
+    }
+}
+
 /// The share after one `<` (narrower) or `>` (wider), from the width shown now, so a press at a
 /// bound changes nothing.
 pub fn step(board: u16, share: Option<f64>, wider: bool) -> f64 {
@@ -121,7 +134,22 @@ mod tests {
         assert_eq!(width(200, board.detail), 56, "unchanged below 100");
         assert_eq!(
             board.toast(),
-            Some("< and > size the detail pane from 100 columns")
+            Some("< and > size the detail pane on boards wider than 100 columns")
+        );
+        let mut pinned = app();
+        pinned.width = 100;
+        assert!(
+            press(&mut pinned, KeyCode::Char('>')).is_none(),
+            "no save at a bound"
+        );
+        assert_eq!(
+            (pinned.detail, pinned.toast()),
+            (None, Some("the detail pane is as wide as it goes"))
+        );
+        assert!(press(&mut pinned, KeyCode::Char('<')).is_none());
+        assert_eq!(
+            pinned.toast(),
+            Some("the detail pane is as narrow as it goes")
         );
         let mut picking = app();
         picking.pick = true;

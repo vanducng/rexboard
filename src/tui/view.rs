@@ -283,7 +283,10 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
         return;
     }
     let width = usize::from(area.width);
-    let columns = Columns::new(board.width, width);
+    let columns = Columns::new(
+        super::detail::columns_board(board.width, width, app.pick),
+        width,
+    );
     let area = if board.height >= HEADED {
         let [top, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
         let spans: Vec<Span> = columns
@@ -793,7 +796,7 @@ mod tests {
         assert!(wide.contains("│"), "the detail pane is on the right at 140");
         assert!(narrow.contains("─────"), "and underneath below 100");
         assert!(
-            wide.contains("2-openrig:…abcdef#l2 › rig"),
+            wide.contains("2-openrig…abcdef#l2 › rig"),
             "the pane stays whole:\n{wide}"
         );
     }
