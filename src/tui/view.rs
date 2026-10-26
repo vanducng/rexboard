@@ -32,7 +32,7 @@ pub const KEYS: [(&str, &str); 22] = [
     ("ctrl+s", "mark done rows seen (was S)"),
     ("space", "full view of the pane, live"),
     ("tab", "the next row that needs you"),
-    ("/", "filter, key:value; enter keeps"),
+    ("/", "filter: text or key:value"),
     ("f", "one status: w d q p e u i"),
     ("v", "status → host, then fields"),
     (":", "a view by name; tab completes"),
@@ -1101,7 +1101,7 @@ mod tests {
         for want in [
             "ctrl+s",
             "v       status → host, then fields",
-            "/       filter, key:value; enter keeps",
+            "/       filter: text or key:value",
             ":       a view by name; tab completes",
             "S A T   sort by state, age, turn",
             "R O W M by harness, host, where, msg",
@@ -2111,6 +2111,28 @@ mod tests {
             out.push('\n');
         }
         out
+    }
+
+    #[test]
+    fn the_bar_draws_its_glyph_in_the_state_face_and_only_the_label_bold() {
+        use ratatui::style::Modifier;
+        let now = DateTime::parse_from_rfc3339("2026-01-01T05:43:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let app = every_state();
+        for key in ["local/busy", "local/allow"] {
+            let row = app.rows.iter().find(|row| row.key == key).unwrap();
+            let bar = crate::tui::card::bar(row, None, now, 80);
+            let glyph = theme::glyph(row, now);
+            let mark = bar.spans.iter().find(|s| s.content == glyph).unwrap();
+            assert_eq!(mark.style, theme::state(row), "{key}: the list's face");
+            let label = bar
+                .spans
+                .iter()
+                .find(|s| s.content.contains(" · "))
+                .unwrap();
+            assert!(label.style.add_modifier.contains(Modifier::BOLD), "{key}");
+        }
     }
 
     /// The board's looks across its screens, cell by cell: a change of look shows as a diff of

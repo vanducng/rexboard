@@ -60,7 +60,21 @@ One table in `src/tui/theme.rs` says how each state looks, and the list, the tur
 
 The board redraws every 80 ms only while a working row is on screen: in the list, on the turn card's bar or on the full view's bar. Otherwise it keeps its once-a-second tick.
 
-**Reduced motion** holds the spinner still as `⠿`, and the board keeps its once-a-second tick. Turn it on with `"motion": "reduced"` in `tui.json` (see [Turn card](#turn-card) for where the file lives), or for one run with `REXBOARD_REDUCED_MOTION=1`. The `?` table says so in its title.
+The rest of the board's text takes one of a few roles, also in `theme.rs`, so a new screen picks a role rather than a colour:
+
+| Role | Look | Where |
+|---|---|---|
+| `alert` | red | a failed jump, read or close, a host down, an extension failing, a refusal; answer mode's bar |
+| `note` | cyan | a passing message (a toast), a jump, close or answer on its way |
+| `accent` | cyan, bold | the board's name, the key table's title, an answer armed to send |
+| `strong` / `quiet` | bold / dim | a key and the words after it in every footer; a headline and its labels |
+| `header` | dim, bold | the column header and the group headers |
+| `selected` | raised background | the selected row or group header, keeping each cell's own colour |
+| cut mark | dim `…` | a pane line cut at the edge, on the line's own background |
+
+The glyph keeps its state's look everywhere, on the bars too: a spinner drawn bold turns into a still blob in a font with no bold braille.
+
+**Reduced motion** holds the spinner still as `⠿`, and the board keeps its once-a-second tick. Turn it on with `"motion": "reduced"` in `tui.json` (see [Turn card](#turn-card) for where the file lives), or for one run with `REXBOARD_REDUCED_MOTION=1`. The `?` table says so in its title when it fits.
 
 ## Views
 
