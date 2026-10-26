@@ -332,6 +332,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
             &app.rows,
             columns.width(Col::Session).saturating_sub(1),
             columns.width(Col::Window).saturating_sub(1),
+            columns.width(Col::Block).saturating_sub(1),
         )
     };
     let mut lines: Vec<Line> = items

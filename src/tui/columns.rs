@@ -762,6 +762,28 @@ mod tests {
     }
 
     #[test]
+    fn names_that_only_differ_in_the_middle_are_numbered() {
+        let named = |key: &str, block: &str| {
+            let mut r = placed(key, "api", "main");
+            r.pane.pane = block.into();
+            r
+        };
+        let lines = seats(
+            vec![
+                named("local/blk-1", "seat-review-one-claude"),
+                named("local/blk-2", "seat-review-two-claude"),
+            ],
+            140,
+            None,
+        );
+        assert_eq!(lines.len(), 2, "{lines:#?}");
+        assert!(
+            lines[0].contains(" #1 ") && lines[1].contains(" #2 "),
+            "{lines:#?}"
+        );
+    }
+
+    #[test]
     fn the_split_columns_keep_both_ends_and_tell_twins_apart() {
         let mut app = App::default();
         let mut long = placed(

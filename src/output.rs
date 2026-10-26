@@ -194,16 +194,17 @@ pub fn wheres(rows: &[Row], max: usize, short: bool, host_column: bool) -> Vec<S
         .collect()
 }
 
-/// BLOCK for each row once WHERE splits: its name, and `#N` when another row on its host reads
-/// the same in SESSION, WINDOW and BLOCK, as shown `session` and `window` columns wide.
-pub fn blocks(rows: &[Row], session: usize, window: usize) -> Vec<String> {
+/// BLOCK for each row once WHERE splits, in `block` columns: its name, and `#N` when another row
+/// on its host reads the same in SESSION, WINDOW and BLOCK as drawn `session`, `window` and
+/// `block` columns wide. The suffix is never cut; the name gives way.
+pub fn blocks(rows: &[Row], session: usize, window: usize, block: usize) -> Vec<String> {
     let shown: Vec<(String, String, String)> = rows
         .iter()
         .map(|row| {
             (
                 squeeze(&clean(&row.pane.session), session),
                 squeeze(&clean(&row.pane.tab), window),
-                name(row),
+                squeeze(&name(row), block),
             )
         })
         .collect();
@@ -217,7 +218,11 @@ pub fn blocks(rows: &[Row], session: usize, window: usize) -> Vec<String> {
                 .map(|(other, _)| other)
                 .collect();
             if twins.len() > 1 {
-                format!("{} #{}", own.2, place_among(row, &twins))
+                let suffix = format!(" #{}", place_among(row, &twins));
+                format!(
+                    "{}{suffix}",
+                    squeeze(&name(row), block.saturating_sub(suffix.width()))
+                )
             } else {
                 own.2.clone()
             }
