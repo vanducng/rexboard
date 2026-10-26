@@ -1,8 +1,8 @@
 # System architecture
 
-rexboard reads Rex, remembers what Rex does not, and shows it. Two commands write to Rex: a jump, which focuses one pane and asks the Rex app to show its session, and `rexboard window`, which makes the board's own session and shows it in the focused app window (`--new`: a new app window).
+rexboard reads Rex, remembers what Rex does not, and shows it. Only a jump writes to Rex: it focuses one pane and asks the Rex app to show its session.
 
-<img alt="rexboard architecture: local (this Mac) and mini each run one observer that feeds rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket; a jump, one of two writes to Rex, runs jump.pre_cmd if set, focuses the pane on its host and asks the Rex app to show its session" src="assets/architecture.svg" width="100%">
+<img alt="rexboard architecture: local (this Mac) and mini each run one observer that feeds rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket; a jump, the one write to Rex, focuses the pane on its host and asks the Rex app to show its session" src="assets/architecture.svg" width="100%">
 
 Each host runs one observer, `rex [-S HOST] do - --all`, whose NDJSON lines ([CLI](cli.md)) feed serve's collectors and its one reducer thread. Two reads bypass serve: the board's peek runs `rex [-S HOST] capture` straight against the pane's host, `ls --direct` takes its own snapshot, and `watch --raw` and `watch --direct` run their own observers.
 
@@ -25,9 +25,9 @@ sed -n '/<svg /,/<\/svg>/p' docs/assets/architecture.html > docs/assets/architec
 | `src/tui/detail.rs` | The detail pane's width and `tui.json` |
 | `src/client.rs` | `ls`, `watch --json`, `seen` and `serve` as clients; starts serve when nothing answers |
 | `src/rex.rs` | Finds `rex`, runs one-shot scripts, and holds the one lock around every spawn, bind, accept and connect |
-| `src/jump.rs` | `jump`, `next` and `pick`'s jump: runs `jump.pre_cmd`, then `jump.lua`, then marks the row seen through serve; turns Rex's failures into plain errors |
+| `src/jump.rs` | `jump`, `next` and `pick`'s jump: runs `jump.lua`, then marks the row seen through serve; turns Rex's failures into plain errors |
 | `src/lua/jump.lua` | Runs through `rex do -`: finds this Mac's Rex app, attaches to the pane's session, focuses the pane on its own server, and asks the app to select the session |
-| `src/config.rs` | `config.toml`: `client`, `jump.pre_cmd` and `hosts.exclude` |
+| `src/config.rs` | `config.toml`: `client` and `hosts.exclude` |
 | `src/tui/` | The board and `pick`: a client of serve's rows, with peek, seen, folds, filter and Enter to jump |
 
 serve uses std threads and channels; there is no async runtime. Collectors, the socket listener and each connection run on their own thread, and only the reducer thread touches the board.

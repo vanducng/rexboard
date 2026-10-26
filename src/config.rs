@@ -10,17 +10,11 @@ use crate::error::{Error, Result};
 pub struct Config {
     /// The Rex app client a jump selects the session in, by label or id.
     pub client: Option<String>,
-    #[serde(default)]
-    pub jump: Jump,
+    /// `[jump]` held `pre_cmd`, which went with the window command; an old one is ignored.
+    #[serde(default, rename = "jump")]
+    _jump: Option<serde::de::IgnoredAny>,
     #[serde(default)]
     pub hosts: Hosts,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Jump {
-    /// Run before the app selects the session, since it selects in its focused window.
-    pub pre_cmd: Option<Vec<String>>,
 }
 
 #[derive(Debug, Default, Deserialize)]

@@ -38,8 +38,6 @@ pub enum Error {
     },
     #[error("{0}")]
     Config(String),
-    #[error("{0}")]
-    Jump(String),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -78,7 +76,6 @@ impl Error {
             Self::NobodyNeedsYou => "NOBODY_NEEDS_YOU",
             Self::AmbiguousClient { .. } => "AMBIGUOUS_CLIENT",
             Self::Config(_) => "CONFIG",
-            Self::Jump(_) => "JUMP",
             Self::Io(_) => "IO",
         }
     }
@@ -97,7 +94,7 @@ impl Error {
             Self::NotFound(_) => vec!["rexboard ls --json".to_owned()],
             Self::NobodyNeedsYou => vec!["rexboard ls".to_owned()],
             Self::AmbiguousClient { steps, .. } | Self::RexExplained { steps, .. } => steps.clone(),
-            Self::Config(_) | Self::Jump(_) => vec![CONFIG_DOC.to_owned()],
+            Self::Config(_) => vec![CONFIG_DOC.to_owned()],
             Self::ContractMismatch(_) => vec![
                 "rexboard --version".to_owned(),
                 "curl -fsSL https://raw.githubusercontent.com/vanducng/rexboard/main/install.sh | sh"

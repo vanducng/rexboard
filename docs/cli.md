@@ -198,9 +198,8 @@ rexboard pick                         # choose from the board's list
 
 Each lands the Rex app on the pane, on its host, and marks it seen through serve, as `s` on the board does. A jump:
 
-1. runs `jump.pre_cmd` from [config.toml](configuration.md), if set, since the app selects the session in whichever of its windows has focus;
-2. focuses the pane on the server that owns it (`session.focus_block`);
-3. asks this Mac's Rex app to select the pane's session and tab (`client.perform session.select`). On this host that is the app client named by `REX_CLIENT`, else `client` in config.toml, else the only app connected over the unix socket. On a remote host it is the app connected from this Mac's Tailscale node. The app has 5 seconds to answer. It does not answer while the Mac's screen is locked; the jump then fails with `REX`, `the Rex app on NAME did not answer within 5s; it does not answer while the Mac's screen is locked`, and the next step `unlock the Mac, then rexboard jump KEY`. With `--json`, Rex's own words are in `error.detail`.
+1. focuses the pane on the server that owns it (`session.focus_block`);
+2. asks this Mac's Rex app to select the pane's session and tab (`client.perform session.select`). On this host that is the app client named by `REX_CLIENT`, else `client` in config.toml, else the only app connected over the unix socket. On a remote host it is the app connected from this Mac's Tailscale node. The app has 5 seconds to answer. It does not answer while the Mac's screen is locked; the jump then fails with `REX`, `the Rex app on NAME did not answer within 5s; it does not answer while the Mac's screen is locked`, and the next step `unlock the Mac, then rexboard jump KEY`. With `--json`, Rex's own words are in `error.detail`.
 
 `next` picks from `needs_you` in board order: blocked, then error, then unseen done, each longest waiting first. It starts after the pane it runs in (`REX_BLOCK`); outside a pane, after the pane the last jump went to (serve keeps that in memory, so a restart starts from the top). It goes to unseen rows first, so repeated `next` works through the queue; once every row is seen, the blocked and erroring ones cycle. `pick` opens the board's list without the detail pane: Enter jumps and exits 0, esc exits 1.
 
@@ -209,27 +208,5 @@ Each lands the Rex app on the pane, on its host, and marks it seen through serve
 | Exit | When |
 | --- | --- |
 | 0 | Jumped |
-| 1 | `NOBODY_NEEDS_YOU`: `next`, or `jump N`, with nothing in `needs_you`; prints `nobody needs you`. `NOT_FOUND`: no such key, or no row N. `AMBIGUOUS_CLIENT`: no app client named, and no app connected, none on the unix socket, or more than one there; the message says which, and the next steps name each app (`open the Rex app` when there is none). `JUMP`: `jump.pre_cmd` failed, took more than 5 seconds, or did not run; nothing is selected. `CONFIG`: config.toml cannot be read or has an unknown key, or `client` names no app. `REX`: a step in Rex failed; the message names it. `pick`: esc |
+| 1 | `NOBODY_NEEDS_YOU`: `next`, or `jump N`, with nothing in `needs_you`; prints `nobody needs you`. `NOT_FOUND`: no such key, or no row N. `AMBIGUOUS_CLIENT`: no app client named, and no app connected, none on the unix socket, or more than one there; the message says which, and the next steps name each app (`open the Rex app` when there is none). `CONFIG`: config.toml cannot be read or has an unknown key, or `client` names no app. `REX`: a step in Rex failed; the message names it. `pick`: esc |
 | 2 | `USAGE`: TARGET is neither a key nor a number, or `pick` without a terminal |
-
-## `rexboard window`
-
-```bash
-rexboard window                # show the board in the focused Rex app window
-rexboard window --new          # open a new app window for it instead
-rexboard window --print-title  # board - rexboard
-```
-
-The board lives in a Rex session labelled `rexboard`, in a tab labelled `board` that runs `rexboard board`; a session of yours that happens to be labelled `rexboard` is never taken for it. The board titles its pane `board`, and the Rex app titles a window `<pane title> - <session>`, so the board's window is `board - rexboard`. `--print-title` prints that, for window-manager rules.
-
-The board shows in the window you are in, so going back and forth is all in one Rex window: show the board, Enter goes to the agent's pane in that same window, and running `rexboard window` again (bind it to a key) shows the board again.
-
-- With no `rexboard` session on this host, `rexboard window` makes it (`rex new rexboard --window board -- rexboard board`).
-- Then it asks the app to select the session, which shows the board in the focused window. If another app window already shows the session, the app focuses that window instead.
-- It never opens an app window. `--new` does: it opens a new app window and selects the session there, for a setup where the board keeps its own window. That setup also wants `jump.pre_cmd` in [config.toml](configuration.md), so a jump from the board lands in your main window and not on the board.
-
-rexboard picks the app client the same way a jump does (`REX_CLIENT`, else `client` in [config.toml](configuration.md), else the only app on the unix socket). With `--new`, a new app window comes with a session of its own, and rexboard destroys it once the board shows in the window: the session the app names, if it is new and not the board's, else the one session that appeared with the window, if it looks like a fresh window's (not labelled `rexboard`, one tab, one pane running a shell such as `zsh`, no status record). rexboard waits up to 2 seconds for it. If none appears, several do, or the one that does looks busy, nothing is destroyed and the command exits 1 naming them, with `rex kill SESSION` as the next step once you have checked it. If destroying it fails, the command exits 1 naming the session left open.
-
-Like a jump, opening or selecting needs the app to answer, which it does not while the Mac's screen is locked.
-
-`rexboard window` prints `opened the board window: board - rexboard` or `showed the board: board - rexboard`; with `--json`, `{"ok":true,"opened":...,"session_id":...,"title":"board - rexboard"}`. The exit codes and errors are those of `jump`.

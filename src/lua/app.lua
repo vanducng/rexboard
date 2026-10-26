@@ -1,4 +1,4 @@
--- Shared by jump.lua and window.lua: this Mac's Rex app among a server's clients.
+-- Runs before jump.lua: this Mac's Rex app among a server's clients.
 local a = rex.args
 
 local function fail(step, err)

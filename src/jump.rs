@@ -1,7 +1,3 @@
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
-
 use serde_json::{Value, json};
 
 use crate::board::{Group, Row};
@@ -16,9 +12,6 @@ const SCRIPT: &str = concat!(
     "\n",
     include_str!("lua/jump.lua")
 );
-
-/// How long `jump.pre_cmd` may take, such as a window manager focusing the main Rex window.
-const PRE_CMD_WITHIN: Duration = Duration::from_secs(5);
 
 /// `rexboard jump`: TARGET is a key (`HOST/BLOCK_ID`) or N, the nth NEEDS YOU row.
 pub fn jump(target: &str, json: bool) -> Result<()> {
@@ -67,18 +60,9 @@ fn find(rows: Vec<Row>, target: &str) -> Result<Row> {
         .ok_or_else(|| Error::NotFound(format!("no pane {target}")))
 }
 
-/// Lands the Rex app on the row's pane and marks it seen. `jump.pre_cmd` runs first, since the
-/// app selects the session in whichever of its windows has focus.
+/// Lands the Rex app on the row's pane and marks it seen.
 pub fn go(row: &Row) -> Result<()> {
     let config = config::load()?;
-    if let Some(argv) = config
-        .jump
-        .pre_cmd
-        .as_deref()
-        .filter(|argv| !argv.is_empty())
-    {
-        pre_cmd(argv)?;
-    }
     let app_client = app_client(config.client);
     let p = &row.pane;
     let reply = rex::run_script(
@@ -98,7 +82,7 @@ pub fn go(row: &Row) -> Result<()> {
 }
 
 /// The Rex app client to ask: `REX_CLIENT`, else `client` from config.toml.
-pub fn app_client(configured: Option<String>) -> Option<String> {
+fn app_client(configured: Option<String>) -> Option<String> {
     std::env::var("REX_CLIENT")
         .ok()
         .filter(|label| !label.is_empty())
@@ -107,7 +91,7 @@ pub fn app_client(configured: Option<String>) -> Option<String> {
 
 /// Turns a Lua reply into an error the reader can act on. `what` names the action in Rex's own
 /// failures, and `retry` is the command to run again once the app answers.
-pub fn check(reply: &Value, what: &str, retry: &str) -> Result<()> {
+fn check(reply: &Value, what: &str, retry: &str) -> Result<()> {
     if reply["ok"] == true {
         return Ok(());
     }
@@ -154,7 +138,7 @@ pub fn check(reply: &Value, what: &str, retry: &str) -> Result<()> {
             text("error"),
             labels.join(", ")
         )),
-        _ if matches!(step.as_str(), "session.select" | "client.window.new")
+        _ if step == "session.select"
             && (error.contains("code=timeout") || error.contains("status=504")) =>
         {
             Error::RexExplained {
@@ -181,40 +165,8 @@ fn app_name(error: &str) -> String {
         .map_or_else(|| "this Mac".to_owned(), crate::output::clean)
 }
 
-fn pre_cmd(argv: &[String]) -> Result<()> {
-    let shown = argv.join(" ");
-    let mut cmd = Command::new(&argv[0]);
-    cmd.args(&argv[1..])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let mut child = rex::spawn(&mut cmd)
-        .map_err(|err| Error::Jump(format!("jump.pre_cmd did not run ({shown}): {err}")))?;
-    let deadline = Instant::now() + PRE_CMD_WITHIN;
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(Error::Jump(format!(
-                "jump.pre_cmd took more than {}s: {shown}",
-                PRE_CMD_WITHIN.as_secs()
-            )));
-        }
-        thread::sleep(Duration::from_millis(10));
-    };
-    if !status.success() {
-        return Err(Error::Jump(format!(
-            "jump.pre_cmd failed ({status}): {shown}"
-        )));
-    }
-    Ok(())
-}
-
 /// How a jump names its row: `session › tab › pane on host`.
-pub fn name(row: &Row) -> String {
+fn name(row: &Row) -> String {
     format!(
         "{} on {}",
         path(&labels(row, false), usize::MAX),
