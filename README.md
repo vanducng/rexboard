@@ -13,6 +13,12 @@ Recorded on demo panes with [scripts/record-demo.sh](scripts/record-demo.sh).
 Needs Rex, with its `rex` CLI on your PATH. Jumps and `rexboard window` also need the Rex app.
 
 ```bash
+brew install vanducng/tap/rexboard
+```
+
+The Homebrew formula covers macOS on Apple silicon and Linux x86_64. Without Homebrew:
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/vanducng/rexboard/main/install.sh | sh
 ```
 
