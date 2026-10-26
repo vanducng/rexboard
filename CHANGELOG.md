@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/vanducng/rexboard/compare/v0.9.0...v0.10.0) (2026-10-26)
+
+
+### Features
+
+* **tui:** a short card bar with a facts block, the key table on the footer, optional Nerd Font icons ([914fa4a](https://github.com/vanducng/rexboard/commit/914fa4a0cfac92d3975b786a024301f7cbc7588d))
+
 ## [0.9.0](https://github.com/vanducng/rexboard/compare/v0.8.0...v0.9.0) (2026-10-26)
 
 
