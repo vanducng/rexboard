@@ -129,7 +129,7 @@ Reading a card does not mark a row seen. `s` does, and so does `tab` off a `done
 
 | Key | Does |
 | --- | --- |
-| `1`-`9` | When the screen shows a numbered dialog (the reply line is then a dim `›` with no cursor), picks that option: one key press, no Enter. An option that grants something for later (`always`, `don't ask again`, `auto mode`) needs the same digit again within 3 seconds; the first press only says `press 2 again to send it`. A digit picks only an option the card shows: on a short board the card takes rows from the list, all of them if it must, and an option still off screen is refused (`option 1 is off screen; make the board taller or jump to it`) and left out of the footer's `1-3 pick` |
+| `1`-`9` | When the screen shows a numbered dialog (the reply line is then a dim `›` with no cursor), picks that option: one key press, no Enter. An option that grants something for later (`always`, `don't ask again`, `auto mode`, `this session`, `accept edits`) needs the same digit again within 3 seconds; the first press only says `press 2 again to send it`. A digit picks only an option the card shows: on a short board the card takes rows from the list, all of them if it must, and an option still off screen is refused (`option 1 is off screen; make the board taller or jump to it`) and left out of the footer's `1-3 pick` |
 | text, then `enter` | When the screen shows an input line and no dialog, sends the line as a paste, then Enter. `enter` with nothing typed does nothing. Text into a dialog is refused: `pick a number; this dialog takes no text` |
 | `esc` | Clears the typed text (the footer then says `esc clears`), or leaves when there is none |
 | `ctrl-c` | Leaves; it never quits the board here |
@@ -141,9 +141,9 @@ The mode is bound to the row's host and pane, not its place in the list, so a re
 
 Before anything is sent, one `rex do` on the pane's host checks, in order, that:
 
-1. the pane's status report is the one the board read (else `the agent's status changed since it was read; nothing sent`);
+1. the agent still waits on the same thing: its status has the state and kind the board read. A fresh report of the same, such as the hook's notification a few seconds after a permission dialog opens, is no change. Else `the agent's status changed since it was read (blocked/permission → working); nothing sent`, naming what moved;
 2. an agent, not a shell, is in front (else `zsh is in front, not the agent; nothing sent`); a tmux seat must still show the same seat's title;
-3. the dialog's options, or the input line and the line above it, are still on the last 40 lines, whole (else `the screen changed since it was read; nothing sent`);
+3. the whole dialog, from its opening (below the rule above it) to its last option, or the input line and the line above it, is still on the last 40 lines, line for line. Every Edit dialog shows the same options, so the file or command above them is part of what must match (else `the screen changed since it was read; nothing sent`);
 4. for a line, no dialog is up: options 1 and 2 with no input line below them (else `a dialog is up; pick a number; nothing sent`). Text into a dialog would be read as its highlighted option, so this holds whatever the board believes it shows.
 
 A pane that is gone says `the pane is gone; nothing sent`. Only then does the key or the line go out, in the same script. A refusal sends nothing, clears any typed text, keeps the mode open with the reason in red, and reads the pane again. A read that shows a dialog clears typed text too.
