@@ -305,7 +305,7 @@ impl Answer {
     fn reply_line(&self, width: usize) -> Line<'static> {
         let now = Instant::now();
         if let Some(what) = &self.sending {
-            return Line::styled(fit(&format!(" sending {what}…"), width), theme::accent());
+            return Line::styled(fit(&format!(" sending {what}…"), width), theme::note());
         }
         if self.screen.is_none() {
             return Line::styled(fit(" reading the pane…", width), theme::quiet());

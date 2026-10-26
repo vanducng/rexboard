@@ -36,11 +36,45 @@ The board is built to live in a narrow column, so the narrow layout is the main 
   | `BLOCK` | Which pane? | The block's label |
   | `MSG` | What did it say? | The agent's own message, its first line. Blank when there is none, and for a hook's filler (`Done`, `Working`, `Allow <tool>?`); the turn card has the title. See [Agent status](agent-status.md) |
 
-  Glyphs: `◉` blocked, `✖` error, `●` done, `◐` working, `○` idle or seen done, `·` unknown. Blocked and error are red, unseen done green, working yellow, the rest dim. Time in state is `≥5h43m` when estimated and `-` for a pane with no status record. A harness read from the title, with no record, ends in `?` (`claude?`). A `working` report more than 120 seconds old on a pane that looks idle (an idle `✳ ` title, or a shell back in front) is not trusted: the row shows `idle?` (from 100 columns; narrower, its `○` glyph), dim, under `UNREPORTED`, and the turn card says `may be stale:` and why. The check cannot see inside tmux: with `tmux` in front the title is tmux's, so only a shell back in front makes such a row suspect. serve checks this every second, since time alone can make a report suspect. Rows of a host that is down, and every row while serve is stopped, are dim. The selected row has a raised background. A pane labelled `shell`, or named after its foreground process, tells you nothing, so its path is `session › window` (also below 100 columns), and its `BLOCK` is its title, else its window. When a path is too long, the window is cut first (to `…` below 6 columns), then the session down to an 8-column stem, then the last label. Rows on one host that would still read the same, as shown, end in `#N`, their place among those rows by window and then by block age. A number can shift when a twin's title changes and it stops reading the same; once split the `#N` goes on `BLOCK`, and a long session, window or block keeps both ends with `…` in the middle. Below 60 columns, where there is no host column, a row from a host other than `local` also gets `@HOST` when a twin is on another host; at 50 columns that reads `api…way › pair #1`, `api…way › pair #2` and `ap…y › pair @mini`. The suffix is never cut: the path gives way first, down to `…`. When rows do not fit, the last line says how many are below (`↓ 4 more`).
+  Each state has its glyph and colour (see [Style](#style)); working spins. Time in state is `≥5h43m` when estimated and `-` for a pane with no status record. A harness read from the title, with no record, ends in `?` (`claude?`). A `working` report more than 120 seconds old on a pane that looks idle (an idle `✳ ` title, or a shell back in front) is not trusted: the row shows `idle?` (from 100 columns; narrower, its `○` glyph), dim, under `UNREPORTED`, and the turn card says `may be stale:` and why. The check cannot see inside tmux: with `tmux` in front the title is tmux's, so only a shell back in front makes such a row suspect. serve checks this every second, since time alone can make a report suspect. Rows of a host that is down show `◌` and are dim, and so is every row while serve is stopped. The selected row has a raised background. A pane labelled `shell`, or named after its foreground process, tells you nothing, so its path is `session › window` (also below 100 columns), and its `BLOCK` is its title, else its window. When a path is too long, the window is cut first (to `…` below 6 columns), then the session down to an 8-column stem, then the last label. Rows on one host that would still read the same, as shown, end in `#N`, their place among those rows by window and then by block age. A number can shift when a twin's title changes and it stops reading the same; once split the `#N` goes on `BLOCK`, and a long session, window or block keeps both ends with `…` in the middle. Below 60 columns, where there is no host column, a row from a host other than `local` also gets `@HOST` when a twin is on another host; at 50 columns that reads `api…way › pair #1`, `api…way › pair #2` and `ap…y › pair @mini`. The suffix is never cut: the path gives way first, down to `…`. When rows do not fit, the last line says how many are below (`↓ 4 more`).
 - **Turn card**, for the selected row, under the list at full width, at every width (see [Turn card](#turn-card)). `c` hides it.
 - **Footer:** the keys that fit, most needed first (`j/k move · s seen · / filter · ? keys` at 50 columns, then `tab next`, `enter jump`, `a answer`, `space full` and `v view` as they fit, so 80 columns ends at `enter jump`; `v view` shows after `/ filter`), or the filter being typed, or a message for 3 seconds. A kept filter starts the footer with `/mini · esc clears ·`. While `c` has the card hidden, `c card` follows `? keys`. It goes before `space full` when the footer is narrow, so at 80 columns the footer shows `c card` and drops `space full`. A filter that matches nothing says `no rows match "mini" · esc clears` in the list. With the card hidden, below 100 columns, a rule sits above the footer when the screen is 20 rows or more.
 
 Long labels are cut to fit: a session, window or block label to 24 columns with `…` in the middle, and every cell at its column's edge with `…`. Widths count CJK and emoji as two columns. Colours are ANSI named colours only, so the terminal's theme carries through.
+
+## Style
+
+One table in `src/tui/theme.rs` says how each state looks, and the list, the turn card's bar, the full view's bar and `pick` all draw from it. Every glyph is one cell wide in any terminal and never an emoji, and its shape says the state without the colour.
+
+| Glyph | State | Look |
+|---|---|---|
+| `!` | blocked on a permission, or on anything but a question | red, bold |
+| `?` | blocked on a question | red, bold |
+| `✗` | error | red, bold |
+| `✓` | done, not yet seen | green, bold |
+| `✓` | done and seen | dim |
+| `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` | working: one frame every 80 ms, from the board's own clock | yellow |
+| `○` | idle, or a `working` report the board doubts (`idle?`) | dim |
+| `·` | no status, or a state read from the title only | dim |
+| `◌` | its host is down | dim, and so is the row |
+
+The board redraws every 80 ms only while a working row is on screen: in the list, on the turn card's bar or on the full view's bar. Otherwise it keeps its once-a-second tick.
+
+The rest of the board's text takes one of a few roles, also in `theme.rs`, so a new screen picks a role rather than a colour:
+
+| Role | Look | Where |
+|---|---|---|
+| `alert` | red | a failed jump, read or close, a host down, an extension failing, a refusal; answer mode's bar |
+| `note` | cyan | a passing message (a toast), a jump, close or answer on its way |
+| `accent` | cyan, bold | the board's name, the key table's title, an answer armed to send |
+| `strong` / `quiet` | bold / dim | a key and the words after it in every footer; a headline and its labels |
+| `header` | dim, bold | the column header and the group headers |
+| `selected` | raised background | the selected row or group header, keeping each cell's own colour |
+| cut mark | dim `…` | a pane line cut at the edge, on the line's own background |
+
+The glyph keeps its state's look everywhere, on the bars too: a spinner drawn bold turns into a still blob in a font with no bold braille.
+
+**Reduced motion** holds the spinner still as `⠿`, and the board keeps its once-a-second tick. Turn it on with `"motion": "reduced"` in `tui.json` (see [Turn card](#turn-card) for where the file lives), or for one run with `REXBOARD_REDUCED_MOTION=1`. The `?` table says so in its title when it fits.
 
 ## Views
 
@@ -104,7 +138,7 @@ The board redraws when serve sends rows, on a key, and once a second for the clo
 The card is the selected row in full, under the list, as wide as the board:
 
 ```
-━━ ● done · seat-a · api › main · mini · claude · ended 4m ago · turn 6m12s ━━━━━━ captured 11:21:14 · 8s ━━
+━━ ✓ done · seat-a · api › main · mini · claude · ended 4m ago · turn 6m12s ━━━━━━ captured 11:21:14 · 8s ━━
  Opened PR #31; CI is green.
    Pushed feat/turn-card and opened PR #31.
    Next step is yours: review and merge.
@@ -123,14 +157,14 @@ The card is 8 rows, or 40% of the body when that is more, and always leaves the 
 
 Reading a card does not mark a row seen. `s` does, and so does `tab` off a `done` row whose card has shown for at least a second. The tail of a blocked row is read by itself once its card has shown for 300 ms, once per report, so the ask can be checked against the screen; moving through rows reads none.
 
-`c`'s choice lives in `tui.json` beside serve's `state.json` (`~/.local/state/rexboard/tui.json`, or under `XDG_STATE_HOME`), as `detail_hidden` (missing means shown). The file is read when the board starts and written on each `c`. The side pane's old width key is ignored, and `<` and `>` say once that they are gone.
+`c`'s choice lives in `tui.json` beside serve's `state.json` (`~/.local/state/rexboard/tui.json`, or under `XDG_STATE_HOME`), as `detail_hidden` (missing means shown), next to `motion` (see [Style](#style)), which `c` keeps as it was. The file is read when the board starts and written on each `c`. The side pane's old width key is ignored, and `<` and `>` say once that they are gone.
 
 ## Full view
 
 `space` gives the selected row's pane the whole terminal: the card's bar on top, the pane's lines in between, and the keys at the bottom. There is no list.
 
 ```
-━━ ● working · seat-b · api › main · mini · claude · for 2m ━━━━━━━━━━━ live · 1s · following ━━
+━━ ⠋ working · seat-b · api › main · mini · claude · for 2m ━━━━━━━━━━━ live · 1s · following ━━
 ...the pane's last lines, newest at the bottom...
 space back · j/k scroll · a answer · enter jump · g/G top, bottom · pgup/pgdn page · q quit
 ```

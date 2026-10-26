@@ -92,6 +92,11 @@ fn board(pick: bool) -> Result<Option<Row>> {
         .map(|path| prefs::load(&path))
         .unwrap_or_default();
     app.hidden = prefs.detail_hidden;
+    app.motion = prefs.motion;
+    theme::set_motion(
+        prefs.motion == prefs::Motion::Full
+            && std::env::var("REXBOARD_REDUCED_MOTION").as_deref() != Ok("1"),
+    );
     app.own = std::env::var("REX_BLOCK").ok().filter(|id| !id.is_empty());
     let mut terminal = ratatui::init();
     let _restore = Restore;

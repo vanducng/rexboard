@@ -873,13 +873,13 @@ mod tests {
             let y = (3..30).find(|&y| line(&buf, y).contains(needle)).unwrap();
             line(&buf, y)
         };
-        assert!(row_at(100, "ask msg").starts_with("◉ permission "));
-        assert!(row_at(100, "pick msg").starts_with("◉ question "));
-        assert!(row_at(100, "plain msg").starts_with("◉ blocked "));
+        assert!(row_at(100, "ask msg").starts_with("! permission "));
+        assert!(row_at(100, "pick msg").starts_with("? question "));
+        assert!(row_at(100, "plain msg").starts_with("! blocked "));
         assert!(row_at(100, "stale msg").starts_with("○ idle? "));
         let narrow = row_at(99, "ask msg");
         assert!(
-            narrow.starts_with("◉ 5h43m "),
+            narrow.starts_with("! 5h43m "),
             "no STATE below 100: {narrow}"
         );
         assert!(!narrow.contains("permission") && !narrow.contains("blocked"));

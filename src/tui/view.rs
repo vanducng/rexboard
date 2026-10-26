@@ -32,7 +32,7 @@ pub const KEYS: [(&str, &str); 22] = [
     ("ctrl+s", "mark done rows seen (was S)"),
     ("space", "full view of the pane, live"),
     ("tab", "the next row that needs you"),
-    ("/", "filter, key:value; enter keeps"),
+    ("/", "filter: text or key:value"),
     ("f", "one status: w d q p e u i"),
     ("v", "status → host, then fields"),
     (":", "a view by name; tab completes"),
@@ -650,6 +650,42 @@ mod tests {
 
     use crate::tui::app::{App, Effect, Peek, Spot};
 
+    /// One row in each look the state table has.
+    fn every_state() -> App {
+        let with = |key: &str, state: &str, group: &str, change: &dyn Fn(&mut Row)| {
+            let mut row = row(key, state, group, false);
+            change(&mut row);
+            row
+        };
+        let rows = vec![
+            with("local/allow", "blocked", "needs_you", &|r| {
+                r.pane.kind = Some("permission".into())
+            }),
+            with("mini/ask", "blocked", "needs_you", &|r| {
+                r.pane.kind = Some("question".into())
+            }),
+            with("local/broke", "error", "needs_you", &|_| {}),
+            with("mini/fresh", "done", "needs_you", &|_| {}),
+            with("local/busy", "working", "working", &|_| {}),
+            with("local/read", "done", "quiet", &|r| r.seen = true),
+            with("mini/rest", "idle", "quiet", &|_| {}),
+            with("local/doubt", "working", "unreported", &|r| {
+                r.suspect = true;
+                r.suspect_reason = Some("reported working at 05:30; zsh is back in front".into());
+            }),
+            with("local/guess", "working", "unreported", &|r| {
+                r.pane.source = "inferred".into()
+            }),
+            with("mini/blank", "unknown", "unreported", &|_| {}),
+            with("studio/away", "working", "unreported", &|r| r.stale = true),
+        ];
+        let mut hosts = crate::tui::app::tests::hosts();
+        hosts.insert("studio".into(), "down".into());
+        let mut app = App::default();
+        app.set_rows(rows, hosts);
+        app
+    }
+
     fn fuller() -> App {
         let mut app = app();
         let mut estimated = row("mini/rig", "working", "working", true);
@@ -706,7 +742,7 @@ mod tests {
                     "{width}x{height} lacks {want:?}:\n{text}"
                 );
             }
-            assert!(text.contains("◉ "), "blocked glyph at {width}");
+            assert!(text.contains("! "), "blocked glyph at {width}");
             assert!(!text.contains("NO SIGNAL"));
         }
     }
@@ -738,7 +774,7 @@ mod tests {
         );
         assert!(!wide.contains('│'), "no pane on the right at 140");
         assert!(
-            wide.contains("━━ ◉") && narrow.contains("━━ ◉"),
+            wide.contains("━━ !") && narrow.contains("━━ !"),
             "the card is under the list at every width"
         );
         assert!(
@@ -962,7 +998,7 @@ mod tests {
         app.set_rows(rows, hosts());
         for width in [30, 40] {
             let text = render(&app, width, 20);
-            let lines: Vec<&str> = text.lines().filter(|l| l.starts_with('●')).collect();
+            let lines: Vec<&str> = text.lines().filter(|l| l.starts_with('✓')).collect();
             assert_eq!(lines.len(), 3, "{text}");
             assert!(lines.iter().any(|l| l.contains(" #1")), "{text}");
             assert!(lines.iter().any(|l| l.contains(" #2")), "{text}");
@@ -1065,7 +1101,7 @@ mod tests {
         for want in [
             "ctrl+s",
             "v       status → host, then fields",
-            "/       filter, key:value; enter keeps",
+            "/       filter: text or key:value",
             ":       a view by name; tab completes",
             "S A T   sort by state, age, turn",
             "R O W M by harness, host, where, msg",
@@ -1256,7 +1292,7 @@ mod tests {
             let harness = if width == 80 { "" } else { "claude · " };
             assert!(
                 card[0].starts_with(&format!(
-                    "━━ ◉ blocked · permission · seat-b · api › main · mini · {harness}waiting"
+                    "━━ ! blocked · permission · seat-b · api › main · mini · {harness}waiting"
                 )),
                 "{width}: the bar, its harness giving way at 80:\n{text}"
             );
@@ -1727,7 +1763,7 @@ mod tests {
         );
         press(&mut app, KeyCode::Char('?'));
         press(&mut app, KeyCode::Char('c'));
-        assert!(render(&app, 140, 30).contains("━━ ◉"));
+        assert!(render(&app, 140, 30).contains("━━ !"));
         let mut picking = fuller();
         picking.pick = true;
         assert_eq!(
@@ -1859,7 +1895,7 @@ mod tests {
         let text = render(&app, 80, 30);
         let bar = &card_of(&text)[0];
         assert!(
-            bar.starts_with("━━ ◉ blocked · permission · seat-b · waiting ")
+            bar.starts_with("━━ ! blocked · permission · seat-b · waiting ")
                 && bar.contains("captured"),
             "the place gives way too: {bar}"
         );
@@ -2077,13 +2113,39 @@ mod tests {
         out
     }
 
-    /// The board's looks across its screens, compared with the copy taken before the style
-    /// tokens: the refactor must change no cell.
     #[test]
-    fn every_screen_looks_as_it_did_before_the_style_tokens() {
-        let mut screens: Vec<(&str, App, u16, u16)> = Vec::new();
-        screens.push(("status 80", fuller(), 80, 30));
-        screens.push(("status 140", fuller(), 140, 34));
+    fn the_bar_draws_its_glyph_in_the_state_face_and_only_the_label_bold() {
+        use ratatui::style::Modifier;
+        let now = DateTime::parse_from_rfc3339("2026-01-01T05:43:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let app = every_state();
+        for key in ["local/busy", "local/allow"] {
+            let row = app.rows.iter().find(|row| row.key == key).unwrap();
+            let bar = crate::tui::card::bar(row, None, now, 80);
+            let glyph = theme::glyph(row, now);
+            let mark = bar.spans.iter().find(|s| s.content == glyph).unwrap();
+            assert_eq!(mark.style, theme::state(row), "{key}: the list's face");
+            let label = bar
+                .spans
+                .iter()
+                .find(|s| s.content.contains(" · "))
+                .unwrap();
+            assert!(label.style.add_modifier.contains(Modifier::BOLD), "{key}");
+        }
+    }
+
+    /// The board's looks across its screens, cell by cell: a change of look shows as a diff of
+    /// the fixture, recorded with UPDATE_STYLE_SNAPSHOT=1.
+    #[test]
+    fn every_screen_matches_the_style_snapshot() {
+        let mut screens: Vec<(&str, App, u16, u16)> = vec![
+            ("status 80", fuller(), 80, 30),
+            ("status 140", fuller(), 140, 34),
+            ("every state 80", every_state(), 80, 32),
+            ("every state 140", every_state(), 140, 32),
+            ("every state 200", every_state(), 200, 32),
+        ];
         let mut table = fuller();
         press(&mut table, KeyCode::Char('v'));
         press(&mut table, KeyCode::Char('A'));

@@ -160,6 +160,8 @@ pub struct App {
     pub pick: bool,
     /// `c` hid the card, from tui.json.
     pub hidden: bool,
+    /// tui.json's motion, written back when `c` saves the file.
+    pub motion: super::prefs::Motion,
     /// The terminal's size at the last draw, which `<` and `>` move the pane against and a
     /// click is read against.
     pub width: u16,
@@ -386,7 +388,7 @@ impl App {
     pub fn frame_every(&self) -> Option<Duration> {
         if let Some(full) = &self.full {
             let row = self.rows.iter().find(|row| row.key == full.key);
-            return super::theme::redraw_every(row.map(super::theme::look));
+            return super::theme::redraw_every(row.map(super::theme::look), super::theme::motion());
         }
         let (_, offset, room) = self.drawn.get();
         let items = self.items();
@@ -399,7 +401,10 @@ impl App {
                 Item::Header { .. } => None,
             });
         let carded = self.current().filter(|_| self.card_shown());
-        super::theme::redraw_every(listed.chain(carded).map(super::theme::look))
+        super::theme::redraw_every(
+            listed.chain(carded).map(super::theme::look),
+            super::theme::motion(),
+        )
     }
 
     /// The column a sort letter names: a built-in one, or a field's.
@@ -589,6 +594,7 @@ impl App {
     fn prefs(&self) -> super::prefs::Prefs {
         super::prefs::Prefs {
             detail_hidden: self.hidden,
+            motion: self.motion,
         }
     }
 
@@ -1248,14 +1254,27 @@ pub mod tests {
     }
 
     #[test]
-    fn with_nothing_animated_on_screen_the_board_keeps_its_once_a_second_tick() {
+    fn the_board_redraws_fast_only_while_a_working_row_is_on_screen() {
+        let spin = Some(Duration::from_millis(80));
         let mut app = app();
         app.drawn.set((3, 0, 20));
-        assert_eq!(app.frame_every(), None, "the list and the card");
+        assert_eq!(app.frame_every(), spin, "codex is in the list");
+        app.drawn.set((3, 0, 3));
+        assert_eq!(
+            app.frame_every(),
+            None,
+            "only NEEDS YOU fits, and the card is seat-b's"
+        );
         app.selected = Some(Spot::Row("mini/codex".into()));
+        assert_eq!(app.frame_every(), spin, "the card's bar is codex's");
         press(&mut app, KeyCode::Char(' '));
         assert!(app.full.is_some());
-        assert_eq!(app.frame_every(), None, "the full view's bar");
+        assert_eq!(app.frame_every(), spin, "the full view's bar");
+        press(&mut app, KeyCode::Esc);
+        app.selected = Some(Spot::Row("local/seat-a".into()));
+        press(&mut app, KeyCode::Char(' '));
+        assert!(app.full.is_some());
+        assert_eq!(app.frame_every(), None, "an idle row's full view");
     }
 
     pub fn row(key: &str, state: &str, group: &str, seen: bool) -> Row {
