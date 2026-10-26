@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(
     name = "rexboard",
     version,
     about = "Unofficial attention board for agent panes across Rex hosts.",
-    after_help = "Errors: {\"ok\":false,\"error\":{code,message,next_steps}} on stderr with --json. Exit 1: Rex or serve failed, or the key was not found. Exit 2: bad usage, or every host is unreachable."
+    after_help = "Errors: {\"ok\":false,\"error\":{code,message,next_steps}} on stderr with --json. Exit 1: Rex or serve failed, the key was not found, or a check refused to answer or close. Exit 2: bad usage, or every host is unreachable."
 )]
 pub struct Cli {
     /// Print JSON on stdout, and errors as JSON on stderr.
@@ -38,6 +38,18 @@ pub enum Command {
         /// Also read the pane's last N lines, as the card does (at most 200).
         #[arg(long, value_name = "N")]
         tail: Option<usize>,
+    },
+    /// Answer a pane's dialog (`--pick N`) or input line (`--text`), by its `key`, checked as the
+    /// board's answer mode checks it.
+    Answer(AnswerArgs),
+    /// Close a pane by its `key`. On a terminal it asks first; `--yes` closes without asking.
+    Close {
+        /// HOST/BLOCK_ID, the key from ls --json.
+        #[arg(value_name = "KEY")]
+        key: String,
+        /// Close without asking. Without a terminal it is required.
+        #[arg(long)]
+        yes: bool,
     },
     /// List the views `ls --view` and the board's `v` take, and what each groups by.
     Views,
@@ -132,6 +144,27 @@ pub struct SeenArgs {
     /// With --all-done, only rows this filter keeps, as with `ls --filter`.
     #[arg(long, value_name = "TEXT", conflicts_with = "key")]
     pub filter: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+#[command(group(ArgGroup::new("reply").required(true).args(["pick", "text"])))]
+pub struct AnswerArgs {
+    /// HOST/BLOCK_ID, the key from ls --json.
+    #[arg(value_name = "KEY")]
+    pub key: String,
+    /// Pick the dialog's option N: one key press, no Enter.
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u8).range(1..=9))]
+    pub pick: Option<u8>,
+    /// Reply with a line: a paste, then Enter. Not into a dialog, or an input line holding text.
+    #[arg(long, value_name = "TEXT")]
+    pub text: Option<String>,
+    /// Send only while the row is still in this state, and kind: `blocked`, `blocked:permission`.
+    #[arg(long, value_name = "STATE[:KIND]")]
+    pub expect: Option<String>,
+    /// Send an option that grants something for later (`always`, `don't ask again`), which the
+    /// board takes only on a second press.
+    #[arg(long)]
+    pub confirm: bool,
 }
 
 #[derive(Debug, Args)]

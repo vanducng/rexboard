@@ -2746,6 +2746,201 @@ fn seen_all_done_marks_the_unseen_done_rows_its_filters_keep() {
         .stderr(predicate::str::contains("<KEY>"));
 }
 
+/// The fake's tail reply for a pane showing `screen`, a fixture under `screens/`.
+fn screen_reply(screen: &str) -> String {
+    let text = std::fs::read_to_string(fixture(&format!("screens/{screen}"))).unwrap();
+    serde_json::json!({ "ok": true, "text": text, "total": text.len(), "cut": false }).to_string()
+}
+
+fn sends(serve: &Serve) -> Vec<serde_json::Value> {
+    serve
+        .log_lines()
+        .iter()
+        .filter_map(|line| line.split_once(" --args ").map(|(_, args)| args))
+        .filter_map(|args| serde_json::from_str::<serde_json::Value>(args).ok())
+        .filter(|args| args.get("action").is_some())
+        .collect()
+}
+
+#[test]
+fn answer_picks_an_option_only_after_the_boards_checks() {
+    let serve = mixed_serve();
+    let answer = |args: &[&str]| {
+        let mut cmd = serve.cmd();
+        cmd.env("FAKE_REX_TAIL_REPLY", screen_reply("claude-permission.txt"))
+            .args(["answer", "mini/block:web-ask", "--json"])
+            .args(args);
+        cmd
+    };
+    let refused = |args: &[&str], why: &str| {
+        answer(args)
+            .assert()
+            .code(1)
+            .stderr(
+                predicate::str::contains("\"code\":\"REFUSED\"").and(predicate::str::contains(why)),
+            )
+            .stderr(predicate::str::contains(
+                "rexboard show mini/block:web-ask --tail 40",
+            ));
+    };
+    refused(&["--pick", "7"], "there is no option 7; nothing sent");
+    refused(
+        &["--pick", "2"],
+        "option 2 (Yes, and always allow access to /work/project from this project) grants something for later; add --confirm",
+    );
+    refused(
+        &["--text", "hi"],
+        "pick a number; this dialog takes no text",
+    );
+    refused(
+        &["--pick", "1", "--expect", "blocked:permission"],
+        "mini/block:web-ask is blocked:question, not blocked:permission; nothing sent",
+    );
+    refused(
+        &["--pick", "1", "--expect", "done"],
+        "is blocked:question, not done",
+    );
+    assert!(sends(&serve).is_empty(), "no refusal reached send.lua");
+    answer(&["--pick", "1", "--text", "x"]).assert().code(2);
+    answer(&[]).assert().code(2);
+    answer(&["--pick", "0"]).assert().code(2);
+    let out = answer(&["--pick", "1", "--expect", "blocked:question"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&out).unwrap(),
+        serde_json::json!({ "ok": true, "key": "mini/block:web-ask", "sent": { "pick": 1, "label": "Yes" } })
+    );
+    let sent = sends(&serve);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(
+        sent[0]["action"],
+        serde_json::json!({ "pick": "1" }),
+        "a digit, no Enter"
+    );
+    assert_eq!(sent[0]["block_id"], "block:web-ask");
+    assert_eq!(sent[0]["expect"]["state"], "blocked");
+    assert_eq!(sent[0]["expect"]["kind"], "question");
+    assert!(
+        sent[0]["expect"]["fingerprint"]
+            .as_str()
+            .unwrap()
+            .contains("Do you want to proceed?"),
+        "the whole dialog is checked again on the pane"
+    );
+    assert!(
+        serve
+            .log_lines()
+            .iter()
+            .any(|l| l.starts_with("-S mini do -")),
+        "sent on the row's host"
+    );
+    let row = serve
+        .rows(&[])
+        .into_iter()
+        .find(|r| r["key"] == "mini/block:web-ask")
+        .unwrap();
+    assert_eq!(row["seen"], true, "a reply marks it seen, as on the board");
+    answer(&["--pick", "2", "--confirm"]).assert().success();
+    answer(&["--pick", "1"])
+        .env(
+            "FAKE_REX_SEND_REPLY",
+            r#"{"ok":false,"code":"prompt_changed"}"#,
+        )
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "the screen changed since it was read; nothing sent",
+        ));
+}
+
+#[test]
+fn answer_text_goes_only_to_an_empty_input_line() {
+    let serve = mixed_serve();
+    let answer = |screen: &str, text: &str| {
+        let mut cmd = serve.cmd();
+        cmd.env("FAKE_REX_TAIL_REPLY", screen_reply(screen)).args([
+            "answer",
+            "mini/block:web-done",
+            "--text",
+            text,
+        ]);
+        cmd
+    };
+    answer("claude-idle.txt", "run the tests")
+        .assert()
+        .success()
+        .stdout("sent \"run the tests\" to web › main › seat-d on mini\n");
+    assert_eq!(
+        sends(&serve)[0]["action"],
+        serde_json::json!({ "text": "run the tests" })
+    );
+    answer("claude-idle.txt", "  ").assert().code(2);
+    answer("claude-permission.txt", "run the tests")
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "pick a number; this dialog takes no text",
+        ));
+    answer("claude-idle.txt", "x")
+        .env("REX_BLOCK", "block:web-done")
+        .assert()
+        .success();
+    serve
+        .cmd()
+        .args(["answer", "mini/block:nope", "--text", "x", "--json"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("\"code\":\"NOT_FOUND\""));
+}
+
+#[test]
+fn close_asks_on_a_terminal_and_needs_yes_without_one() {
+    let serve = mixed_serve();
+    serve
+        .cmd()
+        .args(["close", "mini/block:web-ask", "--json"])
+        .assert()
+        .code(2)
+        .stderr(
+            predicate::str::contains("\"code\":\"USAGE\"")
+                .and(predicate::str::contains(
+                    "close web › main › seat-q on mini, ending claude (blocked · question)? Without a terminal to ask on, --yes closes it",
+                ))
+                .and(predicate::str::contains("rexboard close mini/block:web-ask --yes")),
+        );
+    assert!(
+        !serve.log_lines().iter().any(|l| l.contains("block close")),
+        "nothing closed"
+    );
+    serve
+        .cmd()
+        .args(["close", "mini/block:web-ask", "--yes", "--json"])
+        .assert()
+        .success()
+        .stdout("{\"closed\":true,\"key\":\"mini/block:web-ask\",\"ok\":true}\n");
+    assert!(
+        serve
+            .log_lines()
+            .iter()
+            .any(|l| l == "-S mini block close block:web-ask"),
+        "{:?}",
+        serve.log_lines()
+    );
+    serve
+        .cmd()
+        .env("FAKE_REX_CLOSE_STDERR", "error: block not found")
+        .args(["close", "mini/block:web-done", "--yes"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "close failed: error: block not found",
+        ));
+}
+
 #[test]
 fn every_json_sample_in_the_cli_doc_parses() {
     let doc = include_str!("../docs/cli.md");

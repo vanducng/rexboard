@@ -14,6 +14,7 @@ Answering an agent from the board saves a jump, and closing a finished pane save
 - An option that grants something for later needs the same digit twice. Text goes as a paste then Enter, never into a dialog. Esc and Ctrl+C are never sent.
 - Typing guard: `a`, `i` and `dd` act only when pressed on their own, 300 ms after the key before; a first key within 300 ms of opening answer mode leaves it, and a key within 300 ms of `dd`'s question cancels it.
 - The board never answers or closes its own pane.
+- The CLI's `answer` and `close` name the pane by its key and go through the same read and re-check. A lasting option takes `--confirm` instead of a second press; a close takes `--yes`, or a `y` on a terminal, and without a terminal never asks. Neither acts on the caller's own pane (`REX_BLOCK`). The typing guard is the board's alone: a command line is not typed into the wrong place by a stray key.
 - Live tests write only to throwaway `zz-rexboard-probe-*` panes, never to real ones.
 
 ## Consequences

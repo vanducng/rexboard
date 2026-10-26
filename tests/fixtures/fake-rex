@@ -7,6 +7,7 @@
 #                (default {"ok":true}), or for the tail script $FAKE_REX_TAIL_REPLY (default: a few
 #                lines of generic pane text), after sleeping $FAKE_REX_TAIL_SLEEP seconds when set,
 #                or for the answer script $FAKE_REX_SEND_REPLY (default {"ok":true})
+#   block close  exits 0, or 1 with $FAKE_REX_CLOSE_STDERR on stderr when that is set
 #   hosts        lists one remote host, mini
 #   FAKE_REX_ENV_LOG  each call appends the REX_BLOCK, REX_SESSION and REX_CLIENT it sees (- if unset)
 if [ -n "${FAKE_REX_LOG:-}" ]; then
@@ -57,6 +58,12 @@ case " $* " in
         ;;
       *) cat "${FAKE_REX_FIXTURE:-$dir/snapshot-two-hosts.json}" ;;
     esac
+    ;;
+  *" block close "*)
+    if [ -n "${FAKE_REX_CLOSE_STDERR:-}" ]; then
+      echo "$FAKE_REX_CLOSE_STDERR" >&2
+      exit 1
+    fi
     ;;
   " hosts --json ")
     echo '{"hosts":[{"host":{"label":"mini"}}]}'

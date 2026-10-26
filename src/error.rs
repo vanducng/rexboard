@@ -24,6 +24,9 @@ pub enum Error {
     ServeRunning(String),
     #[error("{0}")]
     NotFound(String),
+    /// A check before acting on a pane failed, so nothing was sent or closed.
+    #[error("{message}")]
+    Refused { message: String, steps: Vec<String> },
     #[error("nobody needs you")]
     NobodyNeedsYou,
     /// No app, or not exactly one, could take a jump on this host.
@@ -93,6 +96,7 @@ impl Error {
             Self::Serve { .. } => "SERVE",
             Self::ServeRunning(_) => "SERVE_RUNNING",
             Self::NotFound(_) => "NOT_FOUND",
+            Self::Refused { .. } => "REFUSED",
             Self::NobodyNeedsYou => "NOBODY_NEEDS_YOU",
             Self::AmbiguousClient { .. } => "AMBIGUOUS_CLIENT",
             Self::Config(_) => "CONFIG",
@@ -116,6 +120,7 @@ impl Error {
             Self::NotFound(_) => vec!["rexboard ls --json".to_owned()],
             Self::NobodyNeedsYou => vec!["rexboard ls".to_owned()],
             Self::AmbiguousClient { steps, .. }
+            | Self::Refused { steps, .. }
             | Self::RexExplained { steps, .. }
             | Self::Upgrade { steps, .. }
             | Self::Extension { steps, .. }

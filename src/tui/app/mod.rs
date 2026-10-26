@@ -24,6 +24,7 @@ mod card;
 mod filter;
 mod full;
 mod pane_keys;
+pub(crate) use pane_keys::{RUNS_THE_BOARD, ending, is_own, runs_rexboard, tmux_note};
 mod select;
 mod views;
 

@@ -1,4 +1,4 @@
-mod answer;
+pub(crate) mod answer;
 mod app;
 pub(crate) mod card;
 mod clipboard;
@@ -10,7 +10,7 @@ mod keys;
 mod meta;
 mod prefs;
 pub(crate) mod query;
-mod screen;
+pub(crate) mod screen;
 mod status;
 mod theme;
 mod view;
@@ -36,8 +36,9 @@ use crate::state::Paths;
 use crate::{interrupted, jump, rex, send, stop_on_signals};
 
 use app::{App, Effect, Link};
-pub(crate) use effects::tail;
+pub(crate) use app::{RUNS_THE_BOARD, ending, is_own, runs_rexboard, tmux_note};
 use effects::{Msg, act, apply, listen, tui_json};
+pub(crate) use effects::{screen as read_screen, tail};
 use screen::Screen;
 
 /// The board as tui.json, the environment and the pane it runs in set it up.

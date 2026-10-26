@@ -256,6 +256,13 @@ pub(crate) fn tail(row: &Row, lines: usize) -> Result<Vec<String>> {
     }
 }
 
+/// `answer`: the row's screen, read as answer mode reads it.
+pub(crate) fn screen(row: &Row) -> Result<Screen> {
+    let rex = rex::locate()?;
+    let p = &row.pane;
+    read(&rex, &p.host, &p.session_id, &p.block_id).map_err(Error::Rex)
+}
+
 /// What answer mode reads: the tail as the card reads it, and the input line with its styles.
 fn read(
     rex: &std::path::Path,

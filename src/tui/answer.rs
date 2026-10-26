@@ -50,6 +50,34 @@ pub enum Step {
     Send(Action),
 }
 
+/// What `row`'s pane must still show, as `screen` read it, for a key to go out; None with no
+/// dialog or input line to check against.
+pub fn expect(row: &Row, screen: &Screen) -> Option<Expect> {
+    Some(Expect {
+        state: row.pane.state.clone(),
+        kind: row.pane.kind.clone(),
+        fingerprint: screen.fingerprint.clone()?,
+        title: (row.pane.source == "bridge").then(|| row.pane.title.clone()),
+    })
+}
+
+/// Why a line of text cannot go to `screen`, or None when it can.
+pub fn text_refusal(screen: &Screen) -> Option<&'static str> {
+    if !screen.options.is_empty() {
+        Some("pick a number; this dialog takes no text")
+    } else if screen.fingerprint.is_none() {
+        Some("no input line on the screen; nothing sent")
+    } else if screen.draft {
+        Some("the input line already has text, which a reply would join; nothing sent")
+    } else {
+        None
+    }
+}
+
+pub fn no_option(digit: char) -> String {
+    format!("there is no option {digit}")
+}
+
 impl Answer {
     pub fn new(row: Row, updated_at: String) -> Self {
         Self {
@@ -67,12 +95,7 @@ impl Answer {
 
     /// What the pane must still show for `action` to go out.
     pub fn expect(&self) -> Option<Expect> {
-        Some(Expect {
-            state: self.row.pane.state.clone(),
-            kind: self.row.pane.kind.clone(),
-            fingerprint: self.screen.as_ref()?.fingerprint.clone()?,
-            title: (self.row.pane.source == "bridge").then(|| self.row.pane.title.clone()),
-        })
+        expect(&self.row, self.screen.as_ref()?)
     }
 
     /// `1 (Yes)` or `"fix the test"`, as the card's bar reports a send.
@@ -149,7 +172,7 @@ impl Answer {
     /// A digit sends its option; a lasting one only on its second press within ARM.
     fn pick(&mut self, digit: char, now: Instant) -> Step {
         let Some(choice) = self.choice(digit) else {
-            self.error = Some(format!("there is no option {digit}"));
+            self.error = Some(no_option(digit));
             return Step::Stay;
         };
         if self.shown.get() & bit(digit) == 0 {
@@ -174,17 +197,13 @@ impl Answer {
         let Some(screen) = self.screen.as_ref().filter(|_| !text.is_empty()) else {
             return Step::Stay;
         };
-        let why = if !screen.options.is_empty() {
-            "pick a number; this dialog takes no text"
-        } else if screen.fingerprint.is_none() {
-            "no input line on the screen; nothing sent"
-        } else if screen.draft {
-            "the input line already has text, which a reply would join; nothing sent"
-        } else {
-            return Step::Send(Action::Text(text));
-        };
-        self.error = Some(why.to_owned());
-        Step::Stay
+        match text_refusal(screen) {
+            Some(why) => {
+                self.error = Some(why.to_owned());
+                Step::Stay
+            }
+            None => Step::Send(Action::Text(text)),
+        }
     }
 
     fn armed_now(&self, now: Instant) -> Option<&Choice> {

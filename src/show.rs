@@ -15,7 +15,8 @@ const GUTTER: &str = " │ ";
 /// The most `--tail` reads, as the card does.
 const TAIL_MOST: usize = 200;
 
-pub fn show(key: &str, tail: Option<usize>, json: bool) -> Result<()> {
+/// The row `key` names among serve's rows, with the extensions' fields.
+pub(crate) fn find(key: &str) -> Result<(Row, Vec<Field>)> {
     if !key.contains('/') {
         return Err(Error::usage_with(
             format!("KEY must be HOST/BLOCK_ID, as in ls --json: {key}"),
@@ -28,6 +29,11 @@ pub fn show(key: &str, tail: Option<usize>, json: bool) -> Result<()> {
         .into_iter()
         .find(|row| row.key == key)
         .ok_or_else(|| Error::NotFound(format!("no pane {key}")))?;
+    Ok((row, rows.fields))
+}
+
+pub fn show(key: &str, tail: Option<usize>, json: bool) -> Result<()> {
+    let (row, fields) = find(key)?;
     let tail = tail
         .map(|lines| crate::tui::tail(&row, lines.min(TAIL_MOST)))
         .transpose()?;
@@ -39,7 +45,7 @@ pub fn show(key: &str, tail: Option<usize>, json: bool) -> Result<()> {
         }
         println!("{shown}");
     } else {
-        print!("{}", text(&row, &rows.fields, tail.as_deref()));
+        print!("{}", text(&row, &fields, tail.as_deref()));
     }
     Ok(())
 }
@@ -88,7 +94,7 @@ fn text(row: &Row, fields: &[Field], tail: Option<&[String]>) -> String {
     out
 }
 
-fn place(row: &Row) -> String {
+pub(crate) fn place(row: &Row) -> String {
     path(&labels(row, false), usize::MAX)
 }
 

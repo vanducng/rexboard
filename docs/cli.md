@@ -184,7 +184,7 @@ rexboard serve --foreground   # run it in this terminal
 rexboard serve --stop         # stop it and its observers
 ```
 
-`serve` owns one observer per host and the board, and answers `ls`, `watch --json`, `seen`, `show`, `views`, `hosts`, `jump`, `next`, `pick`, the board and `ext test` over a unix socket. Any of those starts it when nothing answers, as `rexboard serve --foreground` in its own session with its output in `serve.log`, and waits up to 2 seconds for it. Only one runs at a time: a second `serve --foreground` fails with `SERVE_RUNNING` (exit 1). It rescans `rex hosts` every 5 minutes.
+`serve` owns one observer per host and the board, and answers `ls`, `watch --json`, `seen`, `show`, `answer`, `close`, `views`, `hosts`, `jump`, `next`, `pick`, the board and `ext test` over a unix socket. Any of those starts it when nothing answers, as `rexboard serve --foreground` in its own session with its output in `serve.log`, and waits up to 2 seconds for it. Only one runs at a time: a second `serve --foreground` fails with `SERVE_RUNNING` (exit 1). It rescans `rex hosts` every 5 minutes.
 
 The socket, `serve.sock`, sits beside `serve.lock` in the state dir, so every caller finds the running serve whatever its `TMPDIR` or `XDG_RUNTIME_DIR`. If that path is longer than 103 bytes, commands fail with `SERVE`: set a shorter `XDG_STATE_HOME` everywhere rexboard runs (it also holds `state.json`). serve keeps the environment of the command that started it, so after changing `REXBOARD_REX` or `REX_BIN_DIR`, run `rexboard serve --stop`.
 
@@ -236,6 +236,40 @@ Everything the board's card says about a pane, by the `key` from `ls --json`, pl
 ```
 
 (The sample leaves out some of the fields `ls --json` lists.) An unknown key fails with `NOT_FOUND` (exit 1), a key without `/` with `USAGE` (exit 2), and a tail that cannot be read with `REX` (exit 1).
+
+## `rexboard answer`
+
+```bash
+rexboard answer mini/block:web-seat-b --pick 1                          # option 1 of the dialog
+rexboard answer mini/block:web-seat-b --pick 2 --confirm                # an option that lasts
+rexboard answer mini/block:web-seat-b --pick 1 --expect blocked:permission
+rexboard answer mini/block:web-seat-b --text "run the tests"            # a line into the input line
+```
+
+What the board's [answer mode](tui.md#answer-mode) does, for a script or an agent, with its checks: the pane is read fresh, as answer mode reads it, and one `rex do` on the pane's host checks again that the agent's state and kind, the agent in front, and the whole dialog or input line are as read, then sends. `--pick N` sends option N's digit, one key press and no Enter. An option that grants something for later (`always`, `don't ask again`, `auto mode`, `this session`, `accept edits`), which the board takes only on a second press, needs `--confirm`. `--text` pastes the line, then presses Enter, and only into an empty input line: never into a dialog, or a line that already holds text. `--expect STATE[:KIND]` sends only while the row is still in that state, and kind, as `ls --json` has them (`blocked`, `blocked:permission`). Esc and Ctrl+C are never sent. A reply marks the row seen, as on the board. With `--json`:
+
+```json
+{"ok":true,"key":"mini/block:web-seat-b","sent":{"pick":1,"label":"Yes"}}
+```
+
+or `"sent":{"text":"run the tests"}`. Without it, `sent 1 (Yes) to web › main › seat-b on mini`.
+
+A check that fails sends nothing and fails with `REFUSED` (exit 1), saying why, with `rexboard show KEY --tail 40` as the next step: no such option, a lasting option without `--confirm`, text into a dialog or an input line holding text, no dialog or input line on the screen, a row not in `--expect`'s state, a pane with no status record, your own pane (the one in `REX_BLOCK`), or the pane changed between the read and the send (`the screen changed since it was read; nothing sent`). A send that times out says the pane may or may not have the key. An unknown key fails with `NOT_FOUND`, no `--pick` or `--text`, both, a digit outside 1-9, or an empty `--text` with `USAGE` (exit 2), and a screen that cannot be read with `REX`.
+
+## `rexboard close`
+
+```bash
+rexboard close mini/block:web-seat-b         # asks first, on a terminal
+rexboard close mini/block:web-seat-b --yes   # closes without asking
+```
+
+Closes a pane with `rex [-S HOST] block close`, as the board's `dd` does. On a terminal it asks first, the way `dd` does, and only `y` closes: `close web › main › seat-b on mini, ending claude (blocked · permission)? [y/N]`, with `(tmux keeps running)` for a tmux client; anything else says `nothing closed` and exits 1 with `CANCELLED`. Without a terminal it never asks: `--yes` closes, and without it the command fails with `USAGE` (exit 2) and the question, so nothing is closed by accident. With `--json`:
+
+```json
+{"ok":true,"key":"mini/block:web-seat-b","closed":true}
+```
+
+The pane that runs the board, any pane running `rexboard`, and your own pane are never closed (`REFUSED`, exit 1). Rex refusing the close fails with `REX` and Rex's words (`close failed: error: block not found`); an unknown key with `NOT_FOUND`.
 
 ## `rexboard views`
 
