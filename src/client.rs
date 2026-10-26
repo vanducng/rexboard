@@ -21,6 +21,9 @@ use crate::{interrupted, output, rex, serve, stop_on_signals};
 const START_WITHIN: Duration = Duration::from_secs(2);
 /// Far longer than one restart or heal takes, so only a stuck one runs into it.
 const TURN_WITHIN: Duration = Duration::from_secs(30);
+/// How long a held lock may still name the last holder's dead pid, or none, before it counts
+/// as stuck.
+const RECORD_WITHIN: Duration = Duration::from_millis(500);
 /// serve.log is cut back to nothing past this size when a client starts serve.
 const LOG_MAX: u64 = 1024 * 1024;
 
@@ -148,7 +151,7 @@ fn reach(paths: &Paths, turn: Option<&Lock>) -> Result<UnixStream> {
         } else if !held {
             // Another command stopped the holder and its serve has not taken the lock yet.
             start(paths)?;
-        } else if recorded_pid(paths).is_none() {
+        } else if recorded_pid(paths).is_none() && !record_moves_on(paths, None) {
             return Err(refusal(paths, None));
         }
         if extended {
@@ -175,7 +178,13 @@ fn heal(paths: &Paths, pid: i32, turn: Option<&Lock>) -> Result<()> {
     if !(Lock::held(&paths.lock()) && recorded_pid(paths) == Some(pid)) {
         return Ok(());
     }
-    if !alive(pid) || !is_rexboard(pid) {
+    if !alive(pid) {
+        if record_moves_on(paths, Some(pid)) {
+            return Ok(());
+        }
+        return Err(refusal(paths, Some(pid)));
+    }
+    if !is_rexboard(pid) {
         return Err(refusal(paths, Some(pid)));
     }
     unsafe { libc::kill(pid, libc::SIGTERM) };
@@ -189,6 +198,22 @@ fn heal(paths: &Paths, pid: i32, turn: Option<&Lock>) -> Result<()> {
         ),
     );
     Ok(())
+}
+
+/// Whether serve.lock comes to record a pid other than `stale` (a dead one, or none) within
+/// RECORD_WITHIN, as a serve that has just taken the lock does a moment later.
+fn record_moves_on(paths: &Paths, stale: Option<i32>) -> bool {
+    let deadline = Instant::now() + RECORD_WITHIN;
+    loop {
+        let now = recorded_pid(paths);
+        if now.is_some() && now != stale {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// The turn to replace serve, which one command at a time takes.
@@ -544,7 +569,12 @@ pub fn start_serve(json: bool) -> Result<()> {
 
 fn recorded_pid(paths: &Paths) -> Option<i32> {
     let text = std::fs::read_to_string(paths.lock()).ok()?;
-    let pid = serde_json::from_str::<Value>(&text).ok()?["pid"].as_i64()?;
+    // Only the first value: a record being rewritten can still end in the last one's tail.
+    let record = serde_json::Deserializer::from_str(&text)
+        .into_iter::<Value>()
+        .next()?
+        .ok()?;
+    let pid = record["pid"].as_i64()?;
     i32::try_from(pid).ok()
 }
 
@@ -672,6 +702,13 @@ fn proc_name(pid: i32) -> Option<String> {
 mod tests {
     use super::*;
 
+    fn paths(dir: &std::path::Path) -> Paths {
+        Paths {
+            socket: dir.join("serve.sock"),
+            dir: dir.to_owned(),
+        }
+    }
+
     #[test]
     fn only_rexboard_binaries_are_stopped() {
         assert!(rexboard_exe(std::path::Path::new(
@@ -706,10 +743,7 @@ mod tests {
     #[test]
     fn a_command_holding_the_turn_never_waits_for_it_again() {
         let dir = tempfile::tempdir().unwrap();
-        let paths = Paths {
-            socket: dir.path().join("serve.sock"),
-            dir: dir.path().to_owned(),
-        };
+        let paths = paths(dir.path());
         let mut silent = Command::new("sleep").arg("30").spawn().unwrap();
         let pid = i32::try_from(silent.id()).unwrap();
         let (mut lock, _) = Lock::take(&paths.lock()).unwrap().unwrap();
@@ -733,6 +767,50 @@ mod tests {
             started.elapsed() < Duration::from_secs(5),
             "no wait for the turn"
         );
+    }
+
+    #[test]
+    fn a_dead_pid_on_a_held_lock_is_refused_only_when_its_record_stays() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths(dir.path());
+        let mut gone = Command::new("true").spawn().unwrap();
+        let dead = i32::try_from(gone.id()).unwrap();
+        gone.wait().unwrap();
+        let (mut lock, _) = Lock::take(&paths.lock()).unwrap().unwrap();
+        let record = |pid| crate::state::Record {
+            pid,
+            ..Default::default()
+        };
+        lock.write(&record(dead)).unwrap();
+        let turn = turn(&paths).unwrap();
+        let err = heal(&paths, dead, Some(&turn)).unwrap_err().to_string();
+        assert!(err.contains("which is not running"), "{err}");
+        let writer = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            lock.write(&record(i32::try_from(std::process::id()).unwrap()))
+                .unwrap();
+            lock
+        });
+        let healed = heal(&paths, dead, Some(&turn));
+        let _lock = writer.join().unwrap();
+        assert!(
+            healed.is_ok(),
+            "a new serve that records its pid late is left to answer: {healed:?}"
+        );
+    }
+
+    #[test]
+    fn a_record_caught_mid_rewrite_still_names_its_pid() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths(dir.path());
+        std::fs::write(
+            paths.lock(),
+            r#"{"pid":42,"rex":"rex","children":[]}n/rex","children":[7]}"#,
+        )
+        .unwrap();
+        assert_eq!(recorded_pid(&paths), Some(42));
+        std::fs::write(paths.lock(), "").unwrap();
+        assert_eq!(recorded_pid(&paths), None);
     }
 
     #[test]
