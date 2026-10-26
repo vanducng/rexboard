@@ -76,20 +76,23 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
     }
     let mut meta = super::meta::lines(app, row, text);
     meta.insert(0, Line::default());
-    if room > 0 {
-        // A blocked row's ask is never cut, so only its facts give way; any other message gives
-        // way first, down to its headline.
-        if row.pane.state != "blocked" {
-            let over = (lines.len() + meta.len()).saturating_sub(room);
-            shorten(&mut lines, over, text);
-        }
+    // A blocked row's ask and tail are what it asks, so they are never cut for the facts; the
+    // facts take the rows left. Any other message gives way to the facts, down to its headline.
+    let blocked = row.pane.state == "blocked";
+    if room > 0 && !blocked {
         let over = (lines.len() + meta.len()).saturating_sub(room);
-        meta.truncate(meta.len().saturating_sub(over));
+        shorten(&mut lines, over, text);
     }
-    if let Some(peek) = peek {
-        let room = room.saturating_sub(lines.len() + meta.len());
-        lines.extend(tail(peek, text, room));
+    let tail = peek.map_or_else(Vec::new, |peek| {
+        let used = lines.len() + if blocked { 0 } else { meta.len() };
+        tail(peek, text, room.saturating_sub(used))
+    });
+    if room > 0 {
+        let left = room.saturating_sub(lines.len() + tail.len());
+        // The blank line alone is no facts.
+        meta.truncate(if left < 2 { 0 } else { left });
     }
+    lines.extend(tail);
     lines.extend(meta);
     lines
 }

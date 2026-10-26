@@ -171,10 +171,10 @@ The card is the selected row in full, under the list, as wide as the board:
    Pushed feat/turn-card and opened PR #31.
    Next step is yours: review and merge.
 
- host           mini     harness        claude   turn           6m
- where          api › main › seat-a
+ where   api › main › seat-a
+ host    mini     harness claude   turn    6m
  session-prefix project api
- title          seat-a   source         native
+ title   seat-a   source  native
 ```
 
 1. **The bar:** what you scan first. The glyph and the state (with its kind, as in `blocked · permission`), the block, and how the turn stands: `ended 4m ago` for a done row, `waiting 12s` for a blocked one, `failed 2m ago`, or `for 2m` in any other state. On the right, how fresh the pane's tail is: `captured 11:21:14 · 8s`, or `newer report · space refreshes` once the row has reported since.
@@ -182,9 +182,10 @@ The card is the selected row in full, under the list, as wide as the board:
 3. **The ask or the body:** the message's other lines, wrapped. A blocked row's ask is never cut: its card grows as far as the list's last 3 rows.
 4. A failed jump's reason, and `may be stale:` for a suspect row.
 5. The pane's tail, when it has been read, newest line at the bottom.
-6. **The facts**, after one blank line, at the foot of the card: each once, under a dim label, in aligned columns. First `host`, `harness` and `turn` (how long the last turn ran), then `where` (`session › window › block`), then each extension's fields on the row under the extension's name (`session-prefix  project api`, or `lane  desk` for a lone field named like its extension), then `title` and `source`. When the card is wide, the short facts share a row, up to three; narrow, each takes its own. `where` gives way from its session and window, cut in the middle, and never cuts the block's name while it fits at all. The label column is as wide as the longest label, up to 16 columns, and a longer extension name pushes only its own value.
+6. **The facts**, after one blank line, at the foot of the card: each once, under a dim label, in aligned columns. First `where` (`session › window › block`), which tells two rows of the same name apart, then `host`, `harness` and `turn` (how long the last turn ran), then each extension's fields on the row, then `title` and `source`. When the card is wide, the short facts share a row, up to three; narrow, each takes its own. `where` gives way from its session and window, cut in the middle, and never cuts the block's name while it fits at all.
+7. **An extension's row** starts with the extension's name, dim, then each field's name, dim, and its value: `session-prefix project api`, or `lane desk` for a lone field named like its extension. The label column is as wide as the built-in labels, so a longer extension name runs past it and widens only its own row.
 
-A long message gives way to the facts: it is cut, down to its headline, and the last line it keeps ends in `…`. A blocked row's ask is never cut, so on a short screen its facts give way instead, from the last.
+A long message gives way to the facts: it is cut, down to its headline, and the last line it keeps ends in `…`. A blocked row's ask and tail are what it asks, so neither is cut for the facts: its tail takes the rows it needs first, and the facts get the rows left, from the first, or none on a short screen, where the list's row still has its host, harness and where.
 
 A row with no status record says `no status from this pane` and `space captures the screen`.
 

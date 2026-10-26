@@ -25,8 +25,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                     
 {Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                    
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                          
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump{Reset/Reset/NONE}          {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == status 140
@@ -60,8 +60,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                                                                                 
 {Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                      
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                                                                                
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                      
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                                      
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                   {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == every state 80
@@ -93,8 +93,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · permission · allow · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} allow msg{Reset/Reset/NONE}                                                                      
 {Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local         {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                           
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › allow                                                     
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local         {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                           
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}allow title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                           
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump{Reset/Reset/NONE}          {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == every state 140
@@ -126,8 +126,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · permission · allow · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} allow msg{Reset/Reset/NONE}                                                                                                                                  
 {Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local         {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                       
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › allow                                                                                                                 
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local         {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                       
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}allow title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                                       
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                   {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == every state 200
@@ -159,8 +159,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · permission · allow · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} allow msg{Reset/Reset/NONE}                                                                                                                                                                                              
 {Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local         {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                                                                                   
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › allow                                                                                                                                                                             
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local         {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                                                                                   
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}allow title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                                                                                                   
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                                                                               {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == table sorted 140
@@ -190,8 +190,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                                                                                 
 {Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                      
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                                                                                
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                      
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                                      
 {Cyan/Reset/NONE}click a header to sort · hold Option (iTerm2) or Shift to select text                                                                       
 == keys 120
@@ -409,8 +409,8 @@
 {Reset/Reset/BOLD} Opened PR #31; CI is green.{Reset/Reset/NONE}                                                    
 {Reset/Reset/NONE}   Next step is yours.                                                          
 {Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local          {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude         {Reset/Reset/DIM}turn    {Reset/Reset/NONE}6m                       
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › claude                                                    
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local          {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude         {Reset/Reset/DIM}turn    {Reset/Reset/NONE}6m                       
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}claude title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                          
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump{Reset/Reset/NONE}          {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == done card 200 tall
@@ -470,8 +470,8 @@
 {Reset/Reset/BOLD} Opened PR #31; CI is green.{Reset/Reset/NONE}                                                                                                                                                                            
 {Reset/Reset/NONE}   Next step is yours.                                                                                                                                                                                  
 {Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local          {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude         {Reset/Reset/DIM}turn    {Reset/Reset/NONE}6m                                                                                                                                               
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › claude                                                                                                                                                                            
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local          {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude         {Reset/Reset/DIM}turn    {Reset/Reset/NONE}6m                                                                                                                                               
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}claude title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                                                                                                  
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                                                                               {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == done card nerd 140
@@ -501,8 +501,8 @@
 {Reset/Reset/BOLD} Opened PR #31; CI is green.{Reset/Reset/NONE}                                                                                                                
 {Reset/Reset/NONE}   Next step is yours.                                                                                                                      
 {Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE} {Reset/Reset/DIM} {Reset/Reset/NONE}local          {Reset/Reset/DIM} {Reset/Reset/NONE}claude         {Reset/Reset/DIM} {Reset/Reset/NONE}6m                                                                                                     
 {Reset/Reset/NONE} {Reset/Reset/DIM} {Reset/Reset/NONE}api ›  main ›  claude                                                                                                                  
+{Reset/Reset/NONE} {Reset/Reset/DIM} {Reset/Reset/NONE}local          {Reset/Reset/DIM} {Reset/Reset/NONE}claude         {Reset/Reset/DIM} {Reset/Reset/NONE}6m                                                                                                     
 {Reset/Reset/NONE} {Reset/Reset/DIM} {Reset/Reset/NONE}claude title   {Reset/Reset/DIM} {Reset/Reset/NONE}native                                                                                                                  
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                   {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == f picker 80
@@ -522,8 +522,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                     
 {Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                    
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                          
 {Reset/Reset/BOLD}f {Reset/Reset/BOLD | UNDERLINED}w{Reset/Reset/BOLD}orking 2{Reset/Reset/DIM}  {Reset/Reset/BOLD | UNDERLINED}d{Reset/Reset/BOLD}one 1{Reset/Reset/DIM}  {Reset/Reset/BOLD | UNDERLINED}q{Reset/Reset/BOLD}uestion 0{Reset/Reset/DIM}  {Reset/Reset/BOLD | UNDERLINED}p{Reset/Reset/BOLD}ermission 1{Reset/Reset/DIM}  {Reset/Reset/BOLD | UNDERLINED}e{Reset/Reset/BOLD}rror 0{Reset/Reset/DIM}  {Reset/Reset/BOLD | UNDERLINED}u{Reset/Reset/BOLD}nreported 1{Reset/Reset/DIM}  {Reset/Reset/BOLD | UNDERLINED}i{Reset/Reset/BOLD}dle 1{Reset/Reset/NONE}    
 == filter prompt 80
@@ -543,8 +543,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                     
 {Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                    
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                          
 {Reset/Reset/BOLD}/ seat▏                                                                         
 == command prompt 80
@@ -564,8 +564,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                     
 {Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                    
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                          
 {Reset/Reset/BOLD}: ▏ · tab completes · esc cancels                                               
 == card hidden 80
@@ -620,8 +620,8 @@
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                     
 {Red/Reset/NONE} that pane is gone{Reset/Reset/NONE}                                                              
 {Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                    
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                          
 {Red/Reset/NONE}that pane is gone                                                               
 == toast 80
@@ -641,8 +641,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                     
 {Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                    
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                          
 {Cyan/Reset/NONE}a passing message                                                               
 == z prefix 140
@@ -662,8 +662,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                                                                                 
 {Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                      
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                                                                                
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                      
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                                      
 {Reset/Reset/BOLD}z… a{Reset/Reset/DIM} toggle · {Reset/Reset/BOLD}o{Reset/Reset/DIM} open · {Reset/Reset/BOLD}c{Reset/Reset/DIM} fold · {Reset/Reset/BOLD}R{Reset/Reset/DIM} open all · {Reset/Reset/BOLD}M{Reset/Reset/DIM} fold all · esc cancels{Reset/Reset/NONE}                                                                       
 == dd question 140
@@ -683,8 +683,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                                                                                 
 {Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                      
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                                                                                
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                      
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                                      
 {Red/Reset/BOLD}close api › main › seat-b on mini, ending claude (blocked)? y closes                                                                        
 == answer 80

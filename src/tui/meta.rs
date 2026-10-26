@@ -52,8 +52,6 @@ const VALUE: usize = 24;
 /// Short facts to a row at most, and the columns between them.
 const ACROSS: usize = 3;
 const GAP: usize = 3;
-/// A longer label, such as an extension's name, pushes its own value instead of the column.
-const LABEL: usize = 16;
 
 /// The facts for `row` in `width` columns.
 pub fn lines(app: &App, row: &Row, width: usize) -> Vec<Line<'static>> {
@@ -78,13 +76,12 @@ pub fn lines(app: &App, row: &Row, width: usize) -> Vec<Line<'static>> {
     let groups = extension_groups(app, row);
     let place_label = Fact::Where.label(row, app.nerd);
     let short = || runs.iter().chain(&names);
+    // An extension's name runs on past the column, so a long one widens only its own row.
     let label = short()
         .map(|(l, _)| l.width())
         .chain([place_label.width()])
-        .chain(groups.iter().map(|(l, _)| l.width()))
         .max()
-        .unwrap_or(0)
-        .min(LABEL);
+        .unwrap_or(0);
     let room = width.saturating_sub(1);
     let value = short()
         .map(|(_, v)| v.width())
@@ -111,10 +108,20 @@ pub fn lines(app: &App, row: &Row, width: usize) -> Vec<Line<'static>> {
             .collect()
     };
     let long = room.saturating_sub(label + 1);
-    let mut lines = grid(&runs);
+    // Where first: it is what tells two rows of the same name apart.
     let place = place(row, long, app.nerd);
-    lines.push(long_line(place_label, &place, label, room));
-    lines.extend(groups.iter().map(|(l, v)| long_line(l, v, label, room)));
+    let mut lines = vec![long_line(
+        place_label,
+        vec![Span::styled(place, theme::plain())],
+        label,
+        room,
+    )];
+    lines.extend(grid(&runs));
+    lines.extend(
+        groups
+            .into_iter()
+            .map(|(name, parts)| long_line(&name, parts, label, room)),
+    );
     lines.extend(grid(&names));
     lines
 }
@@ -134,9 +141,27 @@ fn pair(label: &str, value: &str, column: usize, cell: usize, last: bool) -> Vec
     ]
 }
 
-fn long_line(label: &str, value: &str, column: usize, room: usize) -> Line<'static> {
+/// A row of its own: a label, dim and padded to the label column or running past it, then
+/// `parts`, cut to `room`.
+fn long_line(label: &str, parts: Vec<Span<'static>>, column: usize, room: usize) -> Line<'static> {
+    let head = Span::styled(format!("{label:<column$} "), theme::quiet());
+    let mut left = room;
     let mut spans = vec![Span::raw(" ")];
-    spans.extend(pair(label, value, column, room, true));
+    for span in std::iter::once(head).chain(parts) {
+        let wide = span.content.width();
+        if wide <= left {
+            left -= wide;
+            spans.push(span);
+            continue;
+        }
+        if left > 0 {
+            spans.push(Span::styled(
+                fit(&span.content, left).trim_end().to_owned(),
+                span.style,
+            ));
+        }
+        break;
+    }
     Line::from(spans)
 }
 
@@ -178,10 +203,11 @@ fn plain_place(row: &Row, max: usize) -> String {
     }
 }
 
-/// Each extension's fields on the row, as one group per extension in `enabled` order, labelled
-/// by the extension: `session-prefix`, `project api`. A lone field named like its extension is
-/// labelled by it alone: `lane`, `desk`.
-fn extension_groups(app: &App, row: &Row) -> Vec<(String, String)> {
+/// Each extension's fields on the row, as one group per extension in `enabled` order: its name
+/// (`session-prefix`), then each field's name and value (`project api`). A lone field named like
+/// its extension shows only its value (`lane`, `desk`). With glyphs a declared mark stands for the
+/// extension and for a field's name.
+fn extension_groups(app: &App, row: &Row) -> Vec<(String, Vec<Span<'static>>)> {
     let mut groups: Vec<(&str, Vec<(&Field, String)>)> = Vec::new();
     for (field, _) in &app.fields {
         let Some(value) = row.ext.get(&field.id) else {
@@ -197,6 +223,7 @@ fn extension_groups(app: &App, row: &Row) -> Vec<(String, String)> {
             None => groups.push((ext, vec![shown])),
         }
     }
+    let quiet = |text: String| Span::styled(text, theme::quiet());
     let mark = |field: &Field| match (app.nerd, field.icon.as_deref()) {
         (true, Some(icon)) => icon.to_owned(),
         _ => field.name.clone(),
@@ -204,25 +231,31 @@ fn extension_groups(app: &App, row: &Row) -> Vec<(String, String)> {
     groups
         .into_iter()
         .map(|(ext, parts)| {
-            let value = match &parts[..] {
-                [(field, value)] if field.name == ext => value.clone(),
-                _ => parts
-                    .iter()
-                    .map(|(field, value)| format!("{} {value}", mark(field)))
-                    .collect::<Vec<_>>()
-                    .join(" · "),
-            };
+            let mut spans = Vec::new();
+            match &parts[..] {
+                [(field, value)] if field.name == ext => {
+                    spans.push(Span::styled(value.clone(), theme::plain()));
+                }
+                _ => {
+                    for (i, (field, value)) in parts.iter().enumerate() {
+                        if i > 0 {
+                            spans.push(quiet(" · ".to_owned()));
+                        }
+                        spans.push(quiet(format!("{} ", mark(field))));
+                        spans.push(Span::styled(value.clone(), theme::plain()));
+                    }
+                }
+            }
             if !app.nerd {
-                return (ext.to_owned(), value);
+                return (ext.to_owned(), spans);
             }
             match parts[0].0.extension_icon.as_deref() {
-                Some(icon) => (icon.to_owned(), value),
-                // The package mark cannot say which extension it is, so the name moves into the
-                // value.
-                None => (
-                    icons::EXTENSION.glyph.to_owned(),
-                    format!("{ext} · {value}"),
-                ),
+                Some(icon) => (icon.to_owned(), spans),
+                // The package mark cannot say which extension it is, so the name leads the value.
+                None => {
+                    spans.insert(0, quiet(format!("{ext} · ")));
+                    (icons::EXTENSION.glyph.to_owned(), spans)
+                }
             }
         })
         .collect()

@@ -1403,11 +1403,11 @@ mod tests {
                 facts,
                 [
                     "",
-                    "host mini harness claude",
                     "where api › main › seat-b",
+                    "host mini harness claude",
                     "title seat-b title source native"
                 ],
-                "{width}: one blank line, then the facts, each once:\n{text}"
+                "{width}: one blank line, then the facts, where first, each once:\n{text}"
             );
             let lines: Vec<&str> = text.lines().collect();
             assert_eq!(
@@ -1499,9 +1499,9 @@ mod tests {
             .iter()
             .position(|l| l.starts_with(" where "))
             .expect(&text);
-        assert!(lines[place - 2].trim().is_empty(), "{text}");
+        assert!(lines[place - 1].trim().is_empty(), "{text}");
         assert!(
-            lines[place - 3].ends_with("word…"),
+            lines[place - 2].ends_with("word…"),
             "the cut is marked:\n{text}"
         );
         assert!(
@@ -1525,17 +1525,17 @@ mod tests {
         assert_eq!(
             facts(80),
             [
-                "host mini harness claude",
                 "where api › main › seat-b",
+                "host mini harness claude",
                 "title seat-b title source native"
             ]
         );
         assert_eq!(
             facts(36),
             [
+                "where api › main › seat-b",
                 "host mini",
                 "harness claude",
-                "where api › main › seat-b",
                 "title seat-b title",
                 "source native"
             ]
@@ -1558,7 +1558,7 @@ mod tests {
                 let blank = card.iter().position(|l| l.trim().is_empty()).unwrap();
                 let facts = &card[blank + 1..];
                 if !nerd {
-                    assert!(facts[0].starts_with(" host "), "{width}:\n{text}");
+                    assert!(facts[0].starts_with(" where "), "{width}:\n{text}");
                     assert!(!text.chars().any(private), "{width}: words only");
                     continue;
                 }
@@ -1578,6 +1578,38 @@ mod tests {
                 assert!(!text.contains(" host "), "{width}: no word labels:\n{text}");
             }
         }
+    }
+
+    #[test]
+    fn a_blocked_rows_tail_keeps_the_whole_dialog_and_the_facts_take_what_is_left() {
+        let mut app = asking("Bash: touch zz-probe-file-2");
+        let screen = include_str!("../../tests/fixtures/screens/claude-permission.txt");
+        app.peek = Some(Peek {
+            key: "mini/seat-b".into(),
+            lines: Some(Ok(screen.lines().map(str::to_owned).collect())),
+            at: Some(Utc::now()),
+            updated_at: None,
+        });
+        for width in [80u16, 140] {
+            let text = render(&app, width, 30);
+            for line in [
+                "Do you want to proceed?",
+                "❯ 1. Yes",
+                "2. Yes, and always",
+                "4. No",
+            ] {
+                assert!(text.contains(line), "{width}: {line}:\n{text}");
+            }
+            assert!(
+                !text.contains(" where "),
+                "{width}: the facts gave way:\n{text}"
+            );
+        }
+        let text = render(&app, 200, 60);
+        assert!(
+            text.contains("Do you want to proceed?") && text.contains(" where "),
+            "a tall card has room for both:\n{text}"
+        );
     }
 
     #[test]
@@ -2778,17 +2810,26 @@ mod extension_tests {
     }
 
     #[test]
-    fn the_card_lists_each_extensions_fields_as_one_fact_under_where() {
+    fn the_card_lists_each_extensions_fields_as_one_fact_after_how_it_runs() {
         let mut app = with_fields(&[]);
         app.selected = Some(crate::tui::app::Spot::Row("mini/seat-b".into()));
         let text = render(&app, 80, 30);
-        let place = text
+        let runs = text
             .lines()
-            .position(|l| l.starts_with(" where "))
+            .position(|l| l.starts_with(" host "))
             .expect(&text);
         let lines: Vec<&str> = text.lines().collect();
-        assert_eq!(lines[place + 1], " fake           rig api");
-        assert_eq!(lines[place + 2], " session-prefix project api");
+        assert!(lines[runs - 1].starts_with(" where "), "{text}");
+        assert_eq!(lines[runs + 1], " fake    rig api");
+        assert_eq!(
+            lines[runs + 2],
+            " session-prefix project api",
+            "a long name runs past the column and widens only its row"
+        );
+        assert!(
+            lines[runs].starts_with(" host    "),
+            "the built-in labels keep their width: {text}"
+        );
         let mut lone = with_fields(&[field("lane.lane", "LANE")]);
         let mut rows = lone.rows.clone();
         rows[0].ext.insert("lane.lane".into(), "desk".into());
@@ -2803,10 +2844,11 @@ mod extension_tests {
         app.nerd = true;
         let text = render(&app, 80, 30);
         let lines: Vec<&str> = text.lines().collect();
-        let place = lines.iter().rposition(|l| l.contains(" › ")).expect(&text);
         assert!(
-            lines[place + 1].ends_with(" fake · rig api")
-                && lines[place + 2].ends_with(" session-prefix · project api"),
+            lines.iter().any(|l| l.ends_with(" fake · rig api"))
+                && lines
+                    .iter()
+                    .any(|l| l.ends_with(" session-prefix · project api")),
             "a glyph cannot name its extension, so the value does:\n{text}"
         );
         for (field, _) in &mut app.fields {
@@ -2823,7 +2865,7 @@ mod extension_tests {
         app.nerd = false;
         let text = render(&app, 80, 30);
         assert!(
-            !text.contains('\u{ea7e}') && text.contains(" fake           rig api"),
+            !text.contains('\u{ea7e}') && text.contains(" fake    rig api"),
             "words mode ignores them:\n{text}"
         );
     }
