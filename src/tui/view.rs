@@ -495,9 +495,9 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled(kept, theme::bright()));
         spans.push(Span::styled(" · esc clears · ", theme::dim()));
     }
-    // The essentials first, so a narrow board keeps them; `v view` then shows after `/ filter`.
-    // While the card is hidden, `c card` says so ahead of `space zoom`, which then gives way
-    // before `enter jump` and shows after `c card` when it fits.
+    // The essentials first, so a narrow board keeps them; then `tab next`, which works through
+    // the rows that need you, and `v view` last, one `?` away. `v view` shows after `/ filter`.
+    // While the card is hidden, `c card` says so, and `space zoom` shows after it when it fits.
     let keys: Vec<(&str, &str)> = if app.pick {
         vec![("enter", "go"), ("j/k", "move"), ("/", "filter")]
     } else {
@@ -506,14 +506,17 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
             ("s", "seen"),
             ("/", "filter"),
             ("?", "keys"),
-            ("v", "view"),
         ];
         if app.hidden {
-            keys.extend([("c", "card"), ("enter", "jump"), ("space", "zoom")]);
-        } else {
-            keys.extend([("space", "zoom"), ("enter", "jump")]);
+            keys.push(("c", "card"));
         }
-        keys.extend([("tab", "next"), ("1-9", "select")]);
+        keys.extend([
+            ("tab", "next"),
+            ("enter", "jump"),
+            ("space", "zoom"),
+            ("v", "view"),
+            ("1-9", "select"),
+        ]);
         keys
     };
     let (quit_key, quit_what) = if app.pick {
@@ -1081,7 +1084,7 @@ mod tests {
     }
 
     #[test]
-    fn the_footer_shows_v_view_after_filter_when_it_fits() {
+    fn the_footer_ranks_tab_next_above_v_view_and_shows_v_after_filter() {
         let app = fuller();
         let wide = render(&app, 120, 30);
         assert!(
@@ -1091,12 +1094,22 @@ mod tests {
                 .contains("/ filter · v view · ? keys"),
             "{wide}"
         );
-        for (width, shows) in [(50, false), (53, false), (54, true)] {
+        for width in [50, 64, 65, 80] {
             let text = render(&app, width, 30);
             let bar = text.lines().last().unwrap();
-            assert_eq!(bar.contains("v view"), shows, "{width}: {bar}");
             assert!(bar.contains("? keys"), "{width}: {bar}");
+            assert!(
+                !bar.contains("v view") || bar.contains("tab next"),
+                "{width}: tab next outranks v view: {bar}"
+            );
         }
+        let at_80 = render(&app, 80, 30);
+        let bar = at_80.lines().last().unwrap();
+        assert!(
+            bar.starts_with("j/k move · s seen · / filter · ? keys · tab next · enter jump ")
+                && bar.trim_end().ends_with(" q quit"),
+            "{bar}"
+        );
     }
 
     #[test]
@@ -1393,7 +1406,10 @@ mod tests {
             card_of(&text)[0].ends_with(&format!(" captured {time} · 8s ━━")),
             "{text}"
         );
-        assert!(text.contains(" tail line"), "{text}");
+        assert!(
+            text.contains(" │ tail line"),
+            "the tail sits behind a gutter:\n{text}"
+        );
         app.peek.as_mut().unwrap().updated_at = Some("2025-12-31T23:00:00Z".into());
         let text = render(&app, 140, 30);
         assert!(

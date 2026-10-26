@@ -307,7 +307,7 @@ fn peek(
         Ok(lines) => Some(Ok(lines)),
         Err(Error::Cancelled) => None,
         Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::TimedOut => Some(Err(format!(
-            "peek gave up after {}s",
+            "the pane did not answer within {}s",
             PEEK_WITHIN.as_secs()
         ))),
         Err(err) => Some(Err(format!("peek failed: {err}"))),
@@ -484,7 +484,10 @@ mod tests {
         let started = std::time::Instant::now();
         let got = peek(&rex, "mini", "s", "b", &|| false);
         let took = started.elapsed();
-        assert_eq!(got, Some(Err("peek gave up after 3s".to_owned())));
+        assert_eq!(
+            got,
+            Some(Err("the pane did not answer within 3s".to_owned()))
+        );
         assert!(
             took >= PEEK_WITHIN && took < Duration::from_secs(4),
             "{took:?}"

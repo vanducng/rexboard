@@ -16,7 +16,7 @@ The board shows `source` in the turn card, and `rexboard ls --json` has it on ev
 
 `msg` is whatever the reporter sent with the record. A hook that joins a message's lines with ` ⏎ ` (as the dotfiles hooks do, since Rex keeps `msg` on one line) gets them split back: the board's `MSG` column shows the first line, and the turn card the whole message. `MSG` is blank when there is no message, and for the filler a hook sends when it has no words: `Done`, `Working`, `Allow <tool>?`. `rexboard ls --json` keeps `msg` as sent.
 
-Straight in a Rex pane, an agent's own `done` record carries no message. A hook can add a sub-record with the id `turn` that carries the turn's final message; rexboard uses its `msg` when the pane's own record has none and the `turn` record is not older, and does not count it as a child record.
+Straight in a Rex pane, an agent's own `done` record carries no message. A hook can add a sub-record with the id `turn` that carries the turn's final message; rexboard uses its `msg` when the pane's own record has none, and does not count it as a child record. While the pane is `done` it always does, since the agent's own `done` lands just after the hook's `turn`; in any other state only a `turn` record that is not older counts.
 
 Setting up the reporting is part of the agent's setup, not rexboard's. One working setup for agents in tmux seats is on the [Rex page of vanducng/dotfiles](https://dotfiles.vanducng.dev/rex/#agent-status): the hooks, `make rex-hooks-apply` to merge them into the agent's settings, and `REX_AGENT_STATUS_LOG` to log what each hook did.
 

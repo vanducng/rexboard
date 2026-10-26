@@ -19,6 +19,7 @@ use crate::pane::bare_title;
 const TEXT: usize = 120;
 /// One entry of the key table: the key, a space and what it does.
 const KEY_COLUMN: usize = 40;
+const GUTTER: &str = " │ ";
 
 /// The card's lines for a board `width` wide, with the tail filling up to `room` lines.
 pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Line<'static>> {
@@ -174,7 +175,7 @@ fn indented(text: &str, lead: &str, width: usize, style: Style) -> Vec<Line<'sta
 }
 
 /// The newest `room` rows of the tail, wrapped, so the last lines show whole and the oldest fall
-/// off the top.
+/// off the top. A gutter marks them as the pane's own screen, not the agent's report.
 pub fn tail(peek: &Peek, width: usize, room: usize) -> Vec<Line<'static>> {
     match &peek.lines {
         None => vec![Line::styled(" capturing…", theme::dim())],
@@ -184,12 +185,16 @@ pub fn tail(peek: &Peek, width: usize, room: usize) -> Vec<Line<'static>> {
                 if rows.len() >= room {
                     break;
                 }
-                rows.extend(chop(line, width.saturating_sub(1).max(1)).into_iter().rev());
+                rows.extend(
+                    chop(line, width.saturating_sub(GUTTER.width()).max(1))
+                        .into_iter()
+                        .rev(),
+                );
             }
             rows.truncate(room);
             rows.into_iter()
                 .rev()
-                .map(|line| Line::styled(format!(" {line}"), theme::dim()))
+                .map(|line| Line::styled(format!("{GUTTER}{line}"), theme::dim()))
                 .collect()
         }
         // An error is worth reading whole, so it wraps instead of being cut.

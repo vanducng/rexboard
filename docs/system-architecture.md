@@ -4,7 +4,7 @@ rexboard reads Rex, remembers what Rex does not, and shows it. Only a jump write
 
 <img alt="rexboard architecture: rexboard is one Rust binary and Rex runs its Lua scripts. On local (this Mac) and mini, rex do runs observer.lua, which streams NDJSON to rexboard serve; serve keeps state on disk and answers the CLI (ls, watch, seen) and the ratatui board over a unix socket. A jump, the one write to Rex, runs jump.lua: session.focus_block on the pane's host, then client.perform session.select on the Rex app" src="assets/architecture.svg" width="100%">
 
-Each host runs one observer, `rex [-S HOST] do - --all`, whose NDJSON lines ([CLI](cli.md)) feed serve's collectors and its one reducer thread. Some reads bypass serve: the board's peek runs `tail.lua` through `rex [-S HOST] do -` straight against the pane's host, `ls --direct` takes its own snapshot, and `watch --raw` and `watch --direct` run their own observers.
+Each host runs one observer, `rex [-S HOST] do - --all`, whose NDJSON lines ([CLI](cli.md)) feed serve's collectors and its one reducer thread. Some reads bypass serve: the turn card's tail runs `tail.lua` through `rex [-S HOST] do -` straight against the pane's host, `ls --direct` takes its own snapshot, and `watch --raw` and `watch --direct` run their own observers.
 
 The image follows the reader's light or dark setting by itself. Its source is [assets/architecture.html](assets/architecture.html): after editing it, copy its `<svg>` element out with
 
@@ -17,7 +17,7 @@ sed -n '/<svg /,/<\/svg>/p' docs/assets/architecture.html > docs/assets/architec
 | Layer | What |
 | --- | --- |
 | Rust | One binary, `rexboard`, in three roles: the CLI (`ls`, `watch`, `seen`, `jump`, `next`); `rexboard serve`, with one collector per host and one reducer thread that keeps state on disk; and the board and `pick`, a TUI built on ratatui with its crossterm backend |
-| Lua, in Rex | Scripts built into the binary that Rex runs through `rex [-S HOST] do -`: `observer.lua` for serve's observers, `snapshot.lua` for `ls --direct`, `jump.lua` after `app.lua` for a jump, and `tail.lua` for the board's peek. `lib.lua` holds the snapshot code that `observer.lua` and `snapshot.lua` share |
+| Lua, in Rex | Scripts built into the binary that Rex runs through `rex [-S HOST] do -`: `observer.lua` for serve's observers, `snapshot.lua` for `ls --direct`, `jump.lua` after `app.lua` for a jump, and `tail.lua` for the turn card's tail. `lib.lua` holds the snapshot code that `observer.lua` and `snapshot.lua` share |
 | Rex API | The calls those scripts make inside Rex, in the table below. Only a jump writes |
 | Observer contract | NDJSON, one JSON object per line with `"v": 1`, defined in `src/event.rs` |
 | State | `serve.lock`, `serve.sock`, `state.json`, `transitions.jsonl` and `tui.json`, in the state dir (see [Files](#files)) |
@@ -29,7 +29,7 @@ rexboard reaches Rex only through the `rex` command: `rex do` for these scripts 
 | Read | `server.version`, `session.attach_all` with `event_scope = "session"`, `session.list`, `session.view`, `session.list_blocks`, and on each terminal block `program_status`, `title` and `process` | `lib.lua`, `observer.lua`, `snapshot.lua` |
 | Events | `block_event` (`program_status_changed`, `program_status_removed`, `title_changed`, `process_changed`, `child_exited`), `block_created`, `block_closed`, `window_created`, `window_closed`, `session_label_changed`, `window_label_changed`, `active_window_changed`, `session_created` and `session_destroyed`. `observer.lua` hears them because serve runs it with `rex do - --all`, which listens to every session | `observer.lua` |
 | Read, for a jump | `client.list`, `server.whoami` for a remote host, and `session.attach` on the pane's session, a read that `session.focus_block` needs | `app.lua`, `jump.lua` |
-| Read, a peek | `session.attach` on the pane's session (block methods answer only on an attached stream), then on the block `format` with `format = "text"`, `unwrap = true` and `max_bytes = 1` for the size and a blob id, and `blob_read` from 48 KiB before the end. Rex renders the whole scrollback on its side; only the last 48 KiB crosses the wire | `tail.lua` |
+| Read the tail of a pane | `session.attach` on the pane's session (block methods answer only on an attached stream), then on the block `format` with `format = "text"`, `unwrap = true` and `max_bytes = 1` for the size and a blob id, and `blob_read` from 48 KiB before the end. Rex renders the whole scrollback on its side; only the last 48 KiB crosses the wire | `tail.lua` |
 | Write, a jump only | `session.focus_block` on the pane's host, then `client.perform` with `action = "session.select"` on this Mac's Rex app | `jump.lua` |
 
 ## Pieces

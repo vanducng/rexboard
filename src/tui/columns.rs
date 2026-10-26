@@ -19,8 +19,7 @@ pub enum Tier {
     /// 60-99: adds harness and host.
     Mid,
     /// 100 and up: adds the state (or its kind) and the tab.
-    /// From 132 (a 93-column list beside the default pane at 140) WHERE splits into SESSION,
-    /// WINDOW and BLOCK; TURN joins at 140.
+    /// From 132 WHERE splits into SESSION, WINDOW and BLOCK; TURN joins at 140.
     Wide,
 }
 
@@ -65,8 +64,7 @@ enum Width {
     Msg,
 }
 
-/// The board width from which WHERE splits into SESSION, WINDOW and BLOCK: 140 with the default
-/// third leaves a 93-column list, which `columns_board` counts as 132.
+/// The board width from which WHERE splits into SESSION, WINDOW and BLOCK.
 pub const SPLIT: u16 = 132;
 const ALWAYS: RangeInclusive<u16> = 0..=u16::MAX;
 

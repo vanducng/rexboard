@@ -253,8 +253,9 @@ pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
 /// turn's final message that the agent's own `done` leaves out.
 const TURN: &str = "turn";
 
-/// The `turn` record's message, unless it is older than `root`, so a stale turn never speaks for
-/// a newer state.
+/// The `turn` record's message. A `done` root always takes it: the agent's own `done` lands just
+/// after the hook's `turn`, and the hook clears `turn` when the next prompt starts. Any other root
+/// takes it only if it is not older, so a stale turn never speaks for a newer state.
 fn turn_msg(root: &Record, turn: Option<&Record>) -> Option<String> {
     let turn = turn?;
     let at = |r: &Record| {
@@ -263,7 +264,7 @@ fn turn_msg(root: &Record, turn: Option<&Record>) -> Option<String> {
             .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
     };
     match (at(root), at(turn)) {
-        (Some(root_at), Some(turn_at)) if turn_at < root_at => None,
+        (Some(root_at), Some(turn_at)) if turn_at < root_at && root.state != "done" => None,
         _ => turn.msg.clone().filter(|msg| !msg.is_empty()),
     }
 }
@@ -345,10 +346,11 @@ mod tests {
 
     #[test]
     fn a_turn_record_fills_an_empty_msg_and_is_no_child() {
+        // Claude's own `done` lands about 40 ms after the hook's `turn`.
         let pane = with_records(serde_json::json!([
-            {"state": "done", "app": "claude-code", "updated_at": "2026-01-01T00:00:00Z"},
+            {"state": "done", "app": "claude-code", "updated_at": "2026-01-01T00:00:00.040Z"},
             {"id": "turn", "state": "done", "app": "claude-code", "msg": "Opened PR #31",
-             "updated_at": "2026-01-01T00:00:01Z"},
+             "updated_at": "2026-01-01T00:00:00Z"},
         ]));
         assert_eq!(
             (pane.state.as_str(), pane.msg.as_deref()),
