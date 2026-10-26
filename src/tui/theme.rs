@@ -181,7 +181,7 @@ pub fn face(look: Look) -> Face {
         Look::Seen => Face::of("✓", None, Modifier::DIM),
         Look::Working => Face {
             frames: &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
-            interval: Duration::from_millis(80),
+            interval: Duration::from_millis(160),
             ..Face::of("⠿", Some(WARN), Modifier::empty())
         },
         Look::Idle | Look::Suspect => Face::of("○", None, Modifier::DIM),
@@ -327,14 +327,15 @@ mod tests {
         }
         let working = face(Look::Working);
         assert_eq!(working.frame(at(0), true), "⠋");
-        assert_eq!(working.frame(at(80), true), "⠙", "one step every 80 ms");
+        assert_eq!(working.frame(at(159), true), "⠋");
+        assert_eq!(working.frame(at(160), true), "⠙", "one step every 160 ms");
         assert_eq!(
-            working.frame(at(800), true),
+            working.frame(at(1600), true),
             "⠋",
             "ten frames, then round again"
         );
-        assert_eq!(working.frame(at(80), false), "⠿", "reduced motion");
-        assert_eq!(redraw_every(LOOKS, true), Some(Duration::from_millis(80)));
+        assert_eq!(working.frame(at(160), false), "⠿", "reduced motion");
+        assert_eq!(redraw_every(LOOKS, true), Some(Duration::from_millis(160)));
         assert_eq!(redraw_every(LOOKS, false), None, "reduced motion");
         let resting = LOOKS.into_iter().filter(|look| *look != Look::Working);
         assert_eq!(redraw_every(resting, true), None, "nothing working");

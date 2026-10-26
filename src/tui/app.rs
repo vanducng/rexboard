@@ -2178,7 +2178,7 @@ pub mod tests {
 
     #[test]
     fn the_board_redraws_fast_only_while_a_working_row_is_on_screen() {
-        let spin = Some(Duration::from_millis(80));
+        let spin = Some(Duration::from_millis(160));
         let mut app = app();
         app.drawn.set((3, 0, 20));
         assert_eq!(app.frame_every(), spin, "codex is in the list");

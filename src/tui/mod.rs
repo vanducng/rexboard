@@ -5,6 +5,7 @@ mod clipboard;
 mod columns;
 mod full;
 mod keys;
+mod meta;
 mod prefs;
 mod screen;
 mod status;

@@ -98,7 +98,12 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
         list(frame, list_area, app, area, now);
     }
     if height > 0 {
-        let lines = super::card::lines(app, now, usize::from(body.width), usize::from(height));
+        let mut lines = super::card::lines(app, now, usize::from(body.width), usize::from(height));
+        // A card shorter than its rows sits on the footer, so no dead band opens above it.
+        if app.answer.is_none() {
+            let gap = usize::from(height).saturating_sub(lines.len());
+            lines.splice(0..0, std::iter::repeat_n(Line::default(), gap));
+        }
         frame.render_widget(Paragraph::new(lines), card_area);
     }
     frame.render_widget(rule_line(above_footer.width), above_footer);
@@ -127,7 +132,11 @@ fn card_height(app: &App, now: DateTime<Utc>, body: Rect, headed: bool) -> u16 {
         return height;
     }
     let base = (body.height * 2 / 5).max(8);
-    let asks = app.keys || app.current().is_some_and(|row| row.pane.state == "blocked");
+    // The key table takes only its own rows, so it sits on the footer and the list keeps the rest.
+    if app.keys {
+        return (super::card::lines(app, now, usize::from(body.width), 0).len() as u16).min(most);
+    }
+    let asks = app.current().is_some_and(|row| row.pane.state == "blocked");
     let need = if asks {
         super::card::lines(app, now, usize::from(body.width), 0).len() as u16
     } else {
@@ -1372,15 +1381,12 @@ mod tests {
     #[test]
     fn the_card_says_who_where_how_and_what_at_80_140_and_200() {
         let app = asking("Bash: git push origin main --force-with-lease");
-        for (width, height) in [(80u16, 30u16), (140, 30), (200, 40)] {
+        for (width, height) in [(80u16, 30u16), (140, 30), (200, 40), (140, 60)] {
             let text = render(&app, width, height);
             let card = card_of(&text);
-            let harness = if width == 80 { "" } else { "claude · " };
             assert!(
-                card[0].starts_with(&format!(
-                    "━━ ! blocked · permission · seat-b · api › main · mini · {harness}waiting"
-                )),
-                "{width}: the bar, its harness giving way at 80:\n{text}"
+                card[0].starts_with("━━ ! blocked · permission · seat-b · waiting 5h43m ━"),
+                "{width}: the bar says only what, who and how long:\n{text}"
             );
             assert!(
                 card[0].ends_with("━━"),
@@ -1391,11 +1397,27 @@ mod tests {
                 "{width}"
             );
             assert!(!text.contains('│'), "{width}: no pane on the right");
-            let want = (usize::from(height) - 3) * 2 / 5;
+            let words = |l: &String| l.split_whitespace().collect::<Vec<_>>().join(" ");
+            let facts: Vec<String> = card[2..].iter().map(words).collect();
+            assert_eq!(
+                facts,
+                [
+                    "",
+                    "host mini harness claude",
+                    "where api › main › seat-b",
+                    "title seat-b title source native"
+                ],
+                "{width}: one blank line, then the facts, each once:\n{text}"
+            );
+            let lines: Vec<&str> = text.lines().collect();
+            assert_eq!(
+                words(&lines[lines.len() - 2].to_owned()),
+                "title seat-b title source native",
+                "{width}: the card sits on the footer:\n{text}"
+            );
             assert!(
-                card.len() >= want.max(8).min(usize::from(height) - 6),
-                "{width}: {}",
-                card.len()
+                lines[lines.len() - 8].trim().is_empty(),
+                "{width}: the room it does not need opens above it:\n{text}"
             );
             assert!(list_rows(&text) >= 3, "{width}:\n{text}");
         }
@@ -1416,9 +1438,14 @@ mod tests {
         let text = render(&app, 200, 40);
         let card = card_of(&text);
         assert!(
-            card[0].contains(" ended ") && card[0].contains(" ago · turn 6m"),
+            card[0].contains(" · ended 5h43m ago ━") && !card[0].contains("turn"),
             "{}",
             card[0]
+        );
+        assert!(
+            card.iter()
+                .any(|l| l.starts_with(" host ") && l.trim_end().ends_with("turn    6m")),
+            "the turn is a fact: {text}"
         );
         assert_eq!(card[1], " Opened PR #31; CI is green.");
         assert!(card[2].starts_with("   word word"), "{text}");
@@ -1431,6 +1458,87 @@ mod tests {
         assert!(
             list.trim_end().ends_with("CI is green."),
             "MSG is the first line: {list}"
+        );
+    }
+
+    #[test]
+    fn the_key_table_sits_on_the_footer_and_the_list_keeps_the_rest() {
+        let mut app = fuller();
+        press(&mut app, KeyCode::Char('?'));
+        for (width, height) in [(80u16, 30u16), (140, 60), (200, 60)] {
+            let text = render(&app, width, height);
+            let lines: Vec<&str> = text.lines().collect();
+            let title = lines
+                .iter()
+                .position(|l| l.starts_with(" keys"))
+                .expect(&text);
+            let table = &lines[title + 1..lines.len() - 1];
+            assert!(
+                !table.is_empty() && table.iter().all(|l| !l.trim().is_empty()),
+                "{width}x{height}: the table runs down to the footer:\n{text}"
+            );
+            assert_eq!(
+                list_rows(&text.replace(" keys", "━━")),
+                title - 3,
+                "{width}x{height}: the list has every row above it"
+            );
+        }
+    }
+
+    #[test]
+    fn a_long_message_gives_way_to_the_facts() {
+        let mut app = fuller();
+        let mut rows = app.rows.clone();
+        let done = rows.iter_mut().find(|r| r.key == "local/claude").unwrap();
+        done.pane.msg = Some(format!("Opened PR #31. ⏎ {}", "word ".repeat(400)));
+        app.set_rows(rows, hosts());
+        app.selected = Some(Spot::Row("local/claude".into()));
+        let text = render(&app, 80, 30);
+        let lines: Vec<&str> = text.lines().collect();
+        let place = lines
+            .iter()
+            .position(|l| l.starts_with(" where "))
+            .expect(&text);
+        assert!(lines[place - 2].trim().is_empty(), "{text}");
+        assert!(
+            lines[place - 3].ends_with("word…"),
+            "the cut is marked:\n{text}"
+        );
+        assert!(
+            lines[lines.len() - 2].contains("source"),
+            "the facts end the card:\n{text}"
+        );
+    }
+
+    #[test]
+    fn the_facts_share_rows_when_wide_and_take_one_each_when_narrow() {
+        let app = asking("Bash: ls");
+        let facts = |width: u16| -> Vec<String> {
+            let text = render(&app, width, 30);
+            let card = card_of(&text);
+            let blank = card.iter().position(|l| l.trim().is_empty()).unwrap();
+            card[blank + 1..]
+                .iter()
+                .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+                .collect()
+        };
+        assert_eq!(
+            facts(80),
+            [
+                "host mini harness claude",
+                "where api › main › seat-b",
+                "title seat-b title source native"
+            ]
+        );
+        assert_eq!(
+            facts(36),
+            [
+                "host mini",
+                "harness claude",
+                "where api › main › seat-b",
+                "title seat-b title",
+                "source native"
+            ]
         );
     }
 
@@ -1999,14 +2107,20 @@ mod tests {
     }
 
     #[test]
-    fn a_long_window_gives_way_in_the_bar_so_the_outcome_shows() {
+    fn a_long_window_gives_way_in_where_and_the_block_never() {
         let mut app = asking("Bash: ls");
         let mut rows = app.rows.clone();
         rows[0].pane.tab = "2-toolrig:rig:demo-team#fedcba9876543210#l2".into();
         app.set_rows(rows, hosts());
         let text = render(&app, 80, 30);
-        let bar = &card_of(&text)[0];
-        assert!(bar.contains("…") && bar.contains(" · waiting "), "{bar}");
+        let place = text
+            .lines()
+            .find(|l| l.starts_with(" where "))
+            .expect(&text);
+        assert!(
+            place.contains("2-toolrig:ri…") && place.ends_with(" › seat-b"),
+            "the window gives way in the middle, the block never: {place}"
+        );
         app.peek = Some(Peek {
             key: "mini/seat-b".into(),
             lines: Some(Ok(vec!["tail line".into()])),
@@ -2230,7 +2344,7 @@ mod tests {
         let app = every_state();
         for key in ["local/busy", "local/allow"] {
             let row = app.rows.iter().find(|row| row.key == key).unwrap();
-            let bar = crate::tui::card::bar(row, None, now, 80);
+            let bar = crate::tui::card::bar(row, None, now, 80, false);
             let glyph = theme::glyph(row, now);
             let mark = bar.spans.iter().find(|s| s.content == glyph).unwrap();
             assert_eq!(mark.style, theme::state(row), "{key}: the list's face");
@@ -2261,6 +2375,25 @@ mod tests {
         let mut keys = fuller();
         press(&mut keys, KeyCode::Char('?'));
         screens.push(("keys 120", keys, 120, 34));
+        for (name, width, height) in [
+            ("keys 80", 80, 30),
+            ("keys 140 tall", 140, 60),
+            ("keys 200 tall", 200, 60),
+        ] {
+            let mut keys = fuller();
+            press(&mut keys, KeyCode::Char('?'));
+            screens.push((name, keys, width, height));
+        }
+        for (name, width, height) in [("done card 80", 80, 30), ("done card 200 tall", 200, 60)] {
+            let mut done = fuller();
+            let mut rows = done.rows.clone();
+            let row = rows.iter_mut().find(|r| r.key == "local/claude").unwrap();
+            row.last_turn = Some(372);
+            row.pane.msg = Some("Opened PR #31; CI is green. ⏎ Next step is yours.".into());
+            done.set_rows(rows, hosts());
+            done.selected = Some(Spot::Row("local/claude".into()));
+            screens.push((name, done, width, height));
+        }
         let mut status = fuller();
         press(&mut status, KeyCode::Char('f'));
         screens.push(("f picker 80", status, 80, 20));
@@ -2601,17 +2734,17 @@ mod extension_tests {
     }
 
     #[test]
-    fn the_card_lists_each_extensions_fields_under_source() {
+    fn the_card_lists_each_extensions_fields_as_one_fact_under_where() {
         let mut app = with_fields(&[]);
         app.selected = Some(crate::tui::app::Spot::Row("mini/seat-b".into()));
         let text = render(&app, 80, 30);
-        let source = text
+        let place = text
             .lines()
-            .position(|l| l.contains("source native"))
+            .position(|l| l.starts_with(" where "))
             .expect(&text);
         let lines: Vec<&str> = text.lines().collect();
-        assert_eq!(lines[source + 1], " fake · rig api");
-        assert_eq!(lines[source + 2], " session-prefix · project api");
+        assert_eq!(lines[place + 1], " fake           rig api");
+        assert_eq!(lines[place + 2], " session-prefix project api");
         let mut lone = with_fields(&[field("lane.lane", "LANE")]);
         let mut rows = lone.rows.clone();
         rows[0].ext.insert("lane.lane".into(), "desk".into());
@@ -2619,7 +2752,8 @@ mod extension_tests {
         lone.selected = Some(crate::tui::app::Spot::Row(lone.rows[0].key.clone()));
         let text = render(&lone, 80, 30);
         assert!(
-            text.contains("\n lane desk\n"),
+            text.lines()
+                .any(|l| l.starts_with(" lane ") && l.ends_with(" desk")),
             "a lone field named like its extension: {text}"
         );
     }
