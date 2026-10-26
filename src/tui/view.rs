@@ -585,52 +585,41 @@ pub(super) fn note(app: &App) -> Option<(&str, Style)> {
 
 fn footer(frame: &mut Frame, area: Rect, app: &App) {
     let width = usize::from(area.width);
+    let line = footer_overlay(app, width).unwrap_or_else(|| key_bar(app, width));
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+/// What takes the footer over, in order: the `:` and `/` prompts, a prefix waiting for its next
+/// key, answer mode, `dd`'s question, then a note.
+fn footer_overlay(app: &App, width: usize) -> Option<Line<'static>> {
     if app.commanding {
         let text = format!(
             ": {}{} · tab completes · esc cancels",
             app.command.value(),
             theme::CURSOR
         );
-        frame.render_widget(
-            Paragraph::new(Line::styled(fit(&text, width), theme::strong())),
-            area,
-        );
-        return;
+        return Some(Line::styled(fit(&text, width), theme::strong()));
     }
     if app.filtering {
         let text = format!("/ {}{}", app.filter.value(), theme::CURSOR);
-        frame.render_widget(
-            Paragraph::new(Line::styled(fit(&text, width), theme::strong())),
-            area,
-        );
-        return;
+        return Some(Line::styled(fit(&text, width), theme::strong()));
     }
     match app.pending {
-        Some('f') => {
-            frame.render_widget(Paragraph::new(status_keys(app, width)), area);
-            return;
-        }
-        Some(prefix) => {
-            frame.render_widget(Paragraph::new(prefix_keys(app, prefix, width)), area);
-            return;
-        }
+        Some('f') => return Some(status_keys(app, width)),
+        Some(prefix) => return Some(prefix_keys(app, prefix, width)),
         None => {}
     }
     if let Some(answer) = &app.answer {
-        frame.render_widget(Paragraph::new(answer.footer(width)), area);
-        return;
+        return Some(answer.footer(width));
     }
     if let Some(question) = app.close_question(width) {
-        frame.render_widget(
-            Paragraph::new(Line::styled(fit(&question, width), theme::alert_label())),
-            area,
-        );
-        return;
+        return Some(Line::styled(fit(&question, width), theme::alert_label()));
     }
-    if let Some((text, style)) = note(app) {
-        frame.render_widget(Paragraph::new(Line::styled(fit(text, width), style)), area);
-        return;
-    }
+    note(app).map(|(text, style)| Line::styled(fit(text, width), style))
+}
+
+/// The keys, most needed first, with a kept `/` filter before them and quit at the right edge.
+fn key_bar(app: &App, width: usize) -> Line<'static> {
     let mut spans: Vec<Span> = Vec::new();
     let mut used = 0;
     let query = app.filter.value();
@@ -693,7 +682,7 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
     ));
     spans.push(Span::styled(quit_key, theme::strong()));
     spans.push(Span::styled(quit_what, theme::quiet()));
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    Line::from(spans)
 }
 
 #[cfg(test)]
