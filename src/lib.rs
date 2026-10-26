@@ -7,6 +7,7 @@ mod config;
 mod error;
 mod event;
 mod extension;
+mod harness;
 mod jump;
 mod output;
 mod pane;
