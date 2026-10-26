@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use super::theme;
 use crate::board::Row;
 use crate::output::{
-    clean, fit, harness, in_state, labels, name, path, span, squeeze, state_word, what,
+    clean, fit, harness, in_state, labels, name, path, span, squeeze, state_word, turn_msg,
 };
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
@@ -18,9 +18,8 @@ pub enum Tier {
     Narrow,
     /// 60-99: adds harness and host.
     Mid,
-    /// 100 and up: adds the state (or its kind) and the tab, with the detail pane on the right.
-    /// From 132 (a 93-column list beside the default pane at 140) WHERE splits into SESSION,
-    /// WINDOW and BLOCK; TURN joins at 140.
+    /// 100 and up: adds the state (or its kind) and the tab.
+    /// From 132 WHERE splits into SESSION, WINDOW and BLOCK; TURN joins at 140.
     Wide,
 }
 
@@ -65,8 +64,7 @@ enum Width {
     Msg,
 }
 
-/// The board width from which WHERE splits into SESSION, WINDOW and BLOCK: 140 with the default
-/// third leaves a 93-column list, which `columns_board` counts as 132.
+/// The board width from which WHERE splits into SESSION, WINDOW and BLOCK.
 pub const SPLIT: u16 = 132;
 const ALWAYS: RangeInclusive<u16> = 0..=u16::MAX;
 
@@ -280,7 +278,7 @@ fn sort_key(id: Col, row: &Row) -> Option<SortKey> {
         Col::Session => text(&row.pane.session),
         Col::Window => text(&row.pane.tab),
         Col::Block => text(&name(row)),
-        Col::Msg => text(what(row)),
+        Col::Msg => text(turn_msg(row)),
     }
 }
 
@@ -387,7 +385,7 @@ impl Columns {
                     Col::Session => squeeze(&clean(&row.pane.session), width.saturating_sub(1)),
                     Col::Window => squeeze(&clean(&row.pane.tab), width.saturating_sub(1)),
                     Col::Block => squeeze(place, width.saturating_sub(1)),
-                    Col::Msg => return (fit(what(row), *width), c.tone),
+                    Col::Msg => return (fit(turn_msg(row), *width), c.tone),
                 };
                 (fit(&text, width.saturating_sub(1)) + " ", c.tone)
             })
@@ -490,15 +488,6 @@ mod tests {
             .collect()
     }
 
-    /// The list's width beside the detail pane, or the whole width under it.
-    fn list_width(app: &App, width: u16) -> usize {
-        if width >= 100 && !app.pick {
-            usize::from(width) - usize::from(crate::tui::detail::width(width, app.detail)) - 1
-        } else {
-            usize::from(width)
-        }
-    }
-
     #[test]
     fn header_cells_start_where_the_row_cells_under_them_start() {
         let mut picking = app();
@@ -511,12 +500,9 @@ mod tests {
             (picking, 80),
         ] {
             let buf = buffer(&app, width, 30);
-            let list = list_width(&app, width);
+            let list = usize::from(width);
             let header: String = line(&buf, 2).chars().take(list).collect();
-            let columns = Columns::new(
-                crate::tui::detail::columns_board(width, list, app.beside(width)),
-                list,
-            );
+            let columns = Columns::new(width, list);
             let row_y = (3..buf.area.height)
                 .find(|&y| line(&buf, y).contains("seat-b msg"))
                 .unwrap();
@@ -553,19 +539,12 @@ mod tests {
 
     #[test]
     fn a_click_on_each_header_cell_sorts_by_its_column_in_the_table_view() {
-        use crate::tui::detail::{columns_board, list};
-        for (width, share) in [
-            (100, None),
-            (140, None),
-            (140, Some(38.0 / 140.0)),
-            (200, None),
-        ] {
+        for width in [100, 140, 200] {
             let mut app = app();
             app.view = crate::tui::views::views().remove(1);
-            (app.width, app.height, app.detail) = (width, 30, share);
+            (app.width, app.height) = (width, 30);
             let header = line(&buffer(&app, width, 30), 2);
-            let list = usize::from(list(width, share, width >= 100));
-            let columns = Columns::new(columns_board(width, list, width >= 100), list);
+            let columns = Columns::new(width, usize::from(width));
             for (column, _) in columns.cols.iter().filter(|(c, _)| c.letter.is_some()) {
                 let x = header.find(column.header).unwrap();
                 for at in [x, x + column.header.len() - 1] {
@@ -574,18 +553,14 @@ mod tests {
                     assert_eq!(
                         app.sort,
                         Some((column.id, column.first)),
-                        "{width}/{share:?}: {} at {at}:\n{header}",
+                        "{width}: {} at {at}:\n{header}",
                         column.header
                     );
                 }
             }
             app.sort = None;
             app.click(3, 5);
-            app.click(width - 2, 2);
-            assert_eq!(
-                app.sort, None,
-                "{width}: a click on a row or in the detail pane does not sort"
-            );
+            assert_eq!(app.sort, None, "{width}: a click on a row does not sort");
         }
         let mut status = app();
         (status.width, status.height) = (140, 30);
@@ -650,7 +625,7 @@ mod tests {
         board.selected = Some(Spot::Row("local/r30".into()));
         let y_of = |board: &App, key: &str| {
             let buf = buffer(board, 140, 20);
-            let list = list_width(board, 140);
+            let list = 140;
             (0..20).find(|&y| {
                 let text: String = line(&buf, y).chars().take(list).collect();
                 text.contains(&format!("{key} msg"))
@@ -772,43 +747,30 @@ mod tests {
     }
 
     #[test]
-    fn where_and_msg_keep_their_100_column_widths_at_any_pane_width() {
-        let mut app = app();
+    fn where_and_msg_keep_their_100_column_widths_at_every_board_width() {
+        let app = app();
         for width in 100..=240u16 {
-            for share in [None, Some(0.0), Some(0.3), Some(0.4), Some(0.5), Some(0.9)] {
-                app.detail = share;
-                let header: String = line(&buffer(&app, width, 30), 2)
-                    .chars()
-                    .take(list_width(&app, width))
-                    .collect();
-                let at = |name: &str| header.find(name).unwrap();
-                let place = header.find("WHERE").unwrap_or_else(|| at("SESSION"));
+            let header = line(&buffer(&app, width, 30), 2);
+            let at = |name: &str| header.find(name).unwrap();
+            let place = header.find("WHERE").unwrap_or_else(|| at("SESSION"));
+            assert!(
+                at("MSG") - place >= 15 && header.len() - at("MSG") >= 10,
+                "{width}: WHERE, or SESSION to BLOCK, and MSG:\n{header}"
+            );
+            if header.contains("SESSION") {
+                let parts = [at("SESSION"), at("WINDOW"), at("BLOCK"), at("MSG")];
                 assert!(
-                    at("MSG") - place >= 15 && header.len() - at("MSG") >= 10,
-                    "{width} at {share:?}: WHERE, or SESSION to BLOCK, and MSG:\n{header}"
+                    parts.windows(2).all(|w| w[1] - w[0] >= 10),
+                    "{width}: each part at least 10:\n{header}"
                 );
-                if header.contains("SESSION") {
-                    let parts = [at("SESSION"), at("WINDOW"), at("BLOCK"), at("MSG")];
-                    assert!(
-                        parts.windows(2).all(|w| w[1] - w[0] >= 10),
-                        "{width} at {share:?}: each part at least 10:\n{header}"
-                    );
-                }
             }
         }
     }
 
     #[test]
-    fn turn_shows_once_the_list_has_room_with_a_dash_for_no_turn() {
-        let mut narrow = app();
-        narrow.detail = Some(38.0 / 139.0);
-        assert!(!line(&buffer(&narrow, 139, 30), 2).contains("TURN"));
-        assert!(
-            !line(&buffer(&app(), 140, 30), 2).contains("TURN"),
-            "a 93-column list beside the default 46"
-        );
+    fn turn_shows_from_140_columns_with_a_dash_for_no_turn() {
+        assert!(!line(&buffer(&app(), 139, 30), 2).contains("TURN"));
         let mut app = App::default();
-        app.detail = Some(38.0 / 140.0);
         let mut timed = row("local/quick", "done", "needs_you", false);
         timed.last_turn = Some(125);
         let untimed = row("local/fresh", "blocked", "needs_you", false);
@@ -838,8 +800,7 @@ mod tests {
         let row_at = |width: u16, needle: &str| {
             let buf = buffer(&app, width, 30);
             let y = (3..30).find(|&y| line(&buf, y).contains(needle)).unwrap();
-            let list = list_width(&app, width);
-            line(&buf, y).chars().take(list).collect::<String>()
+            line(&buf, y)
         };
         assert!(row_at(100, "ask msg").starts_with("◉ permission "));
         assert!(row_at(100, "pick msg").starts_with("◉ question "));
@@ -879,30 +840,18 @@ mod tests {
                 .all(|h| text.contains(h))
                 && !text.contains("WHERE")
         };
-        let mut board = app();
         let at = |board: &App, width| {
             let text = header(board, width);
             (split(&text), text.contains("TURN"))
         };
-        assert_eq!(
-            at(&board, 139),
-            (false, false),
-            "the default 46 pane: a 92-column list"
-        );
-        assert_eq!(at(&board, 140), (true, false), "the default 46 pane: 93");
-        assert_eq!(at(&board, 151), (true, false), "the default 50 pane: 100");
-        assert_eq!(at(&board, 152), (true, true), "the default 50 pane: 101");
-        board.detail = Some(38.0 / 140.0);
-        assert_eq!(at(&board, 140), (true, true), "a 38 pane: 101");
         let mut picking = app();
         picking.pick = true;
-        assert_eq!(at(&picking, 131), (false, false));
-        assert_eq!(
-            at(&picking, 132),
-            (true, false),
-            "pick splits at its own width"
-        );
-        assert_eq!(at(&picking, 140), (true, true));
+        for board in [app(), picking] {
+            assert_eq!(at(&board, 131), (false, false));
+            assert_eq!(at(&board, 132), (true, false), "the list is the board");
+            assert_eq!(at(&board, 139), (true, false));
+            assert_eq!(at(&board, 140), (true, true));
+        }
     }
 
     fn placed(key: &str, session: &str, tab: &str) -> Row {
@@ -974,14 +923,13 @@ mod tests {
     }
 
     /// The rendered lines of the rows whose BLOCK or WHERE ends in `seat`, top to bottom.
-    fn seats(rows: Vec<Row>, width: u16, detail: Option<f64>) -> Vec<String> {
+    fn seats(rows: Vec<Row>, width: u16) -> Vec<String> {
         let mut app = App::default();
         app.set_rows(rows, hosts());
-        app.detail = detail;
         let buf = buffer(&app, width, 30);
         (3..30)
             .map(|y| line(&buf, y))
-            .filter(|l| l.contains("seat"))
+            .filter(|l| l.contains("seat") && !l.starts_with("━━"))
             .collect()
     }
 
@@ -1001,7 +949,7 @@ mod tests {
             ]
         };
         for (width, label) in [(200, "SESSION .. BLOCK"), (120, "WHERE")] {
-            let lines = seats(rows(), width, None);
+            let lines = seats(rows(), width);
             assert!(
                 lines[0].contains("seat #1") && lines[1].contains("seat #2"),
                 "{label} at {width}: {lines:#?}"
@@ -1013,13 +961,12 @@ mod tests {
     fn rows_that_only_read_the_same_once_squeezed_are_numbered() {
         let lines = seats(
             vec![
-                seat("local/blk-1", "api-gateway-one-prod", "window:a"),
-                seat("local/blk-2", "api-gateway-two-prod", "window:b"),
+                seat("local/blk-1", "api-gateway-one-production", "window:a"),
+                seat("local/blk-2", "api-gateway-two-production", "window:b"),
             ],
-            140,
-            None,
+            132,
         );
-        assert!(lines[0].contains("api-g…-prod"), "{lines:#?}");
+        assert!(lines[0].contains("…roduction"), "squeezed: {lines:#?}");
         assert!(
             lines[0].contains("seat #1") && lines[1].contains("seat #2"),
             "{lines:#?}"
@@ -1035,11 +982,10 @@ mod tests {
         };
         let lines = seats(
             vec![
-                named("local/blk-1", "seat-review-one-claude"),
-                named("local/blk-2", "seat-review-two-claude"),
+                named("local/blk-1", "seat-review-agent-one-claude-code"),
+                named("local/blk-2", "seat-review-agent-two-claude-code"),
             ],
-            140,
-            None,
+            132,
         );
         assert_eq!(lines.len(), 2, "{lines:#?}");
         assert!(
@@ -1061,14 +1007,13 @@ mod tests {
         twin.key = "local/blk-2".into();
         twin.pane.block_id = "blk-2".into();
         app.set_rows(vec![long, twin], hosts());
-        app.detail = Some(38.0 / 200.0);
-        let buf = buffer(&app, 200, 30);
+        let buf = buffer(&app, 161, 30);
         let rows: Vec<String> = (3..30)
             .map(|y| line(&buf, y))
-            .filter(|l| l.contains("seat"))
+            .filter(|l| l.contains("seat") && !l.starts_with("━━"))
             .collect();
         assert_eq!(rows.len(), 2, "{rows:#?}");
-        let columns = Columns::new(200, 161);
+        let columns = Columns::new(161, 161);
         let session = columns.width(Col::Session) - 1;
         assert!(
             rows[0].contains(&squeeze("web-frontend-service", session)),

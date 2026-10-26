@@ -12,14 +12,15 @@ use super::status::ALL;
 use super::theme;
 use super::views::{Key, View};
 use crate::board::Row;
-use crate::output::{blocks, chop, clean, fit, in_state, name, wheres};
-use crate::pane::bare_title;
+use crate::output::{blocks, fit, wheres};
 
 /// Below this many rows the column header and the blank row above it are left out, so no row
 /// is lost to them.
 pub(super) const HEADED: u16 = 12;
 /// The column header's row when there is one: under the top bar and its blank row.
 pub(super) const HEADER_ROW: u16 = 2;
+/// The list rows the card always leaves.
+const LIST_FLOOR: u16 = 3;
 
 const STOPPED: &str = "serve stopped · r reconnects";
 
@@ -29,7 +30,8 @@ pub const KEYS: [(&str, &str); 21] = [
     ("1-9", "the nth NEEDS YOU row"),
     ("s", "mark seen"),
     ("ctrl+s", "mark done rows seen (was S)"),
-    ("space", "peek at the pane"),
+    ("space", "zoom the card and its tail"),
+    ("tab", "the next row that needs you"),
     ("/", "filter; enter keeps it"),
     ("f", "one status: w d q p e u i"),
     ("v", "status, table, harness, host"),
@@ -42,16 +44,15 @@ pub const KEYS: [(&str, &str); 21] = [
     ("z", "fold or open a group"),
     ("enter", "go to the pane"),
     ("r", "reconnect to serve"),
-    ("c", "hide or show the detail pane"),
-    ("< >", "narrow, widen the detail pane"),
+    ("c", "hide or show the card"),
     ("?", "this table"),
     ("q", "quit"),
 ];
 
 pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
     let area = frame.area();
-    let tier = tier(area.width);
-    let ruled = tier != Tier::Wide && area.height >= 20;
+    let card = app.card_shown();
+    let ruled = !card && tier(area.width) != Tier::Wide && area.height >= 20;
     let [top, _gap, body, above_footer, bottom] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(u16::from(area.height >= HEADED)),
@@ -61,54 +62,40 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
     ])
     .areas(area);
     header(frame, top, app, now);
-    if app.beside(area.width) {
-        let [list_area, rule, detail_area] = Layout::horizontal([
-            Constraint::Min(40),
-            Constraint::Length(1),
-            Constraint::Length(super::detail::width(area.width, app.detail)),
-        ])
-        .areas(body);
-        list(frame, list_area, app, area, now);
-        let bar = vec![Line::styled("│", theme::dim()); usize::from(rule.height)];
-        frame.render_widget(Paragraph::new(bar), rule);
-        let padded = Rect {
-            x: detail_area.x + 1,
-            width: detail_area.width.saturating_sub(1),
-            ..detail_area
-        };
-        let lines = detail(
-            app,
-            now,
-            usize::from(padded.width),
-            true,
-            usize::from(padded.height),
-        );
-        frame.render_widget(Paragraph::new(lines), padded);
+    let height = if card {
+        card_height(app, now, body, area.height >= HEADED)
     } else {
-        // The key table takes what it needs, down to 3 list lines; anything else half the body.
-        let most = if app.keys {
-            body.height.saturating_sub(3)
-        } else {
-            (body.height / 2).min(body.height.saturating_sub(4))
-        };
-        let lines = if app.pick || !app.pane_shown() {
-            Vec::new()
-        } else {
-            detail(app, now, usize::from(body.width), false, usize::from(most))
-        };
-        let height = (lines.len() as u16).min(most);
-        let [list_area, rule, detail_area] = Layout::vertical([
-            Constraint::Min(3),
-            Constraint::Length(u16::from(height > 0)),
-            Constraint::Length(height),
-        ])
-        .areas(body);
+        0
+    };
+    let [list_area, card_area] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(height)]).areas(body);
+    if list_area.height > 0 {
         list(frame, list_area, app, area, now);
-        frame.render_widget(rule_line(rule.width), rule);
-        frame.render_widget(Paragraph::new(lines), detail_area);
+    }
+    if height > 0 {
+        let lines = super::card::lines(app, now, usize::from(body.width), usize::from(height));
+        frame.render_widget(Paragraph::new(lines), card_area);
     }
     frame.render_widget(rule_line(above_footer.width), above_footer);
     footer(frame, bottom, app);
+}
+
+/// The card's rows: all of the body zoomed; else at least 8 and 40% of it, more for the key table
+/// or a blocked row's ask, which is never cut, but always leaving the list 3 rows under its column
+/// header, when it has one.
+fn card_height(app: &App, now: DateTime<Utc>, body: Rect, headed: bool) -> u16 {
+    if app.zoom {
+        return body.height;
+    }
+    let most = body.height.saturating_sub(LIST_FLOOR + u16::from(headed));
+    let base = (body.height * 2 / 5).max(8);
+    let asks = app.keys || app.current().is_some_and(|row| row.pane.state == "blocked");
+    let need = if asks {
+        super::card::lines(app, now, usize::from(body.width), 0).len() as u16
+    } else {
+        0
+    };
+    base.max(need).min(most)
 }
 
 /// While `f` waits: each status with its count and its letter underlined, as the column header
@@ -285,10 +272,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
         return;
     }
     let width = usize::from(area.width);
-    let columns = Columns::new(
-        super::detail::columns_board(board.width, width, app.beside(board.width)),
-        width,
-    );
+    let columns = Columns::new(board.width, width);
     let area = if board.height >= HEADED {
         let [top, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
         let spans: Vec<Span> = columns
@@ -453,199 +437,6 @@ fn row_line(
     Line::from(spans)
 }
 
-/// The detail pane's lines: the key table, a folded group's hint, or the selected row. Below
-/// 100 columns it leaves out what the row already shows, and a peek takes the fields' place.
-/// A peek fills what is left of `height` with its newest lines.
-fn detail(
-    app: &App,
-    now: DateTime<Utc>,
-    width: usize,
-    wide: bool,
-    height: usize,
-) -> Vec<Line<'static>> {
-    if app.keys {
-        let mut lines = vec![Line::styled(fit("keys", width), theme::accent())];
-        lines.extend(KEYS.iter().map(|(key, what)| {
-            Line::from(vec![
-                Span::styled(format!("{key:<7} "), theme::bright()),
-                Span::styled(fit(what, width.saturating_sub(8)), theme::dim()),
-            ])
-        }));
-        return lines;
-    }
-    let Some(row) = app.current() else {
-        return match &app.selected {
-            Some(Spot::Group(group)) => vec![Line::styled(
-                fit(&format!("{} is folded · z opens it", group.title()), width),
-                theme::dim(),
-            )],
-            _ => Vec::new(),
-        };
-    };
-    let p = &row.pane;
-    let mut lines = vec![Line::styled(fit(&name(row), width), theme::accent())];
-    if let Some(why) = &app.failed {
-        // A failed jump is worth reading whole, as a peek error is.
-        lines.extend(
-            wrap(why, width.max(1))
-                .into_iter()
-                .map(|line| Line::styled(line, Style::new().fg(Color::Red))),
-        );
-    }
-    let peek = app.peek.as_ref().filter(|peek| peek.key == row.key);
-    if let (false, Some(peek)) = (wide, peek) {
-        let label = format!(" · peek{}", captured(peek));
-        lines[0] = Line::from(vec![
-            Span::styled(
-                fit(&name(row), width.saturating_sub(label.width()))
-                    .trim_end()
-                    .to_owned(),
-                theme::accent(),
-            ),
-            Span::styled(label, theme::dim()),
-        ]);
-        lines.extend(peek_lines(peek, width, height.saturating_sub(lines.len())));
-        return lines;
-    }
-    let mut state = match &p.kind {
-        Some(kind) => format!("{} · {kind}", p.state),
-        None => p.state.clone(),
-    };
-    if row.suspect {
-        state.push_str(" (reported)");
-    }
-    let reported = p
-        .updated_at
-        .as_deref()
-        .and_then(|at| DateTime::parse_from_rfc3339(at).ok())
-        .map_or("none".to_owned(), |at| {
-            at.with_timezone(&Local).format("%H:%M:%S").to_string()
-        });
-    let dash = |text: &str| {
-        if text.is_empty() {
-            "-".to_owned()
-        } else {
-            text.to_owned()
-        }
-    };
-    if let Some(why) = &row.suspect_reason {
-        lines.extend(
-            wrap(&format!("may be stale: {why}"), width.max(1))
-                .into_iter()
-                .map(|line| Line::styled(line, theme::dim())),
-        );
-    }
-    let value = width.saturating_sub(10);
-    let pair = |key: &str, val: &str| {
-        Line::from(vec![
-            Span::styled(format!("{key:<9} "), theme::dim()),
-            Span::raw(fit(val, value)),
-        ])
-    };
-    lines.push(pair("state", &state));
-    let msg = clean(p.msg.as_deref().unwrap_or_default());
-    if wide {
-        lines.push(pair("in state", &in_state(row, now)));
-    }
-    // Wrapped: a permission prompt is what you read before acting. Underneath, only when the
-    // row cut it.
-    let show = if wide {
-        Some(3)
-    } else {
-        (msg.width() > Columns::new(width as u16, width).width(Col::Msg)).then_some(2)
-    };
-    if let Some(most) = show {
-        let mut wrapped = wrap(&dash(&msg), value.max(1));
-        if wrapped.len() > most {
-            wrapped.truncate(most);
-            wrapped[most - 1] = fit(&format!("{}…", wrapped[most - 1]), value)
-                .trim_end()
-                .to_owned();
-        }
-        for (i, line) in wrapped.iter().enumerate() {
-            lines.push(pair(if i == 0 { "msg" } else { "" }, line));
-        }
-    }
-    let mut pairs = Vec::new();
-    pairs.extend([
-        ("host", p.host.clone()),
-        ("session", p.session.clone()),
-        ("window", p.tab.clone()),
-        ("title", dash(bare_title(&p.title))),
-        ("harness", p.harness.clone().unwrap_or_else(|| "-".into())),
-        ("source", p.source.clone()),
-        ("last rpt", reported),
-    ]);
-    for (key, val) in pairs {
-        lines.push(pair(key, &val));
-    }
-    if p.source == "inferred" {
-        lines.push(Line::styled(
-            fit("no status record; state from the title", width),
-            theme::dim(),
-        ));
-    }
-    lines.push(Line::styled(
-        fit("enter goes to the pane", width),
-        theme::dim(),
-    ));
-    if let Some(peek) = peek {
-        lines.push(Line::from(vec![
-            Span::styled("peek", theme::header()),
-            Span::styled(captured(peek), theme::dim()),
-        ]));
-        lines.extend(peek_lines(peek, width, height.saturating_sub(lines.len())));
-    }
-    lines
-}
-
-/// ` · HH:MM:SS`, when the capture came back.
-fn captured(peek: &super::app::Peek) -> String {
-    peek.at.map_or_else(String::new, |at| {
-        format!(" · {}", at.with_timezone(&Local).format("%H:%M:%S"))
-    })
-}
-
-/// The newest `room` rows of the capture, wrapped to the pane, so the last lines show whole and
-/// the oldest fall off the top.
-fn peek_lines(peek: &super::app::Peek, width: usize, room: usize) -> Vec<Line<'static>> {
-    match &peek.lines {
-        None => vec![Line::styled("capturing…", theme::dim())],
-        Some(Ok(text)) => {
-            let mut rows = Vec::new();
-            for line in text.iter().rev() {
-                if rows.len() >= room {
-                    break;
-                }
-                rows.extend(chop(line, width.max(1)).into_iter().rev());
-            }
-            rows.truncate(room);
-            rows.into_iter().rev().map(Line::raw).collect()
-        }
-        // An error is worth reading whole, so it wraps instead of being cut.
-        Some(Err(why)) => wrap(why, width.max(1))
-            .into_iter()
-            .map(|line| Line::styled(line, Style::new().fg(Color::Red)))
-            .collect(),
-    }
-}
-
-fn wrap(text: &str, width: usize) -> Vec<String> {
-    let mut lines = vec![String::new()];
-    for word in text.split_whitespace() {
-        let last = lines.last_mut().expect("one line");
-        if !last.is_empty() && last.width() + 1 + word.width() > width {
-            lines.push(String::new());
-        }
-        let last = lines.last_mut().expect("one line");
-        if !last.is_empty() {
-            last.push(' ');
-        }
-        last.push_str(word);
-    }
-    lines
-}
-
 fn footer(frame: &mut Frame, area: Rect, app: &App) {
     let width = usize::from(area.width);
     if app.commanding {
@@ -693,9 +484,9 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
     }
     let mut spans: Vec<Span> = Vec::new();
     let mut used = 0;
-    if app.peek.is_some() {
-        used += "space closes · ".width();
-        spans.push(Span::styled("space closes · ", theme::dim()));
+    if app.zoom {
+        used += "space returns · ".width();
+        spans.push(Span::styled("space returns · ", theme::dim()));
     }
     let query = app.filter.value();
     if !query.is_empty() {
@@ -704,9 +495,9 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled(kept, theme::bright()));
         spans.push(Span::styled(" · esc clears · ", theme::dim()));
     }
-    // The essentials first, so a narrow board keeps them; `v view` then shows after `/ filter`.
-    // While the pane is hidden, `c pane` says so ahead of `space peek`, which then gives way
-    // before `enter jump` and shows after `c pane` when it fits.
+    // The essentials first, so a narrow board keeps them; then `tab next`, which works through
+    // the rows that need you, and `v view` last, one `?` away. `v view` shows after `/ filter`.
+    // While the card is hidden, `c card` says so, and `space zoom` shows after it when it fits.
     let keys: Vec<(&str, &str)> = if app.pick {
         vec![("enter", "go"), ("j/k", "move"), ("/", "filter")]
     } else {
@@ -715,14 +506,17 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
             ("s", "seen"),
             ("/", "filter"),
             ("?", "keys"),
-            ("v", "view"),
         ];
         if app.hidden {
-            keys.extend([("c", "pane"), ("enter", "jump"), ("space", "peek")]);
-        } else {
-            keys.extend([("space", "peek"), ("enter", "jump")]);
+            keys.push(("c", "card"));
         }
-        keys.push(("1-9", "select"));
+        keys.extend([
+            ("tab", "next"),
+            ("enter", "jump"),
+            ("space", "zoom"),
+            ("v", "view"),
+            ("1-9", "select"),
+        ]);
         keys
     };
     let (quit_key, quit_what) = if app.pick {
@@ -733,7 +527,7 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
     let quit = format!("{quit_key}{quit_what}");
     let mut shown: Vec<(&str, &str)> = Vec::new();
     for (key, what) in keys {
-        if key == "space" && app.peek.is_some() {
+        if key == "space" && app.zoom {
             continue;
         }
         let sep = if shown.is_empty() { 0 } else { " · ".width() };
@@ -775,7 +569,9 @@ mod tests {
 
     use super::*;
     use crate::tui::app::tests::{app, hosts, press, row};
-    use crate::tui::app::{App, Effect, Peek};
+    use std::time::{Duration, Instant};
+
+    use crate::tui::app::{App, Effect, Peek, Spot};
 
     fn fuller() -> App {
         let mut app = app();
@@ -863,148 +659,15 @@ mod tests {
                 && seat_line(&wide).contains(" seat-b "),
             "SESSION, WINDOW and BLOCK at 140:\n{wide}"
         );
-        assert!(wide.contains("│"), "the detail pane is on the right at 140");
-        assert!(narrow.contains("─────"), "and underneath below 100");
+        assert!(!wide.contains('│'), "no pane on the right at 140");
         assert!(
-            wide.lines()
-                .any(|l| l.contains("#l2 ") && l.contains(" rig ")),
+            wide.contains("━━ ◉") && narrow.contains("━━ ◉"),
+            "the card is under the list at every width"
+        );
+        assert!(
+            wide.lines().any(|l| l.contains("#l2 rig")),
             "a long window keeps its tail beside its block:\n{wide}"
         );
-    }
-
-    #[test]
-    fn the_detail_pane_names_the_window() {
-        let text = screen(140, 40);
-        let window = text.lines().find(|l| l.contains("│ window ")).unwrap();
-        assert!(window.ends_with("window    main"), "{window}");
-        assert!(!text.lines().any(|l| l.contains("│ tab ")), "{text}");
-    }
-
-    #[test]
-    fn c_hides_and_shows_the_detail_pane_at_80_140_and_200() {
-        let rules = |text: &str| text.lines().filter(|l| l.starts_with("────")).count();
-        for width in [80u16, 140, 200] {
-            let mut app = fuller();
-            let shown = render(&app, width, 40);
-            let effect = press(&mut app, KeyCode::Char('c'));
-            assert!(
-                matches!(effect, Some(Effect::SavePrefs(prefs)) if prefs.detail_hidden),
-                "{width}: c asks to keep it hidden"
-            );
-            let hidden = render(&app, width, 40);
-            assert!(
-                !hidden.contains("enter goes to the pane"),
-                "{width}: no fields:\n{hidden}"
-            );
-            if width >= 100 {
-                assert!(
-                    shown.contains('│') && !hidden.contains('│'),
-                    "{width}: no rule:\n{hidden}"
-                );
-                let header = hidden.lines().nth(2).unwrap();
-                assert!(
-                    header.contains("TURN") && header.contains("SESSION"),
-                    "{width}: the full width's columns:\n{hidden}"
-                );
-                assert!(
-                    hidden.lines().any(|l| l.ends_with("seat-b msg")),
-                    "{width}: MSG runs to the edge:\n{hidden}"
-                );
-            } else {
-                assert_eq!(
-                    (rules(&shown), rules(&hidden)),
-                    (2, 1),
-                    "80: only the footer's rule:\n{hidden}"
-                );
-            }
-            press(&mut app, KeyCode::Char('c'));
-            assert_eq!(render(&app, width, 40), shown, "{width}: c shows it again");
-        }
-    }
-
-    #[test]
-    fn while_hidden_the_size_keys_say_so_and_peek_and_keys_still_show() {
-        let mut app = fuller();
-        press(&mut app, KeyCode::Char('c'));
-        app.width = 140;
-        let detail = app.detail;
-        assert_eq!(press(&mut app, KeyCode::Char('>')), None);
-        assert_eq!(app.toast(), Some("the detail pane is hidden · c shows it"));
-        assert_eq!(app.detail, detail, "the width is unchanged");
-        press(&mut app, KeyCode::Char('?'));
-        let keys = render(&app, 140, 40);
-        assert!(
-            keys.contains("│ keys") && keys.contains("hide or show the detail pane"),
-            "{keys}"
-        );
-        press(&mut app, KeyCode::Char('?'));
-        assert!(
-            !render(&app, 140, 40).contains('│'),
-            "hidden again once the table closes"
-        );
-        app.peek = Some(Peek {
-            key: "mini/seat-b".into(),
-            lines: Some(Ok(vec!["peek line 1".into()])),
-            at: None,
-        });
-        for width in [140, 80] {
-            let text = render(&app, width, 40);
-            assert!(
-                text.contains("peek line 1"),
-                "{width}: the peek shows:\n{text}"
-            );
-        }
-        app.peek = None;
-        assert!(
-            !render(&app, 140, 40).contains('│'),
-            "and hides when it closes"
-        );
-        let why = "the Rex app on studio did not answer within 5s; it does not answer while the \
-                   Mac's screen is locked";
-        app.jumped(Err(why.into()));
-        let text = render(&app, 80, 40);
-        assert!(
-            text.contains("screen is locked"),
-            "a failed jump's reason shows whole:\n{text}"
-        );
-        press(&mut app, KeyCode::Char('j'));
-        assert!(
-            !render(&app, 80, 40).contains("screen is locked"),
-            "and hides with the next key"
-        );
-        assert!(app.hidden, "the choice is kept throughout");
-    }
-
-    #[test]
-    fn while_hidden_the_footer_says_c_pane_after_the_keys_ahead_of_space_peek() {
-        let mut app = fuller();
-        let footer = |app: &App, width| render(app, width, 40).lines().last().unwrap().to_owned();
-        assert!(!footer(&app, 140).contains("c pane"), "shown: no cue");
-        press(&mut app, KeyCode::Char('c'));
-        assert_eq!(
-            app.toast(),
-            Some("the detail pane is hidden · c shows it"),
-            "c says so as it hides"
-        );
-        app.toast = None;
-        assert!(
-            footer(&app, 140).contains("? keys · c pane · space peek"),
-            "{}",
-            footer(&app, 140)
-        );
-        let eighty = footer(&app, 80);
-        assert!(
-            eighty.contains("? keys · c pane · enter jump") && !eighty.contains("space peek"),
-            "c pane takes space peek's room at 80: {eighty}"
-        );
-        assert!(eighty.ends_with("q quit"), "and still fits: {eighty}");
-        let narrow = footer(&app, 50);
-        assert!(
-            narrow.contains("? keys") && !narrow.contains("c pane"),
-            "{narrow}"
-        );
-        press(&mut app, KeyCode::Char('c'));
-        assert_eq!(app.toast(), None, "showing it again clears the toast");
     }
 
     #[test]
@@ -1020,196 +683,6 @@ mod tests {
         let wide = screen(140, 40);
         let line = wide.lines().find(|l| l.contains("inferred msg")).unwrap();
         assert!(line.contains(" -  "), "{line}");
-    }
-
-    #[test]
-    fn a_peek_shows_in_the_narrow_layout() {
-        let mut app = fuller();
-        let lines = (1..=12).map(|n| format!("peek line {n}")).collect();
-        app.peek = Some(Peek {
-            key: "mini/seat-b".into(),
-            lines: Some(Ok(lines)),
-            at: None,
-        });
-        for (width, height) in [(50, 30), (80, 30)] {
-            let text = render(&app, width, height);
-            assert!(text.contains("peek line 12"), "{width}x{height}:\n{text}");
-            assert!(
-                !text.contains("harness"),
-                "the peek takes the fields' place:\n{text}"
-            );
-        }
-    }
-
-    fn peeking(captured: usize) -> App {
-        let mut app = fuller();
-        app.peek = Some(Peek {
-            key: "mini/seat-b".into(),
-            lines: Some(Ok((1..=captured)
-                .map(|n| format!("peek line {n}"))
-                .collect())),
-            at: None,
-        });
-        app
-    }
-
-    /// The numbers of the peek lines drawn, top to bottom, and the rows they sit on.
-    fn peek_rows(text: &str) -> (Vec<usize>, Vec<usize>) {
-        text.lines()
-            .enumerate()
-            .filter_map(|(y, line)| {
-                let n = line.split("peek line ").nth(1)?;
-                Some((n.trim().parse::<usize>().ok()?, y))
-            })
-            .unzip()
-    }
-
-    #[test]
-    fn a_peek_fills_the_pane_on_the_right_with_its_newest_lines() {
-        let app = peeking(200);
-        let mut shown = Vec::new();
-        for height in [20u16, 40, 60] {
-            let text = render(&app, 140, height);
-            let (numbers, rows) = peek_rows(&text);
-            let header = text.lines().position(|l| l.ends_with("│ peek")).unwrap();
-            let last = text
-                .lines()
-                .collect::<Vec<_>>()
-                .iter()
-                .rposition(|l| l.contains('│'))
-                .unwrap();
-            assert_eq!(numbers.last(), Some(&200), "{height}:\n{text}");
-            assert!(numbers.windows(2).all(|w| w[1] == w[0] + 1), "{numbers:?}");
-            assert_eq!(
-                (rows[0], rows[rows.len() - 1]),
-                (header + 1, last),
-                "{height}: from under the header to the pane's last row:\n{text}"
-            );
-            shown.push(numbers.len());
-        }
-        assert_eq!(
-            shown,
-            [4, 24, 44],
-            "20, 40 and 60 rows, under 15 rows of fields"
-        );
-    }
-
-    #[test]
-    fn a_peek_fills_the_area_under_the_list_below_100_columns() {
-        let text = render(&peeking(200), 80, 30);
-        let (numbers, rows) = peek_rows(&text);
-        let lines: Vec<&str> = text.lines().collect();
-        let name = rows[0] - 1;
-        assert!(lines[name].starts_with("seat-b"), "{text}");
-        assert!(
-            lines[rows[rows.len() - 1] + 1].starts_with("────"),
-            "{text}"
-        );
-        assert_eq!(numbers.last(), Some(&200));
-        assert!(numbers.windows(2).all(|w| w[1] == w[0] + 1), "{numbers:?}");
-        assert_eq!(
-            numbers.len(),
-            12,
-            "half the 26-row body, less the name:\n{text}"
-        );
-    }
-
-    #[test]
-    fn a_short_capture_shows_whole_at_the_top_of_its_space() {
-        for (width, height) in [(140, 60), (80, 30)] {
-            let (numbers, rows) = peek_rows(&render(&peeking(5), width, height));
-            assert_eq!(numbers, [1, 2, 3, 4, 5], "{width}x{height}");
-            assert_eq!(rows[4] - rows[0], 4);
-        }
-    }
-
-    fn capturing(lines: Vec<String>) -> App {
-        let mut app = fuller();
-        app.peek = Some(Peek {
-            key: "mini/seat-b".into(),
-            lines: Some(Ok(lines)),
-            at: None,
-        });
-        app
-    }
-
-    /// The right pane's rows under the `peek` header, down to its last row.
-    fn peek_pane(app: &App, height: u16) -> Vec<String> {
-        let text = render(app, 140, height);
-        let pane: Vec<String> = text
-            .lines()
-            .filter_map(|l| l.split_once('│'))
-            .map(|(_, right)| right.strip_prefix(' ').unwrap_or(right).to_owned())
-            .collect();
-        let header = pane.iter().position(|l| l == "peek").unwrap();
-        pane[header + 1..].to_vec()
-    }
-
-    #[test]
-    fn a_long_last_line_wraps_whole_onto_the_last_rows() {
-        let long = "error: could not compile `demo-crate` (lib) due to 3 previous errors; 7 warnings emitted";
-        let mut lines: Vec<String> = (1..=50).map(|n| format!("short {n}")).collect();
-        lines.push(long.into());
-        let rows = peek_pane(&capturing(lines), 40);
-        let width = usize::from(super::super::detail::width(140, None)) - 1;
-        let tail = long.len().div_ceil(width);
-        assert_eq!(rows[rows.len() - tail..].concat(), long, "{rows:#?}");
-        assert_eq!(rows[rows.len() - tail - 1], "short 50");
-    }
-
-    #[test]
-    fn long_and_short_lines_fill_the_room_exactly() {
-        let width = usize::from(super::super::detail::width(140, None)) - 1;
-        let long = |n: usize| format!("{:x<1$}", format!("long {n:02} "), 2 * width);
-        let lines = (1..=30)
-            .flat_map(|n| [long(n), format!("short {n}")])
-            .collect();
-        let rows = peek_pane(&capturing(lines), 40);
-        let want: Vec<String> = (23..=30)
-            .flat_map(|n| {
-                let l = long(n);
-                [
-                    l[..width].to_owned(),
-                    l[width..].to_owned(),
-                    format!("short {n}"),
-                ]
-            })
-            .collect();
-        assert_eq!(
-            rows, want,
-            "24 rows: the last 8 pairs of a 2-row and a 1-row line"
-        );
-    }
-
-    #[test]
-    fn a_line_longer_than_the_room_shows_its_tail() {
-        let width = usize::from(super::super::detail::width(140, None)) - 1;
-        let line: String = (0..10 * width + 7)
-            .map(|i| char::from(b'a' + (i % 26) as u8))
-            .collect();
-        let rows = peek_pane(&capturing(vec![line.clone()]), 20);
-        assert_eq!(rows.len(), 4, "{rows:#?}");
-        assert_eq!(rows.concat(), line[line.len() - (3 * width + 7)..]);
-    }
-
-    #[test]
-    fn a_peek_keeps_its_newest_line_on_an_8_row_screen() {
-        let text = render(&peeking(200), 80, 8);
-        assert!(text.contains("peek line 200"), "{text}");
-    }
-
-    #[test]
-    fn a_peek_says_what_it_is_and_when_it_was_taken() {
-        let mut app = peeking(3);
-        let narrow = render(&app, 80, 30);
-        assert!(narrow.lines().any(|l| l == "seat-b · peek"), "{narrow}");
-        let at = DateTime::parse_from_rfc3339("2026-01-01T05:43:09Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        app.peek.as_mut().unwrap().at = Some(at);
-        let time = at.with_timezone(&Local).format("%H:%M:%S").to_string();
-        assert!(render(&app, 80, 30).contains(&format!("seat-b · peek · {time}")));
-        assert!(render(&app, 140, 40).contains(&format!("│ peek · {time}")));
     }
 
     #[test]
@@ -1287,65 +760,10 @@ mod tests {
         let text = render(&app, 50, 30);
         for (key, _) in KEYS {
             assert!(
-                text.lines().any(|l| l.starts_with(key)),
+                text.lines().any(|l| l.trim_start().starts_with(key)),
                 "{key} missing:\n{text}"
             );
         }
-    }
-
-    #[test]
-    fn a_narrow_detail_keeps_a_message_the_row_cuts() {
-        let mut app = app();
-        let mut rows = app.rows.clone();
-        rows[0].pane.msg = Some(
-            "Allow Bash: cargo test --workspace --all-features -- --test-threads 1 \
-             and then a lot more words that will not fit in two lines at all"
-                .into(),
-        );
-        app.set_rows(rows, hosts());
-        let text = render(&app, 50, 30);
-        let at = text
-            .lines()
-            .position(|l| l.starts_with("msg "))
-            .expect(&text);
-        let next = text.lines().nth(at + 1).unwrap();
-        assert!(
-            next.starts_with("          ") && next.ends_with('…'),
-            "{text}"
-        );
-        assert!(
-            text.lines().nth(at + 2).unwrap().starts_with("host"),
-            "{text}"
-        );
-        let text = render(&self::app(), 50, 30);
-        assert!(
-            !text.lines().any(|l| l.starts_with("msg ")),
-            "a message the row shows whole stays out:\n{text}"
-        );
-    }
-
-    #[test]
-    fn the_wide_detail_wraps_a_message_to_three_lines() {
-        let mut app = app();
-        let mut rows = app.rows.clone();
-        rows[0].pane.msg = Some(
-            "Allow Bash: cargo test --workspace --all-features -- --test-threads 1 \
-             and then a lot more words that will never fit in three lines of the detail"
-                .into(),
-        );
-        app.set_rows(rows, hosts());
-        let text = render(&app, 140, 40);
-        let detail: Vec<&str> = text
-            .lines()
-            .map(|l| l.split('│').nth(1).unwrap_or("").trim_start())
-            .collect();
-        let at = detail
-            .iter()
-            .position(|l| l.starts_with("msg "))
-            .expect(&text);
-        assert!(detail[at].contains("Allow Bash:"), "{text}");
-        assert!(detail[at + 2].ends_with('…'), "{text}");
-        assert!(detail[at + 3].starts_with("host"), "{text}");
     }
 
     #[test]
@@ -1362,20 +780,7 @@ mod tests {
             text.contains("may be stale: reported working at 12:27; the title shows idle"),
             "{text}"
         );
-        assert!(text.contains("state     working (reported)"), "{text}");
-    }
-
-    #[test]
-    fn an_open_peek_says_how_to_close_it() {
-        let mut app = app();
-        press(&mut app, KeyCode::Char(' '));
-        let text = render(&app, 80, 30);
-        let bar = text.lines().last().unwrap();
-        assert!(bar.starts_with("space closes · "), "{text}");
-        assert!(
-            !bar.contains("space peek"),
-            "one space key at a time: {bar}"
-        );
+        assert!(text.contains("━━ ○ idle? · "), "{text}");
     }
 
     #[test]
@@ -1384,10 +789,7 @@ mod tests {
         app.pick = true;
         for width in [50, 140] {
             let text = render(&app, width, 30);
-            assert!(
-                !text.contains("state     blocked"),
-                "no detail pane:\n{text}"
-            );
+            assert!(!text.contains("━━"), "no card:\n{text}");
             let bar = text.lines().last().unwrap();
             assert!(bar.starts_with("enter go · j/k move"), "{bar}");
             assert!(bar.ends_with("esc cancel"), "{bar}");
@@ -1396,7 +798,7 @@ mod tests {
     }
 
     #[test]
-    fn at_120_columns_where_keeps_what_tells_rows_apart() {
+    fn at_100_columns_where_keeps_what_tells_rows_apart() {
         let mut app = App::default();
         let tab = "2-openrig:rig:demo-team#0123456789abcdef#l2";
         let mut rows = Vec::new();
@@ -1415,12 +817,12 @@ mod tests {
             rows.push(r);
         }
         app.set_rows(rows, hosts());
-        // WHERE's elision at the list width a 38-column pane leaves.
-        app.detail = Some(38.0 / 120.0);
-        let text = render(&app, 120, 36);
+        // WHERE at its narrowest, 100 columns: the window gives way, the session and block stay.
+        let text = render(&app, 100, 36);
         for want in [
-            "api-gateway › … › seat-r",
-            "web-frontend › … › seat-r",
+            "api-gateway › 2-open",
+            "web-frontend › 2-ope",
+            "#l2 › seat-r",
             "api › build #1",
             "api › build #2",
         ] {
@@ -1543,10 +945,9 @@ mod tests {
                     assert!(text.contains(want), "{presses:?} {width}: {want}\n{text}");
                 }
                 assert!(!text.contains(never), "{presses:?} {width}:\n{text}");
-                assert_eq!(
-                    text.matches("seat-b msg").count(),
-                    if width >= 100 { 2 } else { 1 },
-                    "each row once (and the detail's msg at 120)\n{text}"
+                assert!(
+                    text.matches("seat-b msg").count() <= 2,
+                    "each row once, and the card's headline\n{text}"
                 );
             }
         }
@@ -1578,7 +979,7 @@ mod tests {
         for (key, what) in KEYS {
             assert!(
                 what.width() <= 29,
-                "{key}: {what:?} is cut in the detail pane"
+                "{key}: {what:?} is cut in the key table"
             );
         }
         let mut app = fuller();
@@ -1683,7 +1084,7 @@ mod tests {
     }
 
     #[test]
-    fn the_footer_shows_v_view_after_filter_when_it_fits() {
+    fn the_footer_ranks_tab_next_above_v_view_and_shows_v_after_filter() {
         let app = fuller();
         let wide = render(&app, 120, 30);
         assert!(
@@ -1693,12 +1094,22 @@ mod tests {
                 .contains("/ filter · v view · ? keys"),
             "{wide}"
         );
-        for (width, shows) in [(50, false), (53, false), (54, true)] {
+        for width in [50, 64, 65, 80] {
             let text = render(&app, width, 30);
             let bar = text.lines().last().unwrap();
-            assert_eq!(bar.contains("v view"), shows, "{width}: {bar}");
             assert!(bar.contains("? keys"), "{width}: {bar}");
+            assert!(
+                !bar.contains("v view") || bar.contains("tab next"),
+                "{width}: tab next outranks v view: {bar}"
+            );
         }
+        let at_80 = render(&app, 80, 30);
+        let bar = at_80.lines().last().unwrap();
+        assert!(
+            bar.starts_with("j/k move · s seen · / filter · ? keys · tab next · enter jump ")
+                && bar.trim_end().ends_with(" q quit"),
+            "{bar}"
+        );
     }
 
     #[test]
@@ -1727,5 +1138,357 @@ mod tests {
             text.contains("MINI (1)") && !text.contains("@mini"),
             "{text}"
         );
+    }
+
+    /// The card's rows: from its bar to the line above the footer.
+    fn card_of(text: &str) -> Vec<String> {
+        let lines: Vec<&str> = text.lines().collect();
+        let bar = lines.iter().position(|l| l.starts_with("━━")).expect(text);
+        lines[bar..lines.len() - 1]
+            .iter()
+            .map(|l| (*l).to_owned())
+            .collect()
+    }
+
+    /// The list's row lines: between the column header and the card's bar.
+    fn list_rows(text: &str) -> usize {
+        let lines: Vec<&str> = text.lines().collect();
+        let bar = lines
+            .iter()
+            .position(|l| l.starts_with("━━"))
+            .unwrap_or(lines.len() - 1);
+        bar.saturating_sub(3)
+    }
+
+    fn asking(msg: &str) -> App {
+        let mut app = fuller();
+        let mut rows = app.rows.clone();
+        rows[0].pane.kind = Some("permission".into());
+        rows[0].pane.msg = Some(msg.into());
+        app.set_rows(rows, hosts());
+        app
+    }
+
+    #[test]
+    fn the_card_says_who_where_how_and_what_at_80_140_and_200() {
+        let app = asking("Bash: git push origin main --force-with-lease");
+        for (width, height) in [(80u16, 30u16), (140, 30), (200, 40)] {
+            let text = render(&app, width, height);
+            let card = card_of(&text);
+            let harness = if width == 80 { "" } else { "claude · " };
+            assert!(
+                card[0].starts_with(&format!(
+                    "━━ ◉ blocked · permission · seat-b · api › main · mini · {harness}waiting"
+                )),
+                "{width}: the bar, its harness giving way at 80:\n{text}"
+            );
+            assert!(
+                card[0].ends_with("━━"),
+                "{width}: the bar is full width:\n{text}"
+            );
+            assert_eq!(
+                card[1], " Bash: git push origin main --force-with-lease",
+                "{width}"
+            );
+            assert!(!text.contains('│'), "{width}: no pane on the right");
+            let want = (usize::from(height) - 3) * 2 / 5;
+            assert!(
+                card.len() >= want.max(8).min(usize::from(height) - 6),
+                "{width}: {}",
+                card.len()
+            );
+            assert!(list_rows(&text) >= 3, "{width}:\n{text}");
+        }
+    }
+
+    #[test]
+    fn a_done_row_shows_its_headline_then_its_body_at_most_120_wide() {
+        let mut app = fuller();
+        let long = "word ".repeat(80);
+        let mut rows = app.rows.clone();
+        let done = rows.iter_mut().find(|r| r.key == "local/claude").unwrap();
+        done.pane.msg = Some(format!(
+            "Opened PR #31; CI is green. ⏎ {long} ⏎ Next step is yours."
+        ));
+        done.last_turn = Some(372);
+        app.set_rows(rows, hosts());
+        app.selected = Some(Spot::Row("local/claude".into()));
+        let text = render(&app, 200, 40);
+        let card = card_of(&text);
+        assert!(
+            card[0].contains(" ended ") && card[0].contains(" ago · turn 6m"),
+            "{}",
+            card[0]
+        );
+        assert_eq!(card[1], " Opened PR #31; CI is green.");
+        assert!(card[2].starts_with("   word word"), "{text}");
+        assert!(card[1..].iter().all(|l| l.width() <= 120), "{text}");
+        assert!(text.contains("   Next step is yours."), "{text}");
+        let list = text
+            .lines()
+            .find(|l| l.contains(" claude ") && l.contains("Opened"))
+            .unwrap();
+        assert!(
+            list.trim_end().ends_with("CI is green."),
+            "MSG is the first line: {list}"
+        );
+    }
+
+    #[test]
+    fn a_blocked_ask_is_never_cut_and_the_list_keeps_3_rows() {
+        let ask = (1..=6)
+            .map(|n| format!("line {n} of the question"))
+            .collect::<Vec<_>>()
+            .join(" ⏎ ");
+        let app = asking(&ask);
+        let text = render(&app, 80, 30);
+        for n in 1..=6 {
+            assert!(
+                text.contains(&format!("line {n} of the question")),
+                "{text}"
+            );
+        }
+        assert!(list_rows(&text) >= 3, "{text}");
+        let long = (1..=40)
+            .map(|n| format!("step {n}"))
+            .collect::<Vec<_>>()
+            .join(" ⏎ ");
+        let text = render(&asking(&long), 80, 30);
+        assert_eq!(
+            list_rows(&text),
+            3,
+            "the ask grows to the list's floor:\n{text}"
+        );
+    }
+
+    #[test]
+    fn space_zooms_the_card_and_asks_for_the_tail_and_space_or_esc_returns() {
+        let mut app = fuller();
+        let effect = press(&mut app, KeyCode::Char(' '));
+        assert!(
+            matches!(effect, Some(Effect::Peek { ref key, .. }) if key == "mini/seat-b"),
+            "{effect:?}"
+        );
+        assert!(app.zoom);
+        let text = render(&app, 80, 30);
+        assert!(
+            !text.contains("NEEDS YOU"),
+            "the card takes the body:\n{text}"
+        );
+        assert!(
+            text.lines().last().unwrap().starts_with("space returns · "),
+            "{text}"
+        );
+        assert!(!text.lines().last().unwrap().contains("space zoom"));
+        assert_eq!(press(&mut app, KeyCode::Char(' ')), None);
+        assert!(!app.zoom && render(&app, 80, 30).contains("NEEDS YOU"));
+        press(&mut app, KeyCode::Char(' '));
+        press(&mut app, KeyCode::Esc);
+        assert!(!app.zoom, "esc returns too");
+    }
+
+    #[test]
+    fn c_hides_the_card_and_keeps_the_choice() {
+        let mut app = fuller();
+        let effect = press(&mut app, KeyCode::Char('c'));
+        assert!(matches!(effect, Some(Effect::SavePrefs(prefs)) if prefs.detail_hidden));
+        assert_eq!(app.toast(), Some("the card is hidden · c shows it"));
+        app.toast = None;
+        let text = render(&app, 140, 30);
+        assert!(!text.contains("━━"), "{text}");
+        assert!(text.lines().last().unwrap().contains("c card"), "{text}");
+        press(&mut app, KeyCode::Char('?'));
+        assert!(
+            render(&app, 140, 30).contains(" keys"),
+            "the key table still shows"
+        );
+        press(&mut app, KeyCode::Char('?'));
+        press(&mut app, KeyCode::Char('c'));
+        assert!(render(&app, 140, 30).contains("━━ ◉"));
+        let mut picking = fuller();
+        picking.pick = true;
+        assert_eq!(
+            press(&mut picking, KeyCode::Char('c')),
+            None,
+            "pick has no card"
+        );
+    }
+
+    #[test]
+    fn tab_goes_round_the_rows_that_need_you_and_marks_a_read_done_row_seen() {
+        let mut app = app();
+        let long_ago = Instant::now() - Duration::from_secs(2);
+        app.shown = Some(("mini/seat-b".into(), long_ago));
+        assert_eq!(
+            press(&mut app, KeyCode::Tab),
+            None,
+            "a blocked row is never marked"
+        );
+        assert_eq!(app.current().unwrap().key, "local/claude");
+        app.shown = Some(("local/claude".into(), Instant::now()));
+        assert_eq!(press(&mut app, KeyCode::Tab), None, "not read for 1s yet");
+        assert_eq!(
+            app.current().unwrap().key,
+            "mini/seat-b",
+            "wraps to the first"
+        );
+        press(&mut app, KeyCode::Tab);
+        app.shown = Some(("local/claude".into(), long_ago));
+        let effect = press(&mut app, KeyCode::Tab);
+        assert!(
+            matches!(effect, Some(Effect::Seen { ref key, .. }) if key == "local/claude"),
+            "{effect:?}"
+        );
+    }
+
+    #[test]
+    fn a_blocked_row_tails_itself_after_300ms_once_and_a_sweep_tails_none() {
+        let mut board = app();
+        let t0 = Instant::now();
+        board.note_card(t0);
+        assert_eq!(board.auto_tail(t0 + Duration::from_millis(100)), None);
+        let effect = board.auto_tail(t0 + Duration::from_millis(301));
+        assert!(
+            matches!(effect, Some(Effect::Peek { ref key, .. }) if key == "mini/seat-b"),
+            "{effect:?}"
+        );
+        assert_eq!(
+            board.auto_tail(t0 + Duration::from_secs(2)),
+            None,
+            "once per report"
+        );
+        let mut sweep = fuller();
+        let mut t = Instant::now();
+        for _ in 0..5 {
+            press(&mut sweep, KeyCode::Char('j'));
+            t += Duration::from_millis(50);
+            sweep.note_card(t);
+            assert_eq!(sweep.auto_tail(t), None);
+        }
+        let mut done = app();
+        done.selected = Some(Spot::Row("local/claude".into()));
+        done.note_card(t0);
+        assert_eq!(
+            done.auto_tail(t0 + Duration::from_secs(1)),
+            None,
+            "only blocked rows"
+        );
+    }
+
+    #[test]
+    fn digits_f_and_sort_letters_keep_their_meaning() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('2'));
+        assert_eq!(app.current().unwrap().key, "local/claude");
+        press(&mut app, KeyCode::Char('f'));
+        press(&mut app, KeyCode::Char('c'));
+        assert!(!app.hidden, "c after f belongs to f");
+        assert_eq!(app.toast(), Some("f takes w d q p e u i; f or esc clears"));
+        press(&mut app, KeyCode::Char('S'));
+        assert!(app.sort.is_some(), "S still sorts");
+    }
+
+    #[test]
+    fn the_bar_says_how_fresh_the_tail_is() {
+        let mut app = fuller();
+        let at = DateTime::parse_from_rfc3339("2026-01-01T05:42:52Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        app.peek = Some(Peek {
+            key: "mini/seat-b".into(),
+            lines: Some(Ok(vec!["tail line".into()])),
+            at: Some(at),
+            updated_at: Some("2026-01-01T00:00:00Z".into()),
+        });
+        let time = at.with_timezone(&Local).format("%H:%M:%S").to_string();
+        let text = render(&app, 140, 30);
+        assert!(
+            card_of(&text)[0].ends_with(&format!(" captured {time} · 8s ━━")),
+            "{text}"
+        );
+        assert!(
+            text.contains(" │ tail line"),
+            "the tail sits behind a gutter:\n{text}"
+        );
+        app.peek.as_mut().unwrap().updated_at = Some("2025-12-31T23:00:00Z".into());
+        let text = render(&app, 140, 30);
+        assert!(
+            card_of(&text)[0].ends_with(" newer report · space refreshes ━━"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_long_window_gives_way_in_the_bar_so_the_outcome_shows() {
+        let mut app = asking("Bash: ls");
+        let mut rows = app.rows.clone();
+        rows[0].pane.tab = "2-openrig:rig:demo-team#fedcba9876543210#l2".into();
+        app.set_rows(rows, hosts());
+        let text = render(&app, 80, 30);
+        let bar = &card_of(&text)[0];
+        assert!(bar.contains("…") && bar.contains(" · waiting "), "{bar}");
+        app.peek = Some(Peek {
+            key: "mini/seat-b".into(),
+            lines: Some(Ok(vec!["tail line".into()])),
+            at: Some(Utc::now()),
+            updated_at: None,
+        });
+        let text = render(&app, 80, 30);
+        let bar = &card_of(&text)[0];
+        assert!(
+            bar.starts_with("━━ ◉ blocked · permission · seat-b · waiting ")
+                && bar.contains("captured"),
+            "the place gives way too: {bar}"
+        );
+    }
+
+    #[test]
+    fn a_row_with_no_record_says_so_and_how_to_look() {
+        let mut app = fuller();
+        let mut rows = app.rows.clone();
+        rows.iter_mut()
+            .find(|r| r.key == "local/inferred")
+            .unwrap()
+            .pane
+            .msg = None;
+        app.set_rows(rows, hosts());
+        app.selected = Some(Spot::Row("local/inferred".into()));
+        let card = card_of(&render(&app, 80, 30));
+        assert_eq!(card[1], " no status from this pane");
+        assert_eq!(card[2], "   space captures the screen");
+    }
+
+    #[test]
+    fn zoomed_the_tail_fills_the_card_with_its_newest_lines() {
+        let mut app = fuller();
+        app.zoom = true;
+        app.peek = Some(Peek {
+            key: "mini/seat-b".into(),
+            lines: Some(Ok((1..=200).map(|n| format!("peek line {n}")).collect())),
+            at: None,
+            updated_at: None,
+        });
+        for (width, height) in [(80u16, 30u16), (80, 8)] {
+            let text = render(&app, width, height);
+            assert!(text.contains("peek line 200"), "{width}x{height}:\n{text}");
+            let numbers: Vec<usize> = text
+                .lines()
+                .filter_map(|l| l.split("peek line ").nth(1)?.trim().parse().ok())
+                .collect();
+            assert!(numbers.windows(2).all(|w| w[1] == w[0] + 1), "{numbers:?}");
+        }
+    }
+
+    #[test]
+    fn angle_brackets_say_once_that_they_are_gone() {
+        let mut app = fuller();
+        assert_eq!(press(&mut app, KeyCode::Char('>')), None);
+        assert_eq!(
+            app.toast(),
+            Some("the card spans the board now, so < and > are gone · c hides it")
+        );
+        app.toast = None;
+        press(&mut app, KeyCode::Char('<'));
+        assert_eq!(app.toast(), None, "once a run");
     }
 }

@@ -182,12 +182,19 @@ pub fn rank(state: &str) -> u8 {
 }
 
 pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
+    let turn = src.records.get(TURN);
+    let others = || {
+        src.records
+            .iter()
+            .filter(|(id, _)| *id != TURN)
+            .map(|(_, r)| r)
+    };
     let main = src
         .records
         .get("")
-        .or_else(|| src.records.values().min_by_key(|r| rank(&r.state)));
+        .or_else(|| others().min_by_key(|r| rank(&r.state)));
     let mut children = BTreeMap::new();
-    for record in src.records.values() {
+    for record in others() {
         if !main.is_some_and(|m| std::ptr::eq(m, record)) {
             *children.entry(record.state.clone()).or_insert(0) += 1;
         }
@@ -211,7 +218,10 @@ pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
         Some(r) => (
             r.state.clone(),
             r.kind.clone(),
-            r.msg.clone(),
+            r.msg
+                .clone()
+                .filter(|msg| !msg.is_empty())
+                .or_else(|| turn_msg(r, turn)),
             r.updated_at.clone(),
         ),
         None => {
@@ -236,6 +246,26 @@ pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
         updated_at,
         source,
         children,
+    }
+}
+
+/// The sub-record a hook writes beside an agent's own status in a plain Rex pane, to carry the
+/// turn's final message that the agent's own `done` leaves out.
+const TURN: &str = "turn";
+
+/// The `turn` record's message. A `done` root always takes it: the agent's own `done` lands just
+/// after the hook's `turn`, and the hook clears `turn` when the next prompt starts. Any other root
+/// takes it only if it is not older, so a stale turn never speaks for a newer state.
+fn turn_msg(root: &Record, turn: Option<&Record>) -> Option<String> {
+    let turn = turn?;
+    let at = |r: &Record| {
+        r.updated_at
+            .as_deref()
+            .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+    };
+    match (at(root), at(turn)) {
+        (Some(root_at), Some(turn_at)) if turn_at < root_at && root.state != "done" => None,
+        _ => turn.msg.clone().filter(|msg| !msg.is_empty()),
     }
 }
 
@@ -305,6 +335,50 @@ pub fn bare_title(title: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn with_records(records: serde_json::Value) -> Pane {
+        let block = parse_block(&serde_json::json!({
+            "block_id": "b", "label": "seat", "title": "t", "records": records,
+        }))
+        .unwrap();
+        derive("local", "api", "main", &Source::new("s", "w", block))
+    }
+
+    #[test]
+    fn a_turn_record_fills_an_empty_msg_and_is_no_child() {
+        // Claude's own `done` lands about 40 ms after the hook's `turn`.
+        let pane = with_records(serde_json::json!([
+            {"state": "done", "app": "claude-code", "updated_at": "2026-01-01T00:00:00.040Z"},
+            {"id": "turn", "state": "done", "app": "claude-code", "msg": "Opened PR #31",
+             "updated_at": "2026-01-01T00:00:00Z"},
+        ]));
+        assert_eq!(
+            (pane.state.as_str(), pane.msg.as_deref()),
+            ("done", Some("Opened PR #31"))
+        );
+        assert!(pane.children.is_empty(), "{:?}", pane.children);
+        let older = with_records(serde_json::json!([
+            {"state": "working", "app": "claude-code", "updated_at": "2026-01-01T00:05:00Z"},
+            {"id": "turn", "state": "done", "msg": "the last turn", "updated_at": "2026-01-01T00:00:01Z"},
+        ]));
+        assert_eq!(older.msg, None, "a turn older than the root says nothing");
+        let own = with_records(serde_json::json!([
+            {"state": "blocked", "msg": "Allow Bash?", "updated_at": "2026-01-01T00:00:00Z"},
+            {"id": "turn", "state": "done", "msg": "the last turn", "updated_at": "2026-01-01T00:00:01Z"},
+        ]));
+        assert_eq!(
+            own.msg.as_deref(),
+            Some("Allow Bash?"),
+            "the root's own msg wins"
+        );
+        let alone = with_records(serde_json::json!([
+            {"id": "turn", "state": "done", "msg": "the last turn"},
+        ]));
+        assert_eq!(
+            alone.source, "inferred",
+            "a turn record alone is not the pane's status"
+        );
+    }
 
     #[test]
     fn codex_title_is_strict() {

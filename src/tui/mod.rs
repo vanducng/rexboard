@@ -1,6 +1,7 @@
 mod app;
+mod card;
 mod columns;
-mod detail;
+mod prefs;
 mod status;
 mod theme;
 mod view;
@@ -74,9 +75,9 @@ fn board(pick: bool) -> Result<Option<Row>> {
     let mut app = App::default();
     app.pick = pick;
     let prefs = tui_json()
-        .map(|path| detail::load(&path))
+        .map(|path| prefs::load(&path))
         .unwrap_or_default();
-    (app.detail, app.hidden) = (prefs.detail, prefs.detail_hidden);
+    app.hidden = prefs.detail_hidden;
     let mut terminal = ratatui::init();
     let _restore = Restore;
     let mut tick = Instant::now();
@@ -118,6 +119,12 @@ fn board(pick: bool) -> Result<Option<Row>> {
                     Err(RecvTimeoutError::Timeout) => break,
                     Err(RecvTimeoutError::Disconnected) => return Ok(None),
                 }
+            }
+            let now = Instant::now();
+            app.note_card(now);
+            if let Some(effect) = app.auto_tail(now) {
+                act(effect, &tx, &generation);
+                changed = true;
             }
             if tick.elapsed() >= Duration::from_secs(1) {
                 tick = Instant::now();
@@ -245,10 +252,10 @@ fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
             let saved = tui_json()
                 .ok_or_else(|| "no state dir".to_owned())
                 .and_then(|path| {
-                    detail::save(&path, &prefs).map_err(|err| format!("{}: {err}", path.display()))
+                    prefs::save(&path, &prefs).map_err(|err| format!("{}: {err}", path.display()))
                 });
             if let Err(why) = saved {
-                let _ = tx.send(Msg::Say(format!("could not keep the detail pane: {why}")));
+                let _ = tx.send(Msg::Say(format!("could not keep the card setting: {why}")));
             }
         }
         Effect::Reconnect => listen(&tx, generation),
@@ -300,7 +307,7 @@ fn peek(
         Ok(lines) => Some(Ok(lines)),
         Err(Error::Cancelled) => None,
         Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::TimedOut => Some(Err(format!(
-            "peek gave up after {}s",
+            "the pane did not answer within {}s",
             PEEK_WITHIN.as_secs()
         ))),
         Err(err) => Some(Err(format!("peek failed: {err}"))),
@@ -477,7 +484,10 @@ mod tests {
         let started = std::time::Instant::now();
         let got = peek(&rex, "mini", "s", "b", &|| false);
         let took = started.elapsed();
-        assert_eq!(got, Some(Err("peek gave up after 3s".to_owned())));
+        assert_eq!(
+            got,
+            Some(Err("the pane did not answer within 3s".to_owned()))
+        );
         assert!(
             took >= PEEK_WITHIN && took < Duration::from_secs(4),
             "{took:?}"
