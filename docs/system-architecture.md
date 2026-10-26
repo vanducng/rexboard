@@ -57,6 +57,6 @@ One JSON request per line on the socket; every reply line carries `"v": 1`.
 | `{"cmd":"seen","key":"HOST/BLOCK_ID","jump":false}` | `{"v":1,"ok":true,"key":KEY}`. `jump` (from a jump) also makes it where `next` without `after` starts |
 | `{"cmd":"next","after":KEY,"back":false}` | `{"v":1,"row":ROW}`: the next `needs_you` row after `after` (a key or a block id; else the last jump's pane; else the first), unseen rows first and all of them once every row is seen, wrapping; `back` goes the other way |
 | `{"cmd":"stop"}` | `{"v":1,"ok":true}`, then serve saves and exits |
-| `{"cmd":"version"}` | `{"v":1,"rexboard":"0.3.1"}`, answered at once. Every client asks first and replaces a serve older than itself; a serve from before this request answers `USAGE`, which counts as older (`restarted serve (no version) -> ...`) |
+| `{"cmd":"version"}` | `{"v":1,"rexboard":"0.3.1"}`, answered at once. Every client asks first and replaces a serve older than itself; a serve from 0.3.0 or older answers `USAGE`, which counts as older (`restarted serve 0.3.0 or older -> ...`) |
 
 Errors are `{"v":1,"error":{"code":CODE,"message":...}}`, with `CODE` one of `USAGE`, `NOT_FOUND` and `NOBODY_NEEDS_YOU`. `ROW` is the object `ls --json` prints.

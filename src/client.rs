@@ -91,16 +91,25 @@ fn peer_uid(stream: &UnixStream) -> std::io::Result<libc::uid_t> {
 /// serve itself clears a stale socket once it holds the lock, so the client never unlinks one.
 pub fn connect_or_start(paths: &Paths) -> Result<UnixStream> {
     let stream = reach(paths)?;
-    let Some(old) = older_serve(paths) else {
+    if older_serve(paths).is_none() {
         return Ok(stream);
-    };
+    }
     drop(stream);
-    stop(paths)?;
+    let _turn = Lock::wait(&paths.restart())?;
+    // Asked again with the turn: a command that had it first may have replaced serve already.
+    let Some((mut old_serve, old)) = older_serve(paths) else {
+        return reach(paths);
+    };
+    let pid = recorded_pid(paths);
+    send(&mut old_serve, &json!({ "cmd": "stop" }))?;
+    let _ = read(&mut BufReader::new(&old_serve), &mut String::new());
+    wait_gone(paths, pid)?;
+    let stream = reach(paths)?;
     notice(
         paths,
         &format!("restarted serve {old} -> {}", serve::version()),
     );
-    reach(paths)
+    Ok(stream)
 }
 
 fn reach(paths: &Paths) -> Result<UnixStream> {
@@ -109,73 +118,107 @@ fn reach(paths: &Paths) -> Result<UnixStream> {
     }
     paths.create()?;
     // A serve that holds the lock may still be binding; it gets the same wait as one we start.
-    let mut held = Lock::held(&paths.lock());
-    if !held {
+    // Only a holder that was there before this wait, and still is after it, is ever signalled:
+    // a serve this command (or another) just started records its pid before it can answer.
+    let found = Lock::held(&paths.lock())
+        .then(|| recorded_pid(paths))
+        .flatten();
+    if found.is_none() && !Lock::held(&paths.lock()) {
         start(paths)?;
     }
-    let mut healed = false;
+    let mut extended = false;
     let mut deadline = Instant::now() + START_WITHIN;
     loop {
         if let Some(stream) = connect(paths)? {
             return Ok(stream);
         }
-        if Instant::now() >= deadline {
-            // Checked again, so a serve that exited during the wait is not named.
-            if held && Lock::held(&paths.lock()) {
-                let pid = recorded_pid(paths);
-                // A rexboard that holds the lock and never answers is an older build listening
-                // elsewhere, or a stuck one: replace it, once.
-                if let Some(pid) = pid.filter(|&pid| !healed && is_rexboard(pid)) {
-                    healed = true;
-                    held = false;
-                    unsafe { libc::kill(pid, libc::SIGTERM) };
-                    wait_gone(paths, Some(pid))?;
-                    notice(
-                        paths,
-                        &format!(
-                            "restarted serve (pid {pid} did not answer) -> {}",
-                            serve::version()
-                        ),
-                    );
-                    start(paths)?;
-                    deadline = Instant::now() + START_WITHIN;
-                    continue;
-                }
-                let pid = pid.map_or("?".to_owned(), |p| p.to_string());
-                return Err(Error::serve_with(
-                    format!(
-                        "serve (pid {pid}) holds {} but does not answer on {}, and it is not rexboard, so it was left alone",
-                        paths.lock().display(),
-                        paths.socket.display()
-                    ),
-                    &["rexboard serve --stop", "rexboard ls"],
-                ));
-            }
+        if Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+            continue;
+        }
+        let held = Lock::held(&paths.lock());
+        if let Some(pid) = found.filter(|&pid| held && recorded_pid(paths) == Some(pid)) {
+            heal(paths, pid)?;
+        } else if !held {
+            // Another command stopped the holder and its serve has not taken the lock yet.
+            start(paths)?;
+        } else if recorded_pid(paths).is_none() {
+            return Err(refusal(paths, None));
+        }
+        if extended {
             return Err(Error::serve(format!(
                 "serve did not answer on {} within {}s; see {}",
                 paths.socket.display(),
-                START_WITHIN.as_secs(),
+                2 * START_WITHIN.as_secs(),
                 paths.log().display()
             )));
         }
-        thread::sleep(Duration::from_millis(20));
+        extended = true;
+        deadline = Instant::now() + START_WITHIN;
     }
 }
 
-/// The version of the serve on `paths` when it is older than this rexboard. One from before the
-/// handshake does not know the request; doubt (no answer, an odd version) leaves serve alone.
-fn older_serve(paths: &Paths) -> Option<String> {
+/// Replaces `pid`, a serve that holds the lock and never answers: an older build listening
+/// elsewhere, or a stuck one. Only when it is rexboard, and only by the command holding the turn.
+fn heal(paths: &Paths, pid: i32) -> Result<()> {
+    let _turn = Lock::wait(&paths.restart())?;
+    // Another command may have replaced it while this one waited for the turn.
+    if !(Lock::held(&paths.lock()) && recorded_pid(paths) == Some(pid)) {
+        return Ok(());
+    }
+    if !alive(pid) || !is_rexboard(pid) {
+        return Err(refusal(paths, Some(pid)));
+    }
+    unsafe { libc::kill(pid, libc::SIGTERM) };
+    wait_gone(paths, Some(pid))?;
+    start(paths)?;
+    notice(
+        paths,
+        &format!(
+            "restarted serve (pid {pid} did not answer) -> {}",
+            serve::version()
+        ),
+    );
+    Ok(())
+}
+
+/// Why a lock holder that does not answer is left alone, by cause.
+fn refusal(paths: &Paths, pid: Option<i32>) -> Error {
+    let lock = paths.lock().display().to_string();
+    let lsof = format!("lsof {lock}");
+    let Some(pid) = pid else {
+        return Error::serve_with(
+            format!("something holds {lock} but recorded no pid, so it was left alone"),
+            &[lsof.as_str(), "kill <the pid lsof shows>"],
+        );
+    };
+    let kill = format!("kill {pid}");
+    let why = if alive(pid) {
+        format!(
+            "serve.lock names pid {pid}, which does not answer and is not rexboard, so it was left alone"
+        )
+    } else {
+        format!("serve.lock names pid {pid}, which is not running, yet {lock} is held")
+    };
+    Error::serve_with(why, &[lsof.as_str(), kill.as_str()])
+}
+
+/// The serve on `paths`, still connected, and its version, when it is older than this rexboard.
+/// One from 0.3.0 or older does not know the request; doubt (no answer, an odd version) leaves
+/// serve alone.
+fn older_serve(paths: &Paths) -> Option<(UnixStream, String)> {
     let mut stream = connect(paths).ok()??;
     send(&mut stream, &json!({ "cmd": "version" })).ok()?;
     stream.set_read_timeout(Some(START_WITHIN)).ok()?;
-    match read(&mut BufReader::new(stream), &mut String::new()) {
+    let old = match read(&mut BufReader::new(&stream), &mut String::new()) {
         Ok(Some(reply)) => {
             let theirs = reply["rexboard"].as_str()?;
-            older(theirs, &serve::version()).then(|| theirs.to_owned())
+            older(theirs, &serve::version()).then(|| theirs.to_owned())?
         }
-        Err(Error::Usage { .. }) => Some("(no version)".to_owned()),
-        _ => None,
-    }
+        Err(Error::Usage { .. }) => "0.3.0 or older".to_owned(),
+        _ => return None,
+    };
+    Some((stream, old))
 }
 
 /// Whether version `a` comes before `b`, by their dotted numbers; never for one that is not.
@@ -443,9 +486,8 @@ pub fn seen(key: &str, json: bool) -> Result<()> {
 pub fn start_serve(json: bool) -> Result<()> {
     let paths = Paths::find()?;
     let running = connect(&paths)?.is_some();
-    if !running {
-        drop(connect_or_start(&paths)?);
-    }
+    // Also when one runs: an older serve is replaced here as by any other command.
+    drop(connect_or_start(&paths)?);
     let pid = recorded_pid(&paths);
     if json {
         println!(

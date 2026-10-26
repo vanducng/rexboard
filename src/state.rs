@@ -72,6 +72,11 @@ impl Paths {
         self.dir.join("serve.lock")
     }
 
+    /// Held by the one command replacing serve, so racing commands restart it once.
+    pub fn restart(&self) -> PathBuf {
+        self.dir.join("restart.lock")
+    }
+
     /// The board's own settings on this machine, such as the detail pane's width.
     pub fn tui(&self) -> PathBuf {
         self.dir.join("tui.json")
@@ -121,6 +126,21 @@ impl Lock {
         file.read_to_string(&mut text)?;
         let previous = serde_json::from_str(&text).unwrap_or_default();
         Ok(Some((Self { file }, previous)))
+    }
+
+    /// Waits for the lock however long another holder keeps it; dropping it lets go.
+    pub fn wait(path: &Path) -> Result<Self> {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(path)?;
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        Ok(Self { file })
     }
 
     /// Whether a running serve holds the lock. A probe that gets it lets go at once.

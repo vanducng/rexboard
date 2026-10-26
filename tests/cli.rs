@@ -778,11 +778,12 @@ fn a_lock_held_by_another_program_is_left_alone() {
     sh.wait().unwrap();
     assert!(alive, "the holder was not signalled");
     assert!(
-        text.contains(&format!("serve (pid {pid}) holds"))
-            && text.contains("does not answer on")
-            && text.contains("it is not rexboard, so it was left alone"),
+        text.contains(&format!(
+            "serve.lock names pid {pid}, which does not answer and is not rexboard, so it was left alone"
+        )),
         "{text}"
     );
+    assert!(text.contains(&format!("kill {pid}")), "{text}");
     assert!(!text.contains("restarted serve"), "{text}");
     assert_eq!(serve.observer_starts(), 0, "no second serve was started");
 }
@@ -825,6 +826,59 @@ fn a_rexboard_serve_that_does_not_answer_is_replaced_once() {
     assert_eq!(log.matches("restarted serve").count(), 1, "{log}");
     let (said, _) = ls_with_stderr(&mut serve.cmd());
     assert!(!said.contains("restarted"), "only once: {said}");
+}
+
+/// Runs `ls --json` 12 times at once; the stderr of each one that failed.
+fn twelve_at_once(serve: &Serve) -> Vec<String> {
+    let clients: Vec<_> = (0..12)
+        .map(|_| {
+            std::process::Command::new(assert_cmd::cargo::cargo_bin("rexboard"))
+                .env_remove("XDG_RUNTIME_DIR")
+                .envs(serve.envs())
+                .args(["ls", "--json"])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    clients
+        .into_iter()
+        .map(|client| client.wait_with_output().unwrap())
+        .filter(|out| !out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stderr).into_owned())
+        .collect()
+}
+
+fn restarts(serve: &Serve) -> usize {
+    std::fs::read_to_string(serve.file("serve.log"))
+        .unwrap_or_default()
+        .matches("restarted serve")
+        .count()
+}
+
+#[test]
+fn many_commands_at_once_heal_a_silent_serve_once_and_all_get_rows() {
+    let serve = Serve::new();
+    serve.rows(&[]);
+    std::fs::remove_file(serve.socket()).unwrap();
+    let failed = twelve_at_once(&serve);
+    assert!(failed.is_empty(), "every command got rows: {failed:#?}");
+    assert_eq!(restarts(&serve), 1, "one restart");
+}
+
+#[test]
+fn many_commands_at_once_replace_an_older_serve_once() {
+    let serve = Serve::new();
+    serve
+        .cmd()
+        .env("REXBOARD_TEST_VERSION", "0.0.1")
+        .arg("serve")
+        .assert()
+        .success();
+    let failed = twelve_at_once(&serve);
+    assert!(failed.is_empty(), "every command got rows: {failed:#?}");
+    assert_eq!(restarts(&serve), 1, "one restart");
 }
 
 #[test]
@@ -881,6 +935,14 @@ fn serve_stop_finds_a_serve_whose_binary_was_deleted() {
         .unwrap();
     eventually("the copied serve answers", || serve.socket().exists());
     let pid = serve.pid();
+    // A failed assertion must not leave the copied serve running and cargo test waiting on sh.
+    struct Kill(i64);
+    impl Drop for Kill {
+        fn drop(&mut self) {
+            unsafe { libc::kill(self.0 as i32, libc::SIGKILL) };
+        }
+    }
+    let _kill = Kill(pid);
     std::fs::remove_file(&copy).unwrap();
     std::fs::remove_file(serve.socket()).unwrap();
     serve
