@@ -599,7 +599,7 @@ mod tests {
         let mut app = app();
         let mut estimated = row("mini/rig", "working", "working", true);
         estimated.since_estimated = true;
-        estimated.pane.tab = "2-openrig:rig:demo-team#0123456789abcdef#l2".into();
+        estimated.pane.tab = "2-toolrig:rig:demo-team#0123456789abcdef#l2".into();
         estimated.pane.title = "修复解析器🙂 wide title".into();
         estimated.pane.msg = None;
         let mut rows = app.rows.clone();
@@ -822,7 +822,7 @@ mod tests {
     #[test]
     fn at_100_columns_where_keeps_what_tells_rows_apart() {
         let mut app = App::default();
-        let tab = "2-openrig:rig:demo-team#0123456789abcdef#l2";
+        let tab = "2-toolrig:rig:demo-team#0123456789abcdef#l2";
         let mut rows = Vec::new();
         for (key, session) in [("local/gw", "api-gateway"), ("local/fe", "web-frontend")] {
             let mut r = row(key, "blocked", "needs_you", false);
@@ -842,8 +842,8 @@ mod tests {
         // WHERE at its narrowest, 100 columns: the window gives way, the session and block stay.
         let text = render(&app, 100, 36);
         for want in [
-            "api-gateway › 2-open",
-            "web-frontend › 2-ope",
+            "api-gateway › 2-tool",
+            "web-frontend › 2-too",
             "#l2 › seat-r",
             "api › build #1",
             "api › build #2",
@@ -1444,7 +1444,7 @@ mod tests {
     fn a_long_window_gives_way_in_the_bar_so_the_outcome_shows() {
         let mut app = asking("Bash: ls");
         let mut rows = app.rows.clone();
-        rows[0].pane.tab = "2-openrig:rig:demo-team#fedcba9876543210#l2".into();
+        rows[0].pane.tab = "2-toolrig:rig:demo-team#fedcba9876543210#l2".into();
         app.set_rows(rows, hosts());
         let text = render(&app, 80, 30);
         let bar = &card_of(&text)[0];

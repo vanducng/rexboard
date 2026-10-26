@@ -51,13 +51,14 @@ rexboard reaches Rex only through the `rex` command: `rex do` for these scripts 
 | `src/rex.rs` | Finds `rex`, runs one-shot scripts, and holds the one lock around every spawn, bind, accept and connect |
 | `src/send.rs` | Runs `send.lua` for an answer, within 5s, and turns its refusals into plain reasons |
 | `src/lua/send.lua` | After `tail.lua`: re-checks that the pane still shows the report, the agent and the dialog or input line the board read, then sends; a refusal sends nothing |
+| `src/extension/` | Extensions: discovery and manifests (`mod.rs`), the contract 1 request and response with its limits (`contract.rs`), one thread per enabled extension with its timeout and last-good rule (`runner.rs`), and serve's set of them (`running.rs`). The board takes their fields and fallback status in `board.rs`. No tool is named in `src/` |
 | `src/jump.rs` | `jump`, `next` and `pick`'s jump: runs `jump.lua`, then marks the row seen through serve; turns Rex's failures into plain errors |
 | `src/lua/tail.lua` | Defines `tail(a)`: the last `a.max_bytes` of a pane's text, starting at a whole line, through `format` and `blob_read`. The board's peek runs it with 48 KiB and a 3s limit; a newer peek stops an older one |
 | `src/lua/jump.lua` | Runs through `rex do -`: finds this Mac's Rex app, attaches to the pane's session, focuses the pane on its own server, and asks the app to select the session |
 | `src/config.rs` | `config.toml`: `client` and `hosts.exclude` |
 | `src/tui/` | The board and `pick`: a client of serve's rows, with the turn card, its tail, seen, folds, filter, Enter to jump and `a` to answer |
 
-serve uses std threads and channels; there is no async runtime. Collectors, the socket listener and each connection run on their own thread, and only the reducer thread touches the board.
+serve uses std threads and channels; there is no async runtime. Collectors, extension runners, the socket listener and each connection run on their own thread, and only the reducer thread touches the board. A runner sends its results to the reducer and never waits on it, so a slow adapter cannot hold up rows.
 
 ## Files
 

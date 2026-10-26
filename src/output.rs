@@ -468,7 +468,7 @@ mod tests {
     fn row(pane: &str, title: &str, msg: &str) -> Row {
         serde_json::from_value(serde_json::json!({
             "key": "mini/b", "host": "mini", "session_id": "s", "session": "web", "window_id": "w",
-            "tab": "2-openrig:rig:demo-team#0123456789abcdef#l2", "block_id": "b",
+            "tab": "2-toolrig:rig:demo-team#0123456789abcdef#l2", "block_id": "b",
             "pane": pane, "title": title, "harness": "claude-code", "state": "working",
             "kind": null, "msg": msg, "updated_at": null,
             "source": "native", "children": {}, "since": "2026-01-01T00:00:00.000Z",
@@ -523,11 +523,11 @@ mod tests {
     fn path_cuts_the_tab_then_the_session_and_keeps_separators() {
         let labels = [
             "api",
-            "2-openrig:rig:demo-team#0123456789abcdef#l2",
+            "2-toolrig:rig:demo-team#0123456789abcdef#l2",
             "seat-d",
         ];
-        assert_eq!(path(&labels, 60), "api › 2-openrig:ri…89abcdef#l2 › seat-d");
-        assert_eq!(path(&labels, 30), "api › 2-openr…cdef#l2 › seat-d");
+        assert_eq!(path(&labels, 60), "api › 2-toolrig:ri…89abcdef#l2 › seat-d");
+        assert_eq!(path(&labels, 30), "api › 2-toolr…cdef#l2 › seat-d");
         assert_eq!(path(&labels, 16), "api › … › seat-d");
         assert_eq!(
             path(&labels, 14),
@@ -537,7 +537,7 @@ mod tests {
         assert_eq!(path(&["web", "shell"], 9), "web › s…l");
         let gateway = [
             "api-gateway",
-            "2-openrig:rig:demo-team#0123456789abcdef#l2",
+            "2-toolrig:rig:demo-team#0123456789abcdef#l2",
             "seat-r",
         ];
         assert_eq!(path(&gateway, 25), "api-gateway › … › seat-r");
@@ -651,9 +651,9 @@ mod tests {
 
     #[test]
     fn squeeze_keeps_both_ends_of_a_long_label() {
-        let tab = "2-openrig:rig:demo-team#0123456789abcdef#l2";
+        let tab = "2-toolrig:rig:demo-team#0123456789abcdef#l2";
         let short = squeeze(tab, 24);
-        assert_eq!(short, "2-openrig:ri…89abcdef#l2");
+        assert_eq!(short, "2-toolrig:ri…89abcdef#l2");
         assert!(short.width() <= 24);
         assert_eq!(squeeze("main", 24), "main");
     }

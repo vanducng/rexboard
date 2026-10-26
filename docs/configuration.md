@@ -9,12 +9,46 @@ client = "studio"
 [hosts]
 # `rex hosts` labels rexboard leaves out: no observer, no rows.
 exclude = ["build-box"]
+
+[extensions]
+# Only these run, by name. A directory dropped in runs nothing until it is named here.
+enabled = ["session-prefix"]
+# Roots to look in after the config dir's `extensions`, each holding one directory per extension.
+dirs = ["~/work/rexboard-extensions"]
+
+[extensions.settings.session-prefix]
+# Passed to that extension untouched.
+separator = "-"
 ```
 
 | Key | Type | Default | What |
 | --- | --- | --- | --- |
 | `client` | string | none | The app client that takes jumps on this host, by its label (`rex client ls`) or id. `REX_CLIENT` in the environment wins over it. Without either, rexboard uses the only app connected over the unix socket, and fails with `AMBIGUOUS_CLIENT` when no app is connected, when none is on the unix socket, or when more than one is; the message says which, and the next steps name each app. Jumps to a remote host use the app connected from this Mac's Tailscale node instead |
 | `hosts.exclude` | array of strings | `[]` | Remote hosts to leave out of `ls`, `watch` and the board. After a change, run `rexboard serve --stop` so serve rescans |
+| `extensions.enabled` | array of strings | `[]` | The extensions serve runs. An extension is a directory with an `extension.toml` and an adapter; see [Extensions](#extensions) |
+| `extensions.dirs` | array of strings | `[]` | Roots to look in for extensions after `$XDG_CONFIG_HOME/rexboard/extensions`. `~/` is your home. The first extension of a name wins |
+| `extensions.settings.NAME` | table | `{}` | Handed to extension `NAME` in every request, untouched |
+
+## Extensions
+
+An extension adds fields to rows, and may give a row with no status of its own a fallback status, from any tool, without rexboard knowing the tool. It is a directory holding `extension.toml` and an adapter command:
+
+```toml
+name = "session-prefix"  # [a-z0-9-]+, the directory's name
+contract = 1             # the contract the adapter speaks
+cmd = ["./adapter"]      # argv, no shell; a leading ./ is the extension's directory
+every = 10               # seconds between runs, at least 2
+timeout = 5              # seconds, less than every; a slower run is killed
+[[fields]]
+name = "project"         # [a-z0-9-]+, stored on a row as session-prefix.project
+title = "PROJECT"
+[provides]
+status = false           # true lets it give rows with no record a status
+```
+
+serve runs each enabled extension on its own thread: every `every` seconds it writes the current rows to the adapter's stdin as JSON and reads fields per row back from its stdout. A row's own status record always wins over an extension's status. A failing run (an error exit, bad JSON, another contract or a timeout) keeps the last good answer for 3 runs, then drops it. Problems go to `serve.log`, as `ext NAME: …`, along with the adapter's stderr. `ls --json` shows each row's fields under `ext`.
+
+An extension runs with your permissions and sees every row's labels and titles, so enable only adapters you trust. serve reads the manifests and `[extensions]` when it starts and each time it rescans; `rexboard serve --stop` picks up a change at once.
 
 An older config may still have a `[jump]` table with `pre_cmd`, for a board kept in its own Rex window. rexboard no longer runs it and ignores the table, so such a file still loads.
 

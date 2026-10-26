@@ -450,7 +450,8 @@ fn ls_json_adds_board_fields() {
     assert_eq!(codex["turn_started"], "2026-01-01T10:02:00.000Z");
     assert_eq!(by_block(&panes, "block:api-seat-a")["group"], "unreported");
     assert_eq!(codex["process"], "codex");
-    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 26));
+    assert_eq!(claude["ext"], serde_json::json!({}), "no extension enabled");
+    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 27));
 }
 
 /// A status line for the fixture's idle seat on `host`, sent after the recorded stream ends.
@@ -1915,4 +1916,277 @@ fn next_outside_a_pane_starts_after_the_last_jump() {
         "mini/block:seat-new",
         "seen alone does not move it"
     );
+}
+
+/// Writes extension `name` into the serve's config dir: a manifest with one field, `rig`, run
+/// every 2s with a 1s timeout unless `top` says otherwise, then `tables`; and an adapter running
+/// the shell `script`.
+fn extension(
+    serve: &Serve,
+    name: &str,
+    top: &str,
+    tables: &str,
+    script: &str,
+) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = serve
+        .dir
+        .path()
+        .join("config/rexboard/extensions")
+        .join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    let timing = if top.contains("every") {
+        ""
+    } else {
+        "every = 2\ntimeout = 1\n"
+    };
+    std::fs::write(
+        dir.join("extension.toml"),
+        format!("name = \"{name}\"\ncontract = 1\ncmd = [\"./adapter\"]\n{timing}{top}[[fields]]\nname = \"rig\"\ntitle = \"RIG\"\n{tables}"),
+    )
+    .unwrap();
+    let adapter = dir.join("adapter");
+    std::fs::write(&adapter, format!("#!/bin/sh\n{script}\n")).unwrap();
+    std::fs::set_permissions(&adapter, std::fs::Permissions::from_mode(0o755)).unwrap();
+    dir
+}
+
+/// An adapter body that answers `rows` (a JSON object by row key) after reading its request.
+fn answers(rows: &str) -> String {
+    format!("cat > /dev/null\necho '{{\"contract\": 1, \"rows\": {rows}}}'")
+}
+
+const SEAT: &str = "local/block:api-seat-a";
+
+fn ext_of(rows: &[serde_json::Value], key: &str) -> serde_json::Value {
+    row(rows, key)["ext"].clone()
+}
+
+fn serve_log(serve: &Serve) -> String {
+    std::fs::read_to_string(serve.file("serve.log")).unwrap_or_default()
+}
+
+#[test]
+fn ext_fields_reach_ls_json() {
+    let serve = Serve::new();
+    extension(
+        &serve,
+        "fake",
+        "",
+        "",
+        &answers(r#"{"local/block:api-seat-a": {"fields": {"rig": "api"}}}"#),
+    );
+    serve.config("[extensions]\nenabled = [\"fake\"]\n");
+    eventually("the fake extension's field", || {
+        ext_of(&serve.rows(&[]), SEAT) == serde_json::json!({ "fake.rig": "api" })
+    });
+}
+
+#[test]
+fn ext_discovery_runs_only_the_enabled_good_one() {
+    let serve = Serve::new();
+    let ran = serve.dir.path().join("idle-ran");
+    extension(
+        &serve,
+        "fake",
+        "",
+        "",
+        &answers(r#"{"local/block:api-seat-a": {"fields": {"rig": "api"}}}"#),
+    );
+    extension(
+        &serve,
+        "idle",
+        "",
+        "",
+        &format!("touch '{}'", ran.display()),
+    );
+    let extra = serve.dir.path().join("more");
+    let broken = extra.join("broken");
+    std::fs::create_dir_all(&broken).unwrap();
+    std::fs::write(
+        broken.join("extension.toml"),
+        "name = \"broken\"\ncontract = 2\ncmd = [\"x\"]\n",
+    )
+    .unwrap();
+    serve.config(&format!(
+        "[extensions]\nenabled = [\"fake\", \"broken\"]\ndirs = [\"{}\"]\n",
+        extra.display()
+    ));
+    eventually("the enabled extension's field", || {
+        ext_of(&serve.rows(&[]), SEAT)["fake.rig"] == "api"
+    });
+    let log = serve_log(&serve);
+    assert!(
+        log.contains("contract 2 is not supported; this rexboard speaks contract 1"),
+        "{log}"
+    );
+    assert!(
+        log.contains("ext broken: enabled, but no valid extension"),
+        "{log}"
+    );
+    assert!(
+        !ran.exists(),
+        "a discovered extension that is not enabled never runs"
+    );
+}
+
+#[test]
+fn ext_status_fallback_only_reaches_unreported_rows_and_only_when_provided() {
+    let rows = r#"{"local/block:api-seat-a": {"status": {"state": "working", "msg": "from fake"}},
+                   "mini/block:web-done": {"status": {"state": "working"}}}"#;
+    for provides in [true, false] {
+        let serve = Serve::new();
+        let observer = mini_with_done(&serve);
+        let tables = if provides {
+            "[provides]\nstatus = true\n"
+        } else {
+            ""
+        };
+        extension(
+            &serve,
+            "fake",
+            "",
+            tables,
+            &answers(&rows.replace('\n', " ")),
+        );
+        serve.config("[extensions]\nenabled = [\"fake\"]\n");
+        let rows = || {
+            let out = serve
+                .cmd()
+                .env("FAKE_REX_OBSERVER_mini", &observer)
+                .args(["ls", "--json"])
+                .assert()
+                .success()
+                .get_output()
+                .stdout
+                .clone();
+            serde_json::from_slice::<Vec<serde_json::Value>>(&out).unwrap()
+        };
+        if provides {
+            eventually("the fallback status", || {
+                row(&rows(), SEAT)["source"] == "fake"
+            });
+            let all = rows();
+            let seat = row(&all, SEAT);
+            assert_eq!(
+                (seat["state"].as_str(), seat["msg"].as_str()),
+                (Some("working"), Some("from fake"))
+            );
+            let native = row(&all, "mini/block:web-done");
+            assert_eq!(
+                (native["state"].as_str(), native["source"].as_str()),
+                (Some("done"), Some("native")),
+                "native wins"
+            );
+        } else {
+            eventually("a run", || {
+                rows();
+                serve_log(&serve).contains("provides.status")
+            });
+            assert_eq!(row(&rows(), SEAT)["source"], "inferred");
+        }
+    }
+}
+
+/// An adapter that answers well once, then fails as `failure` says on every later run.
+fn good_then(serve: &Serve, failure: &str) {
+    let count = serve.dir.path().join("runs");
+    let good = answers(r#"{"local/block:api-seat-a": {"fields": {"rig": "api"}}}"#);
+    let script = format!(
+        "if [ -e '{c}' ]; then\n{failure}\nfi\ntouch '{c}'\n{good}",
+        c = count.display()
+    );
+    extension(serve, "fake", "", "", &script);
+    serve.config("[extensions]\nenabled = [\"fake\"]\n");
+}
+
+/// The field shows, a failure is logged while it still shows, and after three failed runs it
+/// is gone; serve answers throughout.
+fn kept_three_runs_then_dropped(serve: &Serve, logged: &str) {
+    eventually("the first good run", || {
+        ext_of(&serve.rows(&[]), SEAT)["fake.rig"] == "api"
+    });
+    eventually("a failed run", || serve_log(serve).contains(logged));
+    assert_eq!(
+        ext_of(&serve.rows(&[]), SEAT)["fake.rig"],
+        "api",
+        "kept after one failure"
+    );
+    eventually("the field to go after three failed runs", || {
+        ext_of(&serve.rows(&[]), SEAT).get("fake.rig").is_none()
+    });
+}
+
+#[test]
+fn ext_bad_json_keeps_the_last_good_rows_for_three_runs() {
+    let serve = Serve::new();
+    good_then(&serve, "cat > /dev/null; echo 'not json'; exit 0");
+    kept_three_runs_then_dropped(&serve, "ext fake: printed bad JSON");
+}
+
+#[test]
+fn ext_contract_mismatch_keeps_the_last_good_rows_for_three_runs() {
+    let serve = Serve::new();
+    good_then(&serve, "cat > /dev/null; echo '{\"contract\": 2}'; exit 0");
+    kept_three_runs_then_dropped(
+        &serve,
+        "ext fake: answered for contract 2; this rexboard speaks contract 1",
+    );
+}
+
+#[test]
+fn ext_timeout_kills_the_adapter_and_keeps_the_last_good_rows() {
+    let serve = Serve::new();
+    good_then(&serve, "exec sleep 30");
+    kept_three_runs_then_dropped(&serve, "ext fake: timed out after 1s and was stopped");
+}
+
+#[test]
+fn ext_undeclared_field_is_dropped_and_logged_once() {
+    let serve = Serve::new();
+    extension(
+        &serve,
+        "fake",
+        "",
+        "",
+        &answers(r#"{"local/block:api-seat-a": {"fields": {"rig": "api", "extra": "x"}}}"#),
+    );
+    serve.config("[extensions]\nenabled = [\"fake\"]\n");
+    eventually("the declared field", || {
+        ext_of(&serve.rows(&[]), SEAT) == serde_json::json!({ "fake.rig": "api" })
+    });
+    // Every 2s, so at least one more run answers the same.
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    assert_eq!(
+        serve_log(&serve)
+            .matches("ext fake: undeclared field extra")
+            .count(),
+        1,
+        "once"
+    );
+}
+
+#[test]
+fn ext_a_hanging_adapter_never_delays_rows() {
+    let serve = Serve::new();
+    extension(
+        &serve,
+        "slow",
+        "every = 40\ntimeout = 30\n",
+        "",
+        "exec sleep 30",
+    );
+    serve.config("[extensions]\nenabled = [\"slow\"]\n");
+    let started = std::time::Instant::now();
+    let rows = serve.rows(&[]);
+    assert!(!rows.is_empty());
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let again = std::time::Instant::now();
+    serve.rows(&[]);
+    assert!(
+        again.elapsed() < std::time::Duration::from_secs(2),
+        "{:?} while the adapter hangs",
+        again.elapsed()
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
 }

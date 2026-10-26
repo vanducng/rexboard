@@ -5,6 +5,7 @@ mod collector;
 mod config;
 mod error;
 mod event;
+mod extension;
 mod jump;
 mod output;
 mod pane;

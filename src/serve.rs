@@ -13,6 +13,8 @@ use crate::board::{Board, Group, Memory};
 use crate::collector::{self, Collector, HostEvent, HostId};
 use crate::error::{Error, Result};
 use crate::event::Event;
+use crate::extension::runner::Report;
+use crate::extension::running::Running;
 use crate::state::{self, Lock, Paths, Record};
 use crate::{interrupted, rex, stop_on_signals};
 
@@ -59,6 +61,7 @@ enum Request {
 
 enum Msg {
     Host(HostId, HostEvent),
+    Ext(Report),
     Hosts(Vec<String>),
     Request(Request, SyncSender<String>),
 }
@@ -209,6 +212,7 @@ struct Reducer {
     last_jump: Option<String>,
     rows_due: Option<Instant>,
     save_due: Option<Instant>,
+    extensions: Running,
 }
 
 impl Reducer {
@@ -218,6 +222,15 @@ impl Reducer {
         thread::spawn(move || {
             for (host, event) in host_rx {
                 if forward.send(Msg::Host(host, event)).is_err() {
+                    return;
+                }
+            }
+        });
+        let (ext_tx, ext_rx) = mpsc::channel::<Report>();
+        let forward = tx.clone();
+        thread::spawn(move || {
+            for report in ext_rx {
+                if forward.send(Msg::Ext(report)).is_err() {
                     return;
                 }
             }
@@ -239,6 +252,7 @@ impl Reducer {
             last_jump: None,
             rows_due: None,
             save_due: None,
+            extensions: Running::new(ext_tx),
         }
     }
 
@@ -313,6 +327,7 @@ impl Reducer {
             };
             match msg {
                 Msg::Host(host, event) => self.host_event(&host, &event, paths),
+                Msg::Ext(report) => self.ext_report(report, paths),
                 Msg::Hosts(labels) => self.set_hosts(&labels),
                 Msg::Request(Request::Stop, reply) => {
                     offer(&reply, &json!({ "v": VERSION, "ok": true }).to_string());
@@ -341,6 +356,7 @@ impl Reducer {
     }
 
     fn rescan_now(&mut self) {
+        self.extensions.sync();
         match collector::hosts() {
             Ok(labels) => self.set_hosts(&labels),
             Err(err) => {
@@ -351,7 +367,8 @@ impl Reducer {
     }
 
     /// `rex hosts` can be slow over the network, so later scans run off the reducer thread.
-    fn rescan(&self) {
+    fn rescan(&mut self) {
+        self.extensions.sync();
         let tx = self.tx.clone();
         thread::spawn(move || match collector::hosts() {
             Ok(labels) => {
@@ -436,8 +453,37 @@ impl Reducer {
         self.board.mark_stale(host)
     }
 
+    /// An extension's run: its state for `ext ls` and the board, and its rows when it sent any.
+    fn ext_report(&mut self, report: Report, paths: &Paths) {
+        self.rows_cache = None;
+        let Some(provides_status) = self.extensions.provides_status(&report.name) else {
+            return;
+        };
+        let was = self
+            .extensions
+            .states
+            .insert(report.name.clone(), report.state.clone());
+        let flipped =
+            was.is_none_or(|was| (was.ok, was.error) != (report.state.ok, report.state.error));
+        let changed = report.results.is_some_and(|results| {
+            let now = chrono::Utc::now();
+            !self
+                .board
+                .extension(&report.name, &results, provides_status, now)
+                .is_empty()
+        });
+        if let Err(err) = state::append(&paths.transitions(), &self.board.take_transitions()) {
+            eprintln!("serve: could not append transitions: {err}");
+        }
+        if changed || flipped {
+            self.rows_changed();
+        }
+    }
+
     fn rows_changed(&mut self) {
         self.rows_cache = None;
+        self.extensions
+            .set_rows(&self.board.rows(chrono::Utc::now()));
         let now = Instant::now();
         self.rows_due.get_or_insert(now + DEBOUNCE);
         self.save_due.get_or_insert(now + SAVE_EVERY);
@@ -450,7 +496,13 @@ impl Reducer {
     }
 
     fn rows_line(&self) -> Value {
-        json!({ "v": VERSION, "rows": self.board.rows(chrono::Utc::now()), "hosts": self.hosts })
+        json!({
+            "v": VERSION,
+            "rows": self.board.rows(chrono::Utc::now()),
+            "hosts": self.hosts,
+            "extensions": self.extensions.states,
+            "fields": self.extensions.fields(),
+        })
     }
 
     fn request(&mut self, request: Request, reply: SyncSender<String>) {
