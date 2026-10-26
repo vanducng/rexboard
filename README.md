@@ -29,9 +29,9 @@ A pane needs you when it is blocked (often on a permission prompt), has an error
 
 ## How it works
 
-<img alt="rexboard architecture: local (this Mac) and mini each run one observer that feeds rexboard serve, which keeps state on disk and answers ls, watch, seen and the board over a unix socket; a jump, the one write to Rex, focuses the pane on its host and asks the Rex app to show its session" src="docs/assets/architecture.svg" width="100%">
+<img alt="rexboard architecture: rexboard is one Rust binary and Rex runs its Lua scripts. On local (this Mac) and mini, rex do runs observer.lua, which streams NDJSON to rexboard serve; serve keeps state on disk and answers the CLI (ls, watch, seen) and the ratatui board over a unix socket. A jump, the one write to Rex, runs jump.lua: session.focus_block on the pane's host, then client.perform session.select on the Rex app" src="docs/assets/architecture.svg" width="100%">
 
-rexboard reads Rex. Only a jump (blue) writes to it: it focuses the pane on its host and asks the Rex app to show it.
+rexboard reads Rex. Only a jump (blue) writes to it: it focuses the pane on its host and asks the Rex app to show it. [System architecture](docs/system-architecture.md#stack) names the stack and every Rex API call rexboard makes.
 
 ## Docs
 
@@ -40,7 +40,7 @@ rexboard reads Rex. Only a jump (blue) writes to it: it focuses the pane on its 
 | [CLI](docs/cli.md) | Every command, its output, fields and exit codes |
 | [TUI](docs/tui.md) | The board's layout and keys, and `pick` |
 | [Configuration](docs/configuration.md) | `config.toml`: the app client and excluded hosts |
-| [System architecture](docs/system-architecture.md) | serve, the observers, the protocol and the files |
+| [System architecture](docs/system-architecture.md) | The stack, serve, the observers, the protocol and the files |
 | [Development](docs/development-guidelines.md) | Setup, checks, layout, conventions, tests |
 | [Deployment](docs/deployment.md) | CI, release-please, release assets, install, rollback |
 
