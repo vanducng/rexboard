@@ -121,7 +121,7 @@ fn reply(args: &AnswerArgs, screen: &Screen, row: &Row) -> Result<(Action, Optio
                     &["rexboard answer KEY --text 'run the tests'"],
                 ));
             }
-            if let Some(why) = text_refusal(&screen) {
+            if let Some(why) = text_refusal(screen) {
                 return Err(refuse(why.to_owned()));
             }
             (Action::Text(text), None)
