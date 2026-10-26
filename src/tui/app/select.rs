@@ -316,12 +316,12 @@ impl App {
         if self.full.is_some() {
             return self.full_scroll(if up { 3 } else { -3 });
         }
+        if self.prompting() {
+            return;
+        }
         let card = self.card_drawn.get();
         if (card.top..card.bottom).contains(&y) {
             return self.card_scroll(if up { -1 } else { 1 });
-        }
-        if self.prompting() {
-            return;
         }
         let spots = self.spots();
         let Some(last) = spots.len().checked_sub(1) else {

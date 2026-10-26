@@ -139,12 +139,12 @@ fn scrolled(
     let marker = |text: String| Line::styled(text, theme::quiet());
     let mut shown = Vec::new();
     if at > 0 {
-        shown.push(marker(format!(" {} {at} above", theme::ABOVE)));
+        shown.push(marker(format!(" {} {at} above · ctrl-y", theme::ABOVE)));
     }
     let below = text.len() - at - rows;
     shown.extend(text.drain(at..at + rows));
     if more {
-        shown.push(marker(format!(" {} {below} more", theme::MORE)));
+        shown.push(marker(format!(" {} {below} more · ctrl-e", theme::MORE)));
     }
     (shown, at, last)
 }
@@ -457,14 +457,17 @@ mod tests {
             "the message, whole:\n{text}"
         );
         let more = card.last().unwrap();
-        assert!(more.starts_with(" ↓ ") && more.ends_with(" more"), "{text}");
+        assert!(
+            more.starts_with(" ↓ ") && more.ends_with(" more · ctrl-e"),
+            "{text}"
+        );
         assert!(!text.contains(" where "), "the facts are below:\n{text}");
         let ctrl = |app: &mut App, c: char| {
             key(app, KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
             card_of(&render(app, 80, 30))
         };
         let down = ctrl(&mut app, 'e');
-        assert_eq!(down[1], " ↑ 1 above", "{down:#?}");
+        assert_eq!(down[1], " ↑ 1 above · ctrl-y", "{down:#?}");
         assert!(down[2].starts_with("   word word"), "{down:#?}");
         for _ in 0..100 {
             ctrl(&mut app, 'e');
@@ -476,7 +479,7 @@ mod tests {
             "the facts end it, and it stops there: {end:#?}"
         );
         let up = ctrl(&mut app, 'y');
-        assert!(up.last().unwrap().ends_with(" more"), "{up:#?}");
+        assert!(up.last().unwrap().ends_with(" more · ctrl-e"), "{up:#?}");
         for k in ['j', 'k'] {
             press(&mut app, KeyCode::Char(k));
             app.note_card(std::time::Instant::now());
@@ -511,7 +514,7 @@ mod tests {
         render(&app, 80, 30);
         let card = app.card_drawn.get();
         app.scroll(card.top + 2, false);
-        assert_eq!(card_of(&render(&app, 80, 30))[1], " ↑ 1 above");
+        assert_eq!(card_of(&render(&app, 80, 30))[1], " ↑ 1 above · ctrl-y");
         app.scroll(card.top + 2, true);
         assert_eq!(card_of(&render(&app, 80, 30))[1], " Opened PR #31.");
         app.scroll(card.top - 3, false);
@@ -519,6 +522,15 @@ mod tests {
             app.selected,
             Some(Spot::Row("local/claude".into())),
             "over the list it moves the selection"
+        );
+        app.selected = Some(Spot::Row("local/claude".into()));
+        press(&mut app, KeyCode::Char('/'));
+        render(&app, 80, 30);
+        app.scroll(card.top + 2, false);
+        assert_eq!(
+            card_of(&render(&app, 80, 30))[1],
+            " Opened PR #31.",
+            "with a prompt open the wheel leaves the card alone"
         );
     }
 
@@ -656,14 +668,14 @@ mod tests {
                 "{width}x{height}: from the top:\n{text}"
             );
             assert!(
-                card.last().unwrap().ends_with(" more"),
+                card.last().unwrap().ends_with(" more · ctrl-e"),
                 "{width}x{height}: the facts below:\n{text}"
             );
         }
         let text = render(&app, 80, 30);
         let card = card_of(&text);
         assert!(
-            card[1].starts_with(" ↑ ") && card[1].ends_with(" above"),
+            card[1].starts_with(" ↑ ") && card[1].ends_with(" above · ctrl-y"),
             "{text}"
         );
         assert!(
@@ -671,7 +683,7 @@ mod tests {
             "{text}"
         );
         assert!(
-            card.last().unwrap().ends_with(" more"),
+            card.last().unwrap().ends_with(" more · ctrl-e"),
             "the facts below:\n{text}"
         );
         assert!(!text.contains("earlier output"), "only the dialog:\n{text}");

@@ -58,7 +58,7 @@ impl App {
     pub(super) fn card_scroll(&mut self, by: isize) {
         let drawn = self.card_drawn.get();
         if drawn.last == 0 {
-            return self.say("the card shows all of it");
+            return self.say("nothing more to scroll");
         }
         if let Some(row) = self.current() {
             let at = drawn.at.saturating_add_signed(by).min(drawn.last);
