@@ -11,7 +11,8 @@
 set -euo pipefail
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo=$(CDPATH= cd -- "$here/.." && pwd)
-cols=120
+# 140 columns: the width at which the list beside the default detail pane splits WHERE.
+cols=140
 rows=20
 tmux_socket=zzdemo
 if [[ -x "$HOME/.cargo/bin/cargo" ]]; then
@@ -36,9 +37,8 @@ ours=0
 server_pid=
 cleanup() {
   tmux -L "$tmux_socket" kill-server 2>/dev/null || true
-  if [[ -S "$root/run/rexboard.sock" ]]; then
-    "$board" serve --stop >/dev/null 2>&1 || true
-  fi
+  # The private serve, whose socket lives under $root/state; XDG_STATE_HOME keeps --stop there.
+  "$board" serve --stop >/dev/null 2>&1 || true
   if [[ "$ours" == 1 && -n "$server_pid" ]] && ps -o command= -p "$server_pid" | grep -qF "$root/"; then
     kill "$server_pid" 2>/dev/null || true
   fi
@@ -86,7 +86,13 @@ case "$seat" in
     at 0; report working "Reviewing the parser change"
     at 18; title "✳ seat-b@demo"; printf 'Posted 2 comments\n'; report done "Review posted with 2 comments" ;;
   seat-c)
-    title "✳ seat-c@demo"; printf 'Edit src/app.tsx\n  - import { Board } from "./board";\n  + import { Board, Row } from "./board";\n'
+    title "✳ seat-c@demo"
+    printf 'Read src/app.tsx (84 lines)\nRead src/board.tsx (120 lines)\n'
+    printf 'Edit src/app.tsx\n'
+    printf '  - import { Board } from "./board";\n  + import { Board, Row } from "./board";\n'
+    printf '  - export function App() {\n  + export function App({ rows }: { rows: Row[] }) {\n'
+    printf '  -   return <Board />;\n  +   return <Board rows={rows} />;\n    }\n'
+    printf '\nAllow Edit to src/app.tsx?\n  1. Yes\n  2. Yes, and allow all edits this session\n  3. No\n'
     report blocked "Allow Edit: src/app.tsx" permission ;;
   seat-d)
     title "✳ seat-d@demo"; printf 'Docs updated.\n'; report idle "Waiting for input" ;;
@@ -129,12 +135,14 @@ k() { for key in "$@"; do tmux -L "$tmux_socket" send-keys -t demo "$key"; sleep
 for _ in $(seq 1 100); do tmux -L "$tmux_socket" capture-pane -p -t demo 2>/dev/null | grep -q 'NEEDS YOU' && break; sleep 0.1; done
 sleep 1.5
 touch "$go"
-sleep 4; k 1; sleep 1; k Space; sleep 4; k Space
-sleep 3; k 2; sleep 1; k s; sleep 3
+# The board, then a peek that fills the detail pane, the pane wider and back, one status only,
+# the table view sorted by a column, and the key table.
+sleep 3; k 1; sleep 1; k Space; sleep 4; k Space
+sleep 1; k '>' '>'; sleep 2.5; k '<' '<'
+sleep 1.5; k f p; sleep 3.5; k Escape
+sleep 2; k v; sleep 3; k A; sleep 2.5; k E; sleep 3
 k '?'; sleep 3.5; k '?'
-sleep 2; k / r e v i e w Enter; sleep 3.5; k Escape
-sleep 13; k S; sleep 4
-k q
+sleep 6; k q
 for _ in $(seq 1 100); do tmux -L "$tmux_socket" has-session -t demo 2>/dev/null || break; sleep 0.1; done
 
 python3 - "$cast" "${REXBOARD_DEMO_DENY:-}" <<'PY'
