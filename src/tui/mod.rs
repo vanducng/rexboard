@@ -143,7 +143,8 @@ fn board(pick: bool) -> Result<Option<Row>> {
                 act(effect, &tx, &generation);
                 changed = true;
             }
-            if tick.elapsed() >= Duration::from_secs(1) {
+            // An animated glyph on screen redraws at its own pace; otherwise once a second.
+            if tick.elapsed() >= app.frame_every().unwrap_or(Duration::from_secs(1)) {
                 tick = Instant::now();
                 changed = true;
             }

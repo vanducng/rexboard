@@ -381,6 +381,27 @@ impl App {
         all
     }
 
+    /// How often the board must redraw for the glyphs on screen to move: the full view's row, or
+    /// the list's visible rows and the card's; None when nothing on screen animates.
+    pub fn frame_every(&self) -> Option<Duration> {
+        if let Some(full) = &self.full {
+            let row = self.rows.iter().find(|row| row.key == full.key);
+            return super::theme::redraw_every(row.map(super::theme::look));
+        }
+        let (_, offset, room) = self.drawn.get();
+        let items = self.items();
+        let listed = items
+            .iter()
+            .skip(offset)
+            .take(room)
+            .filter_map(|item| match item {
+                Item::Row(i) => Some(&self.rows[*i]),
+                Item::Header { .. } => None,
+            });
+        let carded = self.current().filter(|_| self.card_shown());
+        super::theme::redraw_every(listed.chain(carded).map(super::theme::look))
+    }
+
     /// The column a sort letter names: a built-in one, or a field's.
     fn column_by_letter(&self, letter: char) -> Option<&'static Column> {
         by_letter(letter).or_else(|| {
@@ -1224,6 +1245,17 @@ pub mod tests {
         app.set_rows(rows().split_off(1), hosts());
         assert!(app.full.is_none());
         assert_eq!(app.toast(), Some("seat-b left the board"));
+    }
+
+    #[test]
+    fn with_nothing_animated_on_screen_the_board_keeps_its_once_a_second_tick() {
+        let mut app = app();
+        app.drawn.set((3, 0, 20));
+        assert_eq!(app.frame_every(), None, "the list and the card");
+        app.selected = Some(Spot::Row("mini/codex".into()));
+        press(&mut app, KeyCode::Char(' '));
+        assert!(app.full.is_some());
+        assert_eq!(app.frame_every(), None, "the full view's bar");
     }
 
     pub fn row(key: &str, state: &str, group: &str, seen: bool) -> Row {

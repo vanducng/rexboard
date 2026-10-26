@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -125,8 +125,8 @@ pub fn draw(frame: &mut Frame, app: &App, full: &Full, row: &Row, now: DateTime<
         .collect();
     if all.is_empty() {
         shown.push(match &full.error {
-            Some(why) => Line::styled(fit(&format!(" {why}"), width), Style::new().fg(Color::Red)),
-            None => Line::styled(" capturing…", theme::dim()),
+            Some(why) => Line::styled(fit(&format!(" {why}"), width), theme::alert()),
+            None => Line::styled(" capturing…", theme::quiet()),
         });
     }
     frame.render_widget(Paragraph::new(shown), body);
@@ -182,8 +182,7 @@ fn cut(line: &str, width: usize) -> Line<'static> {
     if marked {
         // On the row's own background, so a coloured band has no notch at the cut.
         let bg = kept.last().and_then(|span| span.style.bg);
-        let mark = bg.map_or_else(theme::dim, |bg| theme::dim().bg(bg));
-        kept.push(Span::styled("…", mark));
+        kept.push(Span::styled(theme::CUT, theme::cut_mark(bg)));
     }
     Line::from(kept)
 }
@@ -211,9 +210,9 @@ fn keys(width: usize) -> Line<'static> {
             break;
         }
         used += piece;
-        spans.push(Span::styled(sep, theme::dim()));
-        spans.push(Span::styled(key, theme::bright()));
-        spans.push(Span::styled(format!(" {what}"), theme::dim()));
+        spans.push(Span::styled(sep, theme::quiet()));
+        spans.push(Span::styled(key, theme::strong()));
+        spans.push(Span::styled(format!(" {what}"), theme::quiet()));
     }
     Line::from(spans)
 }

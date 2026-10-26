@@ -2,7 +2,7 @@
 //! where with how the turn ended, the headline, the ask or the body, then the pane's tail.
 
 use chrono::{DateTime, Local, Utc};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
@@ -19,7 +19,6 @@ use crate::pane::bare_title;
 const TEXT: usize = 120;
 /// One entry of the key table: the key, a space and what it does.
 const KEY_COLUMN: usize = 40;
-pub(super) const GUTTER: &str = " │ ";
 
 /// The card's lines for a board `width` wide, with the tail filling up to `room` lines.
 pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Line<'static>> {
@@ -33,7 +32,7 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
         return match &app.selected {
             Some(Spot::Group(group)) => vec![Line::styled(
                 fit(&format!("{} is folded · z opens it", group.title()), width),
-                theme::dim(),
+                theme::quiet(),
             )],
             _ => Vec::new(),
         };
@@ -52,29 +51,29 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
     let mut segments = msg.split(BREAK).map(str::trim).filter(|s| !s.is_empty());
     match segments.next() {
         None if row.pane.source == "inferred" => {
-            lines.push(Line::styled(" no status from this pane", theme::bright()));
+            lines.push(Line::styled(" no status from this pane", theme::strong()));
             lines.push(Line::styled(
                 fit("   space captures the screen", text),
-                theme::dim(),
+                theme::quiet(),
             ));
         }
         headline => {
             let headline = headline.unwrap_or(if title.is_empty() { "-" } else { title });
-            lines.extend(indented(headline, " ", text, theme::bright()));
+            lines.extend(indented(headline, " ", text, theme::strong()));
             for segment in segments {
-                lines.extend(indented(segment, "   ", text, Style::new()));
+                lines.extend(indented(segment, "   ", text, theme::plain()));
             }
         }
     }
     if let Some(why) = &app.failed {
-        lines.extend(indented(why, " ", text, Style::new().fg(Color::Red)));
+        lines.extend(indented(why, " ", text, theme::alert()));
     }
     if let Some(why) = &row.suspect_reason {
         lines.extend(indented(
             &format!("may be stale: {why}"),
             " ",
             text,
-            theme::dim(),
+            theme::quiet(),
         ));
     }
     let mut meta = vec![format!("source {}", row.pane.source)];
@@ -83,12 +82,12 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
     }
     lines.push(Line::styled(
         fit(&format!(" {}", meta.join(" · ")), text),
-        theme::dim(),
+        theme::quiet(),
     ));
     lines.extend(
         extension_lines(app, row)
             .into_iter()
-            .map(|line| Line::styled(fit(&line, text), theme::dim())),
+            .map(|line| Line::styled(fit(&line, text), theme::quiet())),
     );
     if let Some(peek) = peek {
         let room = room.saturating_sub(lines.len());
@@ -140,8 +139,9 @@ pub(super) fn bar(
     if let Some(kind) = &row.pane.kind {
         state = format!("{state} · {kind}");
     }
-    let right = right.map_or_else(|| "━━".to_owned(), |text| format!(" {text} ━━"));
-    let room = width.saturating_sub("━━".width() + right.width() + 1);
+    let ends = theme::BAR_END;
+    let right = right.map_or_else(|| ends.to_owned(), |text| format!(" {text} {ends}"));
+    let room = width.saturating_sub(ends.width() + right.width() + 1);
     let line = |place: Option<&str>, extra: &[String]| {
         let mut parts = vec![name(row)];
         parts.extend(place.map(str::to_owned));
@@ -149,7 +149,7 @@ pub(super) fn bar(
         parts.extend(outcome(row, now));
         clean(&format!(
             " {} {state} · {} ",
-            theme::glyph(row),
+            theme::glyph(row, now),
             parts.join(" · ")
         ))
     };
@@ -166,12 +166,12 @@ pub(super) fn bar(
         _ => line(None, &extra),
     };
     let left = fit(&left, room).trim_end().to_owned() + " ";
-    let fill = width.saturating_sub("━━".width() + left.width() + right.width());
+    let fill = width.saturating_sub(ends.width() + left.width() + right.width());
     Line::from(vec![
-        Span::styled("━━", theme::dim()),
-        Span::styled(left, theme::state(row).add_modifier(Modifier::BOLD)),
-        Span::styled("━".repeat(fill), theme::dim()),
-        Span::styled(right, theme::dim()),
+        Span::styled(ends, theme::quiet()),
+        Span::styled(left, theme::bar_label(row)),
+        Span::styled(theme::RULE.repeat(fill), theme::quiet()),
+        Span::styled(right, theme::quiet()),
     ])
 }
 
@@ -228,7 +228,7 @@ fn indented(text: &str, lead: &str, width: usize, style: Style) -> Vec<Line<'sta
 /// off the top. A gutter marks them as the pane's own screen, not the agent's report.
 pub fn tail(peek: &Peek, width: usize, room: usize) -> Vec<Line<'static>> {
     match &peek.lines {
-        None => vec![Line::styled(" capturing…", theme::dim())],
+        None => vec![Line::styled(" capturing…", theme::quiet())],
         Some(Ok(text)) => {
             let mut rows = Vec::new();
             for line in text.iter().rev() {
@@ -237,19 +237,22 @@ pub fn tail(peek: &Peek, width: usize, room: usize) -> Vec<Line<'static>> {
                 }
                 rows.extend(
                     // The full view's reads keep the pane's colours, which the card drops.
-                    chop(&clean(line), width.saturating_sub(GUTTER.width()).max(1))
-                        .into_iter()
-                        .rev(),
+                    chop(
+                        &clean(line),
+                        width.saturating_sub(theme::GUTTER.width()).max(1),
+                    )
+                    .into_iter()
+                    .rev(),
                 );
             }
             rows.truncate(room);
             rows.into_iter()
                 .rev()
-                .map(|line| Line::styled(format!("{GUTTER}{line}"), theme::dim()))
+                .map(|line| Line::styled(format!("{}{line}", theme::GUTTER), theme::quiet()))
                 .collect()
         }
         // An error is worth reading whole, so it wraps instead of being cut.
-        Some(Err(why)) => indented(why, " ", width, Style::new().fg(Color::Red)),
+        Some(Err(why)) => indented(why, " ", width, theme::alert()),
     }
 }
 
@@ -265,9 +268,9 @@ fn keys(app: &App, width: usize) -> Vec<Line<'static>> {
             let Some((key, what)) = all.get(c * rows + r) else {
                 break;
             };
-            spans.push(Span::styled(format!(" {key:<7} "), theme::bright()));
+            spans.push(Span::styled(format!(" {key:<7} "), theme::strong()));
             let room = KEY_COLUMN.min(width).saturating_sub(9);
-            spans.push(Span::styled(fit(what, room), theme::dim()));
+            spans.push(Span::styled(fit(what, room), theme::quiet()));
         }
         lines.push(Line::from(spans));
     }

@@ -47,6 +47,7 @@ rexboard reaches Rex only through the `rex` command: `rex do` for these scripts 
 | `src/tui/card.rs` | The turn card: the selected row's bar, headline, ask or body, and tail |
 | `src/tui/answer.rs`, `src/tui/screen.rs` | Answer mode: its keys and card, and what it reads off a pane (options, the input line, a draft) |
 | `src/tui/prefs.rs` | `tui.json` |
+| `src/tui/theme.rs` | The board's one style system: the roles every piece of text takes (`quiet`, `strong`, `accent`, `alert`, `note`, `header`, `selected`, `cut_mark` and the rest), the marks it draws, and `face`, the table of how each row state looks: its glyph or animation frames and their interval, colour and modifiers. Nothing else in `src/tui/` picks a colour or a glyph, and a test checks it. The board redraws at the shortest interval of an animated glyph on screen, otherwise once a second |
 | `src/client.rs` | `ls`, `watch --json`, `seen` and `serve` as clients; starts serve when nothing answers |
 | `src/rex.rs` | Finds `rex`, runs one-shot scripts, and holds the one lock around every spawn, bind, accept and connect |
 | `src/send.rs` | Runs `send.lua` for an answer, within 5s, and turns its refusals into plain reasons |

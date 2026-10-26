@@ -1,7 +1,7 @@
 use chrono::{DateTime, Local, Utc};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthStr;
@@ -162,22 +162,22 @@ fn card_height(app: &App, now: DateTime<Utc>, body: Rect, headed: bool) -> u16 {
 /// marks sort letters. Narrower, the separators tighten and the hint goes, then `w4 d6 …`.
 fn status_keys(app: &App, width: usize) -> Line<'static> {
     let named = |sep: &str, tail: &str| -> Line<'static> {
-        let mut spans = vec![Span::styled("f ", theme::bright())];
+        let mut spans = vec![Span::styled("f ", theme::strong())];
         for (i, status) in ALL.iter().enumerate() {
             let (letter, rest) = status.name().split_at(1);
             if i > 0 {
-                spans.push(Span::styled(sep.to_owned(), theme::dim()));
+                spans.push(Span::styled(sep.to_owned(), theme::quiet()));
             }
             spans.push(Span::styled(
                 letter.to_owned(),
-                theme::bright().add_modifier(Modifier::UNDERLINED),
+                theme::letter(theme::strong()),
             ));
             spans.push(Span::styled(
                 format!("{rest} {}", app.status_count(*status)),
-                theme::bright(),
+                theme::strong(),
             ));
         }
-        spans.push(Span::styled(tail.to_owned(), theme::dim()));
+        spans.push(Span::styled(tail.to_owned(), theme::quiet()));
         Line::from(spans)
     };
     for line in [named(" · ", " · f/esc clears"), named("  ", "")] {
@@ -191,12 +191,12 @@ fn status_keys(app: &App, width: usize) -> Line<'static> {
         .collect();
     Line::styled(
         fit(&format!("f {} · f/esc clears", short.join(" ")), width),
-        theme::bright(),
+        theme::strong(),
     )
 }
 
 fn rule_line(width: u16) -> Paragraph<'static> {
-    Paragraph::new("─".repeat(usize::from(width))).style(theme::dim())
+    Paragraph::new(theme::LINE.repeat(usize::from(width))).style(theme::quiet())
 }
 
 /// `1 host`, `2 hosts`.
@@ -253,10 +253,10 @@ fn alerts(app: &App, width: usize) -> String {
 }
 
 fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
-    let red = Style::new().fg(Color::Red);
+    let red = theme::alert();
     let (alert, alert_style) = match app.link {
         Link::Up => (alerts(app, usize::from(area.width)), red),
-        Link::Connecting => ("connecting to serve".to_owned(), theme::dim()),
+        Link::Connecting => ("connecting to serve".to_owned(), theme::quiet()),
         Link::Lost(_) => (STOPPED.to_owned(), red),
     };
     let counts = format!(
@@ -299,22 +299,22 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
         .unwrap_or((false, false, false));
     let mut left = vec![Span::styled("rexboard", theme::accent())];
     if let Some(label) = label {
-        left.push(Span::styled(" · ", theme::dim()));
-        left.push(Span::styled(label, theme::bright()));
+        left.push(Span::styled(" · ", theme::quiet()));
+        left.push(Span::styled(label, theme::strong()));
     }
     if with_counts {
-        left.push(Span::styled(counts, theme::dim()));
+        left.push(Span::styled(counts, theme::quiet()));
     }
     if !alert.is_empty() {
-        left.push(Span::styled(" · ", theme::dim()));
+        left.push(Span::styled(" · ", theme::quiet()));
         left.push(Span::styled(alert, alert_style));
     }
     let mut right = Vec::new();
     if with_clock {
-        right.push(Span::styled(clock, theme::dim()));
+        right.push(Span::styled(clock, theme::quiet()));
     }
     if with_hosts && app.link == Link::Up && app.hosts.values().all(|s| s == "up") {
-        right.push(Span::styled(format!(" · {healthy}"), theme::dim()));
+        right.push(Span::styled(format!(" · {healthy}"), theme::quiet()));
     }
     let used = |spans: &[Span]| spans.iter().map(|s| s.content.width()).sum::<usize>();
     let gap = width.saturating_sub(used(&left) + used(&right));
@@ -348,7 +348,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
         };
         let width = usize::from(area.width);
         frame.render_widget(
-            Paragraph::new(Line::styled(fit(&text, width), theme::dim())),
+            Paragraph::new(Line::styled(fit(&text, width), theme::quiet())),
             area,
         );
         return;
@@ -362,17 +362,14 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
             .into_iter()
             .flat_map(|cell| {
                 let Some(at) = cell.underline else {
-                    return vec![Span::styled(cell.text, theme::dim())];
+                    return vec![Span::styled(cell.text, theme::quiet())];
                 };
                 let (before, rest) = cell.text.split_at(at);
                 let (letter, after) = rest.split_at(1);
                 vec![
-                    Span::styled(before.to_owned(), theme::dim()),
-                    Span::styled(
-                        letter.to_owned(),
-                        theme::dim().add_modifier(Modifier::UNDERLINED),
-                    ),
-                    Span::styled(after.to_owned(), theme::dim()),
+                    Span::styled(before.to_owned(), theme::quiet()),
+                    Span::styled(letter.to_owned(), theme::letter(theme::quiet())),
+                    Span::styled(after.to_owned(), theme::quiet()),
                 ]
             })
             .collect();
@@ -425,12 +422,12 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
                 count,
                 folded,
             } => {
-                let mark = if *folded { "▸ " } else { "" };
+                let mark = if *folded { theme::FOLDED } else { "" };
                 let title = format!("{mark}{} ({count}) ", bucket.title());
-                let fill = "┄".repeat(width.saturating_sub(title.width()));
+                let fill = theme::GROUP_FILL.repeat(width.saturating_sub(title.width()));
                 let line = Line::styled(format!("{title}{fill}"), theme::header());
                 if is_selected(app, item) {
-                    line.style(theme::header().bg(theme::RAISED))
+                    line.style(theme::selected(theme::header()))
                 } else {
                     line
                 }
@@ -459,7 +456,10 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
         })
         .sum();
     if room < height {
-        lines.push(Line::styled(format!("↓ {below} more"), theme::dim()));
+        lines.push(Line::styled(
+            format!("{} {below} more", theme::MORE),
+            theme::quiet(),
+        ));
     }
     frame.render_widget(Paragraph::new(lines), area);
 }
@@ -490,9 +490,9 @@ fn row_line(
 ) -> Line<'static> {
     let faded = row.stale || app.link != Link::Up;
     let soft = if row.pane.source == "inferred" || row.suspect || faded {
-        theme::dim()
+        theme::quiet()
     } else {
-        Style::new()
+        theme::plain()
     };
     let mut spans: Vec<Span> = columns
         .cells(row, place, now)
@@ -501,19 +501,19 @@ fn row_line(
             let style = match tone {
                 Tone::State => theme::state(row),
                 Tone::Soft => soft,
-                Tone::Dim => theme::dim(),
+                Tone::Dim => theme::quiet(),
             };
             Span::styled(text, style)
         })
         .collect();
     if faded {
         for span in &mut spans {
-            span.style = span.style.patch(theme::dim());
+            span.style = span.style.patch(theme::quiet());
         }
     }
     if selected {
         for span in &mut spans {
-            span.style = span.style.bg(theme::RAISED);
+            span.style = theme::selected(span.style);
         }
     }
     Line::from(spans)
@@ -521,31 +521,30 @@ fn row_line(
 
 /// What the footer says instead of its keys: a passing message, a running jump or why one failed.
 pub(super) fn note(app: &App) -> Option<(&str, Style)> {
-    let accent = Style::new().fg(theme::ACCENT);
     app.toast()
-        .map(|text| (text, accent))
-        .or_else(|| app.going.as_deref().map(|text| (text, accent)))
-        .or_else(|| {
-            app.failed
-                .as_deref()
-                .map(|text| (text, Style::new().fg(Color::Red)))
-        })
+        .map(|text| (text, theme::note()))
+        .or_else(|| app.going.as_deref().map(|text| (text, theme::note())))
+        .or_else(|| app.failed.as_deref().map(|text| (text, theme::alert())))
 }
 
 fn footer(frame: &mut Frame, area: Rect, app: &App) {
     let width = usize::from(area.width);
     if app.commanding {
-        let text = format!(": {}▏ · tab completes · esc cancels", app.command.value());
+        let text = format!(
+            ": {}{} · tab completes · esc cancels",
+            app.command.value(),
+            theme::CURSOR
+        );
         frame.render_widget(
-            Paragraph::new(Line::styled(fit(&text, width), theme::bright())),
+            Paragraph::new(Line::styled(fit(&text, width), theme::strong())),
             area,
         );
         return;
     }
     if app.filtering {
-        let text = format!("/ {}▏", app.filter.value());
+        let text = format!("/ {}{}", app.filter.value(), theme::CURSOR);
         frame.render_widget(
-            Paragraph::new(Line::styled(fit(&text, width), theme::bright())),
+            Paragraph::new(Line::styled(fit(&text, width), theme::strong())),
             area,
         );
         return;
@@ -568,8 +567,8 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
     if !query.is_empty() {
         let kept = fit(&format!("/{query}"), 16).trim_end().to_owned();
         used += kept.width() + " · esc clears · ".width();
-        spans.push(Span::styled(kept, theme::bright()));
-        spans.push(Span::styled(" · esc clears · ", theme::dim()));
+        spans.push(Span::styled(kept, theme::strong()));
+        spans.push(Span::styled(" · esc clears · ", theme::quiet()));
     }
     // The essentials first, so a narrow board keeps them; then `tab next`, which works through
     // the rows that need you, and `v view` last, one `?` away. `v view` shows after `/ filter`.
@@ -623,15 +622,18 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         }
     }
     for (i, (key, what)) in shown.into_iter().enumerate() {
-        spans.push(Span::styled(if i == 0 { "" } else { " · " }, theme::dim()));
-        spans.push(Span::styled(key, theme::bright()));
-        spans.push(Span::styled(format!(" {what}"), theme::dim()));
+        spans.push(Span::styled(
+            if i == 0 { "" } else { " · " },
+            theme::quiet(),
+        ));
+        spans.push(Span::styled(key, theme::strong()));
+        spans.push(Span::styled(format!(" {what}"), theme::quiet()));
     }
     spans.push(Span::raw(
         " ".repeat(width.saturating_sub(used + quit.width()).max(2)),
     ));
-    spans.push(Span::styled(quit_key, theme::bright()));
-    spans.push(Span::styled(quit_what, theme::dim()));
+    spans.push(Span::styled(quit_key, theme::strong()));
+    spans.push(Span::styled(quit_what, theme::quiet()));
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
@@ -640,6 +642,7 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::style::{Color, Modifier};
 
     use super::*;
     use crate::tui::app::tests::{app, hosts, press, row};
@@ -2047,6 +2050,120 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Every cell's symbol and style, one line per row, the style written where it changes.
+    fn styled_dump(app: &App, width: u16, height: u16) -> String {
+        let now = DateTime::parse_from_rfc3339("2026-01-01T05:43:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| draw(frame, app, now)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut out = String::new();
+        for y in 0..height {
+            let mut last = None;
+            for x in 0..width {
+                let cell = &buffer[(x, y)];
+                let style = (cell.fg, cell.bg, cell.modifier);
+                if last != Some(style) {
+                    out.push_str(&format!("{{{:?}/{:?}/{:?}}}", style.0, style.1, style.2));
+                    last = Some(style);
+                }
+                out.push_str(cell.symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    /// The board's looks across its screens, compared with the copy taken before the style
+    /// tokens: the refactor must change no cell.
+    #[test]
+    fn every_screen_looks_as_it_did_before_the_style_tokens() {
+        let mut screens: Vec<(&str, App, u16, u16)> = Vec::new();
+        screens.push(("status 80", fuller(), 80, 30));
+        screens.push(("status 140", fuller(), 140, 34));
+        let mut table = fuller();
+        press(&mut table, KeyCode::Char('v'));
+        press(&mut table, KeyCode::Char('A'));
+        screens.push(("table sorted 140", table, 140, 30));
+        let mut keys = fuller();
+        press(&mut keys, KeyCode::Char('?'));
+        screens.push(("keys 120", keys, 120, 34));
+        let mut status = fuller();
+        press(&mut status, KeyCode::Char('f'));
+        screens.push(("f picker 80", status, 80, 20));
+        let mut filter = fuller();
+        press(&mut filter, KeyCode::Char('/'));
+        for c in "seat".chars() {
+            press(&mut filter, KeyCode::Char(c));
+        }
+        screens.push(("filter prompt 80", filter, 80, 20));
+        let mut command = fuller();
+        press(&mut command, KeyCode::Char(':'));
+        screens.push(("command prompt 80", command, 80, 20));
+        let mut hidden = fuller();
+        press(&mut hidden, KeyCode::Char('c'));
+        hidden.toast = None;
+        screens.push(("card hidden 80", hidden, 80, 24));
+        let mut failed = fuller();
+        failed.failed = Some("that pane is gone".into());
+        failed.hosts.insert("studio".into(), "down".into());
+        screens.push(("failed jump and a host down 80", failed, 80, 30));
+        let mut toast = fuller();
+        toast.say("a passing message");
+        screens.push(("toast 80", toast, 80, 20));
+        let pinned = |mut app: App| {
+            let at = DateTime::parse_from_rfc3339("2026-01-01T05:42:58Z").unwrap();
+            app.answer.as_mut().unwrap().captured = Some(at.with_timezone(&Utc));
+            app
+        };
+        screens.push(("answer 80", pinned(answering(PERMISSION)), 80, 30));
+        let mut refused = pinned(answering(PERMISSION));
+        refused.answer.as_mut().unwrap().error = Some("the screen changed; nothing sent".into());
+        screens.push(("answer refused 80", refused, 80, 30));
+        let long = format!("\x1b[48;2;0;64;0m+ {}\x1b[0m", "x".repeat(120));
+        screens.push((
+            "full coloured 80",
+            full_of(vec![
+                "\x1b[31m- removed\x1b[0m".into(),
+                long,
+                "plain".into(),
+            ]),
+            80,
+            12,
+        ));
+        let mut failing = full_of(numbered(3));
+        failing.peeked("mini/seat-b", Err("rex timed out".into()));
+        screens.push(("full failing 80", failing, 80, 10));
+        let mut text = String::new();
+        for (name, app, width, height) in &screens {
+            text.push_str(&format!("== {name}\n{}", styled_dump(app, *width, *height)));
+        }
+        // The clock and a capture time show in the local zone, which differs between machines.
+        let local = |at: &str, format: &str| {
+            let at = DateTime::parse_from_rfc3339(at).unwrap();
+            at.with_timezone(&chrono::Local).format(format).to_string()
+        };
+        let text = text
+            .replace(&local("2026-01-01T05:42:58Z", "%H:%M:%S"), "hh:mm:ss")
+            .replace(&local("2026-01-01T05:43:00Z", "%H:%M"), "hh:mm");
+        let path = format!(
+            "{}/tests/fixtures/style-snapshot.txt",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        if std::env::var_os("UPDATE_STYLE_SNAPSHOT").is_some() {
+            std::fs::write(&path, &text).unwrap();
+        }
+        let want = std::fs::read_to_string(&path).expect("the snapshot");
+        for ((name, ..), (got, want)) in screens
+            .iter()
+            .zip(text.split("== ").skip(1).zip(want.split("== ").skip(1)))
+        {
+            assert_eq!(got, want, "{name} changed");
+        }
+        assert_eq!(text, want);
     }
 }
 
