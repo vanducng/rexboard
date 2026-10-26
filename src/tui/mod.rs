@@ -6,7 +6,6 @@ mod theme;
 mod view;
 mod views;
 
-use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -30,6 +29,11 @@ use app::{App, Effect, Link};
 /// Peek keeps this many lines from the end of the pane, enough for a 200-row pane; each draw shows
 /// the newest that fit, so a resize needs no new capture.
 const PEEK_LINES: usize = 200;
+/// A peek reads at most this much of the end of a pane, and gives up after PEEK_WITHIN.
+const PEEK_BYTES: usize = 48 * 1024;
+const PEEK_WITHIN: Duration = Duration::from_secs(3);
+/// Each peek takes the next number; one whose number is no longer the latest stops.
+static PEEK_GEN: AtomicU64 = AtomicU64::new(0);
 
 enum Msg {
     Rows(Rows),
@@ -219,10 +223,22 @@ fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
                 let _ = tx.send(Msg::Jumped(result));
             });
         }
-        Effect::Peek { key, host, block } => {
+        Effect::Peek {
+            key,
+            host,
+            session,
+            block,
+        } => {
+            let mine = PEEK_GEN.fetch_add(1, Ordering::SeqCst) + 1;
             thread::spawn(move || {
-                let lines = capture(&host, &block).map_err(|err| format!("peek failed: {err}"));
-                let _ = tx.send(Msg::Peek(key, lines));
+                let current = || PEEK_GEN.load(Ordering::SeqCst) == mine;
+                let lines = match rex::locate() {
+                    Ok(rex) => peek(&rex, &host, &session, &block, &|| !current()),
+                    Err(err) => Some(Err(format!("peek failed: {err}"))),
+                };
+                if let Some(lines) = lines.filter(|_| current()) {
+                    let _ = tx.send(Msg::Peek(key, lines));
+                }
             });
         }
         Effect::SavePrefs(prefs) => {
@@ -271,33 +287,56 @@ fn listen(tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
     });
 }
 
-/// The last lines of a pane, as plain text with control characters removed.
-fn capture(host: &str, block: &str) -> Result<Vec<String>> {
-    let mut cmd = rex::command(&rex::locate()?);
-    if host != "local" {
-        cmd.args(["-S", host]);
+/// What a peek shows: the pane's last lines, or why there are none. None when a newer peek
+/// cancelled it, which then owns the slot.
+fn peek(
+    rex: &std::path::Path,
+    host: &str,
+    session: &str,
+    block: &str,
+    cancelled: &dyn Fn() -> bool,
+) -> Option<std::result::Result<Vec<String>, String>> {
+    match tail(rex, host, session, block, cancelled) {
+        Ok(lines) => Some(Ok(lines)),
+        Err(Error::Cancelled) => None,
+        Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::TimedOut => Some(Err(format!(
+            "peek gave up after {}s",
+            PEEK_WITHIN.as_secs()
+        ))),
+        Err(err) => Some(Err(format!("peek failed: {err}"))),
     }
-    cmd.args(["capture", "-b", block, "--trim", "--unwrap"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    let out = rex::spawn(&mut cmd)
-        .and_then(std::process::Child::wait_with_output)
-        .map_err(|err| Error::Rex(format!("rex capture did not run: {err}")))?;
-    if !out.status.success() {
-        return Err(Error::Rex(format!("rex capture failed ({})", out.status)));
+}
+
+/// The last lines of a pane, as plain text with control characters removed: only the end of its
+/// scrollback is read (`tail.lua`), within PEEK_WITHIN, and `cancelled` stops it early.
+fn tail(
+    rex: &std::path::Path,
+    host: &str,
+    session: &str,
+    block: &str,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Vec<String>> {
+    let args = json!({ "session_id": session, "block_id": block, "max_bytes": PEEK_BYTES });
+    let remote = (host != "local").then_some(host);
+    let reply = rex::run_script_with(rex, remote, rex::TAIL, &args, PEEK_WITHIN, cancelled)?;
+    if reply["ok"] != true {
+        let field = |name: &str| reply[name].as_str().unwrap_or("unknown").to_owned();
+        return Err(Error::Rex(format!("{}: {}", field("step"), field("error"))));
     }
-    Ok(peek_lines(&String::from_utf8_lossy(&out.stdout)))
+    Ok(peek_lines(reply["text"].as_str().unwrap_or_default()))
 }
 
 /// The last lines of captured pane text, with every escape sequence and control character
 /// removed: the text comes from whatever runs in that pane. Trailing blanks go too, so a padded
 /// line does not wrap into empty rows.
 fn peek_lines(text: &str) -> Vec<String> {
-    let lines: Vec<String> = text
+    let mut lines: Vec<String> = text
         .lines()
         .map(|line| clean(line).trim_end().to_owned())
         .collect();
+    while lines.last().is_some_and(String::is_empty) {
+        lines.pop();
+    }
     lines[lines.len().saturating_sub(PEEK_LINES)..].to_vec()
 }
 
@@ -355,6 +394,117 @@ impl Drop for Restore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A rex that logs its argv and pid to `dir`, sleeps `sleep` seconds, then prints `reply`.
+    fn fake_rex(
+        dir: &std::path::Path,
+        reply: &serde_json::Value,
+        sleep: u32,
+    ) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(dir.join("reply"), reply.to_string()).unwrap();
+        let rex = dir.join("rex");
+        let d = dir.display();
+        std::fs::write(
+            &rex,
+            format!(
+                "#!/bin/sh\necho \"$@\" > '{d}/argv'\necho $$ > '{d}/pid'\ncat > /dev/null\nsleep {sleep}\ncat '{d}/reply'\n"
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&rex, std::fs::Permissions::from_mode(0o755)).unwrap();
+        rex
+    }
+
+    fn gone(dir: &std::path::Path) -> bool {
+        let pid: i32 = std::fs::read_to_string(dir.join("pid"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        unsafe { libc::kill(pid, 0) != 0 }
+    }
+
+    #[test]
+    fn a_peek_reads_the_tail_of_the_pane_on_its_own_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut text: String = (1..=250).map(|n| format!("line {n}\n")).collect();
+        text.push_str("\x1b[31mRED\x1b[0m\n\n  \n");
+        let rex = fake_rex(
+            dir.path(),
+            &json!({ "ok": true, "text": text, "total": 9000, "cut": true }),
+            0,
+        );
+        let lines = peek(&rex, "mini", "session:1", "block:2", &|| false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(lines.len(), PEEK_LINES);
+        assert_eq!(lines.last().unwrap(), "RED", "trailing blank lines dropped");
+        assert!(
+            lines.iter().all(|l| !l.chars().any(char::is_control)),
+            "{lines:?}"
+        );
+        let argv = std::fs::read_to_string(dir.path().join("argv")).unwrap();
+        let (head, args) = argv.trim().split_once(" --args ").unwrap();
+        assert_eq!(head, "-S mini do - --json");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(args).unwrap(),
+            json!({ "session_id": "session:1", "block_id": "block:2", "max_bytes": 49152 })
+        );
+        peek(&rex, "local", "session:1", "block:2", &|| false);
+        let argv = std::fs::read_to_string(dir.path().join("argv")).unwrap();
+        assert!(
+            argv.starts_with("do - --json --args "),
+            "no -S for this host: {argv}"
+        );
+    }
+
+    #[test]
+    fn a_failed_tail_says_which_step() {
+        let dir = tempfile::tempdir().unwrap();
+        let reply = json!({ "ok": false, "step": "blob_read", "error": "not_found" });
+        let rex = fake_rex(dir.path(), &reply, 0);
+        assert_eq!(
+            peek(&rex, "local", "s", "b", &|| false),
+            Some(Err("peek failed: blob_read: not_found".to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_slow_host_gives_up_after_3s_and_its_rex_is_killed() {
+        let dir = tempfile::tempdir().unwrap();
+        let rex = fake_rex(dir.path(), &json!({ "ok": true, "text": "late" }), 5);
+        let started = std::time::Instant::now();
+        let got = peek(&rex, "mini", "s", "b", &|| false);
+        let took = started.elapsed();
+        assert_eq!(got, Some(Err("peek gave up after 3s".to_owned())));
+        assert!(
+            took >= PEEK_WITHIN && took < Duration::from_secs(4),
+            "{took:?}"
+        );
+        assert!(gone(dir.path()), "rex was killed");
+    }
+
+    #[test]
+    fn a_newer_peek_cancels_the_older_one_and_its_rex_is_killed() {
+        let dir = tempfile::tempdir().unwrap();
+        let rex = fake_rex(dir.path(), &json!({ "ok": true, "text": "stale" }), 5);
+        let started = std::time::Instant::now();
+        let newer = std::sync::atomic::AtomicBool::new(false);
+        let got = thread::scope(|s| {
+            s.spawn(|| {
+                thread::sleep(Duration::from_millis(200));
+                newer.store(true, Ordering::SeqCst);
+            });
+            peek(&rex, "local", "s", "b", &|| newer.load(Ordering::SeqCst))
+        });
+        assert_eq!(got, None, "nothing to apply");
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "stopped well before the limit"
+        );
+        assert!(gone(dir.path()), "rex was killed");
+    }
 
     #[test]
     fn mouse_capture_follows_the_table_view_and_never_reaches_pick() {
