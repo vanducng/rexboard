@@ -402,7 +402,11 @@ impl Columns {
         let at = self.cols.iter().position(|(c, _)| c.id == id)?;
         let start: usize = self.cols[..at].iter().map(|(_, w)| w).sum();
         let (column, width) = self.cols[at];
-        let room = if id == Col::Msg { width } else { width - 1 };
+        let room = if id == Col::Msg {
+            width
+        } else {
+            width.saturating_sub(1)
+        };
         let gap = at > 0 && {
             let (before, before_width) = self.cols[at - 1];
             before.header.len() + 1 < before_width
@@ -410,7 +414,7 @@ impl Columns {
         if !gap && column.header.len() < room {
             Some((start + column.header.len(), id, dir.arrow()))
         } else {
-            (at > 0).then(|| (start - 1, id, dir.arrow()))
+            start.checked_sub(1).map(|x| (x, id, dir.arrow()))
         }
     }
 
@@ -629,6 +633,79 @@ mod tests {
             header.contains("STATE     ↓AGE"),
             "a gap keeps it before the name: {header}"
         );
+    }
+
+    #[test]
+    fn a_clicked_row_in_a_scrolled_list_stays_under_the_pointer() {
+        use crate::tui::app::Spot;
+        let mut board = App::default();
+        board.set_rows(
+            (0..40)
+                .map(|n| row(&format!("local/r{n:02}"), "idle", "quiet", true))
+                .collect(),
+            hosts(),
+        );
+        board.view = crate::tui::views::views().remove(1);
+        (board.width, board.height) = (140, 20);
+        board.selected = Some(Spot::Row("local/r30".into()));
+        let y_of = |board: &App, key: &str| {
+            let buf = buffer(board, 140, 20);
+            let list = list_width(board, 140);
+            (0..20).find(|&y| {
+                let text: String = line(&buf, y).chars().take(list).collect();
+                text.contains(&format!("{key} msg"))
+            })
+        };
+        let y = y_of(&board, "r25").expect("r25 is in view with r30 selected");
+        board.click(10, y);
+        assert_eq!(board.selected, Some(Spot::Row("local/r25".into())));
+        assert_eq!(y_of(&board, "r25"), Some(y), "the list kept its place");
+        board.click(10, y);
+        assert_eq!(
+            board.selected,
+            Some(Spot::Row("local/r25".into())),
+            "a second click, same row"
+        );
+        board.selected = Some(Spot::Row("local/r02".into()));
+        assert!(
+            y_of(&board, "r02").is_some(),
+            "above the view it scrolls up to the selection"
+        );
+    }
+
+    #[test]
+    fn the_wheel_stops_at_the_ends_and_the_mouse_waits_for_a_prompt() {
+        let mut board = table(140);
+        buffer(&board, 140, 30);
+        let first = board.selected.clone();
+        board.scroll(true);
+        assert_eq!(board.selected, first, "no wrap at the top");
+        for _ in 0..10 {
+            board.scroll(false);
+        }
+        let last = board.selected.clone();
+        board.scroll(false);
+        assert_eq!(board.selected, last, "no wrap at the bottom");
+        assert_ne!(first, last);
+        board.filtering = true;
+        board.scroll(true);
+        assert_eq!(board.selected, last, "behind the / prompt");
+        board.click(10, 2);
+        assert_eq!(board.sort, None);
+        board.filtering = false;
+        board.commanding = true;
+        board.scroll(true);
+        assert_eq!(board.selected, last, "behind the : prompt");
+    }
+
+    #[test]
+    fn a_narrow_header_sorted_by_where_never_underflows() {
+        for width in 0..=20u16 {
+            let columns = Columns::new(width, usize::from(width));
+            for dir in [Dir::Up, Dir::Down] {
+                columns.header(Some((Col::Where, dir)));
+            }
+        }
     }
 
     #[test]

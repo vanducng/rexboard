@@ -14,7 +14,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use ratatui::crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind, MouseButton, MouseEventKind,
+    self, DisableMouseCapture, Event, KeyEventKind, MouseButton, MouseEvent, MouseEventKind,
 };
 use serde_json::json;
 
@@ -71,11 +71,11 @@ fn board(pick: bool) -> Result<Option<Row>> {
     let mut terminal = ratatui::init();
     let _restore = Restore;
     let mut tick = Instant::now();
-    let mut mouse = false;
+    let mut captured = false;
     loop {
         let size = terminal.size().unwrap_or_default();
         (app.width, app.height) = (size.width, size.height);
-        sync_mouse(&mut std::io::stdout(), &app, &mut mouse);
+        sync_mouse(&mut std::io::stdout(), &app, &mut captured);
         terminal
             .draw(|frame| view::draw(frame, &app, chrono::Utc::now()))
             .unwrap_or_else(|_| leave());
@@ -95,17 +95,7 @@ fn board(pick: bool) -> Result<Option<Row>> {
                         }
                         changed = true;
                     }
-                    Event::Mouse(mouse) => {
-                        match mouse.kind {
-                            MouseEventKind::Down(MouseButton::Left) => {
-                                app.click(mouse.column, mouse.row);
-                            }
-                            MouseEventKind::ScrollUp => app.scroll(true),
-                            MouseEventKind::ScrollDown => app.scroll(false),
-                            _ => {}
-                        }
-                        changed = true;
-                    }
+                    Event::Mouse(event) => changed = mouse(&mut app, event),
                     Event::Resize(..) => changed = true,
                     _ => {}
                 }
@@ -329,12 +319,26 @@ fn sync_mouse(out: &mut impl std::io::Write, app: &App, on: &mut bool) {
     }
 }
 
+/// On: button presses and the wheel (1000) in SGR form (1006), never motion, which would wake the
+/// board on every pointer move. Off: everything any capture could have asked for.
 fn mouse_capture(out: &mut impl std::io::Write, on: bool) -> std::io::Result<()> {
     if on {
-        ratatui::crossterm::execute!(out, EnableMouseCapture)
+        out.write_all(b"\x1b[?1000h\x1b[?1006h")?;
+        out.flush()
     } else {
         ratatui::crossterm::execute!(out, DisableMouseCapture)
     }
+}
+
+/// A mouse event; true when it may have changed what is drawn.
+fn mouse(app: &mut App, event: MouseEvent) -> bool {
+    match event.kind {
+        MouseEventKind::Down(MouseButton::Left) => app.click(event.column, event.row),
+        MouseEventKind::ScrollUp => app.scroll(true),
+        MouseEventKind::ScrollDown => app.scroll(false),
+        _ => return false,
+    }
+    true
 }
 
 /// Puts the terminal back on the way out, panics included (they unwind through it): mouse
@@ -374,6 +378,46 @@ mod tests {
         pick.pick = true;
         pick.view = views::views().remove(1);
         assert!(!pick.clicks(), "pick keeps text selection");
+    }
+
+    #[test]
+    fn motion_and_drags_ask_for_no_redraw() {
+        use ratatui::crossterm::event::KeyModifiers;
+        let mut app = app::tests::app();
+        app.view = views::views().remove(1);
+        let event = |kind| MouseEvent {
+            kind,
+            column: 10,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        };
+        for kind in [
+            MouseEventKind::Moved,
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            assert!(!mouse(&mut app, event(kind)), "{kind:?}");
+        }
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::ScrollUp,
+            MouseEventKind::ScrollDown,
+        ] {
+            assert!(mouse(&mut app, event(kind)), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn capture_asks_for_buttons_only_and_off_clears_every_mode() {
+        let mut on = Vec::new();
+        mouse_capture(&mut on, true).unwrap();
+        assert_eq!(on, b"\x1b[?1000h\x1b[?1006h", "no motion (1002, 1003)");
+        let mut off = Vec::new();
+        mouse_capture(&mut off, false).unwrap();
+        let off = String::from_utf8_lossy(&off);
+        for mode in ["1000", "1002", "1003", "1006", "1015"] {
+            assert!(off.contains(&format!("\x1b[?{mode}l")), "{mode}: {off:?}");
+        }
     }
 
     #[test]

@@ -361,7 +361,7 @@ impl App {
         use super::view::{HEADED, HEADER_ROW};
         let items = self.items();
         let list = usize::from(list(self.width, self.detail, self.pick));
-        if !self.clicks() || items.is_empty() || usize::from(x) >= list {
+        if !self.clicks() || self.prompting() || items.is_empty() || usize::from(x) >= list {
             return;
         }
         if self.height >= HEADED && y == HEADER_ROW {
@@ -380,10 +380,31 @@ impl App {
         }
     }
 
-    /// The wheel moves the selection, as `k` and `j` do; with the mouse captured the terminal no
-    /// longer turns it into arrow keys.
+    /// Whether a prompt (`/`, `:` or `f`) has the keyboard, so the mouse leaves the list alone.
+    fn prompting(&self) -> bool {
+        self.filtering || self.commanding || self.picking_status
+    }
+
+    /// The wheel moves the selection, as `k` and `j` do, but stops at the ends; with the mouse
+    /// captured the terminal no longer turns it into arrow keys.
     pub fn scroll(&mut self, up: bool) {
-        self.step(if up { -1 } else { 1 });
+        if self.prompting() {
+            return;
+        }
+        let spots = self.spots();
+        let Some(last) = spots.len().checked_sub(1) else {
+            return;
+        };
+        let at = self
+            .selected
+            .as_ref()
+            .and_then(|spot| spots.iter().position(|s| s == spot));
+        let next = match at {
+            None => 0,
+            Some(at) if up => at.saturating_sub(1),
+            Some(at) => (at + 1).min(last),
+        };
+        self.selected = Some(spots[next].clone());
     }
 
     pub fn handle(&mut self, key: KeyEvent) -> Option<Effect> {
