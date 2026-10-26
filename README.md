@@ -28,6 +28,10 @@ The first command starts `rexboard serve` in the background. It watches this hos
 
 A pane needs you when it is blocked (often on a permission prompt), has an error, or is done and you have not seen it yet. Going to a pane marks it seen, and so does `s` on the board (`ctrl+s` marks every shown done row seen). A done pane you have seen moves to QUIET; a blocked or erroring one stays in NEEDS YOU until it moves on. A pane is unseen again each time it enters `done`, `blocked` or `error`.
 
+## Where status comes from
+
+Each pane's state is the status its agent reports to Rex. Claude Code and Codex report on their own when they run straight in a Rex pane. An agent inside tmux needs a hook to pass its status through tmux. A pane that reports nothing still shows, with its state read from its title. [Agent status](docs/agent-status.md) has the details, and what to check when a row looks wrong.
+
 ## How it works
 
 <img alt="rexboard architecture: rexboard is one Rust binary and Rex runs its Lua scripts. On local (this Mac) and mini, rex do runs observer.lua, which streams NDJSON to rexboard serve; serve keeps state on disk and answers the CLI (ls, watch, seen) and the ratatui board over a unix socket. A jump, the one write to Rex, runs jump.lua: session.focus_block on the pane's host, then client.perform session.select on the Rex app" src="docs/assets/architecture.svg" width="100%">
@@ -40,6 +44,7 @@ rexboard reads Rex. Only a jump (blue) writes to it: it focuses the pane on its 
 | --- | --- |
 | [CLI](docs/cli.md) | Every command, its output, fields and exit codes |
 | [TUI](docs/tui.md) | The board's layout and keys, and `pick` |
+| [Agent status](docs/agent-status.md) | Where each row's status comes from, and what to check when a row looks wrong |
 | [Configuration](docs/configuration.md) | `config.toml`: the app client and excluded hosts |
 | [System architecture](docs/system-architecture.md) | The stack, serve, the observers, the protocol and the files |
 | [Development](docs/development-guidelines.md) | Setup, checks, layout, conventions, tests |
