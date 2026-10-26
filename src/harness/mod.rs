@@ -4,6 +4,7 @@
 
 mod claude;
 mod codex;
+pub mod dialog;
 mod pi;
 
 pub trait Harness: Sync {

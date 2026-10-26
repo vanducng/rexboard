@@ -1,6 +1,7 @@
 //! What answer mode reads off a pane's tail: the numbered options of a dialog, or the input line,
 //! and the literal text `send.lua` must still find on screen before it sends.
 
+use crate::harness::dialog::SHARED;
 use crate::output::clean;
 
 /// Only the end of the screen counts, so an old dialog in the scrollback never matches;
@@ -19,15 +20,7 @@ impl Choice {
     /// An option that writes a rule or changes the mode for later prompts too.
     pub fn lasting(&self) -> bool {
         let label = self.label.to_lowercase().replace('’', "'");
-        [
-            "don't ask again",
-            "always",
-            "auto mode",
-            "this session",
-            "accept edits",
-        ]
-        .iter()
-        .any(|words| label.contains(words))
+        SHARED.lasting.iter().any(|words| label.contains(words))
     }
 }
 
@@ -138,10 +131,13 @@ fn choices(lines: &[String]) -> Option<Vec<Choice>> {
 /// `❯ 1. Yes` or `  2) No`: the digit and its label.
 fn option(line: &str) -> Option<(char, &str)> {
     let rest = line.trim_start();
-    let rest = rest.strip_prefix(['❯', '>']).unwrap_or(rest).trim_start();
+    let rest = rest
+        .strip_prefix(SHARED.cursor)
+        .unwrap_or(rest)
+        .trim_start();
     let mut chars = rest.chars();
     let digit = chars.next().filter(|c| ('1'..='9').contains(c))?;
-    let rest = chars.as_str().strip_prefix(['.', ')'])?;
+    let rest = chars.as_str().strip_prefix(SHARED.separators)?;
     if !rest.starts_with(char::is_whitespace) {
         return None;
     }
@@ -156,7 +152,7 @@ fn prompt(line: &str) -> Option<&str> {
     }
     let rest = line.trim_start();
     let rest = rest.strip_prefix('│').unwrap_or(rest).trim_start();
-    let rest = rest.strip_prefix(['❯', '›', '>'])?;
+    let rest = rest.strip_prefix(SHARED.input)?;
     Some(rest.trim().trim_end_matches('│').trim())
 }
 
@@ -173,7 +169,7 @@ fn vt_typed(vt: &str) -> bool {
         .is_some_and(|chars| {
             let at = chars
                 .iter()
-                .position(|&(c, _)| matches!(c, '❯' | '›' | '>'))
+                .position(|&(c, _)| SHARED.input.contains(&c))
                 .unwrap_or(0);
             chars[at + 1..]
                 .iter()
