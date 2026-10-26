@@ -12,6 +12,8 @@ pub struct Prefs {
     pub detail_hidden: bool,
     #[serde(default)]
     pub motion: Motion,
+    #[serde(default)]
+    pub icons: Icons,
 }
 
 /// `"motion": "reduced"` holds the working spinner still.
@@ -23,6 +25,18 @@ pub enum Motion {
     #[default]
     #[serde(other)]
     Full,
+}
+
+/// `"icons": "nerd"` labels the card's facts with Nerd Font glyphs; `"text"`, the default, with
+/// words.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Icons {
+    Nerd,
+    /// Any other value too, so a typo keeps the rest of the file.
+    #[default]
+    #[serde(other)]
+    Text,
 }
 
 /// A missing or unreadable tui.json is the defaults. Keys this build does not know, such as the
@@ -56,6 +70,7 @@ mod tests {
         let kept = Prefs {
             detail_hidden: true,
             motion: Motion::Reduced,
+            icons: Icons::Nerd,
         };
         save(&path, &kept).unwrap();
         assert_eq!(load(&path), kept);
@@ -69,9 +84,20 @@ mod tests {
             load(&path),
             Prefs {
                 detail_hidden: true,
-                motion: Motion::Full
+                motion: Motion::Full,
+                icons: Icons::Text,
             },
             "an unknown motion is full and keeps the rest"
+        );
+        std::fs::write(&path, r#"{"icons": "emoji", "motion": "reduced"}"#).unwrap();
+        assert_eq!(
+            load(&path),
+            Prefs {
+                detail_hidden: false,
+                motion: Motion::Reduced,
+                icons: Icons::Text,
+            },
+            "unknown icons are words and keep the rest"
         );
         std::fs::write(&path, r#"{"detail": 0.4}"#).unwrap();
         assert!(!load(&path).detail_hidden, "a file from before c shows it");

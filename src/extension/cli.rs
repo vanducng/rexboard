@@ -37,6 +37,7 @@ struct Entry {
     last: Option<String>,
     /// Why it cannot run: broken, or enabled but found nowhere.
     problem: Option<String>,
+    icon: Option<String>,
 }
 
 fn ls(json: bool) -> Result<()> {
@@ -56,7 +57,7 @@ fn ls(json: bool) -> Result<()> {
                 json!({
                     "name": e.name, "contract": e.contract, "enabled": e.enabled,
                     "dir": e.dir, "last_run": runs.get(&e.name),
-                    "problem": e.problem,
+                    "problem": e.problem, "icon": e.icon,
                 })
             })
             .collect();
@@ -91,6 +92,7 @@ fn entries(found: &Discovery, enabled: &[String], runs: &Value) -> Vec<Entry> {
             dir: Some(ext.dir.clone()),
             last: runs.get(ext.name()).map(last_run),
             problem: None,
+            icon: ext.manifest.icon.clone(),
         })
         .collect();
     for problem in &found.problems {
@@ -105,6 +107,7 @@ fn entries(found: &Discovery, enabled: &[String], runs: &Value) -> Vec<Entry> {
             dir: Some(problem.dir.clone()),
             last: None,
             problem: Some(format!("broken: {}", problem.why)),
+            icon: None,
         });
     }
     for name in enabled {
@@ -116,6 +119,7 @@ fn entries(found: &Discovery, enabled: &[String], runs: &Value) -> Vec<Entry> {
                 dir: None,
                 last: None,
                 problem: Some("enabled, but not found".to_owned()),
+                icon: None,
             });
         }
     }
