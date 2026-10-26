@@ -7,6 +7,7 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, Peek, Spot};
+use super::screen::Screen;
 use super::theme;
 use super::view::key_rows;
 use crate::board::Row;
@@ -84,8 +85,14 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
         shorten(&mut lines, over, text);
     }
     let tail = peek.map_or_else(Vec::new, |peek| {
-        let used = lines.len() + if blocked { 0 } else { meta.len() };
-        tail(peek, text, room.saturating_sub(used))
+        let mut rows = room.saturating_sub(lines.len());
+        if !blocked {
+            rows = rows.saturating_sub(meta.len());
+        } else if let Some(dialog) = dialog_rows(peek, text) {
+            // The dialog is the ask; the output above it gives way to the facts.
+            rows = rows.min(dialog);
+        }
+        tail(peek, text, rows)
     });
     if room > 0 {
         let left = room.saturating_sub(lines.len() + tail.len());
@@ -95,6 +102,28 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
     lines.extend(tail);
     lines.extend(meta);
     lines
+}
+
+/// The rows a tail's dialog takes `width` wide, from its opening to the end, as `tail` draws
+/// them; None when the tail shows no dialog.
+fn dialog_rows(peek: &Peek, width: usize) -> Option<usize> {
+    let Some(Ok(lines)) = &peek.lines else {
+        return None;
+    };
+    // The parse drops blank lines at the end, which the tail still draws.
+    let blank = lines
+        .iter()
+        .rev()
+        .take_while(|l| l.trim().is_empty())
+        .count();
+    let count = Screen::parse(&lines.join("\n"), None).dialog? + blank;
+    let room = width.saturating_sub(theme::GUTTER.width()).max(1);
+    Some(
+        lines[lines.len().saturating_sub(count)..]
+            .iter()
+            .map(|line| chop(&clean(line), room).len())
+            .sum(),
+    )
 }
 
 /// The message `over` lines shorter, keeping the bar and the headline; the last kept line ends

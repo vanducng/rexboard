@@ -1584,32 +1584,45 @@ mod tests {
     fn a_blocked_rows_tail_keeps_the_whole_dialog_and_the_facts_take_what_is_left() {
         let mut app = asking("Bash: touch zz-probe-file-2");
         let screen = include_str!("../../tests/fixtures/screens/claude-permission.txt");
+        // A real pane: plenty of earlier output, then the rule Claude draws above its dialog.
+        let mut lines: Vec<String> = (1..=200).map(|n| format!("earlier output {n}")).collect();
+        lines.push("─".repeat(80));
+        lines.extend(screen.lines().map(str::to_owned));
         app.peek = Some(Peek {
             key: "mini/seat-b".into(),
-            lines: Some(Ok(screen.lines().map(str::to_owned).collect())),
+            lines: Some(Ok(lines)),
             at: Some(Utc::now()),
             updated_at: None,
         });
-        for width in [80u16, 140] {
-            let text = render(&app, width, 30);
-            for line in [
-                "Do you want to proceed?",
-                "❯ 1. Yes",
-                "2. Yes, and always",
-                "4. No",
-            ] {
-                assert!(text.contains(line), "{width}: {line}:\n{text}");
+        let ask = [
+            "Do you want to proceed?",
+            "❯ 1. Yes",
+            "2. Yes, and always",
+            "4. No",
+            "Esc to cancel",
+        ];
+        for (width, height, facts) in [(80u16, 30u16, false), (140, 60, true), (200, 60, true)] {
+            let text = render(&app, width, height);
+            for line in ask {
+                assert!(text.contains(line), "{width}x{height}: {line}:\n{text}");
             }
+            // A 30-row card has room for the question and its options, as before the facts;
+            // a taller one shows the dialog from its opening.
+            assert_eq!(
+                text.contains("Bash command"),
+                facts,
+                "{width}x{height}:\n{text}"
+            );
             assert!(
-                !text.contains(" where "),
-                "{width}: the facts gave way:\n{text}"
+                !text.contains("earlier output"),
+                "{width}x{height}: only the dialog:\n{text}"
+            );
+            assert_eq!(
+                text.contains(" where "),
+                facts,
+                "{width}x{height}: the facts take the rows left:\n{text}"
             );
         }
-        let text = render(&app, 200, 60);
-        assert!(
-            text.contains("Do you want to proceed?") && text.contains(" where "),
-            "a tall card has room for both:\n{text}"
-        );
     }
 
     #[test]
