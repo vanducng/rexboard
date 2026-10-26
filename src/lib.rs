@@ -12,6 +12,7 @@ mod pane;
 mod rex;
 mod send;
 mod serve;
+mod show;
 mod state;
 mod tui;
 mod upgrade;
@@ -65,7 +66,10 @@ pub fn execute(cli: &Cli) -> Result<()> {
         Command::Serve(args) if args.stop => client::stop_serve(cli.json),
         Command::Serve(args) if args.foreground => serve::run(),
         Command::Serve(_) => client::start_serve(cli.json),
-        Command::Seen { key } => client::seen(key, cli.json),
+        Command::Seen(args) => client::seen(args, cli.json),
+        Command::Show { key, tail } => show::show(key, *tail, cli.json),
+        Command::Views => show::views(cli.json),
+        Command::Hosts => show::hosts(cli.json),
         Command::Jump { target } => jump::jump(target, cli.json),
         Command::Next { back } => jump::next(*back, cli.json),
         Command::Upgrade { check } => upgrade::run(*check, cli.json),

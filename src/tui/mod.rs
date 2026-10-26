@@ -1,6 +1,6 @@
 mod answer;
 mod app;
-mod card;
+pub(crate) mod card;
 mod clipboard;
 mod columns;
 mod full;
@@ -8,6 +8,7 @@ mod icons;
 mod keys;
 mod meta;
 mod prefs;
+pub(crate) mod query;
 mod screen;
 mod status;
 mod theme;
@@ -415,6 +416,18 @@ fn peek(
         ))),
         Err(Error::Cancelled) => None,
         Err(err) => Some(Err(said(err, "peek failed"))),
+    }
+}
+
+/// `show --tail`: the last `lines` of a row's pane as the card reads them, through the board's
+/// own bounded read.
+pub(crate) fn tail(row: &Row, lines: usize) -> Result<Vec<String>> {
+    let rex = rex::locate()?;
+    let p = &row.pane;
+    match peek(&rex, &p.host, &p.session_id, &p.block_id, false, &|| false) {
+        Some(Ok(all)) => Ok(all[all.len().saturating_sub(lines)..].to_vec()),
+        Some(Err(why)) => Err(Error::Rex(why)),
+        None => Err(Error::Cancelled),
     }
 }
 

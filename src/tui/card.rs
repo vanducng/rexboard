@@ -212,7 +212,7 @@ pub(super) fn bar(
 
 /// How the turn stands: `ended 4m ago`, `waiting 12s`, `for 2m`. Nothing for a
 /// row with no report to date it.
-fn outcome(row: &Row, now: DateTime<Utc>) -> Option<String> {
+pub(crate) fn outcome(row: &Row, now: DateTime<Utc>) -> Option<String> {
     let since = in_state(row, now);
     if since == "-" {
         return None;
