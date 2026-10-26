@@ -150,7 +150,7 @@ A line rexboard cannot read restarts that host's observer the same way: a line t
 | Exit | When |
 | --- | --- |
 | 0 | `--for` elapsed, Ctrl-C or SIGTERM, or stdout closed |
-| 1 | `REX_NOT_FOUND`: no `rex` CLI. `REX`: `rex hosts` failed. `CONTRACT_MISMATCH`: every host stopped and the last one stopped on a version mismatch; next steps `rexboard --version` and the `install.sh` one-liner |
+| 1 | `REX_NOT_FOUND`: no `rex` CLI. `REX`: `rex hosts` failed. `CONTRACT_MISMATCH`: every host stopped and the last one stopped on a version mismatch; next steps `rexboard --version` and `brew upgrade rexboard` |
 | 2 | `USAGE`: neither `--json` nor `--raw`, a bad flag, or `--host` names no host |
 
 ## `rexboard board`
