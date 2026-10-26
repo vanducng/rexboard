@@ -1285,6 +1285,130 @@ mod tests {
         app
     }
 
+    /// The full view of `lines` at `width` by 30, cell by cell.
+    fn full_cells(lines: &[&str], width: u16) -> ratatui::buffer::Buffer {
+        let app = full_of(lines.iter().map(|l| (*l).to_owned()).collect());
+        let now = DateTime::parse_from_rfc3339("2026-01-01T05:43:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
+        terminal.draw(|frame| draw(frame, &app, now)).unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn row_text(buffer: &ratatui::buffer::Buffer, y: u16) -> String {
+        (0..buffer.area.width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect::<String>()
+            .trim_end()
+            .to_owned()
+    }
+
+    const DIFF: [&str; 3] = [
+        "\x1b[31m- removed\x1b[0m",
+        "\x1b[32m+ added\x1b[0m \x1b[1;3;4;7mloud\x1b[22;23;24;27m quiet",
+        "\x1b[38;5;244m@@ -1 +1 @@\x1b[0m   ",
+    ];
+
+    #[test]
+    fn full_view_draws_the_panes_colours_and_modifiers() {
+        let buffer = full_cells(&DIFF, 80);
+        assert_eq!(row_text(&buffer, 1), "- removed");
+        assert_eq!(row_text(&buffer, 2), "+ added loud quiet");
+        assert_eq!(
+            row_text(&buffer, 3),
+            "@@ -1 +1 @@",
+            "padding after the text is dropped"
+        );
+        assert_eq!(buffer[(0, 1)].fg, Color::Indexed(1));
+        assert_eq!(buffer[(2, 2)].fg, Color::Indexed(2));
+        let loud = buffer[(8, 2)].modifier;
+        for m in [
+            Modifier::BOLD,
+            Modifier::ITALIC,
+            Modifier::UNDERLINED,
+            Modifier::REVERSED,
+        ] {
+            assert!(loud.contains(m), "{m:?} in {loud:?}");
+        }
+        assert!(buffer[(13, 2)].modifier.is_empty(), "turned off again");
+        assert_eq!(buffer[(13, 2)].fg, Color::Reset, "reset by 0 before it");
+        assert_eq!(buffer[(0, 3)].fg, Color::Indexed(244));
+    }
+
+    #[test]
+    fn full_view_cuts_a_coloured_line_at_80_without_splitting_its_escapes() {
+        let long = format!("\x1b[48;2;0;64;0m+ {}\x1b[0m\x1b[31mtail", "x".repeat(120));
+        let buffer = full_cells(&[&long], 80);
+        let text = row_text(&buffer, 1);
+        assert_eq!(text.chars().count(), 80);
+        assert!(text.starts_with("+ xxx") && text.ends_with("x…"), "{text}");
+        assert!(!text.contains('\x1b') && !text.contains("[0m"), "{text}");
+        assert_eq!(buffer[(0, 1)].bg, Color::Rgb(0, 64, 0));
+        assert_eq!(
+            buffer[(78, 1)].bg,
+            Color::Rgb(0, 64, 0),
+            "the colour runs to the cut"
+        );
+        assert_eq!(buffer[(79, 1)].symbol(), "…");
+        assert!(buffer[(79, 1)].modifier.contains(Modifier::DIM));
+        assert_ne!(
+            buffer[(79, 1)].bg,
+            Color::Rgb(0, 64, 0),
+            "the mark is the board's"
+        );
+        let padded = format!("\x1b[48;2;0;64;0m+ added{}\x1b[0m", " ".repeat(150));
+        let buffer = full_cells(&[&padded], 80);
+        assert_eq!(
+            row_text(&buffer, 1),
+            "+ added",
+            "no mark when only padding is past the edge"
+        );
+        assert_eq!(
+            buffer[(79, 1)].bg,
+            Color::Rgb(0, 64, 0),
+            "the background runs to the edge"
+        );
+        let wide = full_cells(&[&long], 200);
+        assert!(row_text(&wide, 1).ends_with("xtail"), "uncut when it fits");
+        assert_eq!(wide[(122, 1)].fg, Color::Indexed(1));
+    }
+
+    #[test]
+    fn full_view_reads_with_colours_and_the_card_shows_them_plain() {
+        let mut app = fuller();
+        let effect = press(&mut app, KeyCode::Char(' '));
+        assert!(
+            matches!(effect, Some(Effect::Peek { vt: true, .. })),
+            "{effect:?}"
+        );
+        app.peeked(
+            "mini/seat-b",
+            Ok(DIFF.iter().map(|l| (*l).to_owned()).collect()),
+        );
+        let t0 = app.full.as_ref().unwrap().asked;
+        assert!(matches!(
+            app.live(t0 + crate::tui::full::EVERY),
+            Some(Effect::Peek { vt: true, .. })
+        ));
+        press(&mut app, KeyCode::Esc);
+        let text = render(&app, 80, 30);
+        assert!(
+            text.contains("- removed") && text.contains("+ added loud quiet"),
+            "{text}"
+        );
+        assert!(!text.contains('\x1b') && !text.contains("[31m"), "{text}");
+        let mut board = fuller();
+        board.selected = Some(Spot::Row("mini/seat-b".into()));
+        let t = Instant::now();
+        board.note_card(t);
+        let tail = board.auto_tail(t + Duration::from_secs(1));
+        assert!(
+            matches!(tail, Some(Effect::Peek { vt: false, .. })),
+            "the card's own tail stays text: {tail:?}"
+        );
+    }
+
     fn numbered(n: usize) -> Vec<String> {
         (1..=n).map(|n| format!("peek line {n}")).collect()
     }
