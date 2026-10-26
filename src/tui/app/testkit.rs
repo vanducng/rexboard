@@ -286,14 +286,19 @@ pub fn list_rows(text: &str) -> usize {
     bar.saturating_sub(3)
 }
 
-/// The card's rows: from its bar to the line above the footer.
+/// The card's rows: from its bar to its last line, above the blank row on the footer.
 pub fn card_of(text: &str) -> Vec<String> {
     let lines: Vec<&str> = text.lines().collect();
     let bar = lines.iter().position(|l| l.starts_with("━━")).expect(text);
-    lines[bar..lines.len() - 1]
-        .iter()
-        .map(|l| (*l).to_owned())
-        .collect()
+    let mut end = lines.len() - 1 - usize::from(crate::tui::view::FOOTER_GAP);
+    assert!(
+        lines[end..lines.len() - 1].iter().all(|l| l.is_empty()),
+        "a blank row above the footer:\n{text}"
+    );
+    while end > bar && lines[end - 1].is_empty() {
+        end -= 1;
+    }
+    lines[bar..end].iter().map(|l| (*l).to_owned()).collect()
 }
 
 pub fn asking(msg: &str) -> App {

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/vanducng/rexboard/compare/v0.11.0...v0.11.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **tui:** one card height, its text scrolling, a blank row above the footer ([293e3af](https://github.com/vanducng/rexboard/commit/293e3af4f4b3002ea02ee57e0a58c5175127db02))
+
 ## [0.11.0](https://github.com/vanducng/rexboard/compare/v0.10.0...v0.11.0) (2026-10-26)
 
 

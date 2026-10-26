@@ -721,23 +721,23 @@ mod tests {
         let mut board = table(140);
         buffer(&board, 140, 30);
         let first = board.selected.clone();
-        board.scroll(true);
+        board.scroll(0, true);
         assert_eq!(board.selected, first, "no wrap at the top");
         for _ in 0..10 {
-            board.scroll(false);
+            board.scroll(0, false);
         }
         let last = board.selected.clone();
-        board.scroll(false);
+        board.scroll(0, false);
         assert_eq!(board.selected, last, "no wrap at the bottom");
         assert_ne!(first, last);
         board.filtering = true;
-        board.scroll(true);
+        board.scroll(0, true);
         assert_eq!(board.selected, last, "behind the / prompt");
         board.click(10, 2);
         assert_eq!(board.sort, None);
         board.filtering = false;
         board.commanding = true;
-        board.scroll(true);
+        board.scroll(0, true);
         assert_eq!(board.selected, last, "behind the : prompt");
     }
 
@@ -770,13 +770,13 @@ mod tests {
             .unwrap();
         board.click(10, y);
         assert_eq!(board.selected, Some(Spot::Row("local/seat-a".into())));
-        board.scroll(true);
+        board.scroll(0, true);
         assert_ne!(
             board.selected,
             Some(Spot::Row("local/seat-a".into())),
             "up moves"
         );
-        board.scroll(false);
+        board.scroll(0, false);
         assert_eq!(
             board.selected,
             Some(Spot::Row("local/seat-a".into())),

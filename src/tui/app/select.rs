@@ -309,14 +309,19 @@ impl App {
         }
     }
 
-    /// The wheel moves the selection, as `k` and `j` do, but stops at the ends; with the mouse
-    /// captured the terminal no longer turns it into arrow keys.
-    pub fn scroll(&mut self, up: bool) {
+    /// The wheel at row `y` moves the selection, as `k` and `j` do, but stops at the ends; over
+    /// the card it scrolls the card's text. With the mouse captured the terminal no longer turns
+    /// it into arrow keys.
+    pub fn scroll(&mut self, y: u16, up: bool) {
         if self.full.is_some() {
             return self.full_scroll(if up { 3 } else { -3 });
         }
         if self.prompting() {
             return;
+        }
+        let card = self.card_drawn.get();
+        if (card.top..card.bottom).contains(&y) {
+            return self.card_scroll(if up { -1 } else { 1 });
         }
         let spots = self.spots();
         let Some(last) = spots.len().checked_sub(1) else {
