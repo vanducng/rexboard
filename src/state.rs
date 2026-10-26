@@ -128,8 +128,9 @@ impl Lock {
         Ok(Some((Self { file }, previous)))
     }
 
-    /// Waits for the lock however long another holder keeps it; dropping it lets go.
-    pub fn wait(path: &Path) -> Result<Self> {
+    /// Waits up to `within` for the lock, or None when another holder keeps it that long;
+    /// dropping it lets go.
+    pub fn wait(path: &Path, within: std::time::Duration) -> Result<Option<Self>> {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -137,10 +138,18 @@ impl Lock {
             .truncate(false)
             .mode(0o600)
             .open(path)?;
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
-            return Err(std::io::Error::last_os_error().into());
+        let deadline = std::time::Instant::now() + within;
+        while unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            let err = std::io::Error::last_os_error();
+            if err.raw_os_error() != Some(libc::EWOULDBLOCK) {
+                return Err(err.into());
+            }
+            if std::time::Instant::now() >= deadline {
+                return Ok(None);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        Ok(Self { file })
+        Ok(Some(Self { file }))
     }
 
     /// Whether a running serve holds the lock. A probe that gets it lets go at once.

@@ -651,9 +651,32 @@ impl Serve {
 }
 
 impl Drop for Serve {
+    /// Stops until serve.lock stays free for 200ms: a spare serve that a racing command started
+    /// can take the lock after the first stop.
     fn drop(&mut self) {
-        let _ = self.cmd().args(["serve", "--stop"]).ok();
+        let lock = self.file("serve.lock");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
+            let _ = self.cmd().args(["serve", "--stop"]).ok();
+            let free_since = std::time::Instant::now();
+            while !held(&lock) {
+                if free_since.elapsed() >= std::time::Duration::from_millis(200) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        }
     }
+}
+
+/// Whether something holds the flock on `path`, as rexboard's own probe asks.
+fn held(path: &std::path::Path) -> bool {
+    use std::os::fd::AsRawFd;
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) };
+    rc != 0
 }
 
 /// Polls `check` every 20ms for up to 10s.
@@ -783,7 +806,7 @@ fn a_lock_held_by_another_program_is_left_alone() {
         )),
         "{text}"
     );
-    assert!(text.contains(&format!("kill {pid}")), "{text}");
+    assert!(text.contains("kill <the pid lsof shows>"), "{text}");
     assert!(!text.contains("restarted serve"), "{text}");
     assert_eq!(serve.observer_starts(), 0, "no second serve was started");
 }
@@ -998,9 +1021,9 @@ fn serve_stop_signals_nothing_when_the_lock_names_another_program() {
     assert!(alive, "the holder was not signalled");
     assert!(
         text.contains(&format!(
-            "serve.lock names pid {pid}, which is not rexboard"
-        )),
-        "{text}"
+            "serve.lock names pid {pid}, which does not answer and is not rexboard, so it was left alone"
+        )) && !text.contains("retry"),
+        "the same refusal as any command's: {text}"
     );
 }
 
