@@ -672,94 +672,11 @@ mod tests {
     use ratatui::style::{Color, Modifier};
 
     use super::*;
-    use crate::tui::app::testkit::{app, hosts, press, row};
+    use crate::tui::app::testkit::*;
 
-    /// The rows `?` lists for the board.
-    pub fn listed() -> Vec<(&'static str, &'static str)> {
-        keys::BOARD
-            .iter()
-            .filter(|entry| !entry.keys.is_empty())
-            .map(|entry| (entry.keys, entry.help))
-            .collect()
-    }
     use std::time::{Duration, Instant};
 
     use crate::tui::app::{App, Effect, Peek, Spot};
-
-    /// One row in each look the state table has.
-    fn every_state() -> App {
-        let with = |key: &str, state: &str, group: &str, change: &dyn Fn(&mut Row)| {
-            let mut row = row(key, state, group, false);
-            change(&mut row);
-            row
-        };
-        let rows = vec![
-            with("local/allow", "blocked", "needs_you", &|r| {
-                r.pane.kind = Some("permission".into())
-            }),
-            with("mini/ask", "blocked", "needs_you", &|r| {
-                r.pane.kind = Some("question".into())
-            }),
-            with("local/broke", "error", "needs_you", &|_| {}),
-            with("mini/fresh", "done", "needs_you", &|_| {}),
-            with("local/busy", "working", "working", &|_| {}),
-            with("local/read", "done", "quiet", &|r| r.seen = true),
-            with("mini/rest", "idle", "quiet", &|_| {}),
-            with("local/doubt", "working", "unreported", &|r| {
-                r.suspect = true;
-                r.suspect_reason = Some("reported working at 05:30; zsh is back in front".into());
-            }),
-            with("local/guess", "working", "unreported", &|r| {
-                r.pane.source = "inferred".into()
-            }),
-            with("mini/blank", "unknown", "unreported", &|_| {}),
-            with("studio/away", "working", "unreported", &|r| r.stale = true),
-        ];
-        let mut hosts = crate::tui::app::testkit::hosts();
-        hosts.insert("studio".into(), "down".into());
-        let mut app = App::default();
-        app.set_rows(rows, hosts);
-        app
-    }
-
-    fn fuller() -> App {
-        let mut app = app();
-        let mut estimated = row("mini/rig", "working", "working", true);
-        estimated.since_estimated = true;
-        estimated.pane.tab = "2-toolrig:rig:demo-team#0123456789abcdef#l2".into();
-        estimated.pane.title = "修复解析器🙂 wide title".into();
-        estimated.pane.msg = None;
-        let mut rows = app.rows.clone();
-        rows.insert(3, estimated);
-        let mut seat = row("local/inferred", "unknown", "unreported", true);
-        seat.pane.source = "inferred".into();
-        rows.push(seat);
-        app.set_rows(rows, app.hosts.clone());
-        app
-    }
-
-    fn render(app: &App, width: u16, height: u16) -> String {
-        let now = DateTime::parse_from_rfc3339("2026-01-01T05:43:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-        terminal.draw(|frame| draw(frame, app, now)).unwrap();
-        let buffer = terminal.backend().buffer();
-        (0..height)
-            .map(|y| {
-                (0..width)
-                    .map(|x| buffer[(x, y)].symbol())
-                    .collect::<String>()
-                    .trim_end()
-                    .to_owned()
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    fn screen(width: u16, height: u16) -> String {
-        render(&fuller(), width, height)
-    }
 
     #[test]
     fn renders_groups_counts_and_estimates_at_50_80_and_140() {
@@ -1349,35 +1266,6 @@ mod tests {
         );
     }
 
-    /// The card's rows: from its bar to the line above the footer.
-    fn card_of(text: &str) -> Vec<String> {
-        let lines: Vec<&str> = text.lines().collect();
-        let bar = lines.iter().position(|l| l.starts_with("━━")).expect(text);
-        lines[bar..lines.len() - 1]
-            .iter()
-            .map(|l| (*l).to_owned())
-            .collect()
-    }
-
-    /// The list's row lines: between the column header and the card's bar.
-    fn list_rows(text: &str) -> usize {
-        let lines: Vec<&str> = text.lines().collect();
-        let bar = lines
-            .iter()
-            .position(|l| l.starts_with("━━"))
-            .unwrap_or(lines.len() - 1);
-        bar.saturating_sub(3)
-    }
-
-    fn asking(msg: &str) -> App {
-        let mut app = fuller();
-        let mut rows = app.rows.clone();
-        rows[0].pane.kind = Some("permission".into());
-        rows[0].pane.msg = Some(msg.into());
-        app.set_rows(rows, hosts());
-        app
-    }
-
     #[test]
     fn the_card_says_who_where_how_and_what_at_80_140_and_200() {
         let app = asking("Bash: git push origin main --force-with-lease");
@@ -1652,38 +1540,6 @@ mod tests {
         );
     }
 
-    /// The board with seat-b's full view open and `lines` read from its pane at 05:42:59.
-    fn full_of(lines: Vec<String>) -> App {
-        let mut app = fuller();
-        press(&mut app, KeyCode::Char(' '));
-        app.peeked("mini/seat-b", Ok(lines));
-        app.peek.as_mut().unwrap().at = Some(
-            DateTime::parse_from_rfc3339("2026-01-01T05:42:59Z")
-                .unwrap()
-                .with_timezone(&Utc),
-        );
-        app
-    }
-
-    /// The full view of `lines` at `width` by 30, cell by cell.
-    fn full_cells(lines: &[&str], width: u16) -> ratatui::buffer::Buffer {
-        let app = full_of(lines.iter().map(|l| (*l).to_owned()).collect());
-        let now = DateTime::parse_from_rfc3339("2026-01-01T05:43:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
-        terminal.draw(|frame| draw(frame, &app, now)).unwrap();
-        terminal.backend().buffer().clone()
-    }
-
-    fn row_text(buffer: &ratatui::buffer::Buffer, y: u16) -> String {
-        (0..buffer.area.width)
-            .map(|x| buffer[(x, y)].symbol())
-            .collect::<String>()
-            .trim_end()
-            .to_owned()
-    }
-
     const DIFF: [&str; 3] = [
         "\x1b[31m- removed\x1b[0m",
         "\x1b[32m+ added\x1b[0m \x1b[1;3;4;7mloud\x1b[22;23;24;27m quiet",
@@ -1793,10 +1649,6 @@ mod tests {
             matches!(tail, Some(Effect::Peek { vt: false, .. })),
             "the card's own tail stays text: {tail:?}"
         );
-    }
-
-    fn numbered(n: usize) -> Vec<String> {
-        (1..=n).map(|n| format!("peek line {n}")).collect()
     }
 
     #[test]
@@ -2235,20 +2087,9 @@ mod tests {
         assert_eq!(card[2], "   space captures the screen");
     }
 
-    const PERMISSION: &str = "⏺ Bash(git push origin main --force-with-lease)\n Bash command\n   git push origin main --force-with-lease\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and don't ask again for git push commands in /work/project\n   3. No, and tell Claude what to do differently\n\n Esc to cancel · Tab to amend\n";
-
-    fn answering(text: &str) -> App {
-        let mut app = fuller();
-        let Some(Effect::Read { key, .. }) = press(&mut app, KeyCode::Char('a')) else {
-            panic!("a reads the pane");
-        };
-        app.screen(&key, Ok(crate::tui::screen::Screen::parse(text, None)));
-        app
-    }
-
     #[test]
     fn answer_mode_shows_a_red_bar_the_options_and_its_own_footer_at_80_and_140() {
-        let app = answering(PERMISSION);
+        let app = answer_mode_on(PERMISSION);
         for width in [80, 140] {
             let text = render(&app, width, 24);
             let card = card_of(&text);
@@ -2287,7 +2128,7 @@ mod tests {
 
     #[test]
     fn answer_mode_says_why_a_key_did_nothing_and_shows_a_pending_double_press() {
-        let mut app = answering(PERMISSION);
+        let mut app = answer_mode_on(PERMISSION);
         press(&mut app, KeyCode::Char('x'));
         let text = render(&app, 100, 24);
         assert!(
@@ -2304,7 +2145,7 @@ mod tests {
 
     #[test]
     fn after_a_send_the_card_drops_the_tail_from_before_the_answer() {
-        let mut app = answering(PERMISSION);
+        let mut app = answer_mode_on(PERMISSION);
         app.peek = Some(Peek {
             key: "mini/seat-b".into(),
             lines: Some(Ok(PERMISSION.lines().map(str::to_owned).collect())),
@@ -2321,7 +2162,7 @@ mod tests {
 
     #[test]
     fn after_a_send_the_bar_says_what_went_where() {
-        let mut app = answering(PERMISSION);
+        let mut app = answer_mode_on(PERMISSION);
         press(&mut app, KeyCode::Char('1'));
         app.sent("mini/seat-b", "1 (Yes)", Ok(()));
         let text = render(&app, 140, 24);
@@ -2334,7 +2175,7 @@ mod tests {
         let four = include_str!("../../tests/fixtures/screens/claude-permission.txt");
         for text in [PERMISSION, four] {
             for (height, refused) in [(12, false), (9, false), (13, true), (6, false)] {
-                let mut app = answering(text);
+                let mut app = answer_mode_on(text);
                 if refused {
                     app.answer.as_mut().unwrap().error =
                         Some("the screen changed since it was read; nothing sent".into());
@@ -2373,7 +2214,7 @@ mod tests {
                 }
                 for digit in digits {
                     let drawn = screen.lines().any(|l| l.contains(&format!("{digit}. ")));
-                    let mut copy = answering(text);
+                    let mut copy = answer_mode_on(text);
                     render(&copy, 80, height);
                     let sent = press(&mut copy, KeyCode::Char(digit));
                     if shown.contains(&digit) {
@@ -2517,8 +2358,8 @@ mod tests {
             app.answer.as_mut().unwrap().captured = Some(at.with_timezone(&Utc));
             app
         };
-        screens.push(("answer 80", pinned(answering(PERMISSION)), 80, 30));
-        let mut refused = pinned(answering(PERMISSION));
+        screens.push(("answer 80", pinned(answer_mode_on(PERMISSION)), 80, 30));
+        let mut refused = pinned(answer_mode_on(PERMISSION));
         refused.answer.as_mut().unwrap().error = Some("the screen changed; nothing sent".into());
         screens.push(("answer refused 80", refused, 80, 30));
         let long = format!("\x1b[48;2;0;64;0m+ {}\x1b[0m", "x".repeat(120));
@@ -2573,10 +2414,10 @@ mod extension_tests {
     use ratatui::backend::TestBackend;
     use ratatui::crossterm::event::KeyCode;
 
-    use super::tests::listed;
     use super::*;
     use crate::client::{ExtRun, Field};
     use crate::tui::app::App;
+    use crate::tui::app::testkit::listed;
     use crate::tui::app::testkit::{app, hosts, press};
     use crate::tui::columns::{Col, Columns, Dir};
 

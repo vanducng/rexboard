@@ -1,7 +1,12 @@
 //! Fixtures the app's tests and the board's other tests share: rows, a board, and keys
 //! pressed at a person's pace.
 
+use chrono::{DateTime, Utc};
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
+
 use super::*;
+use crate::tui::view::draw;
 
 /// An idle prompt, as a fast host reads it back.
 pub const IDLE: &str = "────\n❯\u{a0}\n";
@@ -186,3 +191,163 @@ pub fn drawn(app: &App) {
         answer.lines(chrono::Utc::now(), 120, 40);
     }
 }
+
+/// The rows `?` lists for the board.
+pub fn listed() -> Vec<(&'static str, &'static str)> {
+    keys::BOARD
+        .iter()
+        .filter(|entry| !entry.keys.is_empty())
+        .map(|entry| (entry.keys, entry.help))
+        .collect()
+}
+
+/// One row in each look the state table has.
+pub fn every_state() -> App {
+    let with = |key: &str, state: &str, group: &str, change: &dyn Fn(&mut Row)| {
+        let mut row = row(key, state, group, false);
+        change(&mut row);
+        row
+    };
+    let rows = vec![
+        with("local/allow", "blocked", "needs_you", &|r| {
+            r.pane.kind = Some("permission".into())
+        }),
+        with("mini/ask", "blocked", "needs_you", &|r| {
+            r.pane.kind = Some("question".into())
+        }),
+        with("local/broke", "error", "needs_you", &|_| {}),
+        with("mini/fresh", "done", "needs_you", &|_| {}),
+        with("local/busy", "working", "working", &|_| {}),
+        with("local/read", "done", "quiet", &|r| r.seen = true),
+        with("mini/rest", "idle", "quiet", &|_| {}),
+        with("local/doubt", "working", "unreported", &|r| {
+            r.suspect = true;
+            r.suspect_reason = Some("reported working at 05:30; zsh is back in front".into());
+        }),
+        with("local/guess", "working", "unreported", &|r| {
+            r.pane.source = "inferred".into()
+        }),
+        with("mini/blank", "unknown", "unreported", &|_| {}),
+        with("studio/away", "working", "unreported", &|r| r.stale = true),
+    ];
+    let mut hosts = crate::tui::app::testkit::hosts();
+    hosts.insert("studio".into(), "down".into());
+    let mut app = App::default();
+    app.set_rows(rows, hosts);
+    app
+}
+
+pub fn fuller() -> App {
+    let mut app = app();
+    let mut estimated = row("mini/rig", "working", "working", true);
+    estimated.since_estimated = true;
+    estimated.pane.tab = "2-toolrig:rig:demo-team#0123456789abcdef#l2".into();
+    estimated.pane.title = "修复解析器🙂 wide title".into();
+    estimated.pane.msg = None;
+    let mut rows = app.rows.clone();
+    rows.insert(3, estimated);
+    let mut seat = row("local/inferred", "unknown", "unreported", true);
+    seat.pane.source = "inferred".into();
+    rows.push(seat);
+    app.set_rows(rows, app.hosts.clone());
+    app
+}
+
+pub fn render(app: &App, width: u16, height: u16) -> String {
+    let now = DateTime::parse_from_rfc3339("2026-01-01T05:43:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| draw(frame, app, now)).unwrap();
+    let buffer = terminal.backend().buffer();
+    (0..height)
+        .map(|y| {
+            (0..width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn screen(width: u16, height: u16) -> String {
+    render(&fuller(), width, height)
+}
+
+/// The list's row lines: between the column header and the card's bar.
+pub fn list_rows(text: &str) -> usize {
+    let lines: Vec<&str> = text.lines().collect();
+    let bar = lines
+        .iter()
+        .position(|l| l.starts_with("━━"))
+        .unwrap_or(lines.len() - 1);
+    bar.saturating_sub(3)
+}
+
+/// The card's rows: from its bar to the line above the footer.
+pub fn card_of(text: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let bar = lines.iter().position(|l| l.starts_with("━━")).expect(text);
+    lines[bar..lines.len() - 1]
+        .iter()
+        .map(|l| (*l).to_owned())
+        .collect()
+}
+
+pub fn asking(msg: &str) -> App {
+    let mut app = fuller();
+    let mut rows = app.rows.clone();
+    rows[0].pane.kind = Some("permission".into());
+    rows[0].pane.msg = Some(msg.into());
+    app.set_rows(rows, hosts());
+    app
+}
+
+/// The board with seat-b's full view open and `lines` read from its pane at 05:42:59.
+pub fn full_of(lines: Vec<String>) -> App {
+    let mut app = fuller();
+    press(&mut app, KeyCode::Char(' '));
+    app.peeked("mini/seat-b", Ok(lines));
+    app.peek.as_mut().unwrap().at = Some(
+        DateTime::parse_from_rfc3339("2026-01-01T05:42:59Z")
+            .unwrap()
+            .with_timezone(&Utc),
+    );
+    app
+}
+
+/// The full view of `lines` at `width` by 30, cell by cell.
+pub fn full_cells(lines: &[&str], width: u16) -> ratatui::buffer::Buffer {
+    let app = full_of(lines.iter().map(|l| (*l).to_owned()).collect());
+    let now = DateTime::parse_from_rfc3339("2026-01-01T05:43:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
+    terminal.draw(|frame| draw(frame, &app, now)).unwrap();
+    terminal.backend().buffer().clone()
+}
+
+pub fn row_text(buffer: &ratatui::buffer::Buffer, y: u16) -> String {
+    (0..buffer.area.width)
+        .map(|x| buffer[(x, y)].symbol())
+        .collect::<String>()
+        .trim_end()
+        .to_owned()
+}
+
+pub fn numbered(n: usize) -> Vec<String> {
+    (1..=n).map(|n| format!("peek line {n}")).collect()
+}
+
+pub fn answer_mode_on(text: &str) -> App {
+    let mut app = fuller();
+    let Some(Effect::Read { key, .. }) = press(&mut app, KeyCode::Char('a')) else {
+        panic!("a reads the pane");
+    };
+    app.screen(&key, Ok(crate::tui::screen::Screen::parse(text, None)));
+    app
+}
+
+pub const PERMISSION: &str = "⏺ Bash(git push origin main --force-with-lease)\n Bash command\n   git push origin main --force-with-lease\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and don't ask again for git push commands in /work/project\n   3. No, and tell Claude what to do differently\n\n Esc to cancel · Tab to amend\n";
