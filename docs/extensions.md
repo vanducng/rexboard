@@ -2,7 +2,7 @@
 
 An extension adds fields to rows, and may give a row with no status of its own a fallback status, from any tool, without rexboard knowing the tool. It is a directory holding `extension.toml` and an adapter: a program that reads the rows as JSON on stdin and prints fields per row as JSON on stdout. rexboard speaks to it through **contract 1**, described here. This page is the contract's source of truth, and a test checks that its JSON samples parse with rexboard's own types.
 
-## Write one in a minute
+## Write one
 
 ```sh
 rexboard ext new my-tool        # ~/.config/rexboard/extensions/my-tool, from the example
@@ -10,7 +10,7 @@ $EDITOR ~/.config/rexboard/extensions/my-tool/adapter
 rexboard ext test my-tool       # one run against serve's rows; exit 1 if the answer breaks the contract
 ```
 
-Then add `my-tool` to `extensions.enabled` in [config.toml](configuration.md). serve picks it up at its next rescan, or at once after `rexboard serve --stop`.
+Then add `my-tool` to `extensions.enabled` in [config.toml](configuration.md). serve reads the manifests and the `[extensions]` table when it starts and at each rescan (every 5 minutes); `rexboard serve --stop` picks up a change at once.
 
 The example, [`examples/extensions/session-prefix`](../examples/extensions/session-prefix), is a whole adapter in POSIX `sh` and `jq`. It gives each row a `project`, its session label up to the first `-`:
 
@@ -44,11 +44,11 @@ icon = "\uF502"          # the field's own mark on the card, in place of its nam
 status = false           # true lets it give rows with no record a status
 ```
 
-`description`, `every`, `timeout`, `icon`, `fields` (and each field's `icon`) and `provides` are optional; the values above for `every` and `timeout` are their defaults. A key the manifest does not know, a name that does not match the directory, another contract, a field declared twice, or an `icon` that is not one character one cell wide makes the extension broken: `rexboard ext ls` says why, and serve skips it and logs why.
+`description`, `every`, `timeout`, `icon`, `fields` (and each field's `icon`) and `provides` are optional; the values above for `every` and `timeout` are their defaults. A field needs both `name` and `title`. The extension is broken when the manifest has a key it does not know, a name that does not match the directory, a name or field name that is not `[a-z0-9-]+`, another contract, an empty `cmd`, `every` under 2, `timeout` of 0 or not less than `every`, a field declared twice, or an `icon` that is not one character one cell wide. `rexboard ext ls` says why, and serve skips it and logs why.
 
 The icons show only with `"icons": "nerd"` (see [TUI](tui.md#icons)): the card labels the extension's fields with its `icon` and puts each field's `icon` in place of its name, `<icon> <icon> api`. Without one, the card's package mark stands in and the extension's name and the field's name stay. In words mode, and everywhere else (column headers, `ls`, `--json`), titles and names are used as before; `ext ls --json` lists an extension's `icon`. A Nerd Font glyph from the Basic Multilingual Plane (U+E000 to U+F8FF) is the safe choice: one from plane 15 can draw two cells wide in some terminals. A rexboard older than this key does not know it, so it marks a manifest that has one broken.
 
-Extensions are found in `$XDG_CONFIG_HOME/rexboard/extensions` (`~/.config/rexboard/extensions`), then in each of `extensions.dirs`, one directory per extension. The first of a name wins. Only the names in `extensions.enabled` run: a directory dropped in runs nothing by itself.
+Extensions are found in `$XDG_CONFIG_HOME/rexboard/extensions` (`~/.config/rexboard/extensions`), then in each of `extensions.dirs`, one directory per extension. The first of a name wins; `ext ls` shows a later one as `broken: shadowed by an earlier extension named NAME`. Only the names in `extensions.enabled` run: a directory dropped in runs nothing by itself.
 
 ## The request
 
@@ -77,7 +77,7 @@ Every `every` seconds, serve runs the adapter in its directory and writes one re
 ```
 
 - `settings` is `[extensions.settings.NAME]` from config.toml, untouched, or `{}`.
-- `rows` holds every pane serve has, plain shells too. The names match `rexboard ls --json`. `process` and `harness` may be `null`. `state` is `unknown` and `source` is `inferred` for a pane with no status record.
+- `rows` holds every pane serve has, plain shells too. The names match `rexboard ls --json`. `process` and `harness` may be `null`. A pane with no status record has `state` `unknown` and `source` `inferred`, or the state and `source` (the extension's name) of a fallback status given before.
 - The adapter is not run until serve has rows.
 
 ## The response
@@ -102,7 +102,7 @@ The adapter prints one JSON object on stdout and exits 0:
 
 A row's fields reach `rexboard ls --json` under `ext`, by id: `"ext": {"session-prefix.project": "api"}`. A field's short name is its own (`project`), unless another enabled extension declares a field of the same name; then both go by id. On the board each field gets a view, a column and a filter key; see [TUI](tui.md#extension-fields).
 
-A row's own status record always wins: an extension's status reaches only rows with none.
+A row's own status record always wins: an extension's status reaches only rows with none. Such a row has the extension's name as its `source`, and is grouped by the state given.
 
 ## Limits and failures
 

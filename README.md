@@ -6,7 +6,7 @@ An attention board for coding-agent panes across [Rex](https://www.superlogical.
 
 ## Install
 
-Needs Rex, with its `rex` CLI on your PATH; jumps need the Rex app.
+Needs Rex, with its `rex` CLI on your PATH. Jumps also need the Rex app.
 
 ```bash
 brew install vanducng/tap/rexboard
@@ -16,42 +16,34 @@ brew install vanducng/tap/rexboard
 
 ```bash
 rexboard                 # the board, in this terminal
-rexboard ls --json       # every agent pane, most urgent first, as JSON
 rexboard next            # go to the next pane that needs you
-rexboard pick            # choose a pane from the list and go to it
+rexboard pick            # choose a pane from a list and go to it
+rexboard ls --json       # every agent pane, most urgent first
 rexboard upgrade         # upgrade to the latest release
 ```
 
-On the board the keys are vim's, plain keys and vim's own ctrl chords only, so they work in a stock Rex window: `j`/`k` move, `n` goes to the next row that needs you, `enter` jumps to its pane and `-` comes back, `space` shows the pane live, `a` answers it, `m` marks it seen, `/` filters, `o` sorts, `dd` closes a pane after asking, and `?` lists the rest. A prefix shows its next keys in the footer. See [TUI](docs/tui.md#keys).
+The first command starts `rexboard serve` in the background. It watches this host and every host in `rex hosts`, and remembers what Rex does not: how long each pane has been in its state, and whether you have seen it.
 
-The first command starts `rexboard serve` in the background. It watches this host and every host in `rex hosts`, and keeps what Rex does not: how long each pane has been in its state, and whether you have seen it.
+On the board, `j`/`k` move, `n` goes to the next row that needs you, `enter` jumps to its pane and `-` comes back. `space` watches the pane live, `a` answers it, `m` marks it seen, `/` filters, `o` sorts and `dd` closes a pane after asking. `?` lists every key. The keys are vim's and work in a stock Rex window. See [TUI](docs/tui.md#keys).
 
-## What "needs you" and "seen" mean
+A pane needs you when it is blocked, has an error, or is done and you have not seen it. Going to it, or `m`, marks it seen. Its state is what its agent reports to Rex: Claude Code and Codex report on their own in a Rex pane, an agent inside tmux needs a hook, and a pane that reports nothing is read from its title. [Agent status](docs/agent-status.md) says what to check when a row looks wrong.
 
-A pane needs you when it is blocked (often on a permission prompt), has an error, or is done and you have not seen it yet. Going to a pane marks it seen, and so does `m` on the board (`:seen` marks every shown done row seen). A done pane you have seen moves to QUIET; a blocked or erroring one stays in NEEDS YOU until it moves on. A pane is unseen again each time it enters `done`, `blocked` or `error`.
-
-## Where status comes from
-
-Each pane's state is the status its agent reports to Rex. Claude Code and Codex report on their own when they run straight in a Rex pane. An agent inside tmux needs a hook to pass its status through tmux. A pane that reports nothing still shows, with its state read from its title. [Agent status](docs/agent-status.md) has the details, and what to check when a row looks wrong.
-
-## How it works
-
-<img alt="rexboard architecture: rexboard is one Rust binary and Rex runs its Lua scripts. On local (this Mac) and mini, rex do runs observer.lua, which streams NDJSON to rexboard serve; serve keeps state on disk and answers the CLI (ls, watch, seen) and the ratatui board over a unix socket. A jump, the one write to Rex, runs jump.lua: session.focus_block on the pane's host, then client.perform session.select on the Rex app" src="docs/assets/architecture.svg" width="100%">
-
-rexboard reads Rex. Only a jump (blue) writes to it: it focuses the pane on its host and asks the Rex app to show it. [System architecture](docs/system-architecture.md#stack) names the stack and every Rex API call rexboard makes.
+rexboard only reads Rex, except to jump to a pane and, from the board, to answer or close one.
 
 ## Docs
 
 | Page | What it covers |
 | --- | --- |
-| [CLI](docs/cli.md) | Every command, its output, fields and exit codes |
-| [TUI](docs/tui.md) | The board's layout and keys, and `pick` |
-| [Agent status](docs/agent-status.md) | Where each row's status comes from, and what to check when a row looks wrong |
-| [Configuration](docs/configuration.md) | `config.toml`: the app client, excluded hosts and enabled extensions |
-| [Extensions](docs/extensions.md) | Add fields and a fallback status from any tool: the contract, the example, and `rexboard ext` |
-| [System architecture](docs/system-architecture.md) | The stack, serve, the observers, the protocol and the files |
-| [Development](docs/development-guidelines.md) | Setup, checks, layout, conventions, tests |
-| [Deployment](docs/deployment.md) | CI, release-please, release assets, install, rollback |
+| [CLI](docs/cli.md) | Every command, its output, JSON fields and exit codes |
+| [TUI](docs/tui.md) | The board's layout, views, keys, full view, answer mode and `pick` |
+| [Agent status](docs/agent-status.md) | Where each row's status comes from, and what to check when one looks wrong |
+| [Configuration](docs/configuration.md) | `config.toml`: the app client, excluded hosts and extensions |
+| [Extensions](docs/extensions.md) | Add fields, and a fallback status, from any tool |
+| [System architecture](docs/system-architecture.md) | serve, the observers, the Rex calls, the protocol and the files |
+| [Decisions](docs/decisions/README.md) | Why rexboard works the way it does, one record per decision |
+| [Contributing](CONTRIBUTING.md) | Setup, checks, how to add a key, command or page, and pull request rules |
+| [Development](docs/development-guidelines.md) | The code map and the tests |
+| [Deployment](docs/deployment.md) | CI, releases, install, upgrade and rollback |
 
 ## License
 
