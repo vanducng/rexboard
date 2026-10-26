@@ -673,7 +673,7 @@ mod tests {
     #[test]
     fn mouse_capture_follows_the_table_view_and_never_reaches_pick() {
         use ratatui::crossterm::event::KeyCode;
-        let mut app = app::tests::app();
+        let mut app = app::testkit::app();
         let mut on = false;
         let mut out = Vec::new();
         let mut step = |app: &App, out: &mut Vec<u8>| {
@@ -682,12 +682,12 @@ mod tests {
             String::from_utf8_lossy(out).into_owned()
         };
         assert_eq!(step(&app, &mut out), "", "status: off, nothing written");
-        app::tests::press(&mut app, KeyCode::Char('v'));
+        app::testkit::press(&mut app, KeyCode::Char('v'));
         assert!(step(&app, &mut out).contains("\x1b[?1000h"), "table: on");
         assert_eq!(step(&app, &mut out), "", "only on a change");
-        app::tests::press(&mut app, KeyCode::Char('v'));
+        app::testkit::press(&mut app, KeyCode::Char('v'));
         assert!(step(&app, &mut out).contains("\x1b[?1000l"), "harness: off");
-        let mut pick = app::tests::app();
+        let mut pick = app::testkit::app();
         pick.pick = true;
         pick.view = views::views().remove(1);
         assert!(!pick.clicks(), "pick keeps text selection");
@@ -696,7 +696,7 @@ mod tests {
     #[test]
     fn motion_and_drags_ask_for_no_redraw() {
         use ratatui::crossterm::event::KeyModifiers;
-        let mut app = app::tests::app();
+        let mut app = app::testkit::app();
         app.view = views::views().remove(1);
         let event = |kind| MouseEvent {
             kind,

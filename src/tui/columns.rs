@@ -535,7 +535,7 @@ mod tests {
 
     use super::*;
     use crate::tui::app::App;
-    use crate::tui::app::tests::{app, hosts, row};
+    use crate::tui::app::testkit::{app, hosts, row};
     use crate::tui::view::draw;
 
     fn now() -> DateTime<Utc> {
@@ -645,7 +645,7 @@ mod tests {
 
     #[test]
     fn a_click_on_the_sort_arrow_flips_the_sort() {
-        use crate::tui::app::tests::sort;
+        use crate::tui::app::testkit::sort;
 
         for (width, letter, sorted) in [(140, 'a', Col::Age), (100, 'o', Col::Host)] {
             let mut app = table(width);
@@ -664,7 +664,7 @@ mod tests {
 
     #[test]
     fn at_100_the_arrow_follows_a_name_with_no_gap_before_it() {
-        use crate::tui::app::tests::sort;
+        use crate::tui::app::testkit::sort;
 
         let mut app = table(100);
         sort(&mut app, 'o');
@@ -798,7 +798,7 @@ mod tests {
 
     #[test]
     fn opening_the_table_view_says_how_to_sort_and_select_once() {
-        use crate::tui::app::tests::press;
+        use crate::tui::app::testkit::press;
         use ratatui::crossterm::event::KeyCode;
         let mut app = app();
         press(&mut app, KeyCode::Char('v'));
@@ -941,7 +941,7 @@ mod tests {
 
     #[test]
     fn e_n_and_b_sort_by_session_window_and_block_and_again_reverse() {
-        use crate::tui::app::tests::sort;
+        use crate::tui::app::testkit::sort;
 
         let mut app = App::default();
         app.set_rows(
@@ -970,7 +970,7 @@ mod tests {
 
     #[test]
     fn the_filter_matches_session_window_and_block() {
-        use crate::tui::app::tests::press;
+        use crate::tui::app::testkit::press;
         use ratatui::crossterm::event::KeyCode;
         for query in ["ses-c", "win-b", "blk-a"] {
             let mut app = App::default();

@@ -349,7 +349,7 @@ mod tests {
 
     #[test]
     fn every_state_has_its_glyph() {
-        use crate::tui::app::tests::row;
+        use crate::tui::app::testkit::row;
         let glyph_of = |row: &Row| face(look(row)).frame(at(0), false);
         let mut question = row("a/q", "blocked", "needs_you", false);
         question.pane.kind = Some("question".into());

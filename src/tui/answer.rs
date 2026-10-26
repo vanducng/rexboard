@@ -386,7 +386,7 @@ fn hang(line: &str, width: usize, indent: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::app::tests::row;
+    use crate::tui::app::testkit::row;
 
     fn dialog() -> Answer {
         let mut answer = Answer::new(

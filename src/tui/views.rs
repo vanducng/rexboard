@@ -124,7 +124,7 @@ mod tests {
     use ratatui::crossterm::event::KeyCode;
 
     use super::*;
-    use crate::tui::app::tests::{app, hosts, press, row, sort};
+    use crate::tui::app::testkit::{app, hosts, press, row, sort};
     use crate::tui::app::{App, Spot};
     use crate::tui::columns::{Col, Dir};
 

@@ -672,7 +672,7 @@ mod tests {
     use ratatui::style::{Color, Modifier};
 
     use super::*;
-    use crate::tui::app::tests::{app, hosts, press, row};
+    use crate::tui::app::testkit::{app, hosts, press, row};
 
     /// The rows `?` lists for the board.
     pub fn listed() -> Vec<(&'static str, &'static str)> {
@@ -715,7 +715,7 @@ mod tests {
             with("mini/blank", "unknown", "unreported", &|_| {}),
             with("studio/away", "working", "unreported", &|r| r.stale = true),
         ];
-        let mut hosts = crate::tui::app::tests::hosts();
+        let mut hosts = crate::tui::app::testkit::hosts();
         hosts.insert("studio".into(), "down".into());
         let mut app = App::default();
         app.set_rows(rows, hosts);
@@ -1172,7 +1172,7 @@ mod tests {
                 .contains("view:")
         );
         press(&mut app, KeyCode::Char('v'));
-        crate::tui::app::tests::sort(&mut app, 'a');
+        crate::tui::app::testkit::sort(&mut app, 'a');
         let top = render(&app, 120, 30).lines().next().unwrap().to_owned();
         assert!(top.starts_with("rexboard · view: table ↓age · "), "{top}");
         let narrow = render(&app, 50, 30).lines().next().unwrap().to_owned();
@@ -1276,7 +1276,7 @@ mod tests {
             }
         }
         press(&mut app, KeyCode::Char('v'));
-        crate::tui::app::tests::sort(&mut app, 'a');
+        crate::tui::app::testkit::sort(&mut app, 'a');
         let top = render(&app, 120, 30).lines().next().unwrap().to_owned();
         assert!(
             top.starts_with("rexboard · view: table ↓age · only question · "),
@@ -1888,7 +1888,7 @@ mod tests {
         assert!(!text.contains("peek line 201"), "held while paused");
         press(&mut app, KeyCode::PageUp);
         assert_eq!(render(&app, 80, 30).lines().nth(28), Some("peek line 171"));
-        crate::tui::app::tests::key(
+        crate::tui::app::testkit::key(
             &mut app,
             KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL),
         );
@@ -1897,7 +1897,7 @@ mod tests {
             Some("peek line 143"),
             "ctrl-b pages too"
         );
-        crate::tui::app::tests::key(
+        crate::tui::app::testkit::key(
             &mut app,
             KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
         );
@@ -1906,7 +1906,7 @@ mod tests {
             Some("peek line 157"),
             "ctrl-d half a page"
         );
-        crate::tui::app::tests::key(
+        crate::tui::app::testkit::key(
             &mut app,
             KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL),
         );
@@ -2155,7 +2155,7 @@ mod tests {
         press(&mut app, KeyCode::Char('c'));
         assert!(!app.hidden, "c after f belongs to f");
         assert_eq!(app.toast(), Some("f takes w d q p e u i; ff clears"));
-        crate::tui::app::tests::sort(&mut app, 's');
+        crate::tui::app::testkit::sort(&mut app, 's');
         assert!(app.sort.is_some(), "o s sorts");
     }
 
@@ -2453,7 +2453,7 @@ mod tests {
         ];
         let mut table = fuller();
         press(&mut table, KeyCode::Char('v'));
-        crate::tui::app::tests::sort(&mut table, 'a');
+        crate::tui::app::testkit::sort(&mut table, 'a');
         screens.push(("table sorted 140", table, 140, 30));
         let mut keys = fuller();
         press(&mut keys, KeyCode::Char('?'));
@@ -2577,7 +2577,7 @@ mod extension_tests {
     use super::*;
     use crate::client::{ExtRun, Field};
     use crate::tui::app::App;
-    use crate::tui::app::tests::{app, hosts, press};
+    use crate::tui::app::testkit::{app, hosts, press};
     use crate::tui::columns::{Col, Columns, Dir};
 
     fn field(id: &str, title: &str) -> Field {
@@ -2710,7 +2710,7 @@ mod extension_tests {
             .unwrap();
         assert_eq!(project.underline, Some(0));
         press(&mut app, KeyCode::Char('v'));
-        crate::tui::app::tests::sort(&mut app, 'r');
+        crate::tui::app::testkit::sort(&mut app, 'r');
         assert_eq!(app.sort, Some((Col::Field("fake.rig"), Dir::Up)));
         assert_eq!(
             keys(&app),
@@ -2798,13 +2798,13 @@ mod extension_tests {
         let rows = key_rows(&app);
         let at = rows.iter().position(|(k, _)| k == "o r p l").unwrap();
         assert_eq!(rows[at - 1].0, "o", "right after the sort row");
-        let mut one = crate::tui::app::tests::app();
+        let mut one = crate::tui::app::testkit::app();
         one.set_extensions(vec![field("fake.rig", "RIG")], BTreeMap::new());
         assert!(
             key_rows(&one).contains(&("o r".to_owned(), "sort by rig (fake)".to_owned())),
             "the source while it fits"
         );
-        let mut plain = crate::tui::app::tests::app();
+        let mut plain = crate::tui::app::testkit::app();
         press(&mut plain, KeyCode::Char('?'));
         assert_eq!(
             key_rows(&plain).len(),
@@ -2891,7 +2891,7 @@ mod extension_tests {
         app.set_extensions(Vec::new(), BTreeMap::new());
         assert_eq!(app.view.name, "status");
         assert_eq!(app.sort, None);
-        let mut plain = crate::tui::app::tests::app();
+        let mut plain = crate::tui::app::testkit::app();
         let before: Vec<String> = [50, 80, 120, 140, 200]
             .map(|w| render(&plain, w, 30))
             .into();

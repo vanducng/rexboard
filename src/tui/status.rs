@@ -72,7 +72,7 @@ pub mod tests {
 
     use super::*;
     use crate::tui::app::App;
-    use crate::tui::app::tests::{hosts, press, row};
+    use crate::tui::app::testkit::{hosts, press, row};
 
     /// One row per status, plus the edge cases: a seen done row, a blocked row with no kind, a
     /// stale working row (UNREPORTED) and an idle row, which no letter takes.
