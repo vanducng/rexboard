@@ -2,6 +2,7 @@
 //! a table of how each row state looks. Nothing outside this file picks a colour or a glyph, so a
 //! new look is an edit here.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -53,7 +54,7 @@ pub fn strong() -> Style {
     Style::new().add_modifier(Modifier::BOLD)
 }
 
-/// The board's name and the key table's title.
+/// The board's name, the key table's title, and an answer armed to send.
 pub fn accent() -> Style {
     Style::new().fg(ACCENT).add_modifier(Modifier::BOLD)
 }
@@ -63,7 +64,7 @@ pub fn alert() -> Style {
     Style::new().fg(ALERT)
 }
 
-/// A passing message, or a jump on its way.
+/// A passing message, or a jump or an answer on its way.
 pub fn note() -> Style {
     Style::new().fg(ACCENT)
 }
@@ -101,44 +102,54 @@ pub fn alert_label() -> Style {
 /// How a row looks, before the table says what that means.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Look {
+    /// Blocked on a permission, or on anything but a question.
     Blocked,
+    Question,
     Error,
     /// Done and not yet seen.
     Unseen,
+    Seen,
     Working,
-    /// Idle, or done and seen.
-    Quiet,
-    /// A record the board doubts.
+    Idle,
+    /// A `working` record the board doubts.
     Suspect,
+    /// No state, or one only inferred from the pane.
     Unknown,
+    /// Its host stopped answering.
+    Stale,
 }
 
 #[cfg(test)]
-pub const LOOKS: [Look; 7] = [
+pub const LOOKS: [Look; 10] = [
     Look::Blocked,
+    Look::Question,
     Look::Error,
     Look::Unseen,
+    Look::Seen,
     Look::Working,
-    Look::Quiet,
+    Look::Idle,
     Look::Suspect,
     Look::Unknown,
+    Look::Stale,
 ];
 
-/// What a look draws: its glyph, or the frames it cycles through every `interval`, and its
-/// colour and modifiers.
+/// What a look draws: the frames it cycles through every `interval` (one, for most), the glyph
+/// it holds still when motion is off, and its colour and modifiers.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Face {
     pub frames: &'static [&'static str],
     pub interval: Duration,
+    pub still: &'static str,
     pub fg: Option<Color>,
     pub modifier: Modifier,
 }
 
 impl Face {
-    const fn still(glyph: &'static [&'static str], fg: Option<Color>, modifier: Modifier) -> Face {
+    const fn of(glyph: &'static str, fg: Option<Color>, modifier: Modifier) -> Face {
         Face {
-            frames: glyph,
+            frames: &[],
             interval: Duration::ZERO,
+            still: glyph,
             fg,
             modifier,
         }
@@ -149,66 +160,90 @@ impl Face {
     }
 
     /// The frame showing at `now`: from the clock, so every redraw in one interval draws the same.
-    pub fn frame(&self, now: DateTime<Utc>) -> &'static str {
-        if !self.animated() {
-            return self.frames[0];
+    pub fn frame(&self, now: DateTime<Utc>, moving: bool) -> &'static str {
+        if !moving || !self.animated() {
+            return self.still;
         }
         let step = now.timestamp_millis().max(0) as u128 / self.interval.as_millis();
         self.frames[(step % self.frames.len() as u128) as usize]
     }
 }
 
-/// The table: how each look is drawn.
+/// The table: how each look is drawn. Each glyph is one cell wide in every terminal and never
+/// an emoji, and its shape says the state without the colour.
 pub fn face(look: Look) -> Face {
+    let loud = Modifier::BOLD;
     match look {
-        Look::Blocked => Face::still(&["◉"], Some(ALERT), Modifier::empty()),
-        Look::Error => Face::still(&["✖"], Some(ALERT), Modifier::empty()),
-        Look::Unseen => Face::still(&["●"], Some(OK), Modifier::empty()),
-        Look::Working => Face::still(&["◐"], Some(WARN), Modifier::empty()),
-        Look::Quiet | Look::Suspect => Face::still(&["○"], None, Modifier::DIM),
-        Look::Unknown => Face::still(&["·"], None, Modifier::DIM),
+        Look::Blocked => Face::of("!", Some(ALERT), loud),
+        Look::Question => Face::of("?", Some(ALERT), loud),
+        Look::Error => Face::of("✗", Some(ALERT), loud),
+        Look::Unseen => Face::of("✓", Some(OK), loud),
+        Look::Seen => Face::of("✓", None, Modifier::DIM),
+        Look::Working => Face {
+            frames: &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+            interval: Duration::from_millis(80),
+            ..Face::of("⠿", Some(WARN), Modifier::empty())
+        },
+        Look::Idle | Look::Suspect => Face::of("○", None, Modifier::DIM),
+        Look::Unknown => Face::of("·", None, Modifier::DIM),
+        Look::Stale => Face::of("◌", None, Modifier::DIM),
     }
 }
 
 pub fn look(row: &Row) -> Look {
+    if row.stale {
+        return Look::Stale;
+    }
     if row.suspect {
         return Look::Suspect;
     }
+    if row.pane.source == "inferred" {
+        return Look::Unknown;
+    }
     match row.pane.state.as_str() {
+        "blocked" if row.pane.kind.as_deref() == Some("question") => Look::Question,
         "blocked" => Look::Blocked,
         "error" => Look::Error,
-        "done" if !row.seen => Look::Unseen,
+        "done" if row.seen => Look::Seen,
+        "done" => Look::Unseen,
         "working" => Look::Working,
-        "idle" | "done" => Look::Quiet,
+        "idle" => Look::Idle,
         _ => Look::Unknown,
     }
 }
 
-/// The glyph for a row at `now`: `○` once a done pane has been seen.
+static MOTION: AtomicBool = AtomicBool::new(true);
+
+/// Off holds every animated glyph still: tui.json's `"motion": "reduced"` or
+/// REXBOARD_REDUCED_MOTION=1.
+pub fn set_motion(on: bool) {
+    MOTION.store(on, Ordering::Relaxed);
+}
+
+pub fn motion() -> bool {
+    MOTION.load(Ordering::Relaxed)
+}
+
+/// The glyph for a row at `now`.
 pub fn glyph(row: &Row, now: DateTime<Utc>) -> &'static str {
-    face(look(row)).frame(now)
+    face(look(row)).frame(now, motion())
 }
 
 pub fn state(row: &Row) -> Style {
     let face = face(look(row));
-    let base = Style {
+    Style {
         fg: face.fg,
         ..Style::new().add_modifier(face.modifier)
-    };
-    if row.stale {
-        base.add_modifier(Modifier::DIM)
-    } else {
-        base
     }
 }
 
 /// How often the board must redraw for these looks to move: the shortest interval of the
-/// animated ones, or None when none is.
-pub fn redraw_every(looks: impl IntoIterator<Item = Look>) -> Option<Duration> {
+/// animated ones, or None when none is or motion is off.
+pub fn redraw_every(looks: impl IntoIterator<Item = Look>, moving: bool) -> Option<Duration> {
     looks
         .into_iter()
         .map(face)
-        .filter(Face::animated)
+        .filter(|face| moving && face.animated())
         .map(|face| face.interval)
         .min()
 }
@@ -245,6 +280,11 @@ mod tests {
             "\"◐",
             "\"○",
             "\"·\"",
+            "\"✓",
+            "\"✗",
+            "\"◌",
+            "\"⠋",
+            "\"⠿",
             "\"━",
             "\"─",
             "\"┄",
@@ -280,13 +320,63 @@ mod tests {
     }
 
     #[test]
-    fn todays_table_animates_nothing_so_the_board_keeps_its_cadence() {
+    fn only_working_moves_and_motion_off_holds_it_still() {
         for look in LOOKS {
             let face = face(look);
-            assert!(!face.animated(), "{look:?}");
-            assert_eq!(face.frame(at(0)), face.frame(at(12_345)), "{look:?}");
+            assert_eq!(face.animated(), look == Look::Working, "{look:?}");
         }
-        assert_eq!(redraw_every(LOOKS), None, "no extra redraws");
+        let working = face(Look::Working);
+        assert_eq!(working.frame(at(0), true), "⠋");
+        assert_eq!(working.frame(at(80), true), "⠙", "one step every 80 ms");
+        assert_eq!(
+            working.frame(at(800), true),
+            "⠋",
+            "ten frames, then round again"
+        );
+        assert_eq!(working.frame(at(80), false), "⠿", "reduced motion");
+        assert_eq!(redraw_every(LOOKS, true), Some(Duration::from_millis(80)));
+        assert_eq!(redraw_every(LOOKS, false), None, "reduced motion");
+        let resting = LOOKS.into_iter().filter(|look| *look != Look::Working);
+        assert_eq!(redraw_every(resting, true), None, "nothing working");
+    }
+
+    #[test]
+    fn every_state_has_its_glyph() {
+        use crate::tui::app::tests::row;
+        let glyph_of = |row: &Row| face(look(row)).frame(at(0), false);
+        let mut question = row("a/q", "blocked", "needs_you", false);
+        question.pane.kind = Some("question".into());
+        let mut permission = row("a/p", "blocked", "needs_you", false);
+        permission.pane.kind = Some("permission".into());
+        let mut inferred = row("a/i", "working", "unreported", false);
+        inferred.pane.source = "inferred".into();
+        let mut suspect = row("a/s", "working", "unreported", false);
+        suspect.suspect = true;
+        let mut stale = row("a/t", "blocked", "unreported", false);
+        stale.stale = true;
+        let cases = [
+            (permission, "!"),
+            (row("a/b", "blocked", "needs_you", false), "!"),
+            (question, "?"),
+            (row("a/e", "error", "needs_you", false), "✗"),
+            (row("a/d", "done", "needs_you", false), "✓"),
+            (row("a/f", "done", "quiet", true), "✓"),
+            (row("a/w", "working", "working", false), "⠿"),
+            (row("a/z", "idle", "quiet", false), "○"),
+            (suspect, "○"),
+            (inferred, "·"),
+            (row("a/u", "unknown", "unreported", false), "·"),
+            (stale, "◌"),
+        ];
+        for (row, want) in &cases {
+            assert_eq!(glyph_of(row), *want, "{}", row.key);
+        }
+        let unseen = state(&cases[4].0);
+        let seen = state(&cases[5].0);
+        assert_eq!(unseen.fg, Some(OK), "done and not seen is green");
+        assert!(unseen.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(seen.fg, None, "seen fades");
+        assert!(seen.add_modifier.contains(Modifier::DIM));
     }
 
     #[test]
@@ -294,21 +384,25 @@ mod tests {
         let spinner = Face {
             frames: &["a", "b", "c"],
             interval: Duration::from_millis(100),
-            fg: None,
-            modifier: Modifier::empty(),
+            ..Face::of("s", None, Modifier::empty())
         };
         assert!(spinner.animated());
-        assert_eq!(spinner.frame(at(1_000)), "b", "1000 / 100 = 10, 10 % 3 = 1");
         assert_eq!(
-            spinner.frame(at(1_099)),
+            spinner.frame(at(1_000), true),
+            "b",
+            "1000 / 100 = 10, 10 % 3 = 1"
+        );
+        assert_eq!(
+            spinner.frame(at(1_099), true),
             "b",
             "the same frame for the whole interval"
         );
-        assert_eq!(spinner.frame(at(1_100)), "c");
-        assert_eq!(spinner.frame(at(1_200)), "a", "and round again");
+        assert_eq!(spinner.frame(at(1_100), true), "c");
+        assert_eq!(spinner.frame(at(1_200), true), "a", "and round again");
         let one = Face {
+            frames: &["x"],
             interval: Duration::from_millis(100),
-            ..Face::still(&["x"], None, Modifier::empty())
+            ..Face::of("x", None, Modifier::empty())
         };
         assert!(!one.animated(), "one frame never needs a redraw");
     }

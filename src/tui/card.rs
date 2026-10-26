@@ -128,7 +128,7 @@ fn extension_lines(app: &App, row: &Row) -> Vec<String> {
 
 /// The first line: the row's state and place, how the turn went, and how fresh the tail is, or
 /// the answer the board last sent it.
-/// `━━ ● done · seat-a · api › main · mini · claude · ended 4m ago · turn 6m12s ━━ captured …`
+/// `━━ ✓ done · seat-a · api › main · mini · claude · ended 4m ago · turn 6m12s ━━ captured …`
 pub(super) fn bar(
     row: &Row,
     right: Option<String>,
@@ -167,12 +167,22 @@ pub(super) fn bar(
     };
     let left = fit(&left, room).trim_end().to_owned() + " ";
     let fill = width.saturating_sub(ends.width() + left.width() + right.width());
-    Line::from(vec![
-        Span::styled(ends, theme::quiet()),
-        Span::styled(left, theme::bar_label(row)),
+    let mut spans = vec![Span::styled(ends, theme::quiet())];
+    // The glyph keeps its own face: in a font with no bold braille a bold spinner is a still blob.
+    let (glyph, bold) = (theme::glyph(row, now), theme::bar_label(row));
+    match left.strip_prefix(&format!(" {glyph}")) {
+        Some(label) => spans.extend([
+            Span::styled(" ", bold),
+            Span::styled(glyph, theme::state(row)),
+            Span::styled(label.to_owned(), bold),
+        ]),
+        None => spans.push(Span::styled(left, bold)),
+    }
+    spans.extend([
         Span::styled(theme::RULE.repeat(fill), theme::quiet()),
         Span::styled(right, theme::quiet()),
-    ])
+    ]);
+    Line::from(spans)
 }
 
 /// How the turn stands: `ended 4m ago · turn 6m12s`, `waiting 12s`, `for 2m`. Nothing for a
@@ -261,7 +271,16 @@ fn keys(app: &App, width: usize) -> Vec<Line<'static>> {
     let all = key_rows(app);
     let columns = (width / KEY_COLUMN).max(1);
     let rows = all.len().div_ceil(columns);
-    let mut lines = vec![Line::styled(fit(" keys", width), theme::accent())];
+    let motion = " · \"motion\": \"reduced\" in tui.json stills the spinner";
+    let title = if " keys".width() + motion.width() <= width {
+        Line::from(vec![
+            Span::styled(" keys", theme::accent()),
+            Span::styled(motion, theme::quiet()),
+        ])
+    } else {
+        Line::styled(fit(" keys", width), theme::accent())
+    };
+    let mut lines = vec![title];
     for r in 0..rows {
         let mut spans = Vec::new();
         for c in 0..columns {

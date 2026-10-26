@@ -47,7 +47,7 @@ rexboard reaches Rex only through the `rex` command: `rex do` for these scripts 
 | `src/tui/card.rs` | The turn card: the selected row's bar, headline, ask or body, and tail |
 | `src/tui/answer.rs`, `src/tui/screen.rs` | Answer mode: its keys and card, and what it reads off a pane (options, the input line, a draft) |
 | `src/tui/prefs.rs` | `tui.json` |
-| `src/tui/theme.rs` | The board's one style system: the roles every piece of text takes (`quiet`, `strong`, `accent`, `alert`, `note`, `header`, `selected`, `cut_mark` and the rest), the marks it draws, and `face`, the table of how each row state looks: its glyph or animation frames and their interval, colour and modifiers. Nothing else in `src/tui/` picks a colour or a glyph, and a test checks it. The board redraws at the shortest interval of an animated glyph on screen, otherwise once a second |
+| `src/tui/theme.rs` | The board's one style system: the roles every piece of text takes (`quiet`, `strong`, `accent`, `alert`, `note`, `header`, `selected`, `cut_mark` and the rest), the marks it draws, and `face`, the table of how each row state looks: its glyph or animation frames and their interval, the glyph it holds under reduced motion, colour and modifiers. Nothing else in `src/tui/` picks a colour or a glyph, and a test checks it. The board redraws at the shortest interval of an animated glyph on screen (the working spinner's 80 ms), otherwise once a second; reduced motion (`tui.json` or `REXBOARD_REDUCED_MOTION=1`) is a process-wide switch set at start |
 | `src/client.rs` | `ls`, `watch --json`, `seen` and `serve` as clients; starts serve when nothing answers |
 | `src/rex.rs` | Finds `rex`, runs one-shot scripts, and holds the one lock around every spawn, bind, accept and connect |
 | `src/send.rs` | Runs `send.lua` for an answer, within 5s, and turns its refusals into plain reasons |
@@ -71,7 +71,7 @@ serve uses std threads and channels; there is no async runtime. Collectors, exte
 | `state.json` | `{"v":1,"panes":{KEY:{state,kind,since,since_estimated,turn_started,last_turn,seen}},"jumps":[KEY,KEY]}` (`jumps`: the last two jumps, older first, for `jump -`), written through a temp file and a rename at most once a second, and on stop. Entries for a host that has not sent its first snapshot this run are kept as loaded |
 | `transitions.jsonl` | One line per state change: `{at, host, block_id, from, to, kind}`. Over 5 MB at serve start, it moves to `transitions.jsonl.1`, replacing the older one |
 | `serve.log` | serve's output when a command started it. A client clears it first when it is over 1 MB |
-| `tui.json` | The board's own settings on this machine: `{"detail_hidden": BOOL}`, whether `c` hid the turn card. Written by the board, not serve, on each `c`; a missing or unreadable file means shown, and the side pane's old `detail` key is ignored |
+| `tui.json` | The board's own settings on this machine: `{"detail_hidden": BOOL, "motion": "full" | "reduced"}`: whether `c` hid the turn card, and whether the working spinner holds still. Written by the board, not serve, on each `c`; a missing or unreadable file means shown, and the side pane's old `detail` key is ignored |
 
 On start, serve takes the lock, removes a stale socket, then stops observers a dead serve left behind. A recorded pid is stopped only if it is still its own process group, its parent is init or the recorded serve, and its command is the recorded `rex` running `do - --all --fail-fast`. Anything else is skipped and logged, because the pid may now belong to another program.
 
