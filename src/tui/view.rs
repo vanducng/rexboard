@@ -2141,6 +2141,14 @@ mod tests {
         for (name, app, width, height) in &screens {
             text.push_str(&format!("== {name}\n{}", styled_dump(app, *width, *height)));
         }
+        // The clock and a capture time show in the local zone, which differs between machines.
+        let local = |at: &str, format: &str| {
+            let at = DateTime::parse_from_rfc3339(at).unwrap();
+            at.with_timezone(&chrono::Local).format(format).to_string()
+        };
+        let text = text
+            .replace(&local("2026-01-01T05:42:58Z", "%H:%M:%S"), "hh:mm:ss")
+            .replace(&local("2026-01-01T05:43:00Z", "%H:%M"), "hh:mm");
         let path = format!(
             "{}/tests/fixtures/style-snapshot.txt",
             env!("CARGO_MANIFEST_DIR")
