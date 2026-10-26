@@ -1582,6 +1582,23 @@ mod tests {
     }
 
     #[test]
+    fn after_a_send_the_card_drops_the_tail_from_before_the_answer() {
+        let mut app = answering(PERMISSION);
+        app.peek = Some(Peek {
+            key: "mini/seat-b".into(),
+            lines: Some(Ok(PERMISSION.lines().map(str::to_owned).collect())),
+            at: Some(Utc::now()),
+            updated_at: None,
+        });
+        press(&mut app, KeyCode::Char('1'));
+        app.sent("mini/seat-b", "1 (Yes)", Ok(()));
+        assert!(app.peek.is_none());
+        let card = card_of(&render(&app, 140, 24)).join("\n");
+        assert!(!card.contains("Do you want to proceed"), "{card}");
+        assert!(card.contains(" sent 1 (Yes) → seat-b "), "{card}");
+    }
+
+    #[test]
     fn after_a_send_the_bar_says_what_went_where() {
         let mut app = answering(PERMISSION);
         press(&mut app, KeyCode::Char('1'));
