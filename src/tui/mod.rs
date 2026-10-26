@@ -165,6 +165,7 @@ fn apply(app: &mut App, msg: Msg) {
         Msg::Peek(key, lines) => {
             if let Some(peek) = app.peek.as_mut().filter(|peek| peek.key == key) {
                 peek.lines = Some(lines);
+                peek.at = Some(chrono::Utc::now());
             }
         }
         Msg::Say(text) => app.say(text),

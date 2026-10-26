@@ -12,7 +12,7 @@ use super::status::ALL;
 use super::theme;
 use super::views::{Key, View};
 use crate::board::Row;
-use crate::output::{clean, fit, in_state, name, wheres};
+use crate::output::{chop, clean, fit, in_state, name, wheres};
 use crate::pane::bare_title;
 
 /// Below this many rows the column header and the blank row above it are left out, so no row
@@ -84,7 +84,7 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
         let most = if app.keys {
             body.height.saturating_sub(3)
         } else {
-            body.height / 2
+            (body.height / 2).min(body.height.saturating_sub(4))
         };
         let lines = if app.pick {
             Vec::new()
@@ -470,6 +470,16 @@ fn detail(
     }
     let peek = app.peek.as_ref().filter(|peek| peek.key == row.key);
     if let (false, Some(peek)) = (wide, peek) {
+        let label = format!(" · peek{}", captured(peek));
+        lines[0] = Line::from(vec![
+            Span::styled(
+                fit(&name(row), width.saturating_sub(label.width()))
+                    .trim_end()
+                    .to_owned(),
+                theme::accent(),
+            ),
+            Span::styled(label, theme::dim()),
+        ]);
         lines.extend(peek_lines(peek, width, height.saturating_sub(lines.len())));
         return lines;
     }
@@ -556,20 +566,38 @@ fn detail(
         theme::dim(),
     ));
     if let Some(peek) = peek {
-        lines.push(Line::styled("peek", theme::header()));
+        lines.push(Line::from(vec![
+            Span::styled("peek", theme::header()),
+            Span::styled(captured(peek), theme::dim()),
+        ]));
         lines.extend(peek_lines(peek, width, height.saturating_sub(lines.len())));
     }
     lines
 }
 
-/// The newest `room` captured lines, each cut at the pane's edge.
+/// ` · HH:MM:SS`, when the capture came back.
+fn captured(peek: &super::app::Peek) -> String {
+    peek.at.map_or_else(String::new, |at| {
+        format!(" · {}", at.with_timezone(&Local).format("%H:%M:%S"))
+    })
+}
+
+/// The newest `room` rows of the capture, wrapped to the pane, so the last lines show whole and
+/// the oldest fall off the top.
 fn peek_lines(peek: &super::app::Peek, width: usize, room: usize) -> Vec<Line<'static>> {
     match &peek.lines {
         None => vec![Line::styled("capturing…", theme::dim())],
-        Some(Ok(text)) => text[text.len().saturating_sub(room)..]
-            .iter()
-            .map(|line| Line::raw(fit(line, width)))
-            .collect(),
+        Some(Ok(text)) => {
+            let mut rows = Vec::new();
+            for line in text.iter().rev() {
+                if rows.len() >= room {
+                    break;
+                }
+                rows.extend(chop(line, width.max(1)).into_iter().rev());
+            }
+            rows.truncate(room);
+            rows.into_iter().rev().map(Line::raw).collect()
+        }
         // An error is worth reading whole, so it wraps instead of being cut.
         Some(Err(why)) => wrap(why, width.max(1))
             .into_iter()
@@ -820,6 +848,7 @@ mod tests {
         app.peek = Some(Peek {
             key: "mini/seat-b".into(),
             lines: Some(Ok(lines)),
+            at: None,
         });
         for (width, height) in [(50, 30), (80, 30)] {
             let text = render(&app, width, height);
@@ -838,6 +867,7 @@ mod tests {
             lines: Some(Ok((1..=captured)
                 .map(|n| format!("peek line {n}"))
                 .collect())),
+            at: None,
         });
         app
     }
@@ -910,6 +940,95 @@ mod tests {
             assert_eq!(numbers, [1, 2, 3, 4, 5], "{width}x{height}");
             assert_eq!(rows[4] - rows[0], 4);
         }
+    }
+
+    fn capturing(lines: Vec<String>) -> App {
+        let mut app = fuller();
+        app.peek = Some(Peek {
+            key: "mini/seat-b".into(),
+            lines: Some(Ok(lines)),
+            at: None,
+        });
+        app
+    }
+
+    /// The right pane's rows under the `peek` header, down to its last row.
+    fn peek_pane(app: &App, height: u16) -> Vec<String> {
+        let text = render(app, 140, height);
+        let pane: Vec<String> = text
+            .lines()
+            .filter_map(|l| l.split_once('│'))
+            .map(|(_, right)| right.strip_prefix(' ').unwrap_or(right).to_owned())
+            .collect();
+        let header = pane.iter().position(|l| l == "peek").unwrap();
+        pane[header + 1..].to_vec()
+    }
+
+    #[test]
+    fn a_long_last_line_wraps_whole_onto_the_last_rows() {
+        let long = "error: could not compile `demo-crate` (lib) due to 3 previous errors; 7 warnings emitted";
+        let mut lines: Vec<String> = (1..=50).map(|n| format!("short {n}")).collect();
+        lines.push(long.into());
+        let rows = peek_pane(&capturing(lines), 40);
+        let width = usize::from(super::super::detail::width(140, None)) - 1;
+        let tail = long.len().div_ceil(width);
+        assert_eq!(rows[rows.len() - tail..].concat(), long, "{rows:#?}");
+        assert_eq!(rows[rows.len() - tail - 1], "short 50");
+    }
+
+    #[test]
+    fn long_and_short_lines_fill_the_room_exactly() {
+        let width = usize::from(super::super::detail::width(140, None)) - 1;
+        let long = |n: usize| format!("{:x<1$}", format!("long {n:02} "), 2 * width);
+        let lines = (1..=30)
+            .flat_map(|n| [long(n), format!("short {n}")])
+            .collect();
+        let rows = peek_pane(&capturing(lines), 40);
+        let want: Vec<String> = (23..=30)
+            .flat_map(|n| {
+                let l = long(n);
+                [
+                    l[..width].to_owned(),
+                    l[width..].to_owned(),
+                    format!("short {n}"),
+                ]
+            })
+            .collect();
+        assert_eq!(
+            rows, want,
+            "24 rows: the last 8 pairs of a 2-row and a 1-row line"
+        );
+    }
+
+    #[test]
+    fn a_line_longer_than_the_room_shows_its_tail() {
+        let width = usize::from(super::super::detail::width(140, None)) - 1;
+        let line: String = (0..10 * width + 7)
+            .map(|i| char::from(b'a' + (i % 26) as u8))
+            .collect();
+        let rows = peek_pane(&capturing(vec![line.clone()]), 20);
+        assert_eq!(rows.len(), 4, "{rows:#?}");
+        assert_eq!(rows.concat(), line[line.len() - (3 * width + 7)..]);
+    }
+
+    #[test]
+    fn a_peek_keeps_its_newest_line_on_an_8_row_screen() {
+        let text = render(&peeking(200), 80, 8);
+        assert!(text.contains("peek line 200"), "{text}");
+    }
+
+    #[test]
+    fn a_peek_says_what_it_is_and_when_it_was_taken() {
+        let mut app = peeking(3);
+        let narrow = render(&app, 80, 30);
+        assert!(narrow.lines().any(|l| l == "seat-b · peek"), "{narrow}");
+        let at = DateTime::parse_from_rfc3339("2026-01-01T05:43:09Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        app.peek.as_mut().unwrap().at = Some(at);
+        let time = at.with_timezone(&Local).format("%H:%M:%S").to_string();
+        assert!(render(&app, 80, 30).contains(&format!("seat-b · peek · {time}")));
+        assert!(render(&app, 140, 40).contains(&format!("│ peek · {time}")));
     }
 
     #[test]
