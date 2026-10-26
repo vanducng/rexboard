@@ -1,6 +1,7 @@
 //! Answer mode (`a`): one row's pane, read fresh, answered with a digit or a line of text while
 //! the board's own keys are off. Bound to the row's key, so a re-sort cannot move it.
 
+use std::cell::Cell;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local, Utc};
@@ -37,6 +38,8 @@ pub struct Answer {
     pub error: Option<String>,
     /// What is on its way to the pane.
     pub sending: Option<String>,
+    /// The options whose line the card drew last, one bit per digit; a digit picks only these.
+    pub shown: Cell<u16>,
 }
 
 /// What a key in answer mode leads to.
@@ -60,6 +63,7 @@ impl Answer {
             armed: None,
             error: None,
             sending: None,
+            shown: Cell::new(0),
         }
     }
 
@@ -81,6 +85,21 @@ impl Answer {
             }
             Action::Text(text) => format!("\"{}\"", fit(text, 24).trim_end()),
         }
+    }
+
+    /// The options on screen, in order.
+    fn visible(&self) -> Vec<char> {
+        let options = self.screen.as_ref().map_or(&[][..], |s| &s.options[..]);
+        options
+            .iter()
+            .map(|c| c.digit)
+            .filter(|d| self.shown.get() & bit(*d) != 0)
+            .collect()
+    }
+
+    /// Whether the card drew every option.
+    pub fn all_shown(&self) -> bool {
+        self.visible().len() == self.screen.as_ref().map_or(0, |s| s.options.len())
     }
 
     fn choice(&self, digit: char) -> Option<&Choice> {
@@ -134,6 +153,12 @@ impl Answer {
             self.error = Some(format!("there is no option {digit}"));
             return Step::Stay;
         };
+        if self.shown.get() & bit(digit) == 0 {
+            self.error = Some(format!(
+                "option {digit} is off screen; make the board taller or jump to it"
+            ));
+            return Step::Stay;
+        }
         let again = self
             .armed
             .is_some_and(|(armed, at)| armed == digit && now.duration_since(at) < ARM);
@@ -231,7 +256,8 @@ impl Answer {
             .last()
             .map_or(screen.lines.len(), |c| c.line + 1);
         let text = width.saturating_sub(GUTTER.width()).max(1);
-        let mut rows: Vec<Line<'static>> = Vec::new();
+        // Each row, and the digit when it is an option's first row.
+        let mut rows: Vec<(Line<'static>, Option<char>)> = Vec::new();
         for (i, line) in screen.lines[..end].iter().enumerate().rev() {
             if rows.len() >= room {
                 break;
@@ -259,16 +285,21 @@ impl Answer {
             } else {
                 theme::dim()
             };
-            for piece in pieces.into_iter().rev() {
-                rows.push(Line::from(vec![
+            for (at, piece) in pieces.into_iter().enumerate().rev() {
+                let line = Line::from(vec![
                     Span::styled(GUTTER, theme::dim()),
                     Span::styled(piece, style),
-                ]));
+                ]);
+                rows.push((line, choice.filter(|_| at == 0).map(|c| c.digit)));
             }
         }
         rows.truncate(room);
-        rows.reverse();
-        rows
+        self.shown.set(
+            rows.iter()
+                .filter_map(|(_, digit)| *digit)
+                .fold(0, |bits, digit| bits | bit(digit)),
+        );
+        rows.into_iter().rev().map(|(line, _)| line).collect()
     }
 
     /// ` › fix the test▏`, or what is happening instead.
@@ -297,6 +328,7 @@ impl Answer {
     /// The footer: what keys do here, and the promise that nothing goes out unchecked.
     pub fn footer(&self, width: usize) -> Line<'static> {
         let options = self.screen.as_ref().map_or(0, |s| s.options.len());
+        let visible = self.visible();
         let esc = if self.input.value().is_empty() {
             "esc back to board"
         } else {
@@ -304,7 +336,11 @@ impl Answer {
         };
         let keys = match &self.screen {
             None => esc.to_owned(),
-            Some(_) if options > 0 => format!("1-{options} pick · {esc}"),
+            Some(_) if options > 0 => match (visible.first(), visible.last()) {
+                (Some(a), Some(b)) if a == b => format!("{a} pick · {esc}"),
+                (Some(a), Some(b)) => format!("{a}-{b} pick · {esc}"),
+                _ => format!("options are off screen · {esc}"),
+            },
             Some(screen) if screen.fingerprint.is_none() => {
                 format!("{esc} · no dialog or input line on this screen")
             }
@@ -323,6 +359,10 @@ impl Answer {
             Span::styled(CHECKED, theme::dim()),
         ])
     }
+}
+
+fn bit(digit: char) -> u16 {
+    1 << digit.to_digit(10).unwrap_or(0)
 }
 
 /// `line` cut into rows of `width`, the rows after the first indented by `indent`.
@@ -353,6 +393,7 @@ mod tests {
         );
         let text = "Bash wants to run:\n  git push\n ❯ 1. Yes\n   2. Yes, and don't ask again for git push commands\n   3. No\n Esc to cancel\n";
         answer.screen = Some(Screen::parse(text, None));
+        answer.lines(Utc::now(), 120, 40);
         answer
     }
 

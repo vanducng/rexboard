@@ -89,12 +89,21 @@ fn card_height(app: &App, now: DateTime<Utc>, body: Rect, headed: bool) -> u16 {
         return body.height;
     }
     let most = body.height.saturating_sub(LIST_FLOOR + u16::from(headed));
-    if app.answer.is_some() {
-        let need = super::card::lines(app, now, usize::from(body.width), usize::from(most));
-        return (body.height * 2 / 5)
-            .max(8)
-            .max(need.len() as u16)
-            .min(most);
+    if let Some(answer) = &app.answer {
+        let lines = |rows: u16| {
+            super::card::lines(app, now, usize::from(body.width), usize::from(rows)).len() as u16
+        };
+        let mut height = (body.height * 2 / 5).max(8).max(lines(most)).min(most);
+        // A digit picks only an option the card drew, so the card takes rows from the list,
+        // all of them if it must, until every option shows.
+        while height < body.height {
+            lines(height);
+            if answer.all_shown() {
+                break;
+            }
+            height += 1;
+        }
+        return height;
     }
     let base = (body.height * 2 / 5).max(8);
     let asks = app.keys || app.current().is_some_and(|row| row.pane.state == "blocked");
@@ -1580,5 +1589,69 @@ mod tests {
         let text = render(&app, 140, 24);
         let bar = &card_of(&text)[0];
         assert!(bar.contains(" sent 1 (Yes) → seat-b "), "{bar}");
+    }
+
+    #[test]
+    fn answer_a_short_board_shows_every_option_or_refuses_the_hidden_ones() {
+        let four = include_str!("../../tests/fixtures/screens/claude-permission.txt");
+        for text in [PERMISSION, four] {
+            for (height, refused) in [(12, false), (9, false), (13, true), (6, false)] {
+                let mut app = answering(text);
+                if refused {
+                    app.answer.as_mut().unwrap().error =
+                        Some("the screen changed since it was read; nothing sent".into());
+                }
+                let screen = render(&app, 80, height);
+                let footer = screen.lines().last().unwrap().to_owned();
+                let digits: Vec<char> = app
+                    .answer
+                    .as_ref()
+                    .unwrap()
+                    .screen
+                    .as_ref()
+                    .unwrap()
+                    .options
+                    .iter()
+                    .map(|c| c.digit)
+                    .collect();
+                let picks = footer
+                    .split(" pick")
+                    .next()
+                    .filter(|_| footer.contains(" pick"));
+                let shown: Vec<char> = match picks.map(|p| p.split_once('-')) {
+                    Some(Some((a, b))) => {
+                        let (a, b) = (a.chars().next().unwrap(), b.chars().next().unwrap());
+                        digits
+                            .iter()
+                            .copied()
+                            .filter(|d| (a..=b).contains(d))
+                            .collect()
+                    }
+                    Some(None) => picks.unwrap().chars().take(1).collect(),
+                    None => Vec::new(),
+                };
+                if height >= 12 {
+                    assert_eq!(shown, digits, "every option fits at 80x{height}: {screen}");
+                }
+                for digit in digits {
+                    let drawn = screen.lines().any(|l| l.contains(&format!("{digit}. ")));
+                    let mut copy = answering(text);
+                    render(&copy, 80, height);
+                    let sent = press(&mut copy, KeyCode::Char(digit));
+                    if shown.contains(&digit) {
+                        assert!(drawn, "{digit} is in the footer, so on the card: {screen}");
+                    } else {
+                        assert_eq!(sent, None, "{digit} is off screen at 80x{height}");
+                        let why = copy.answer.as_ref().unwrap().error.clone().unwrap();
+                        assert_eq!(
+                            why,
+                            format!(
+                                "option {digit} is off screen; make the board taller or jump to it"
+                            )
+                        );
+                    }
+                }
+            }
+        }
     }
 }

@@ -129,7 +129,7 @@ Reading a card does not mark a row seen. `s` does, and so does `tab` off a `done
 
 | Key | Does |
 | --- | --- |
-| `1`-`9` | When the screen shows a numbered dialog (the reply line is then a dim `›` with no cursor), picks that option: one key press, no Enter. An option that grants something for later (`always`, `don't ask again`, `auto mode`) needs the same digit again within 3 seconds; the first press only says `press 2 again to send it` |
+| `1`-`9` | When the screen shows a numbered dialog (the reply line is then a dim `›` with no cursor), picks that option: one key press, no Enter. An option that grants something for later (`always`, `don't ask again`, `auto mode`) needs the same digit again within 3 seconds; the first press only says `press 2 again to send it`. A digit picks only an option the card shows: on a short board the card takes rows from the list, all of them if it must, and an option still off screen is refused (`option 1 is off screen; make the board taller or jump to it`) and left out of the footer's `1-3 pick` |
 | text, then `enter` | When the screen shows an input line and no dialog, sends the line as a paste, then Enter. `enter` with nothing typed does nothing. Text into a dialog is refused: `pick a number; this dialog takes no text` |
 | `esc` | Clears the typed text (the footer then says `esc clears`), or leaves when there is none |
 | `ctrl-c` | Leaves; it never quits the board here |

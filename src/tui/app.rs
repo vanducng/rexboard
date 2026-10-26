@@ -812,6 +812,7 @@ impl App {
                 if !screen.options.is_empty() {
                     answer.input.reset();
                 }
+                answer.shown.set(0);
                 answer.screen = Some(screen);
                 answer.captured = Some(chrono::Utc::now());
             }
@@ -1137,7 +1138,15 @@ pub mod tests {
             panic!("a reads the pane first");
         };
         app.screen(&key, Ok(Screen::parse(text, None)));
+        drawn(app);
         key
+    }
+
+    /// The card drawn as the board draws it, which tells answer mode the options on screen.
+    fn drawn(app: &App) {
+        if let Some(answer) = &app.answer {
+            answer.lines(chrono::Utc::now(), 120, 40);
+        }
     }
 
     #[test]
@@ -1158,6 +1167,7 @@ pub mod tests {
             "waits for the read"
         );
         app.screen("mini/seat-b", Ok(Screen::parse(DIALOG, None)));
+        drawn(&app);
         let mut moved = rows();
         moved.reverse();
         app.set_rows(moved, hosts());
