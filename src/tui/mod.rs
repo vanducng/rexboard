@@ -2,6 +2,7 @@ mod answer;
 mod app;
 mod card;
 mod columns;
+mod full;
 mod prefs;
 mod screen;
 mod status;
@@ -134,7 +135,7 @@ fn board(pick: bool) -> Result<Option<Row>> {
             }
             let now = Instant::now();
             app.note_card(now);
-            if let Some(effect) = app.auto_tail(now) {
+            if let Some(effect) = app.auto_tail(now).or_else(|| app.live(now)) {
                 act(effect, &tx, &generation);
                 changed = true;
             }
@@ -194,12 +195,7 @@ fn apply(app: &mut App, msg: Msg) -> Option<Effect> {
             app.say(format!("{why} · r reconnects"));
             app.link = Link::Lost(why);
         }
-        Msg::Peek(key, lines) => {
-            if let Some(peek) = app.peek.as_mut().filter(|peek| peek.key == key) {
-                peek.lines = Some(lines);
-                peek.at = Some(chrono::Utc::now());
-            }
-        }
+        Msg::Peek(key, lines) => app.peeked(&key, lines),
         Msg::Say(text) => app.say(text),
         Msg::Jumped(result) => app.jumped(result),
         Msg::Screen(key, screen) => app.screen(&key, screen),
