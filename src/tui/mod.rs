@@ -1,5 +1,6 @@
 mod app;
 mod columns;
+mod detail;
 mod status;
 mod theme;
 mod view;
@@ -19,6 +20,7 @@ use crate::board::Row;
 use crate::client::{self, Rows};
 use crate::error::{Error, Result};
 use crate::output::{clean, labels, path};
+use crate::state::Paths;
 use crate::{interrupted, jump, rex, stop_on_signals};
 
 use app::{App, Effect, Link};
@@ -62,6 +64,7 @@ fn board(pick: bool) -> Result<Option<Row>> {
     listen(&tx, &generation);
     let mut app = App::default();
     app.pick = pick;
+    app.detail = tui_json().and_then(|path| detail::load(&path).detail);
     let mut terminal = ratatui::init();
     let _restore = Restore;
     if !pick {
@@ -69,6 +72,7 @@ fn board(pick: bool) -> Result<Option<Row>> {
     }
     let mut tick = Instant::now();
     loop {
+        app.width = terminal.size().map_or(0, |size| size.width);
         terminal
             .draw(|frame| view::draw(frame, &app, chrono::Utc::now()))
             .unwrap_or_else(|_| leave());
@@ -211,9 +215,29 @@ fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
                 let _ = tx.send(Msg::Peek(key, lines));
             });
         }
+        Effect::SaveDetail(share) => {
+            let saved = tui_json()
+                .ok_or_else(|| "no state dir".to_owned())
+                .and_then(|path| {
+                    detail::save(
+                        &path,
+                        &detail::Prefs {
+                            detail: Some(share),
+                        },
+                    )
+                    .map_err(|err| format!("{}: {err}", path.display()))
+                });
+            if let Err(why) = saved {
+                let _ = tx.send(Msg::Say(format!("could not keep the width: {why}")));
+            }
+        }
         Effect::Reconnect => listen(&tx, generation),
         Effect::Quit => {}
     }
+}
+
+fn tui_json() -> Option<std::path::PathBuf> {
+    Paths::find().ok().map(|paths| paths.tui())
 }
 
 /// Starts a subscriber thread. A newer `listen` makes the older one stop at its next tick.

@@ -71,6 +71,11 @@ impl Paths {
     pub fn lock(&self) -> PathBuf {
         self.dir.join("serve.lock")
     }
+
+    /// The board's own settings on this machine, such as the detail pane's width.
+    pub fn tui(&self) -> PathBuf {
+        self.dir.join("tui.json")
+    }
 }
 
 /// What serve.lock records: the serve and the observers it started.
