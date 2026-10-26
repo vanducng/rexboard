@@ -34,7 +34,14 @@ for _, r in ipairs(status.records or {}) do
   end
   if id ~= "turn" and (not main or (rank[r.state] or 5) < (rank[main.state] or 5)) then main = r end
 end
-if not main or main.updated_at ~= a.expect.updated_at then return refuse("status_changed") end
+-- Same state and kind: a fresh report of the same wait (a hook's notification for the dialog
+-- already up) is no change. The fingerprint below tells one dialog from another.
+local function wait(state, kind)
+  if not state then return "no status" end
+  return kind and (state .. "/" .. kind) or state
+end
+local was, is = wait(a.expect.state, a.expect.kind), wait(main and main.state, main and main.kind)
+if was ~= is then return refuse("status_changed", was .. " → " .. is) end
 
 local process, perr = rex.block.call(term, "process", where)
 if not process then return fail("process", perr) end

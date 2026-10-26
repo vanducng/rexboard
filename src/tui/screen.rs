@@ -19,9 +19,15 @@ impl Choice {
     /// An option that writes a rule or changes the mode for later prompts too.
     pub fn lasting(&self) -> bool {
         let label = self.label.to_lowercase().replace('’', "'");
-        ["don't ask again", "always", "auto mode"]
-            .iter()
-            .any(|words| label.contains(words))
+        [
+            "don't ask again",
+            "always",
+            "auto mode",
+            "this session",
+            "accept edits",
+        ]
+        .iter()
+        .any(|words| label.contains(words))
     }
 }
 
@@ -30,8 +36,10 @@ pub struct Screen {
     /// The window's lines, without escape sequences or control characters.
     pub lines: Vec<String>,
     pub options: Vec<Choice>,
-    /// The option block, or the input line and the line above it, exactly as captured and
-    /// wrapped in newlines, so only whole lines match: `❯ ` must not match `❯ half typed`.
+    /// The whole dialog (from its opening to its last option), or the input line and the line
+    /// above it, exactly as captured and wrapped in newlines, so only whole lines match: `❯ `
+    /// must not match `❯ half typed`. A dialog's options alone repeat from one dialog to the
+    /// next (every Edit asks the same three), so the command or file above them is included.
     pub fingerprint: Option<String>,
     /// The input line already holds typed text, which a reply would join.
     pub draft: bool,
@@ -53,8 +61,9 @@ impl Screen {
         });
         if let Some(options) = options {
             let (first, last) = (options[0].line, options.last().expect("two or more").line);
+            let top = opening(&lines, first);
             return Self {
-                fingerprint: Some(whole(&raw[first..=last])),
+                fingerprint: Some(whole(&raw[top..=last])),
                 lines,
                 options,
                 draft: false,
@@ -74,6 +83,21 @@ impl Screen {
             options: Vec::new(),
         }
     }
+}
+
+/// Where the dialog whose first option is at `first` begins: after the nearest rule or input
+/// line above it, else at the window's top.
+fn opening(lines: &[String], first: usize) -> usize {
+    lines[..first]
+        .iter()
+        .rposition(|line| is_rule(line) || prompt(line).is_some())
+        .map_or(0, |at| at + 1)
+}
+
+/// A solid rule, as a harness draws above a dialog or around its input line.
+fn is_rule(line: &str) -> bool {
+    let line = line.trim();
+    line.chars().count() >= 3 && line.chars().all(|c| matches!(c, '─' | '━'))
 }
 
 fn whole(lines: &[&str]) -> String {
@@ -252,9 +276,53 @@ mod tests {
         let lasting: Vec<bool> = screen.options.iter().map(Choice::lasting).collect();
         assert_eq!(lasting, [false, true, true, false]);
         let fp = screen.fingerprint.unwrap();
-        assert!(fp.starts_with("\n ❯ 1. Yes\n"), "{fp:?}");
+        assert!(
+            fp.starts_with("\n Bash command\n"),
+            "the whole dialog: {fp:?}"
+        );
+        assert!(fp.contains("\n touch zz-probe-file-2\n"), "{fp:?}");
         assert!(fp.ends_with("   4. No\n"), "{fp:?}");
         assert!(!screen.draft);
+    }
+
+    /// An Edit dialog for `file`, under the prompt that asked for it.
+    fn edit(file: &str) -> String {
+        format!(
+            "❯ Update both files\n\n⏺ Update({file})\n──────────\n Edit file\n {file}\n╌╌╌╌╌╌╌╌╌╌\n 1 -old\n 1 +new\n╌╌╌╌╌╌╌╌╌╌\n Do you want to make this edit to {file}?\n ❯ 1. Yes\n   2. Yes, allow all edits during this session (shift+tab)\n   3. No\n\n Esc to cancel\n"
+        )
+    }
+
+    #[test]
+    fn answer_two_dialogs_with_the_same_options_have_different_fingerprints() {
+        let a = Screen::parse(&edit("a.txt"), None).fingerprint.unwrap();
+        let b = edit("b.txt");
+        assert!(
+            a.starts_with("\n Edit file\n a.txt\n"),
+            "from below the rule: {a:?}"
+        );
+        assert!(
+            !format!("\n{b}\n").contains(&a),
+            "a.txt's key must not fit b.txt's dialog"
+        );
+        let lasting: Vec<bool> = Screen::parse(&edit("a.txt"), None)
+            .options
+            .iter()
+            .map(Choice::lasting)
+            .collect();
+        assert_eq!(
+            lasting,
+            [false, true, false],
+            "edits for the whole session ask twice"
+        );
+        let wrapped = " ❯ 1. Yes\n   2. Yes, and switch to accept edits (auto-approve file edits and common file\n      commands) for this session (shift+tab)\n   3. No\n";
+        assert!(
+            Screen::parse(wrapped, None).options[1].lasting(),
+            "its first line is its label"
+        );
+        assert!(
+            format!("\n{}\n", edit("a.txt")).contains(&a),
+            "it still fits its own"
+        );
     }
 
     #[test]

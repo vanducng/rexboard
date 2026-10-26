@@ -834,8 +834,12 @@ impl App {
                     Some(answer) => Some(answer.updated_at),
                     None => latest.as_ref().and_then(|row| row.pane.updated_at.clone()),
                 };
-                // A tail from before the answer shows the question it answered.
+                // A tail from before the answer shows the question it answered, and one read now
+                // could catch the dialog before the agent takes the key: wait for its next report.
                 self.peek.take_if(|peek| peek.key == key);
+                if let Some(row) = &latest {
+                    self.tailed = Some((row.key.clone(), row.pane.updated_at.clone()));
+                }
                 let to = latest.as_ref().map_or_else(|| key.to_owned(), name);
                 let at = chrono::Local::now().format("%H:%M:%S");
                 self.sent = Some(Sent {
@@ -1186,7 +1190,10 @@ pub mod tests {
         assert_eq!((key.as_str(), pane.host.as_str()), ("mini/seat-b", "mini"));
         assert_eq!(action, Action::Pick('1'));
         assert_eq!(what, "1 (Yes)");
-        assert_eq!(expect.updated_at, "2026-01-01T00:00:00Z");
+        assert_eq!(
+            (expect.state.as_str(), expect.kind.as_deref()),
+            ("blocked", None)
+        );
         assert!(expect.fingerprint.starts_with("\n ❯ 1. Yes"));
         assert_eq!(expect.title, None, "a native row has no title check");
     }
@@ -1351,6 +1358,34 @@ pub mod tests {
             sent.text.starts_with("sent 1 (Yes) → seat-b "),
             "{}",
             sent.text
+        );
+    }
+
+    #[test]
+    fn answer_a_send_holds_the_auto_tail_until_the_next_report() {
+        let mut app = app();
+        let key = answering(&mut app, DIALOG);
+        press(&mut app, KeyCode::Char('1'));
+        // A hook's second report for the same dialog lands while the answer goes out.
+        let mut rows = rows();
+        rows[0].pane.updated_at = Some("2026-01-01T00:00:06Z".into());
+        app.set_rows(rows.clone(), hosts());
+        app.sent(&key, "1 (Yes)", Ok(()));
+        let t0 = Instant::now();
+        app.note_card(t0);
+        assert_eq!(
+            app.auto_tail(t0 + Duration::from_secs(1)),
+            None,
+            "not the answered report"
+        );
+        rows[0].pane.updated_at = Some("2026-01-01T00:01:00Z".into());
+        app.set_rows(rows, hosts());
+        assert!(
+            matches!(
+                app.auto_tail(t0 + Duration::from_secs(2)),
+                Some(Effect::Peek { .. })
+            ),
+            "a new ask is read"
         );
     }
 
