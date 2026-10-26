@@ -1,12 +1,8 @@
 # rexboard
 
-An attention board for coding-agent panes across Rex hosts: which agent is working, blocked or done, for how long, and a jump to its pane.
-
-Unofficial. Not affiliated with Superlogical or Rex.
+An attention board for coding-agent panes across [Rex](https://www.superlogical.com/rex/docs) hosts: which agent is working, blocked or done, for how long, and a jump to its pane.
 
 <img alt="The rexboard board in a terminal: agent panes on demo sessions move from WORKING to NEEDS YOU to QUIET while their times in state tick; a peek, marking a pane seen, the key table and a filter are shown" src="docs/assets/demo.gif" width="100%">
-
-Recorded on demo panes with [scripts/record-demo.sh](scripts/record-demo.sh).
 
 ## Install
 
