@@ -71,7 +71,7 @@ fn docs_cli_md_names_every_command_and_flag() {
         for arg in command.get_arguments() {
             if let Some(long) = arg.get_long()
                 && !matches!(long, "help" | "version")
-                && !doc.contains(&format!("--{long}"))
+                && !names_flag(&doc, long)
             {
                 missing.push(format!("{path} --{long}"));
             }
@@ -83,6 +83,32 @@ fn docs_cli_md_names_every_command_and_flag() {
         }
     }
     assert!(missing.is_empty(), "not in docs/cli.md: {missing:?}");
+}
+
+/// Whether `doc` names `--{long}` as a whole flag, so `--all` is not found inside `--all-done`.
+fn names_flag(doc: &str, long: &str) -> bool {
+    let flag = format!("--{long}");
+    doc.match_indices(&flag).any(|(at, _)| {
+        !doc[at + flag.len()..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    })
+}
+
+#[test]
+fn a_flag_is_named_only_as_a_whole_word() {
+    assert!(names_flag("`ls --all` lists", "all"));
+    assert!(names_flag("ends with --all", "all"));
+    assert!(
+        !names_flag("only `seen --all-done`", "all"),
+        "inside --all-done"
+    );
+    assert!(
+        !names_flag("only `serve --foreground`", "for"),
+        "inside --foreground"
+    );
+    assert!(names_flag("`watch --for 10`", "for"));
 }
 
 /// What a public file must not hold: a home directory, a tailnet host name, or a private key.
