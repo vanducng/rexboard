@@ -17,6 +17,9 @@ pub const SNAPSHOT: &str = concat!(
     include_str!("lua/snapshot.lua")
 );
 
+/// Reads the end of one pane; the args are `session_id`, `block_id` and `max_bytes`.
+pub const TAIL: &str = concat!(include_str!("lua/tail.lua"), "\nreturn tail(rex.args)");
+
 static FDS: Mutex<()> = Mutex::new(());
 
 /// macOS std creates pipes and sockets, then sets close-on-exec in a second step, so a child
@@ -74,8 +77,25 @@ pub fn locate() -> Result<PathBuf> {
 
 /// Runs `rex [-S host] do - --json --args <json>` with `lua` on stdin and returns its JSON result.
 pub fn run_script(host: Option<&str>, lua: &str, args: &Value) -> Result<Value> {
-    let rex = locate()?;
-    let mut cmd = command(&rex);
+    run_script_with(&locate()?, host, lua, args, TIMEOUT, &|| false).map_err(|err| match err {
+        Error::Io(io) if io.kind() == std::io::ErrorKind::TimedOut => {
+            Error::Rex(format!("rex did not answer within {}s", TIMEOUT.as_secs()))
+        }
+        err => err,
+    })
+}
+
+/// `rex [-S host] do -` with `lua`, killed after `limit` (an io `TimedOut` error) or as soon as
+/// `cancelled` says so (`Error::Cancelled`).
+pub fn run_script_with(
+    rex: &Path,
+    host: Option<&str>,
+    lua: &str,
+    args: &Value,
+    limit: Duration,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Value> {
+    let mut cmd = command(rex);
     if let Some(host) = host {
         cmd.args(["-S", host]);
     }
@@ -90,18 +110,20 @@ pub fn run_script(host: Option<&str>, lua: &str, args: &Value) -> Result<Value> 
     let writer = thread::spawn(move || stdin.write_all(lua.as_bytes()));
     let stdout = drain(child.stdout.take().expect("piped stdout"));
     let stderr = drain(child.stderr.take().expect("piped stderr"));
-    let deadline = Instant::now() + TIMEOUT;
+    let deadline = Instant::now() + limit;
     let status = loop {
         if let Some(status) = child.try_wait()? {
             break status;
         }
-        if Instant::now() >= deadline {
+        let gave_up = Instant::now() >= deadline;
+        if gave_up || cancelled() {
             let _ = child.kill();
             let _ = child.wait();
-            return Err(Error::Rex(format!(
-                "rex did not answer within {}s",
-                TIMEOUT.as_secs()
-            )));
+            return Err(if gave_up {
+                std::io::Error::from(std::io::ErrorKind::TimedOut).into()
+            } else {
+                Error::Cancelled
+            });
         }
         thread::sleep(Duration::from_millis(5));
     };

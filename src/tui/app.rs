@@ -26,6 +26,7 @@ pub enum Effect {
     Peek {
         key: String,
         host: String,
+        session: String,
         block: String,
     },
     /// Mark these unseen `done` rows seen.
@@ -564,9 +565,10 @@ impl App {
             }
             KeyCode::Char(' ') => {
                 let row = self.current()?;
-                let (key, host, block) = (
+                let (key, host, session, block) = (
                     row.key.clone(),
                     row.pane.host.clone(),
+                    row.pane.session_id.clone(),
                     row.pane.block_id.clone(),
                 );
                 if self.peek.as_ref().is_some_and(|peek| peek.key == key) {
@@ -579,7 +581,12 @@ impl App {
                     lines: None,
                     at: None,
                 });
-                return Some(Effect::Peek { key, host, block });
+                return Some(Effect::Peek {
+                    key,
+                    host,
+                    session,
+                    block,
+                });
             }
             KeyCode::Enter if self.going.is_some() => self.say("a jump is already running"),
             KeyCode::Enter => {
