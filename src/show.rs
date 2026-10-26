@@ -43,6 +43,9 @@ pub fn show(key: &str, tail: Option<usize>, json: bool) -> Result<()> {
         if let Some(tail) = &tail {
             shown["tail"] = json!(tail);
         }
+        let screen = crate::tui::read_screen(&row)?;
+        shown["dialog"] = json!(crate::tui::answer::dialog_id(&screen));
+        shown["options"] = crate::tui::answer::options_json(&screen);
         println!("{shown}");
     } else {
         print!("{}", text(&row, &fields, tail.as_deref()));

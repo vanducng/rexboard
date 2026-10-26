@@ -24,9 +24,14 @@ pub enum Error {
     ServeRunning(String),
     #[error("{0}")]
     NotFound(String),
-    /// A check before acting on a pane failed, so nothing was sent or closed.
+    /// A check before acting on a pane failed, so nothing was sent or closed; `options` lists the
+    /// dialog's when the refusal is about them.
     #[error("{message}")]
-    Refused { message: String, steps: Vec<String> },
+    Refused {
+        message: String,
+        steps: Vec<String>,
+        options: Option<serde_json::Value>,
+    },
     #[error("nobody needs you")]
     NobodyNeedsYou,
     /// No app, or not exactly one, could take a jump on this host.
@@ -120,7 +125,6 @@ impl Error {
             Self::NotFound(_) => vec!["rexboard ls --json".to_owned()],
             Self::NobodyNeedsYou => vec!["rexboard ls".to_owned()],
             Self::AmbiguousClient { steps, .. }
-            | Self::Refused { steps, .. }
             | Self::RexExplained { steps, .. }
             | Self::Upgrade { steps, .. }
             | Self::Extension { steps, .. }
@@ -128,6 +132,7 @@ impl Error {
             {
                 steps.clone()
             }
+            Self::Refused { steps, .. } => steps.clone(),
             Self::Config(_) => vec![CONFIG_DOC.to_owned()],
             Self::ContractMismatch(_) => vec![
                 "rexboard --version".to_owned(),
@@ -163,6 +168,13 @@ pub fn report(json: bool, err: &Error) {
         });
         if let Error::RexExplained { detail, .. } = err {
             body["error"]["detail"] = json!(detail);
+        }
+        if let Error::Refused {
+            options: Some(options),
+            ..
+        } = err
+        {
+            body["error"]["options"] = options.clone();
         }
         eprintln!("{body}");
         return;

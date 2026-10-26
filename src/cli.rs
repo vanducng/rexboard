@@ -47,7 +47,7 @@ pub enum Command {
         /// HOST/BLOCK_ID, the key from ls --json.
         #[arg(value_name = "KEY")]
         key: String,
-        /// Close without asking. Without a terminal it is required.
+        /// Close without asking; needed when there is no terminal to ask on.
         #[arg(long)]
         yes: bool,
     },
@@ -158,7 +158,12 @@ pub struct AnswerArgs {
     /// Reply with a line: a paste, then Enter. Not into a dialog, or an input line holding text.
     #[arg(long, value_name = "TEXT")]
     pub text: Option<String>,
-    /// Send only while the row is still in this state, and kind: `blocked`, `blocked:permission`.
+    /// The `dialog` from `show KEY --json`: the answer goes only to the dialog or input line you
+    /// read.
+    #[arg(long, value_name = "ID")]
+    pub dialog: String,
+    /// Send only if the row is still in this state, or state and kind: `blocked`,
+    /// `blocked:permission`.
     #[arg(long, value_name = "STATE[:KIND]")]
     pub expect: Option<String>,
     /// Send an option that grants something for later (`always`, `don't ask again`), which the

@@ -78,6 +78,36 @@ pub fn no_option(digit: char) -> String {
     format!("there is no option {digit}")
 }
 
+/// A short id for what `screen` shows, its dialog or its input line, so an answer can require
+/// the screen its caller read. FNV-1a, so it holds across builds.
+pub fn dialog_id(screen: &Screen) -> Option<String> {
+    let hash = screen
+        .fingerprint
+        .as_ref()?
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+        });
+    Some(format!("{:012x}", hash >> 16))
+}
+
+/// The dialog's options as `show --json` and a refusal list them.
+pub fn options_json(screen: &Screen) -> serde_json::Value {
+    serde_json::Value::Array(
+        screen
+            .options
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "digit": c.digit.to_digit(10),
+                    "label": c.label,
+                    "lasting": c.lasting(),
+                })
+            })
+            .collect(),
+    )
+}
+
 impl Answer {
     pub fn new(row: Row, updated_at: String) -> Self {
         Self {
