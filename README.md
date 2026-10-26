@@ -45,7 +45,8 @@ rexboard reads Rex. Only a jump (blue) writes to it: it focuses the pane on its 
 | [CLI](docs/cli.md) | Every command, its output, fields and exit codes |
 | [TUI](docs/tui.md) | The board's layout and keys, and `pick` |
 | [Agent status](docs/agent-status.md) | Where each row's status comes from, and what to check when a row looks wrong |
-| [Configuration](docs/configuration.md) | `config.toml`: the app client and excluded hosts |
+| [Configuration](docs/configuration.md) | `config.toml`: the app client, excluded hosts and enabled extensions |
+| [Extensions](docs/extensions.md) | Add fields and a fallback status from any tool: the contract, the example, and `rexboard ext` |
 | [System architecture](docs/system-architecture.md) | The stack, serve, the observers, the protocol and the files |
 | [Development](docs/development-guidelines.md) | Setup, checks, layout, conventions, tests |
 | [Deployment](docs/deployment.md) | CI, release-please, release assets, install, rollback |

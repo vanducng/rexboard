@@ -1,6 +1,7 @@
 //! Extensions: a directory with `extension.toml` and an adapter command. rexboard runs the
 //! enabled ones over a versioned stdin/stdout contract and knows no tool by name.
 
+pub mod cli;
 pub mod contract;
 pub mod runner;
 pub mod running;
@@ -87,7 +88,21 @@ impl Extension {
 #[derive(Debug, Default)]
 pub struct Discovery {
     pub found: BTreeMap<String, Extension>,
-    pub problems: Vec<String>,
+    pub problems: Vec<Problem>,
+}
+
+/// An extension directory that was skipped, and why.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Problem {
+    pub dir: PathBuf,
+    pub why: String,
+}
+
+impl std::fmt::Display for Problem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let path = self.dir.join("extension.toml");
+        write!(f, "extension {}: {}", path.display(), self.why)
+    }
 }
 
 /// Where extensions live: `$XDG_CONFIG_HOME/rexboard/extensions`, then each of `dirs`.
@@ -112,18 +127,17 @@ pub fn discover(roots: &[PathBuf]) -> Discovery {
             .collect();
         dirs.sort();
         for dir in dirs {
-            match load(&dir) {
+            match read(&dir) {
                 Ok(ext) if discovery.found.contains_key(ext.name()) => {
-                    discovery.problems.push(format!(
-                        "extension {}: {} is shadowed by an earlier one of that name",
-                        ext.name(),
-                        dir.display()
-                    ));
+                    discovery.problems.push(Problem {
+                        why: format!("shadowed by an earlier extension named {}", ext.name()),
+                        dir,
+                    });
                 }
                 Ok(ext) => {
                     discovery.found.insert(ext.name().to_owned(), ext);
                 }
-                Err(why) => discovery.problems.push(why),
+                Err(why) => discovery.problems.push(Problem { dir, why }),
             }
         }
     }
@@ -131,12 +145,21 @@ pub fn discover(roots: &[PathBuf]) -> Discovery {
 }
 
 /// Reads and checks one extension directory.
+#[cfg(test)]
 pub fn load(dir: &Path) -> Result<Extension, String> {
-    let path = dir.join("extension.toml");
-    let fail = |why: String| format!("extension {}: {why}", path.display());
-    let text = std::fs::read_to_string(&path).map_err(|err| fail(err.to_string()))?;
-    let manifest: Manifest = toml::from_str(&text).map_err(|err| fail(err.message().to_owned()))?;
-    check(&manifest, dir).map_err(fail)?;
+    read(dir).map_err(|why| {
+        Problem {
+            dir: dir.to_owned(),
+            why,
+        }
+        .to_string()
+    })
+}
+
+fn read(dir: &Path) -> Result<Extension, String> {
+    let text = std::fs::read_to_string(dir.join("extension.toml")).map_err(|e| e.to_string())?;
+    let manifest: Manifest = toml::from_str(&text).map_err(|err| err.message().to_owned())?;
+    check(&manifest, dir)?;
     Ok(Extension {
         dir: dir.to_owned(),
         manifest,
@@ -180,7 +203,7 @@ fn check(m: &Manifest, dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn is_name(name: &str) -> bool {
+pub(crate) fn is_name(name: &str) -> bool {
     !name.is_empty()
         && name
             .bytes()
@@ -303,8 +326,12 @@ pub mod tests {
         assert_eq!(found.found.keys().collect::<Vec<_>>(), ["fake", "more"]);
         assert!(found.found["fake"].declares("rig"), "the first root wins");
         assert_eq!(found.problems.len(), 2, "{:?}", found.problems);
-        assert!(found.problems.iter().any(|p| p.contains("broken")));
-        assert!(found.problems.iter().any(|p| p.contains("shadowed")));
+        let said: Vec<String> = found.problems.iter().map(Problem::to_string).collect();
+        assert!(
+            said.iter().any(|p| p.contains("broken/extension.toml")),
+            "{said:?}"
+        );
+        assert!(said.iter().any(|p| p.contains("shadowed")), "{said:?}");
     }
 
     #[test]

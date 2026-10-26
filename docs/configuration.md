@@ -31,24 +31,9 @@ separator = "-"
 
 ## Extensions
 
-An extension adds fields to rows, and may give a row with no status of its own a fallback status, from any tool, without rexboard knowing the tool. It is a directory holding `extension.toml` and an adapter command:
+An extension adds fields to rows, and may give a row with no status of its own a fallback status, from any tool. It is a directory holding `extension.toml` and an adapter, found in `$XDG_CONFIG_HOME/rexboard/extensions` and then in `extensions.dirs`. Only the names in `extensions.enabled` run. serve reads the manifests and `[extensions]` when it starts and each time it rescans; `rexboard serve --stop` picks up a change at once.
 
-```toml
-name = "session-prefix"  # [a-z0-9-]+, the directory's name
-contract = 1             # the contract the adapter speaks
-cmd = ["./adapter"]      # argv, no shell; a leading ./ is the extension's directory
-every = 10               # seconds between runs, at least 2
-timeout = 5              # seconds, less than every; a slower run is killed
-[[fields]]
-name = "project"         # [a-z0-9-]+, stored on a row as session-prefix.project
-title = "PROJECT"
-[provides]
-status = false           # true lets it give rows with no record a status
-```
-
-serve runs each enabled extension on its own thread: every `every` seconds it writes the current rows to the adapter's stdin as JSON and reads fields per row back from its stdout. A row's own status record always wins over an extension's status. A failing run (an error exit, bad JSON, another contract or a timeout) keeps the last good answer for 3 runs, then drops it. Problems go to `serve.log`, as `ext NAME: …`, along with the first 4 KiB of the adapter's stderr per run. Anything the adapter leaves running, such as a process started with `&`, is stopped when it exits. `ls --json` shows each row's fields under `ext`; an extension that stops running takes its fields and status off the rows.
-
-An extension runs with your permissions and sees every row's labels and titles, so enable only adapters you trust. serve reads the manifests and `[extensions]` when it starts and each time it rescans; `rexboard serve --stop` picks up a change at once.
+`rexboard ext new NAME` starts one from the example, `rexboard ext test NAME` checks it, and `rexboard ext ls` shows each one found and how its last run went. [Extensions](extensions.md) has the manifest, the contract, its limits and failure rules, and the trust model: an extension runs with your permissions and sees every row's labels and titles, so enable only adapters you trust.
 
 An older config may still have a `[jump]` table with `pre_cmd`, for a board kept in its own Rex window. rexboard no longer runs it and ignores the table, so such a file still loads.
 

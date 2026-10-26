@@ -69,6 +69,7 @@ pub fn execute(cli: &Cli) -> Result<()> {
         Command::Jump { target } => jump::jump(target, cli.json),
         Command::Next { back } => jump::next(*back, cli.json),
         Command::Upgrade { check } => upgrade::run(*check, cli.json),
+        Command::Ext(command) => extension::cli::run(command, cli.json),
         Command::Board | Command::Pick => {
             if !stdout().is_terminal() || !stdin().is_terminal() {
                 return Err(Error::usage_with(

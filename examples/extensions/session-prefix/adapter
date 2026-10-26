@@ -1,0 +1,9 @@
+#!/bin/sh
+# Reads a contract 1 request on stdin and answers with each row's project: its session label up
+# to the first separator (settings.separator, "-" by default). Needs jq.
+exec jq -c '
+  (.settings.separator // "-") as $sep
+  | {
+      contract: 1,
+      rows: (.rows | map({key, value: {fields: {project: (.session | split($sep)[0])}}}) | from_entries)
+    }'

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -45,6 +47,9 @@ pub enum Command {
     },
     /// Pick a pane from the board's list and go to it. Enter goes and exits 0; esc exits 1.
     Pick,
+    /// List extensions, run one once against real rows, or start a new one from the example.
+    #[command(subcommand)]
+    Ext(ExtCommand),
     /// Upgrade rexboard the way it was installed (Homebrew, or install.sh), then stop serve so the
     /// next command runs the new one.
     #[command(alias = "update")]
@@ -52,6 +57,27 @@ pub enum Command {
         /// Only say whether a newer release is out.
         #[arg(long)]
         check: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ExtCommand {
+    /// One line per extension found: its contract, whether it is enabled, how its last run in
+    /// a running serve went, and its directory. A broken one says why.
+    Ls,
+    /// Run an extension once, enabled or not, and check its answer against the contract. Exit 1
+    /// when the answer breaks it.
+    Test {
+        #[arg(value_name = "NAME")]
+        name: String,
+        /// Send the rows in FILE, as `rexboard ls --json` prints them, instead of serve's.
+        #[arg(long, value_name = "FILE")]
+        rows: Option<PathBuf>,
+    },
+    /// Start extension NAME from the example, in `$XDG_CONFIG_HOME/rexboard/extensions/NAME`.
+    New {
+        #[arg(value_name = "NAME")]
+        name: String,
     },
 }
 

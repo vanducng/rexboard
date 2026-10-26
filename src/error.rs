@@ -41,6 +41,9 @@ pub enum Error {
     /// The upgrade could not run, or did not take.
     #[error("{message}")]
     Upgrade { message: String, steps: Vec<String> },
+    /// An extension could not be found, made or run, or its answer broke the contract.
+    #[error("{message}")]
+    Extension { message: String, steps: Vec<String> },
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -60,6 +63,13 @@ impl Error {
 
     pub fn upgrade(message: impl Into<String>, steps: &[&str]) -> Self {
         Self::Upgrade {
+            message: message.into(),
+            steps: steps.iter().map(|s| (*s).to_owned()).collect(),
+        }
+    }
+
+    pub fn extension(message: impl Into<String>, steps: &[&str]) -> Self {
+        Self::Extension {
             message: message.into(),
             steps: steps.iter().map(|s| (*s).to_owned()).collect(),
         }
@@ -87,6 +97,7 @@ impl Error {
             Self::AmbiguousClient { .. } => "AMBIGUOUS_CLIENT",
             Self::Config(_) => "CONFIG",
             Self::Upgrade { .. } => "UPGRADE",
+            Self::Extension { .. } => "EXTENSION",
             Self::Io(_) => "IO",
         }
     }
@@ -107,6 +118,7 @@ impl Error {
             Self::AmbiguousClient { steps, .. }
             | Self::RexExplained { steps, .. }
             | Self::Upgrade { steps, .. }
+            | Self::Extension { steps, .. }
                 if !steps.is_empty() =>
             {
                 steps.clone()

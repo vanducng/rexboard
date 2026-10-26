@@ -302,6 +302,22 @@ mod tests {
     }
 
     #[test]
+    fn the_shipped_example_names_each_rows_project_from_its_session() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/extensions/session-prefix");
+        let ext = crate::extension::load(&dir).unwrap();
+        let mut rows = rows();
+        rows[0].session = "api-gateway".into();
+        let parsed = run_once(&ext, &serde_json::json!({}), &rows, &|| false).unwrap();
+        assert_eq!(parsed.problems, Vec::<String>::new());
+        assert_eq!(parsed.rows["local/b1"].fields["project"], "api");
+        let dot = serde_json::json!({ "separator": "." });
+        rows[0].session = "web.app-v2".into();
+        let parsed = run_once(&ext, &dot, &rows, &|| false).unwrap();
+        assert_eq!(parsed.rows["local/b1"].fields["project"], "web");
+    }
+
+    #[test]
     fn a_hanging_adapter_is_stopped_at_its_timeout() {
         let root = tempfile::tempdir().unwrap();
         let ext = adapter(root.path(), "sleep 30", "every = 2\ntimeout = 1\n");
