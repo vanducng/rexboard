@@ -68,6 +68,7 @@ fn board(pick: bool) -> Result<Option<Row>> {
     let mut app = App::default();
     app.pick = pick;
     app.detail = tui_json().and_then(|path| detail::load(&path).detail);
+    client::QUIET.store(true, Ordering::Relaxed);
     let mut terminal = ratatui::init();
     let _restore = Restore;
     let mut tick = Instant::now();

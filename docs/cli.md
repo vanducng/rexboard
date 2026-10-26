@@ -174,9 +174,9 @@ rexboard serve --stop         # stop it and its observers
 
 `serve` keeps `since`, `seen` and the turn fields in `state.json` and puts them back after a restart for every pane whose `state` and `kind` did not change. It appends each state change to `transitions.jsonl`. [System architecture](system-architecture.md) has the protocol and the files.
 
-**After upgrading from 0.2.0 or older:** the old serve listens under its own `TMPDIR` or `XDG_RUNTIME_DIR`, so commands fail with `serve (pid N) holds .../serve.lock but does not answer on .../serve.sock`. Run `rexboard serve --stop` once; the next command starts a new serve. A stuck serve gives the same error and the same fix.
+**Upgrades take effect by themselves.** Every command first asks serve which rexboard it is. When serve is older, the command stops it, starts its own, and says so once, on stderr and in `serve.log`: `restarted serve 0.3.0 -> 0.3.1`. A newer serve, or one whose version it cannot read, is kept, so two installed versions never take turns restarting it. A serve that holds `serve.lock` but does not answer, such as one from 0.2.0 or older listening under its own `TMPDIR`, or a stuck one, is replaced the same way when it is a `rexboard` process (`restarted serve (pid N did not answer) -> 0.3.1`). Each command does this at most once. If the holder is not rexboard, the command fails with `SERVE` and leaves it alone.
 
-`serve --stop` exits 0 whether or not serve was running. A serve that holds the lock but does not answer gets SIGTERM, but only when the pid in `serve.lock` is a `rexboard` process. A serve that ignores SIGTERM is named with `kill -9 N` as the next step. It waits up to 5 seconds for serve's process to exit, then fails with `SERVE`. `serve --json` prints `pid` as a number, `null` when unknown.
+`serve --stop` exits 0 whether or not serve was running. A serve that holds the lock but does not answer gets SIGTERM, but only when the pid in `serve.lock` is a `rexboard` process: by its executable's path, or by its process name when the path cannot be read, as on macOS once an upgrade has deleted the binary it runs. A serve that ignores SIGTERM is named with `kill -9 N` as the next step. It waits up to 5 seconds for serve's process to exit, then fails with `SERVE`. `serve --json` prints `pid` as a number, `null` when unknown.
 
 ## `rexboard seen`
 

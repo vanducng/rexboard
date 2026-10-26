@@ -761,7 +761,7 @@ fn hold_lock(serve: &Serve) -> (std::process::Child, i32) {
 }
 
 #[test]
-fn a_held_lock_without_a_socket_names_the_serve_to_stop() {
+fn a_lock_held_by_another_program_is_left_alone() {
     let serve = Serve::new();
     let (mut sh, pid) = hold_lock(&serve);
     let out = serve
@@ -773,16 +773,128 @@ fn a_held_lock_without_a_socket_names_the_serve_to_stop() {
         .stderr
         .clone();
     let text = String::from_utf8_lossy(&out);
+    let alive = unsafe { libc::kill(pid, 0) } == 0;
     unsafe { libc::kill(pid, libc::SIGTERM) };
     sh.wait().unwrap();
+    assert!(alive, "the holder was not signalled");
     assert!(
         text.contains(&format!("serve (pid {pid}) holds"))
             && text.contains("does not answer on")
-            && text.contains("the next command starts a new one"),
+            && text.contains("it is not rexboard, so it was left alone"),
         "{text}"
     );
-    assert!(text.contains("rexboard serve --stop"), "{text}");
+    assert!(!text.contains("restarted serve"), "{text}");
     assert_eq!(serve.observer_starts(), 0, "no second serve was started");
+}
+
+/// The lines `rexboard ls --json` printed on stderr, and its rows.
+fn ls_with_stderr(cmd: &mut Command) -> (String, Vec<serde_json::Value>) {
+    let out = cmd
+        .args(["ls", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    (
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+        serde_json::from_slice(&out.stdout).unwrap(),
+    )
+}
+
+#[test]
+fn a_rexboard_serve_that_does_not_answer_is_replaced_once() {
+    let serve = Serve::new();
+    serve.rows(&[]);
+    let old = serve.pid();
+    // Still serve, still holding the lock, but nobody can reach it, as after an upgrade that
+    // moved the socket.
+    std::fs::remove_file(serve.socket()).unwrap();
+    let (said, rows) = ls_with_stderr(&mut serve.cmd());
+    assert!(!rows.is_empty());
+    assert!(
+        said.contains(&format!("restarted serve (pid {old} did not answer) -> ")),
+        "{said}"
+    );
+    assert_ne!(
+        unsafe { libc::kill(old as i32, 0) },
+        0,
+        "serve {old} is gone"
+    );
+    assert_ne!(serve.pid(), old, "a new serve holds the lock");
+    let log = std::fs::read_to_string(serve.file("serve.log")).unwrap();
+    assert_eq!(log.matches("restarted serve").count(), 1, "{log}");
+    let (said, _) = ls_with_stderr(&mut serve.cmd());
+    assert!(!said.contains("restarted"), "only once: {said}");
+}
+
+#[test]
+fn an_older_serve_is_restarted_once_and_a_newer_one_is_kept() {
+    let serve = Serve::new();
+    serve
+        .cmd()
+        .env("REXBOARD_TEST_VERSION", "0.0.1")
+        .arg("serve")
+        .assert()
+        .success();
+    let old = serve.pid();
+    let (said, rows) = ls_with_stderr(&mut serve.cmd());
+    assert!(!rows.is_empty());
+    let mine = env!("CARGO_PKG_VERSION");
+    assert!(
+        said.contains(&format!("restarted serve 0.0.1 -> {mine}")),
+        "{said}"
+    );
+    assert_ne!(serve.pid(), old, "a new serve holds the lock");
+    let (said, _) = ls_with_stderr(&mut serve.cmd());
+    assert!(
+        !said.contains("restarted"),
+        "the same version stays: {said}"
+    );
+
+    let newer = Serve::new();
+    newer
+        .cmd()
+        .env("REXBOARD_TEST_VERSION", "99.0.0")
+        .arg("serve")
+        .assert()
+        .success();
+    let kept = newer.pid();
+    let (said, _) = ls_with_stderr(&mut newer.cmd());
+    assert!(!said.contains("restarted"), "a newer serve is kept: {said}");
+    assert_eq!(newer.pid(), kept);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn serve_stop_finds_a_serve_whose_binary_was_deleted() {
+    let serve = Serve::new();
+    let bin_dir = tempfile::tempdir().unwrap();
+    let copy = bin_dir.path().join("rexboard");
+    std::fs::copy(assert_cmd::cargo::cargo_bin("rexboard"), &copy).unwrap();
+    // Under sh, which reaps it, so like a real serve it is not the test's child.
+    let mut sh = std::process::Command::new("sh")
+        .args(["-c", r#""$0" serve --foreground >/dev/null 2>&1 & wait"#])
+        .arg(&copy)
+        .env_remove("XDG_RUNTIME_DIR")
+        .envs(serve.envs())
+        .spawn()
+        .unwrap();
+    eventually("the copied serve answers", || serve.socket().exists());
+    let pid = serve.pid();
+    std::fs::remove_file(&copy).unwrap();
+    std::fs::remove_file(serve.socket()).unwrap();
+    serve
+        .cmd()
+        .args(["serve", "--stop"])
+        .assert()
+        .success()
+        .stdout("serve stopped\n");
+    sh.wait().unwrap();
+    assert_ne!(
+        unsafe { libc::kill(pid as i32, 0) },
+        0,
+        "serve {pid} is gone"
+    );
 }
 
 #[test]

@@ -5,6 +5,7 @@ use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -20,6 +21,10 @@ use crate::{interrupted, output, rex, serve, stop_on_signals};
 const START_WITHIN: Duration = Duration::from_secs(2);
 /// serve.log is cut back to nothing past this size when a client starts serve.
 const LOG_MAX: u64 = 1024 * 1024;
+
+/// Set while the board is up, whose screen a stderr line would break; notices then go only to
+/// serve.log.
+pub static QUIET: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Default, Deserialize)]
 pub struct Rows {
@@ -82,18 +87,34 @@ fn peer_uid(stream: &UnixStream) -> std::io::Result<libc::uid_t> {
 }
 
 /// Connects to serve, starting it first when nobody answers and no live serve holds the lock.
+/// A serve older than this rexboard is replaced once, so an upgrade takes effect by itself.
 /// serve itself clears a stale socket once it holds the lock, so the client never unlinks one.
 pub fn connect_or_start(paths: &Paths) -> Result<UnixStream> {
+    let stream = reach(paths)?;
+    let Some(old) = older_serve(paths) else {
+        return Ok(stream);
+    };
+    drop(stream);
+    stop(paths)?;
+    notice(
+        paths,
+        &format!("restarted serve {old} -> {}", serve::version()),
+    );
+    reach(paths)
+}
+
+fn reach(paths: &Paths) -> Result<UnixStream> {
     if let Some(stream) = connect(paths)? {
         return Ok(stream);
     }
     paths.create()?;
     // A serve that holds the lock may still be binding; it gets the same wait as one we start.
-    let held = Lock::held(&paths.lock());
+    let mut held = Lock::held(&paths.lock());
     if !held {
         start(paths)?;
     }
-    let deadline = Instant::now() + START_WITHIN;
+    let mut healed = false;
+    let mut deadline = Instant::now() + START_WITHIN;
     loop {
         if let Some(stream) = connect(paths)? {
             return Ok(stream);
@@ -101,10 +122,29 @@ pub fn connect_or_start(paths: &Paths) -> Result<UnixStream> {
         if Instant::now() >= deadline {
             // Checked again, so a serve that exited during the wait is not named.
             if held && Lock::held(&paths.lock()) {
-                let pid = recorded_pid(paths).map_or("?".to_owned(), |p| p.to_string());
+                let pid = recorded_pid(paths);
+                // A rexboard that holds the lock and never answers is an older build listening
+                // elsewhere, or a stuck one: replace it, once.
+                if let Some(pid) = pid.filter(|&pid| !healed && is_rexboard(pid)) {
+                    healed = true;
+                    held = false;
+                    unsafe { libc::kill(pid, libc::SIGTERM) };
+                    wait_gone(paths, Some(pid))?;
+                    notice(
+                        paths,
+                        &format!(
+                            "restarted serve (pid {pid} did not answer) -> {}",
+                            serve::version()
+                        ),
+                    );
+                    start(paths)?;
+                    deadline = Instant::now() + START_WITHIN;
+                    continue;
+                }
+                let pid = pid.map_or("?".to_owned(), |p| p.to_string());
                 return Err(Error::serve_with(
                     format!(
-                        "serve (pid {pid}) holds {} but does not answer on {}. It is probably from an older rexboard, or it is stuck. Stop it; the next command starts a new one",
+                        "serve (pid {pid}) holds {} but does not answer on {}, and it is not rexboard, so it was left alone",
                         paths.lock().display(),
                         paths.socket.display()
                     ),
@@ -119,6 +159,42 @@ pub fn connect_or_start(paths: &Paths) -> Result<UnixStream> {
             )));
         }
         thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// The version of the serve on `paths` when it is older than this rexboard. One from before the
+/// handshake does not know the request; doubt (no answer, an odd version) leaves serve alone.
+fn older_serve(paths: &Paths) -> Option<String> {
+    let mut stream = connect(paths).ok()??;
+    send(&mut stream, &json!({ "cmd": "version" })).ok()?;
+    stream.set_read_timeout(Some(START_WITHIN)).ok()?;
+    match read(&mut BufReader::new(stream), &mut String::new()) {
+        Ok(Some(reply)) => {
+            let theirs = reply["rexboard"].as_str()?;
+            older(theirs, &serve::version()).then(|| theirs.to_owned())
+        }
+        Err(Error::Usage { .. }) => Some("(no version)".to_owned()),
+        _ => None,
+    }
+}
+
+/// Whether version `a` comes before `b`, by their dotted numbers; never for one that is not.
+fn older(a: &str, b: &str) -> bool {
+    let parts = |v: &str| -> Option<Vec<u64>> { v.split('.').map(|p| p.parse().ok()).collect() };
+    matches!((parts(a), parts(b)), (Some(a), Some(b)) if a < b)
+}
+
+/// One line in serve.log and, unless the board is up, on stderr.
+fn notice(paths: &Paths, line: &str) {
+    if let Ok(mut log) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(paths.log())
+    {
+        let _ = writeln!(log, "{line}");
+    }
+    if !QUIET.load(Ordering::Relaxed) {
+        eprintln!("{line}");
     }
 }
 
@@ -399,11 +475,23 @@ fn alive(pid: i32) -> bool {
 }
 
 pub fn stop_serve(json: bool) -> Result<()> {
-    let paths = Paths::find()?;
+    let stopped = stop(&Paths::find()?)?;
+    if json {
+        println!("{}", json!({ "ok": true, "running": false }));
+    } else if stopped {
+        println!("serve stopped");
+    } else {
+        println!("serve is not running");
+    }
+    Ok(())
+}
+
+/// Stops the serve on `paths`; false when none was running.
+fn stop(paths: &Paths) -> Result<bool> {
     let lock = paths.lock().display().to_string();
-    let pid = match connect(&paths)? {
+    let pid = match connect(paths)? {
         Some(mut stream) => {
-            let pid = recorded_pid(&paths);
+            let pid = recorded_pid(paths);
             send(&mut stream, &json!({ "cmd": "stop" }))?;
             // serve may close as it stops; the wait below is what proves it stopped.
             let _ = read(&mut BufReader::new(stream), &mut String::new());
@@ -412,20 +500,14 @@ pub fn stop_serve(json: bool) -> Result<()> {
         // A serve that holds the lock but does not answer (an older build, or a stuck one).
         None if Lock::held(&paths.lock()) => {
             let lsof = format!("lsof {lock}");
-            let Some(pid) = recorded_pid(&paths) else {
+            let Some(pid) = recorded_pid(paths) else {
                 return Err(Error::serve_with(
                     format!("a serve holds {lock} but recorded no pid"),
                     &[lsof.as_str(), "kill <the pid lsof shows>"],
                 ));
             };
             // The record can lag the lock, so never signal a pid that is not rexboard.
-            let Some(exe) = exe_path(pid) else {
-                return Err(Error::serve_with(
-                    format!("cannot read pid {pid}'s executable, so it was not signalled"),
-                    &[lsof.as_str(), "kill <the pid lsof shows>"],
-                ));
-            };
-            if !rexboard_exe(&exe) {
+            if !is_rexboard(pid) {
                 return Err(Error::serve_with(
                     format!(
                         "serve.lock names pid {pid}, which is not rexboard; serve may still be starting, retry"
@@ -436,19 +518,18 @@ pub fn stop_serve(json: bool) -> Result<()> {
             unsafe { libc::kill(pid, libc::SIGTERM) };
             Some(pid)
         }
-        None => {
-            if json {
-                println!("{}", json!({ "ok": true, "running": false }));
-            } else {
-                println!("serve is not running");
-            }
-            return Ok(());
-        }
+        None => return Ok(false),
     };
+    wait_gone(paths, pid)?;
+    Ok(true)
+}
+
+/// Waits up to 5s for `pid` to exit, or with no pid for nothing to answer on the socket.
+fn wait_gone(paths: &Paths, pid: Option<i32>) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(5);
     let running = || match pid {
         Some(pid) => alive(pid),
-        None => matches!(connect(&paths), Ok(Some(_))),
+        None => matches!(connect(paths), Ok(Some(_))),
     };
     while running() {
         if Instant::now() >= deadline {
@@ -469,12 +550,17 @@ pub fn stop_serve(json: bool) -> Result<()> {
         }
         thread::sleep(Duration::from_millis(20));
     }
-    if json {
-        println!("{}", json!({ "ok": true, "running": false }));
-    } else {
-        println!("serve stopped");
-    }
     Ok(())
+}
+
+/// Whether `pid` runs rexboard: by its executable's path, or by its name when the path cannot
+/// be read, as on macOS once an upgrade has deleted the binary it runs.
+fn is_rexboard(pid: i32) -> bool {
+    rexboard_process(exe_path(pid).as_deref(), proc_name(pid).as_deref())
+}
+
+fn rexboard_process(exe: Option<&std::path::Path>, name: Option<&str>) -> bool {
+    exe.map_or(name == Some("rexboard"), rexboard_exe)
 }
 
 /// Whether an executable path is rexboard's. Linux shows a binary replaced in place, as
@@ -498,6 +584,21 @@ fn exe_path(pid: i32) -> Option<std::path::PathBuf> {
     std::fs::read_link(format!("/proc/{pid}/exe")).ok()
 }
 
+/// The process's own name (p_comm), which outlives a deleted binary.
+#[cfg(target_os = "macos")]
+fn proc_name(pid: i32) -> Option<String> {
+    let mut buf = [0u8; 64];
+    let len = unsafe { libc::proc_name(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
+    let len = usize::try_from(len).ok().filter(|&len| len > 0)?;
+    Some(String::from_utf8_lossy(&buf[..len]).into_owned())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn proc_name(pid: i32) -> Option<String> {
+    let name = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+    Some(name.trim_end().to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -512,5 +613,33 @@ mod tests {
         )));
         assert!(!rexboard_exe(std::path::Path::new("/usr/bin/perl")));
         assert!(!rexboard_exe(std::path::Path::new("/usr/bin/rexboard-old")));
+    }
+
+    #[test]
+    fn a_process_whose_path_cannot_be_read_counts_by_its_name() {
+        let path = std::path::Path::new;
+        assert!(
+            rexboard_process(None, Some("rexboard")),
+            "a deleted binary on macOS"
+        );
+        assert!(!rexboard_process(None, Some("perl")));
+        assert!(!rexboard_process(None, None), "nothing to go on");
+        assert!(
+            !rexboard_process(Some(path("/usr/bin/perl")), Some("rexboard")),
+            "a readable path wins over the name"
+        );
+        assert!(rexboard_process(
+            Some(path("/opt/homebrew/bin/rexboard")),
+            None
+        ));
+    }
+
+    #[test]
+    fn only_an_older_dotted_version_counts_as_older() {
+        assert!(older("0.3.0", "0.3.1"));
+        assert!(older("0.9.9", "0.10.0"), "numbers, not text");
+        assert!(!older("0.3.1", "0.3.1"));
+        assert!(!older("0.4.0", "0.3.1"), "a newer serve is kept");
+        assert!(!older("0.3.1-rc1", "0.3.1"), "doubt leaves serve alone");
     }
 }
