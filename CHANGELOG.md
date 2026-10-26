@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/vanducng/rexboard/compare/v0.11.1...v0.12.0) (2026-10-26)
+
+
+### Features
+
+* **cli:** answer and close a pane, pinned to the dialog the caller read ([c43955b](https://github.com/vanducng/rexboard/commit/c43955b6b1d0a8ba8c3eeb8460d42906fc985f7c))
+
 ## [0.11.1](https://github.com/vanducng/rexboard/compare/v0.11.0...v0.11.1) (2026-10-26)
 
 
