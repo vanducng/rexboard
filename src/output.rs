@@ -195,6 +195,33 @@ pub fn wheres(rows: &[Row], max: usize, short: bool, host_column: bool) -> Vec<S
         .collect()
 }
 
+/// BLOCK for each row once WHERE splits: its name, and `#N`, its place among its tab's agent
+/// panes, when another row on its host has the same session, tab and name.
+pub fn blocks(rows: &[Row]) -> Vec<String> {
+    let names: Vec<String> = rows.iter().map(name).collect();
+    rows.iter()
+        .zip(&names)
+        .map(|(row, own)| {
+            let p = &row.pane;
+            let twins = rows
+                .iter()
+                .zip(&names)
+                .filter(|(o, other)| {
+                    other == &own
+                        && o.pane.host == p.host
+                        && o.pane.session == p.session
+                        && o.pane.tab == p.tab
+                })
+                .count();
+            if twins > 1 {
+                format!("{own} #{}", position(row, rows))
+            } else {
+                own.clone()
+            }
+        })
+        .collect()
+}
+
 /// The pane's place among the agent panes of its tab, oldest first: Rex block ids sort by
 /// creation time.
 fn position(row: &Row, rows: &[Row]) -> usize {

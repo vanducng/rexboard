@@ -12,7 +12,7 @@ use super::status::ALL;
 use super::theme;
 use super::views::{Key, View};
 use crate::board::Row;
-use crate::output::{chop, clean, fit, in_state, name, wheres};
+use crate::output::{blocks, chop, clean, fit, in_state, name, wheres};
 use crate::pane::bare_title;
 
 /// Below this many rows the column header and the blank row above it are left out, so no row
@@ -22,7 +22,7 @@ const HEADED: u16 = 12;
 const STOPPED: &str = "serve stopped · r reconnects";
 
 /// The `?` table: every key, in the order an operator reaches for them.
-pub const KEYS: [(&str, &str); 18] = [
+pub const KEYS: [(&str, &str); 19] = [
     ("j/k", "move; g/G first, last"),
     ("1-9", "the nth NEEDS YOU row"),
     ("s", "mark seen"),
@@ -34,6 +34,7 @@ pub const KEYS: [(&str, &str); 18] = [
     (":", "a view by name; tab completes"),
     ("S A T", "sort by state, age, turn"),
     ("R O W M", "by harness, host, where, msg"),
+    ("E N B", "by session, window, block"),
     ("esc", "clear filters/sort/peek/folds"),
     ("z", "fold or open a group"),
     ("enter", "go to the pane"),
@@ -318,13 +319,17 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
     };
     let at = items.iter().position(|item| is_selected(app, item));
     let offset = at.map_or(0, |at| (at + 1).saturating_sub(room));
-    let places = wheres(
-        &app.rows,
-        columns.width(Col::Where).saturating_sub(1),
-        columns.tier != Tier::Wide,
-        // The host view's groups already name the host, so its rows need no `@HOST`.
-        columns.has(Col::Host) || app.view.group_by == Some(Key::Host),
-    );
+    let places = if columns.has(Col::Where) {
+        wheres(
+            &app.rows,
+            columns.width(Col::Where).saturating_sub(1),
+            columns.tier != Tier::Wide,
+            // The host view's groups already name the host, so its rows need no `@HOST`.
+            columns.has(Col::Host) || app.view.group_by == Some(Key::Host),
+        )
+    } else {
+        blocks(&app.rows)
+    };
     let mut lines: Vec<Line> = items
         .iter()
         .skip(offset)
@@ -389,7 +394,7 @@ fn is_selected(app: &App, item: &Item) -> bool {
     }
 }
 
-/// One row of the list. `place` is its WHERE, worked out with the other rows.
+/// One row of the list. `place` is its WHERE or BLOCK, worked out with the other rows.
 fn row_line(
     row: &Row,
     place: &str,
@@ -546,7 +551,7 @@ fn detail(
     pairs.extend([
         ("host", p.host.clone()),
         ("session", p.session.clone()),
-        ("tab", p.tab.clone()),
+        ("window", p.tab.clone()),
         ("title", dash(bare_title(&p.title))),
         ("harness", p.harness.clone().unwrap_or_else(|| "-".into())),
         ("source", p.source.clone()),
@@ -832,6 +837,14 @@ mod tests {
             wide.contains("2-openrig…abcdef#l2 › rig"),
             "the pane stays whole:\n{wide}"
         );
+    }
+
+    #[test]
+    fn the_detail_pane_names_the_window() {
+        let text = screen(140, 40);
+        let window = text.lines().find(|l| l.contains("│ window ")).unwrap();
+        assert!(window.ends_with("window    main"), "{window}");
+        assert!(!text.lines().any(|l| l.contains("│ tab ")), "{text}");
     }
 
     #[test]
