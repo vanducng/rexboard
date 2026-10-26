@@ -1373,27 +1373,42 @@ fn board_under_pty(
 ) -> (String, std::process::ExitStatus) {
     use std::io::Read;
     use std::os::fd::FromRawFd;
-    let (mut master, mut slave) = (0, 0);
-    let mut size = libc::winsize {
+    let size = libc::winsize {
         ws_row: 24,
         ws_col: 80,
         ws_xpixel: 0,
         ws_ypixel: 0,
     };
-    let opened = unsafe {
-        libc::openpty(
-            &raw mut master,
-            &raw mut slave,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            &raw mut size,
+    // Both ends close-on-exec from the start. openpty sets it in a second step, and a child
+    // that another test spawned in between kept the master open, so closing it hung nothing up.
+    let master = unsafe {
+        libc::open(
+            c"/dev/ptmx".as_ptr(),
+            libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC,
         )
     };
-    assert_eq!(opened, 0, "openpty failed");
-    // Close-on-exec, so children that other tests spawn meanwhile do not inherit the pty.
-    for fd in [master, slave] {
-        unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
-    }
+    assert!(master >= 0, "no pty");
+    assert_eq!(unsafe { libc::grantpt(master) }, 0, "grantpt");
+    assert_eq!(unsafe { libc::unlockpt(master) }, 0, "unlockpt");
+    let name = {
+        // ptsname returns a static buffer that parallel tests would share.
+        static PTSNAME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = PTSNAME
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        unsafe { std::ffi::CStr::from_ptr(libc::ptsname(master)) }.to_owned()
+    };
+    let slave = unsafe {
+        libc::open(
+            name.as_ptr(),
+            libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC,
+        )
+    };
+    assert!(slave >= 0, "no pty slave");
+    assert_eq!(
+        unsafe { libc::ioctl(slave, libc::TIOCSWINSZ, &raw const size) },
+        0
+    );
     let stdio = || unsafe {
         std::process::Stdio::from_raw_fd(libc::fcntl(slave, libc::F_DUPFD_CLOEXEC, 0))
     };
@@ -2091,9 +2106,10 @@ fn ext_status_fallback_only_reaches_unreported_rows_and_only_when_provided() {
 /// An adapter that answers well once, then fails as `failure` says on every later run.
 fn good_then(serve: &Serve, failure: &str) {
     let count = serve.dir.path().join("runs");
-    let good = answers(r#"{"local/block:api-seat-a": {"fields": {"rig": "api"}}}"#);
+    // The good answer counts only once the run was sent the row: an early run can come before
+    // the local host's snapshot.
     let script = format!(
-        "if [ -e '{c}' ]; then\n{failure}\nfi\ntouch '{c}'\n{good}",
+        "req=$(cat)\nif [ -e '{c}' ]; then\n{failure}\nfi\ncase \"$req\" in *'{SEAT}'*) touch '{c}' ;; esac\necho '{{\"contract\": 1, \"rows\": {{\"{SEAT}\": {{\"fields\": {{\"rig\": \"api\"}}}}}}}}'",
         c = count.display()
     );
     extension(serve, "fake", "", "", &script);
