@@ -9,16 +9,21 @@ use unicode_width::UnicodeWidthStr;
 use super::answer::{Answer, Step};
 use super::columns::{Col, Column, Columns, Sort, by_letter, field_column, free_letter};
 use super::full::Full;
+use super::keys::{self, Act, K};
 use super::screen::Screen;
 use super::status::Status;
 use super::views::{Bucket, Key, View, arrange, bucket, views};
 use crate::board::{Group, Row};
 use crate::client::{ExtRun, Field};
-use crate::output::{clean, harness, labels, name, path, wheres};
+use crate::output::{clean, harness, labels, name, path, squeeze, wheres};
 use crate::pane::Pane;
 use crate::send::{Action, Expect};
 
 const TOAST: Duration = Duration::from_secs(3);
+/// Keys this close together are typing or a paste, not a person answering a question.
+pub const GUARD: Duration = Duration::from_millis(300);
+const TOO_FAST_TO_ANSWER: &str = "keys came too fast; nothing sent · a answers";
+const TOO_FAST_TO_CLOSE: &str = "keys came too fast; nothing closed · dd closes";
 
 const HIDDEN: &str = "the card is hidden · c shows it";
 /// A blocked row's tail is read once its card has shown this long, so j/k across rows reads none.
@@ -140,14 +145,15 @@ pub struct App {
     pub filtering: bool,
     /// `f` and a letter: only rows with that status show.
     pub status: Option<Status>,
-    /// `f` was pressed and waits for its letter.
-    pub picking_status: bool,
+    /// A prefix key (`g o z y f d`) waiting for the key after it.
+    pub pending: Option<char>,
     /// The `:` prompt: a view name being typed.
     pub command: Input,
     pub commanding: bool,
     pub view: View,
     pub sort: Option<Sort>,
-    told_ctrl_s: bool,
+    /// Keys whose meaning changed (`R`, `M`, `N`), told once a run.
+    told: BTreeSet<char>,
     told_table: bool,
     /// Where the list's rows were last drawn: the first row's line, the first item shown, and
     /// how many rows fit. The draw sets it, so a click can find the row under it.
@@ -163,7 +169,6 @@ pub struct App {
     pub shown: Option<(String, Instant)>,
     /// The row and report the last automatic tail was for, so each is read once.
     tailed: Option<(String, Option<String>)>,
-    told_angles: bool,
     pub toast: Option<(String, Instant)>,
     pub link: Link,
     /// `rexboard pick`: the list alone; enter goes and esc gives up.
@@ -180,8 +185,17 @@ pub struct App {
     pub going: Option<String>,
     /// Why the last jump or close failed, until the next key.
     pub failed: Option<String>,
-    /// `ctrl+k`: the row to close once a second `ctrl+k` confirms it.
-    pub closing: Option<Row>,
+    /// `dd`: the row to close once `y` confirms it, and when it asked.
+    pub closing: Option<(Row, Instant)>,
+    /// When answer mode opened, until its first key: a key sooner than GUARD is typing, and
+    /// leaves it.
+    answer_guard: Option<Instant>,
+    /// When the last key came, and whether this one came a quiet GUARD after it: typing never
+    /// does, so `dd` and `a`/`i` only act on a key pressed on its own.
+    last_key: Option<Instant>,
+    quiet: bool,
+    /// Whether the waiting prefix's key came on its own.
+    pending_quiet: bool,
     needs: BTreeSet<String>,
     /// `a`: answering one row; the board's keys are off.
     pub answer: Option<Answer>,
@@ -230,7 +244,7 @@ impl App {
                 self.sent = None;
             }
         }
-        if let Some(row) = &self.closing
+        if let Some((row, _)) = &self.closing
             && !self.rows.iter().any(|r| r.key == row.key)
         {
             self.say(format!(
@@ -469,17 +483,22 @@ impl App {
     /// Where the selection can rest, in list order: rows and folded headers.
     pub fn spots(&self) -> Vec<Spot> {
         self.items()
-            .into_iter()
-            .filter_map(|item| match item {
-                Item::Row(i) => Some(Spot::Row(self.rows[i].key.clone())),
-                Item::Header {
-                    bucket,
-                    folded: true,
-                    ..
-                } => Some(Spot::Group(bucket)),
-                Item::Header { .. } => None,
-            })
+            .iter()
+            .filter_map(|item| self.spot(item))
             .collect()
+    }
+
+    /// The spot an item is, if the selection can rest on it: a row, or a folded header.
+    fn spot(&self, item: &Item) -> Option<Spot> {
+        match item {
+            Item::Row(i) => Some(Spot::Row(self.rows[*i].key.clone())),
+            Item::Header {
+                bucket,
+                folded: true,
+                ..
+            } => Some(Spot::Group(bucket.clone())),
+            Item::Header { .. } => None,
+        }
     }
 
     pub fn current(&self) -> Option<&Row> {
@@ -564,8 +583,14 @@ impl App {
         self.command = Input::new(common);
     }
 
-    /// The `:` prompt's Enter: a view's name, or the start of exactly one.
-    fn open(&mut self) {
+    /// The `:` prompt's Enter: `seen` marks every done row shown seen, `q` quits, else a view's
+    /// name, or the start of exactly one.
+    fn open(&mut self) -> Option<Effect> {
+        match self.command.value().trim() {
+            "seen" => return self.seen_all(),
+            "q" | "q!" | "quit" => return Some(Effect::Quit),
+            _ => {}
+        }
         let typed = match self.command.value().trim() {
             // `flat` was the table view's name before v0.3.
             "flat" => "table".to_owned(),
@@ -583,18 +608,14 @@ impl App {
             Some(view) => self.show(view),
             None => self.say(format!("no view \"{typed}\"")),
         }
+        None
     }
 
-    /// Shift and a column's letter: sort by it, or flip it if it is already the sort.
+    /// `o` and a column's letter: sort by it, flip it if it is the sort, clear it the third time.
     fn sort_by(&mut self, letter: char) {
         let Some(column) = self.column_by_letter(letter) else {
             return;
         };
-        // ponytail: one hint per run for S's move to ctrl+s; drop it in v0.3.
-        if letter == 'S' && !self.told_ctrl_s {
-            self.told_ctrl_s = true;
-            self.say("sorted by state · bulk seen is ctrl+s now");
-        }
         self.sort = match self.sort {
             Some((id, dir)) if id == column.id && dir == column.first => Some((id, dir.flip())),
             Some((id, _)) if id == column.id => None,
@@ -716,29 +737,36 @@ impl App {
         }
     }
 
-    /// Keys while the full view is open: it scrolls, answers, jumps or closes; the board's own
-    /// keys wait.
-    fn full_key(&mut self, key: KeyEvent) -> Option<Effect> {
+    /// Keys while the full view is open: it scrolls, answers, jumps or goes back; the board's
+    /// own keys wait.
+    fn full_key(&mut self, key: K, now: Instant) -> Option<Effect> {
         let page = self.full_page().1 as isize;
-        if key.modifiers.contains(KeyModifiers::CONTROL) {
-            return (key.code == KeyCode::Char('c')).then_some(Effect::Quit);
-        }
-        match key.code {
-            KeyCode::Char(' ') | KeyCode::Esc => self.full = None,
-            KeyCode::Char('q') => return Some(Effect::Quit),
-            KeyCode::Char('j') | KeyCode::Down => self.full_scroll(-1),
-            KeyCode::Char('k') | KeyCode::Up => self.full_scroll(1),
-            KeyCode::PageDown => self.full_scroll(-page),
-            KeyCode::PageUp => self.full_scroll(page),
-            KeyCode::Char('g') | KeyCode::Home => self.full_scroll(isize::MAX),
-            KeyCode::Char('G') | KeyCode::End => self.full_scroll(isize::MIN),
+        let act = match self.pending.take() {
+            Some(prefix) => keys::find(keys::FULL, &[keys::K(KeyCode::Char(prefix), false), key]),
+            None if keys::starts(keys::FULL, key) => {
+                self.pending = key.char();
+                return None;
+            }
+            None => keys::find(keys::FULL, &[key]),
+        };
+        match act? {
+            Act::Leave => self.full = None,
+            Act::Quit => return Some(Effect::Quit),
+            Act::Down => self.full_scroll(-1),
+            Act::Up => self.full_scroll(1),
+            Act::HalfDown => self.full_scroll(-(page / 2).max(1)),
+            Act::HalfUp => self.full_scroll((page / 2).max(1)),
+            Act::PageDown => self.full_scroll(-page),
+            Act::PageUp => self.full_scroll(page),
+            Act::First => self.full_scroll(isize::MAX),
+            Act::Last => self.full_scroll(isize::MIN),
             // The filter or a fold may have moved the board's selection off the viewed row.
-            KeyCode::Char('a') | KeyCode::Enter => {
+            act @ (Act::Answer | Act::Jump) => {
                 self.selected = self.full.as_ref().map(|full| Spot::Row(full.key.clone()));
-                return if key.code == KeyCode::Enter {
+                return if act == Act::Jump {
                     self.jump()
                 } else {
-                    self.start_answer()
+                    self.start_answer(now)
                 };
             }
             _ => {}
@@ -781,8 +809,8 @@ impl App {
         Some(Effect::Back)
     }
 
-    /// `ctrl+k`: ask before closing the current row's pane. Never the board's own.
-    fn ask_close(&mut self) {
+    /// `dd`: ask before closing the current row's pane. Never the board's own.
+    fn ask_close(&mut self, now: Instant) {
         let Some(row) = self.current() else {
             return;
         };
@@ -790,25 +818,34 @@ impl App {
             self.failed = Some("that pane runs the board; it stays open".into());
             return;
         }
-        self.closing = Some(row.clone());
+        self.closing = Some((row.clone(), now));
     }
 
     /// Where `row` is, as the list tells it apart from the rows that read the same (`#N`), in
-    /// `max` columns.
+    /// `max` columns: the path gives way, never the suffix.
     fn place(&self, row: &Row, max: usize) -> String {
+        let whole = path(&labels(row, false), usize::MAX);
         let at = self.rows.iter().position(|r| r.key == row.key);
-        at.map_or_else(
-            || path(&labels(row, false), max),
-            |at| wheres(&self.rows, max, false, true).swap_remove(at),
-        )
+        let full = at.map_or_else(
+            || whole.clone(),
+            |at| wheres(&self.rows, usize::MAX, false, true).swap_remove(at),
+        );
+        if full.width() <= max {
+            return full;
+        }
+        // Both ends stay: the session, and the block that would close.
+        let suffix = full.strip_prefix(whole.as_str()).unwrap_or_default();
+        let room = max.saturating_sub(suffix.width()).max(1);
+        format!("{}{suffix}", squeeze(&whole, room))
     }
 
-    /// The footer while `ctrl+k` waits for a second `ctrl+k`: the place as the list shows it,
-    /// with its `#N`, and what closing it ends, in `width` columns. Only the place gives way.
+    /// The footer while `dd` waits for `y`: the place as the list shows it, with its `#N`, and
+    /// what closing it ends, in `width` columns. Only the place gives way.
     pub fn close_question(&self, width: usize) -> Option<String> {
-        let row = self.closing.as_ref()?;
-        let state = match row.pane.state.as_str() {
-            state @ ("blocked" | "working") => format!(" ({state})"),
+        let (row, _) = self.closing.as_ref()?;
+        let state = match (row.pane.state.as_str(), row.pane.kind.as_deref()) {
+            ("blocked", Some(kind)) if !kind.is_empty() => format!(" (blocked · {kind})"),
+            (state @ ("blocked" | "working"), _) => format!(" ({state})"),
             _ => String::new(),
         };
         let tmux = if row.pane.process.as_deref() == Some("tmux") {
@@ -816,17 +853,29 @@ impl App {
         } else {
             ""
         };
-        let rest = format!(
-            " on {}, ending {}{state}?{tmux} ctrl+k again closes it",
-            row.pane.host,
-            harness(row)
-        );
+        let full = self.place(row, usize::MAX);
+        let ending = format!(", ending {}{state}", harness(row));
+        // A narrow footer drops what it ends before it cuts the place.
+        let rest = [ending.as_str(), ""]
+            .into_iter()
+            .map(|ending| format!(" on {}{ending}?{tmux} y closes", row.pane.host))
+            .find(|rest| "close ".width() + full.width() + rest.width() <= width)
+            .unwrap_or_else(|| format!(" on {}?{tmux} y closes", row.pane.host));
         let room = width.saturating_sub("close ".width() + rest.width());
         Some(format!("close {}{rest}", self.place(row, room)))
     }
 
-    /// The second `ctrl+k`: close the row the first one asked about.
-    fn close(&mut self, row: Row) -> Option<Effect> {
+    /// The key after `dd`'s question: only `y` closes, and only once the question has been up
+    /// for GUARD, so typing or a paste that hits `dd` closes nothing.
+    fn answer_close(&mut self, row: Row, asked: Instant, key: K, now: Instant) -> Option<Effect> {
+        if now.duration_since(asked) < GUARD {
+            self.say("nothing closed (keys came too fast)");
+            return None;
+        }
+        if key != keys::K(KeyCode::Char('y'), false) {
+            self.say("nothing closed");
+            return None;
+        }
         if self.busy() {
             return None;
         }
@@ -834,7 +883,7 @@ impl App {
         Some(Effect::Close(Box::new(row)))
     }
 
-    /// `y` copies the row's message and `Y` where it is, as `session › window › block @host`,
+    /// `yy` copies the row's message and `yp` where it is, as `session › window › block @host`,
     /// both without terminal control, so a paste cannot end early and run what follows.
     fn copy(&mut self, location: bool) -> Option<Effect> {
         let row = self.current()?;
@@ -850,7 +899,7 @@ impl App {
                 .to_owned()
         };
         if text.is_empty() {
-            self.failed = Some("this row has no message to copy · Y copies where it is".into());
+            self.failed = Some("this row has no message to copy · yp copies where it is".into());
             return None;
         }
         let shown = if location {
@@ -861,8 +910,9 @@ impl App {
         Some(Effect::Copy { text, shown })
     }
 
-    /// `tab`: a done row read for READ is seen; then on to the next NEEDS YOU row, wrapping.
-    fn next_waiting(&mut self, now: Instant) -> Option<Effect> {
+    /// `n` (or `tab`, or `N` the other way): a done row read for READ is seen; then on to the
+    /// next NEEDS YOU row, wrapping.
+    fn next_waiting(&mut self, now: Instant, back: bool) -> Option<Effect> {
         let seen = self.current().and_then(|row| {
             let read = self
                 .shown
@@ -892,7 +942,13 @@ impl App {
         let at = waiting
             .iter()
             .position(|spot| Some(spot) == self.selected.as_ref());
-        let next = at.map_or(0, |at| at + 1) % waiting.len().max(1);
+        let n = waiting.len().max(1);
+        let next = match at {
+            Some(at) if back => (at + n - 1) % n,
+            Some(at) => (at + 1) % n,
+            None if back => n - 1,
+            None => 0,
+        };
         match waiting.get(next) {
             Some(spot) => self.selected = Some(spot.clone()),
             None => self.say("nobody needs you"),
@@ -927,7 +983,7 @@ impl App {
 
     /// Whether a prompt (`/`, `:` or `f`) has the keyboard, so the mouse leaves the list alone.
     fn prompting(&self) -> bool {
-        self.filtering || self.commanding || self.picking_status || self.answer.is_some()
+        self.filtering || self.commanding || self.pending == Some('f') || self.answer.is_some()
     }
 
     /// The wheel moves the selection, as `k` and `j` do, but stops at the ends; with the mouse
@@ -956,23 +1012,26 @@ impl App {
     }
 
     pub fn handle(&mut self, key: KeyEvent) -> Option<Effect> {
+        self.handle_at(key, Instant::now())
+    }
+
+    /// One key, at `now`. The layers take it in turn: `dd`'s question, answer mode, the full
+    /// view, the `:` and `/` prompts, a pending prefix, then the board's table.
+    pub fn handle_at(&mut self, key: KeyEvent, now: Instant) -> Option<Effect> {
         self.failed = None;
-        // After `ctrl+k`, a second one closes and `esc` only cancels; any other key cancels and
-        // then does what it does.
-        if let Some(row) = self.closing.take() {
-            if key.code == KeyCode::Char('k') && key.modifiers == KeyModifiers::CONTROL {
-                return self.close(row);
-            }
-            self.say("nothing closed");
-            if key.code == KeyCode::Esc {
-                return None;
-            }
+        self.quiet = self
+            .last_key
+            .is_none_or(|at| now.duration_since(at) >= GUARD);
+        self.last_key = Some(now);
+        let k = K::of(key);
+        if let Some((row, asked)) = self.closing.take() {
+            return self.answer_close(row, asked, k?, now);
         }
         if self.answer.is_some() {
-            return self.answer_key(key, Instant::now());
+            return self.answer_key(key, now);
         }
         if self.full.is_some() {
-            return self.full_key(key);
+            return self.full_key(k?, now);
         }
         if self.commanding {
             match key.code {
@@ -980,7 +1039,7 @@ impl App {
                 KeyCode::Tab => self.complete(),
                 KeyCode::Enter => {
                     self.commanding = false;
-                    self.open();
+                    return self.open();
                 }
                 _ => {
                     self.command.handle_event(&Event::Key(key));
@@ -1002,120 +1061,127 @@ impl App {
             self.keep_selection_visible();
             return None;
         }
-        // A key with ctrl or alt after `f` keeps its own meaning, so ctrl+c still quits.
-        if self.picking_status && !(key.modifiers - KeyModifiers::SHIFT).is_empty() {
-            self.picking_status = false;
+        let k = k?;
+        // A ctrl chord after a prefix keeps its own meaning, so ctrl-c still quits.
+        if let Some(prefix) = self.pending.take()
+            && !k.1
+        {
+            return self.after(prefix, k, now);
         }
-        if self.picking_status {
-            self.picking_status = false;
-            match key.code {
-                KeyCode::Char('f') | KeyCode::Esc => self.status = None,
-                KeyCode::Char(c) => match Status::from_letter(c) {
-                    Some(status) => {
-                        self.status = Some(status);
-                        // Folded groups would hide the very rows asked for.
-                        self.unfold_all();
-                    }
-                    None => self.say("f takes w d q p e u i; f or esc clears"),
-                },
-                _ => {}
-            }
-            self.keep_selection_visible();
+        if keys::starts(keys::BOARD, k) {
+            self.pending = k.char();
+            self.pending_quiet = self.quiet;
             return None;
         }
-        if key.modifiers.contains(KeyModifiers::CONTROL) {
-            return match key.code {
-                KeyCode::Char('c') => Some(Effect::Quit),
-                KeyCode::Char('s') => self.seen_all(),
-                KeyCode::Char('k') if !self.pick => {
-                    self.ask_close();
-                    None
-                }
-                _ => None,
-            };
+        let act = keys::find(keys::BOARD, &[k])?;
+        self.act(act, k, now)
+    }
+
+    /// The key after a prefix: `o` takes a column's letter, `f` a status's, the rest their
+    /// second key from the table. Anything else, esc included, drops the prefix.
+    fn after(&mut self, prefix: char, k: K, now: Instant) -> Option<Effect> {
+        let letter = k.char();
+        match (prefix, letter) {
+            ('o', Some(letter)) if self.column_by_letter(letter).is_some() => self.sort_by(letter),
+            ('o', _) if k.0 != KeyCode::Esc => self.say(format!(
+                "o takes {}; esc cancels",
+                self.sort_letters().join(" ")
+            )),
+            ('f', Some('f')) => self.status = None,
+            ('f', Some(letter)) if Status::from_letter(letter).is_some() => {
+                self.status = Status::from_letter(letter);
+                // Folded groups would hide the very rows asked for.
+                self.unfold_all();
+            }
+            ('f', _) if k.0 != KeyCode::Esc => self.say("f takes w d q p e u i; ff clears"),
+            ('o' | 'f', _) => {}
+            _ => {
+                let act = keys::find(keys::BOARD, &[K(KeyCode::Char(prefix), false), k])?;
+                return self.act(act, k, now);
+            }
         }
-        match key.code {
-            KeyCode::Char('q') => return Some(Effect::Quit),
-            KeyCode::Char('j') | KeyCode::Down => self.step(1),
-            KeyCode::Char('k') | KeyCode::Up => self.step(-1),
-            KeyCode::Char('g') | KeyCode::Home => self.selected = self.spots().first().cloned(),
-            KeyCode::Char('G') | KeyCode::End => self.selected = self.spots().last().cloned(),
-            KeyCode::Char('/') => self.filtering = true,
-            KeyCode::Char('f') => self.picking_status = true,
-            KeyCode::Char(':') => {
+        self.keep_selection_visible();
+        None
+    }
+
+    /// The sort letters `o` takes, built-in then the fields'.
+    pub fn sort_letters(&self) -> Vec<String> {
+        super::columns::COLUMNS
+            .iter()
+            .filter_map(|c| c.letter)
+            .chain(self.fields.iter().filter_map(|(_, l)| *l))
+            .map(String::from)
+            .collect()
+    }
+
+    fn act(&mut self, act: Act, k: K, now: Instant) -> Option<Effect> {
+        // `pick` only picks: nothing that leaves the list or acts on a pane but going to it.
+        if self.pick
+            && matches!(
+                act,
+                Act::Full
+                    | Act::NextNeeds
+                    | Act::PrevNeeds
+                    | Act::Answer
+                    | Act::Card
+                    | Act::Back
+                    | Act::Close
+            )
+        {
+            return None;
+        }
+        match act {
+            Act::Down => self.step(1),
+            Act::Up => self.step(-1),
+            Act::First => self.selected = self.spots().first().cloned(),
+            Act::Last => self.selected = self.spots().last().cloned(),
+            Act::Top | Act::Middle | Act::Bottom => {
+                if act == Act::Middle {
+                    self.tell(
+                        'M',
+                        "middle of the screen · M used to sort; message is om now",
+                    );
+                }
+                self.on_screen(act);
+            }
+            Act::HalfDown => self.page(1, 2),
+            Act::HalfUp => self.page(-1, 2),
+            Act::PageDown => self.page(1, 1),
+            Act::PageUp => self.page(-1, 1),
+            Act::NextGroup => self.group(false),
+            Act::PrevGroup => self.group(true),
+            Act::NextNeeds => return self.next_waiting(now, false),
+            Act::PrevNeeds => {
+                self.tell(
+                    'N',
+                    "previous row needing you · N used to sort; window is on now",
+                );
+                return self.next_waiting(now, true);
+            }
+            Act::Nth => self.nth(k.char()? as usize - '1' as usize),
+            Act::Jump => return self.jump(),
+            Act::Back => return self.back(),
+            Act::Filter => self.filtering = true,
+            Act::Status => self.pending = Some('f'),
+            Act::Sort => self.pending = Some('o'),
+            Act::Command => {
                 self.command.reset();
                 self.commanding = true;
             }
-            KeyCode::Char('v') => {
+            Act::NextView | Act::PrevView => {
                 let all = self.views();
                 let at = all.iter().position(|v| *v == self.view).unwrap_or(0);
-                self.show(all[(at + 1) % all.len()].clone());
+                let by = if act == Act::NextView {
+                    1
+                } else {
+                    all.len() - 1
+                };
+                self.show(all[(at + by) % all.len()].clone());
             }
-            KeyCode::Char('y') => return self.copy(false),
-            KeyCode::Char('Y') => return self.copy(true),
-            KeyCode::Char('-') if !self.pick => return self.back(),
-            KeyCode::Char(c) if self.column_by_letter(c).is_some() => self.sort_by(c),
-            KeyCode::Char('?') => self.keys = !self.keys,
-            KeyCode::Esc if self.pick => return Some(Effect::Quit),
-            KeyCode::Esc => {
-                self.filter.reset();
-                self.status = None;
-                self.peek = None;
-                self.keys = false;
-                self.sort = None;
-                self.unfold_all();
-                self.keep_selection_visible();
-            }
-            KeyCode::Char('z') => match self.selected.clone() {
-                Some(Spot::Group(group)) => {
-                    self.folded.remove(&group);
-                    self.selected = self.first_row_of(&group);
-                }
-                Some(Spot::Row(_)) => {
-                    if let Some(group) = self.current().and_then(|row| bucket(&self.view, row)) {
-                        self.folded.insert(group.clone());
-                        self.selected = Some(Spot::Group(group));
-                    }
-                }
-                None => {}
-            },
-            KeyCode::Char(c @ '1'..='9') => {
-                for row in self.rows.iter().filter(|row| row.group == Group::NeedsYou) {
-                    if let Some(group) = bucket(&self.view, row) {
-                        self.folded.remove(&group);
-                    }
-                }
-                let n = c as usize - '1' as usize;
-                let pick = self
-                    .items()
-                    .into_iter()
-                    .filter_map(|item| match item {
-                        Item::Row(i) if self.rows[i].group == Group::NeedsYou => {
-                            Some(Spot::Row(self.rows[i].key.clone()))
-                        }
-                        _ => None,
-                    })
-                    .nth(n);
-                if pick.is_some() {
-                    self.selected = pick;
-                }
-            }
-            KeyCode::Char('s') => {
-                return self.current().map(|row| Effect::Seen {
-                    key: row.key.clone(),
-                    label: path(&labels(row, true), usize::MAX),
-                    state: row.pane.state.clone(),
-                });
-            }
-            KeyCode::Char(' ') if !self.pick => return self.open_full(Instant::now()),
-            KeyCode::Tab if !self.pick => return self.next_waiting(Instant::now()),
-            KeyCode::Char('a') if !self.pick => return self.start_answer(),
-            KeyCode::Enter => return self.jump(),
-            KeyCode::Char('r') => {
-                self.link = Link::Connecting;
-                return Some(Effect::Reconnect);
-            }
-            KeyCode::Char('c') if !self.pick => {
+            Act::FoldToggle | Act::FoldOpen | Act::FoldClose => self.fold(act),
+            Act::OpenAll => self.unfold_all(),
+            Act::FoldAll => self.fold_all(),
+            Act::Card => {
                 self.hidden = !self.hidden;
                 if self.hidden {
                     self.say(HIDDEN);
@@ -1124,18 +1190,190 @@ impl App {
                 }
                 return Some(Effect::SavePrefs(self.prefs()));
             }
-            // The card spans the board, so there is no width left to size; said once a run.
-            KeyCode::Char('<' | '>') if !self.pick && !self.told_angles => {
-                self.told_angles = true;
-                self.say("the card spans the board now, so < and > are gone · c hides it");
+            Act::Full => return self.open_full(now),
+            Act::Answer => return self.start_answer(now),
+            Act::Seen => {
+                return self.current().map(|row| Effect::Seen {
+                    key: row.key.clone(),
+                    label: path(&labels(row, true), usize::MAX),
+                    state: row.pane.state.clone(),
+                });
             }
-            _ => {}
+            Act::Close if !self.pending_quiet => self.say(TOO_FAST_TO_CLOSE),
+            Act::Close => self.ask_close(now),
+            Act::CopyMsg => return self.copy(false),
+            Act::CopyPlace => return self.copy(true),
+            Act::Reconnect => {
+                self.tell('R', "reconnecting · R used to sort; harness is oh now");
+                self.link = Link::Connecting;
+                return Some(Effect::Reconnect);
+            }
+            Act::Keys => self.keys = !self.keys,
+            Act::Cancel if self.pick => return Some(Effect::Quit),
+            Act::Cancel if self.keys => self.keys = false,
+            Act::Cancel => {
+                self.filter.reset();
+                self.status = None;
+                self.peek = None;
+                self.sort = None;
+                self.keep_selection_visible();
+            }
+            // `q` closes the layer in front, and quits only from the bare board.
+            Act::Quit if self.keys && k.0 == KeyCode::Char('q') => self.keys = false,
+            Act::Quit => return Some(Effect::Quit),
+            Act::Moved(note) => self.say(note),
+            Act::Leave => {}
         }
         None
     }
 
-    /// `a`: answer mode on the current row, once a fresh read of its pane comes back.
-    fn start_answer(&mut self) -> Option<Effect> {
+    /// Says `note` the first time a run presses `key`, whose meaning changed.
+    fn tell(&mut self, key: char, note: &str) {
+        if self.told.insert(key) {
+            self.say(note);
+        }
+    }
+
+    /// `1`-`9`: the nth NEEDS YOU row, opening its group if it is folded.
+    fn nth(&mut self, n: usize) {
+        for row in self.rows.iter().filter(|row| row.group == Group::NeedsYou) {
+            if let Some(group) = bucket(&self.view, row) {
+                self.folded.remove(&group);
+            }
+        }
+        let pick = self
+            .items()
+            .into_iter()
+            .filter_map(|item| match item {
+                Item::Row(i) if self.rows[i].group == Group::NeedsYou => {
+                    Some(Spot::Row(self.rows[i].key.clone()))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        match pick.get(n) {
+            Some(spot) => self.selected = Some(spot.clone()),
+            None if pick.is_empty() => self.say("nobody needs you"),
+            None => self.say(format!("NEEDS YOU has {} rows shown", pick.len())),
+        }
+    }
+
+    /// The spots drawn on screen now, in order.
+    fn on_screen_spots(&self) -> Vec<Spot> {
+        let (_, offset, room) = self.drawn.get();
+        self.items()
+            .iter()
+            .skip(offset)
+            .take(room.max(1))
+            .filter_map(|item| self.spot(item))
+            .collect()
+    }
+
+    /// `H` `M` `L`: the top, middle or bottom of what the screen shows.
+    fn on_screen(&mut self, act: Act) {
+        let shown = self.on_screen_spots();
+        let at = match act {
+            Act::Top => 0,
+            Act::Middle => shown.len().saturating_sub(1) / 2,
+            _ => shown.len().saturating_sub(1),
+        };
+        if let Some(spot) = shown.get(at) {
+            self.selected = Some(spot.clone());
+        }
+    }
+
+    /// `ctrl-d`/`ctrl-u` (a half) and `ctrl-f`/`ctrl-b` (a whole): a page of the screen's
+    /// rows down (`dir` 1) or up, stopping at the ends.
+    fn page(&mut self, dir: isize, part: usize) {
+        let (_, _, room) = self.drawn.get();
+        let by = (room / part).max(1) as isize;
+        let spots = self.spots();
+        let Some(last) = spots.len().checked_sub(1) else {
+            return;
+        };
+        let at = self
+            .selected
+            .as_ref()
+            .and_then(|spot| spots.iter().position(|s| s == spot))
+            .unwrap_or(0) as isize;
+        let next = (at + dir * by).clamp(0, last as isize) as usize;
+        self.selected = Some(spots[next].clone());
+    }
+
+    /// `]` and `[`: the first spot of the next group, or of this one and then the one before.
+    fn group(&mut self, back: bool) {
+        let items = self.items();
+        let spot_at = |i: usize| items[i..].iter().find_map(|item| self.spot(item));
+        let heads: Vec<usize> = (0..items.len())
+            .filter(|&i| matches!(items[i], Item::Header { .. }))
+            .collect();
+        let here = items.iter().position(|item| {
+            let spot = match item {
+                Item::Row(r) => Spot::Row(self.rows[*r].key.clone()),
+                Item::Header { bucket, .. } => Spot::Group(bucket.clone()),
+            };
+            Some(&spot) == self.selected.as_ref()
+        });
+        let Some(here) = here else {
+            self.selected = spot_at(0);
+            return;
+        };
+        let head = if back {
+            let own = heads.iter().rev().find(|&&h| h <= here).copied();
+            match own {
+                Some(h) if spot_at(h) != self.selected => Some(h),
+                Some(h) => heads.iter().rev().find(|&&o| o < h).copied(),
+                None => None,
+            }
+        } else {
+            heads.iter().find(|&&h| h > here).copied()
+        };
+        if let Some(spot) = head.and_then(spot_at) {
+            self.selected = Some(spot);
+        }
+    }
+
+    /// `za` toggles the selection's group, `zo` opens a folded one, `zc` folds a row's.
+    fn fold(&mut self, act: Act) {
+        match self.selected.clone() {
+            Some(Spot::Group(group)) if act != Act::FoldClose => {
+                self.folded.remove(&group);
+                self.selected = self.first_row_of(&group);
+            }
+            Some(Spot::Row(_)) if act != Act::FoldOpen => {
+                if let Some(group) = self.current().and_then(|row| bucket(&self.view, row)) {
+                    self.folded.insert(group.clone());
+                    self.selected = Some(Spot::Group(group));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// `zM`: every group folded; the selection rests on its group's header.
+    fn fold_all(&mut self) {
+        let groups: Vec<Bucket> = self
+            .items()
+            .into_iter()
+            .filter_map(|item| match item {
+                Item::Header { bucket, .. } => Some(bucket),
+                Item::Row(_) => None,
+            })
+            .collect();
+        let mine = self.current().and_then(|row| bucket(&self.view, row));
+        self.folded.extend(groups);
+        if let Some(group) = mine {
+            self.selected = Some(Spot::Group(group));
+        }
+    }
+
+    /// `a` or `i`: answer mode on the current row, once a fresh read of its pane comes back.
+    /// Pressed in the middle of typing, it opens nothing.
+    fn start_answer(&mut self, now: Instant) -> Option<Effect> {
+        if !self.quiet {
+            self.say(TOO_FAST_TO_ANSWER);
+            return None;
+        }
         let Some(row) = self.current() else {
             self.say("select a row to answer it");
             return None;
@@ -1153,10 +1391,24 @@ impl App {
         self.keys = false;
         let effect = read(&row);
         self.answer = Some(Answer::new(row, updated_at));
+        self.answer_guard = Some(now);
         Some(effect)
     }
 
+    /// A key in answer mode. A first key within GUARD of the opening means the opener was
+    /// typing meant for somewhere else: answer mode leaves at once, and stays left, so no later
+    /// pause lets the rest of the typing pick or fill the reply.
     fn answer_key(&mut self, key: KeyEvent, now: Instant) -> Option<Effect> {
+        let leaving = key.code == KeyCode::Esc
+            || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL));
+        if let Some(at) = self.answer_guard.take()
+            && !leaving
+            && now.duration_since(at) < GUARD
+        {
+            self.answer = None;
+            self.say(TOO_FAST_TO_ANSWER);
+            return None;
+        }
         let answer = self.answer.as_mut()?;
         match answer.key(key, now) {
             Step::Stay => None,
@@ -1166,7 +1418,7 @@ impl App {
             }
             Step::Next => {
                 self.answer = None;
-                self.next_waiting(now)
+                self.next_waiting(now, false)
             }
             Step::Send(action) => {
                 let expect = answer.expect()?;
@@ -1388,32 +1640,32 @@ pub mod tests {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
     }
 
+    /// Types `keys` as a person would, a little over GUARD apart.
+    fn typed(app: &mut App, keys: &str) -> Vec<Option<Effect>> {
+        keys.chars().map(|c| press(app, KeyCode::Char(c))).collect()
+    }
+
     #[test]
-    fn close_asks_first_and_only_a_second_ctrl_k_closes() {
+    fn dd_asks_and_only_y_closes() {
         let mut app = app();
         app.selected = Some(Spot::Row("mini/seat-b".into()));
-        assert!(app.handle(ctrl('k')).is_none());
+        typed(&mut app, "dd");
         assert_eq!(
             app.close_question(usize::MAX).as_deref(),
-            Some(
-                "close api › main › seat-b on mini, ending claude (blocked)? ctrl+k again closes it"
-            )
+            Some("close api › main › seat-b on mini, ending claude (blocked)? y closes")
         );
-        assert!(press(&mut app, KeyCode::Esc).is_none(), "esc only cancels");
+        assert!(press(&mut app, KeyCode::Esc).is_none());
         assert!(app.close_question(usize::MAX).is_none());
         assert_eq!(app.toast(), Some("nothing closed"));
-        app.handle(ctrl('k'));
+        typed(&mut app, "dd");
         assert!(
-            matches!(
-                press(&mut app, KeyCode::Char('y')),
-                Some(Effect::Copy { .. })
-            ),
-            "y after ctrl+k copies, as y does, and closes nothing"
+            press(&mut app, KeyCode::Char('d')).is_none(),
+            "a third d is not y"
         );
-        assert!(app.close_question(usize::MAX).is_none());
-        app.handle(ctrl('k'));
+        assert_eq!(app.toast(), Some("nothing closed"));
+        typed(&mut app, "dd");
         assert!(matches!(
-            app.handle(ctrl('k')),
+            press(&mut app, KeyCode::Char('y')),
             Some(Effect::Close(row)) if row.key == "mini/seat-b"
         ));
         assert_eq!(app.going.as_deref(), Some("closing api › main › seat-b…"));
@@ -1421,8 +1673,169 @@ pub mod tests {
         assert_eq!(app.toast(), Some("closed api › main › seat-b on mini"));
     }
 
+    /// Typing meant for an agent that lands on the board: the burst hits `dd` and `a`, and
+    /// nothing closes and nothing is sent.
     #[test]
-    fn close_names_a_default_labelled_twin_as_the_list_does() {
+    fn a_typed_burst_closes_nothing_and_sends_nothing() {
+        let t0 = Instant::now();
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        let mut app = app();
+        app.selected = Some(Spot::Row("mini/seat-b".into()));
+        app.handle_at(KeyEvent::from(KeyCode::Char('d')), at(0));
+        app.handle_at(KeyEvent::from(KeyCode::Char('d')), at(40));
+        assert!(app.close_question(usize::MAX).is_some(), "dd asks");
+        assert!(
+            app.handle_at(KeyEvent::from(KeyCode::Char('y')), at(80))
+                .is_none(),
+            "a y within GUARD of the question closes nothing"
+        );
+        assert_eq!(app.toast(), Some("nothing closed (keys came too fast)"));
+        let mut app = super::tests::app();
+        app.selected = Some(Spot::Row("mini/seat-b".into()));
+        let effects = typed_at(&mut app, "added hidden\n", 60, None, IDLE);
+        assert!(!effects.iter().any(acts_on_a_pane), "{effects:?}");
+        assert!(app.answer.is_none(), "the burst left answer mode");
+    }
+
+    /// An idle prompt, as a fast host reads it back.
+    const IDLE: &str = "────\n❯\u{a0}\n";
+
+    /// Types `text` (a newline is enter) a key every `gap` ms, with one 400 ms pause before
+    /// the character at `pause`. Each read answer mode asks for comes back at once as `screen`.
+    fn typed_at(
+        app: &mut App,
+        text: &str,
+        gap: u64,
+        pause: Option<usize>,
+        screen: &str,
+    ) -> Vec<Effect> {
+        let t0 = Instant::now();
+        let mut ms = 0;
+        let mut effects = Vec::new();
+        for (i, c) in text.chars().enumerate() {
+            ms += if pause == Some(i) { 400 } else { gap };
+            let code = if c == '\n' {
+                KeyCode::Enter
+            } else {
+                KeyCode::Char(c)
+            };
+            let effect = app.handle_at(KeyEvent::from(code), t0 + Duration::from_millis(ms));
+            if let Some(Effect::Read { key, .. }) = &effect {
+                app.screen(key, Ok(Screen::parse(screen, None)));
+                drawn(app);
+            }
+            effects.extend(effect);
+        }
+        effects
+    }
+
+    /// What typing must never do: answer an agent or close a pane.
+    fn acts_on_a_pane(effect: &Effect) -> bool {
+        matches!(effect, Effect::Send { .. } | Effect::Close(_))
+    }
+
+    /// Typing meant for an agent, with one ordinary pause anywhere in it, sends nothing and
+    /// picks nothing: an opener only opens on its own, and a fast key after it leaves for good.
+    #[test]
+    fn typing_with_one_pause_never_sends_or_picks() {
+        for text in [
+            "please run tests\n",
+            "fix it and run tests\n",
+            "hidden middle ok\n",
+        ] {
+            for pause in 0..text.chars().count() {
+                let mut app = app();
+                let effects = typed_at(&mut app, text, 120, Some(pause), IDLE);
+                assert!(
+                    !effects.iter().any(acts_on_a_pane),
+                    "{text:?} paused at {pause}: {effects:?}"
+                );
+            }
+        }
+        for pause in 0.."please run 1 test".len() {
+            let mut app = app();
+            let effects = typed_at(&mut app, "please run 1 test", 120, Some(pause), DIALOG);
+            assert!(
+                !effects.iter().any(acts_on_a_pane),
+                "paused at {pause}: {effects:?}"
+            );
+        }
+    }
+
+    /// A seeded spread of random typing, 20 to 280 ms a key with one 400 ms pause, at dialogs
+    /// and idle prompts: nothing sends, picks or closes.
+    #[test]
+    fn random_typing_with_a_pause_never_acts_on_a_pane() {
+        let mut seed: u64 = 0x5eed;
+        let mut next = |n: u64| {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 33) % n
+        };
+        let letters: Vec<char> = "abcdefghijklmnopqrstuvwxyz123".chars().collect();
+        for round in 0..20_000 {
+            let mut text = String::new();
+            for _ in 0..=next(12) {
+                for _ in 0..=next(8) {
+                    text.push(letters[next(letters.len() as u64) as usize]);
+                }
+                text.push(if next(6) == 0 { '\n' } else { ' ' });
+            }
+            let pause = next(text.chars().count() as u64) as usize;
+            let screen = if round % 2 == 0 { IDLE } else { DIALOG };
+            let mut app = app();
+            let t0 = Instant::now();
+            let mut ms = 0;
+            for (i, c) in text.chars().enumerate() {
+                ms += if i == pause { 400 } else { 20 + next(261) };
+                let code = if c == '\n' {
+                    KeyCode::Enter
+                } else {
+                    KeyCode::Char(c)
+                };
+                let effect = app.handle_at(KeyEvent::from(code), t0 + Duration::from_millis(ms));
+                if let Some(Effect::Read { key, .. }) = &effect {
+                    app.screen(key, Ok(Screen::parse(screen, None)));
+                    drawn(&app);
+                }
+                // The one way through: the typing starts with `a`, `i` or `dd` and pauses
+                // right after it, which is what a person pressing it does.
+                let opener_then_pause = (text.starts_with(['a', 'i']) && pause == 1)
+                    || (text.starts_with("dd") && pause == 2);
+                assert!(
+                    !effect.as_ref().is_some_and(acts_on_a_pane) || opener_then_pause,
+                    "{text:?} paused at {pause}: {effect:?}"
+                );
+            }
+        }
+    }
+
+    /// `dd` in the middle of a word, as in "buddy", asks nothing, and a cancelled question stays
+    /// cancelled whatever comes after a pause.
+    #[test]
+    fn dd_in_a_word_asks_nothing_and_a_cancel_stays() {
+        for pause in 0.."buddy".len() {
+            let mut app = app();
+            let effects = typed_at(&mut app, "buddy", 120, Some(pause), IDLE);
+            assert!(!effects.iter().any(acts_on_a_pane), "paused at {pause}");
+        }
+        let t0 = Instant::now();
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        let mut app = app();
+        app.handle_at(KeyEvent::from(KeyCode::Char('d')), at(0));
+        app.handle_at(KeyEvent::from(KeyCode::Char('d')), at(100));
+        app.handle_at(KeyEvent::from(KeyCode::Char('x')), at(200));
+        assert!(app.close_question(usize::MAX).is_none());
+        assert!(
+            app.handle_at(KeyEvent::from(KeyCode::Char('y')), at(900))
+                .is_none(),
+            "y after a pause does not bring the question back"
+        );
+    }
+
+    #[test]
+    fn dd_names_a_default_labelled_twin_as_the_list_does() {
         let mut app = app();
         let twin = |block: &str| {
             let mut row = row(&format!("local/{block}"), "working", "working", true);
@@ -1434,20 +1847,20 @@ pub mod tests {
         let mut asked = Vec::new();
         for key in ["local/one", "local/two"] {
             app.selected = Some(Spot::Row(key.into()));
-            app.handle(ctrl('k'));
+            typed(&mut app, "dd");
             asked.push(app.close_question(usize::MAX).unwrap());
-            app.handle(KeyEvent::from(KeyCode::Esc));
+            press(&mut app, KeyCode::Esc);
         }
         assert_ne!(asked[0], asked[1], "{asked:?}");
         assert!(asked[0].starts_with("close api › main #"), "{asked:?}");
     }
 
     #[test]
-    fn close_never_takes_the_boards_own_pane_and_forgets_a_row_that_left() {
+    fn dd_never_takes_the_boards_own_pane_and_forgets_a_row_that_left() {
         let mut app = app();
         app.own = Some("seat-a".into());
         app.selected = Some(Spot::Row("local/seat-a".into()));
-        app.handle(ctrl('k'));
+        typed(&mut app, "dd");
         assert!(
             app.close_question(usize::MAX).is_none(),
             "the board's own pane"
@@ -1462,17 +1875,17 @@ pub mod tests {
         app.set_rows(rows.clone(), hosts());
         app.own = None;
         app.selected = Some(Spot::Row("mini/codex".into()));
-        app.handle(ctrl('k'));
+        typed(&mut app, "dd");
         assert!(
             app.close_question(usize::MAX).is_none(),
             "a pane running rexboard"
         );
         app.selected = Some(Spot::Row("local/claude".into()));
-        app.handle(ctrl('k'));
+        typed(&mut app, "dd");
         assert_eq!(
             app.close_question(usize::MAX).as_deref(),
             Some(
-                "close api › main › claude on local, ending claude? (tmux keeps running) ctrl+k again closes it"
+                "close api › main › claude on local, ending claude? (tmux keeps running) y closes"
             )
         );
         rows.remove(1);
@@ -1487,20 +1900,20 @@ pub mod tests {
         );
         let mut pick = super::tests::app();
         pick.pick = true;
-        pick.handle(ctrl('k'));
+        typed(&mut pick, "dd");
         assert!(pick.close_question(usize::MAX).is_none(), "pick only picks");
     }
 
     #[test]
-    fn y_copies_the_message_and_capital_y_where_the_pane_is_without_control() {
+    fn yy_copies_the_message_and_yp_the_place_without_control() {
         let mut app = app();
         app.selected = Some(Spot::Row("mini/seat-b".into()));
         assert!(matches!(
-            press(&mut app, KeyCode::Char('y')),
+            typed(&mut app, "yy").pop().flatten(),
             Some(Effect::Copy { text, shown }) if text == "seat-b msg" && shown == "\"seat-b msg\""
         ));
         assert!(matches!(
-            press(&mut app, KeyCode::Char('Y')),
+            typed(&mut app, "yp").pop().flatten(),
             Some(Effect::Copy { text, shown })
                 if text == "api › main › seat-b @mini" && shown == text
         ));
@@ -1510,22 +1923,226 @@ pub mod tests {
         app.set_rows(rows.clone(), hosts());
         assert!(
             matches!(
-                press(&mut app, KeyCode::Char('y')),
+                typed(&mut app, "yy").pop().flatten(),
                 Some(Effect::Copy { text, .. }) if text == "doneecho hi"
             ),
             "a paste cannot end early"
         );
         assert!(matches!(
-            press(&mut app, KeyCode::Char('Y')),
+            typed(&mut app, "yp").pop().flatten(),
             Some(Effect::Copy { text, .. }) if text == "api › main › seat-b @mini"
         ));
         rows[0].pane.msg = None;
         app.set_rows(rows, hosts());
-        assert!(press(&mut app, KeyCode::Char('y')).is_none());
+        assert!(typed(&mut app, "yy").pop().flatten().is_none());
         assert_eq!(
             app.failed.as_deref(),
-            Some("this row has no message to copy · Y copies where it is")
+            Some("this row has no message to copy · yp copies where it is")
         );
+    }
+
+    /// What a key can change on the board, to tell whether it did anything.
+    fn state_of(app: &App) -> String {
+        format!(
+            "{:?} {:?} {} {:?} {} {} {} {} {:?} {} {} {} {:?} {:?}",
+            app.selected,
+            app.sort,
+            app.view.name,
+            app.folded,
+            app.keys,
+            app.filtering,
+            app.commanding,
+            app.hidden,
+            app.pending,
+            app.closing.is_some(),
+            app.answer.is_some(),
+            app.full.is_some(),
+            app.status,
+            app.toast(),
+        )
+    }
+
+    /// Every key in the board's table does something on a board with rows: an effect, a
+    /// change on screen or a word in the footer. None is listed and silently ignored.
+    #[test]
+    fn every_key_in_the_table_does_something() {
+        for entry in keys::BOARD {
+            for seq in entry.seqs {
+                let did = ["local/seat-a", "mini/seat-b"].iter().any(|from| {
+                    let mut app = app();
+                    app.drawn.set((3, 0, 20));
+                    app.selected = Some(Spot::Row((*from).into()));
+                    if matches!(entry.act, Act::Cancel | Act::FoldOpen | Act::OpenAll) {
+                        app.status = Some(Status::Done);
+                        app.selected = Some(Spot::Group(Bucket::Status(Group::NeedsYou)));
+                        app.folded.insert(Bucket::Status(Group::NeedsYou));
+                    }
+                    let before = state_of(&app);
+                    let mut effect = None;
+                    for k in seq.iter() {
+                        let modifiers = if k.1 {
+                            KeyModifiers::CONTROL
+                        } else {
+                            KeyModifiers::NONE
+                        };
+                        effect = key(&mut app, KeyEvent::new(k.0, modifiers));
+                    }
+                    effect.is_some() || state_of(&app) != before
+                });
+                assert!(did, "{:?} ({seq:?}) did nothing", entry.act);
+            }
+        }
+    }
+
+    #[test]
+    fn q_closes_the_layer_in_front_and_quits_only_from_the_bare_board() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('?'));
+        assert_eq!(press(&mut app, KeyCode::Char('q')), None);
+        assert!(!app.keys, "q closes the key table");
+        press(&mut app, KeyCode::Char('/'));
+        assert_eq!(press(&mut app, KeyCode::Char('q')), None);
+        assert_eq!(app.filter.value(), "q", "q is text in a prompt");
+        press(&mut app, KeyCode::Esc);
+        typed(&mut app, ":q");
+        assert_eq!(
+            press(&mut app, KeyCode::Enter),
+            Some(Effect::Quit),
+            ":q quits"
+        );
+        assert_eq!(press(&mut app, KeyCode::Char('q')), Some(Effect::Quit));
+    }
+
+    #[test]
+    fn motions_move_by_screen_page_group_and_needing_you() {
+        let mut app = App::default();
+        let mut rows: Vec<Row> = (0..3)
+            .map(|i| row(&format!("mini/b{i}"), "blocked", "needs_you", false))
+            .collect();
+        rows.extend((0..10).map(|i| row(&format!("local/w{i}"), "working", "working", false)));
+        rows.push(row("local/idle", "idle", "quiet", true));
+        app.set_rows(rows, hosts());
+        // In list order: NEEDS YOU's 3 rows, WORKING's 10, QUIET's 1.
+        let spots = app.spots();
+        let at = |app: &App| spots.iter().position(|s| Some(s) == app.selected.as_ref());
+        // 8 items from the top: NEEDS YOU, its 3 rows, WORKING and its first 3 rows.
+        app.drawn.set((3, 0, 8));
+        press(&mut app, KeyCode::Char('L'));
+        assert_eq!(at(&app), Some(5), "the last row on screen");
+        press(&mut app, KeyCode::Char('H'));
+        assert_eq!(at(&app), Some(0));
+        press(&mut app, KeyCode::Char('M'));
+        assert_eq!(at(&app), Some(2), "the middle of the 6 rows on screen");
+        assert_eq!(
+            app.toast(),
+            Some("middle of the screen · M used to sort; message is om now")
+        );
+        key(&mut app, ctrl('d'));
+        assert_eq!(at(&app), Some(6), "half of 8 down");
+        key(&mut app, ctrl('f'));
+        assert_eq!(at(&app), Some(13), "a page, stopping at the end");
+        key(&mut app, ctrl('b'));
+        key(&mut app, ctrl('u'));
+        assert_eq!(at(&app), Some(1));
+        press(&mut app, KeyCode::Char(']'));
+        assert_eq!(at(&app), Some(3), "the next group's first row");
+        press(&mut app, KeyCode::Char(']'));
+        assert_eq!(at(&app), Some(13));
+        press(&mut app, KeyCode::Char('['));
+        assert_eq!(at(&app), Some(3), "the previous group's first row");
+        key(&mut app, KeyEvent::from(KeyCode::Down));
+        press(&mut app, KeyCode::Char('['));
+        assert_eq!(at(&app), Some(3), "first back to its own group's first row");
+        press(&mut app, KeyCode::Char('['));
+        assert_eq!(at(&app), Some(0));
+        press(&mut app, KeyCode::Char('n'));
+        assert_eq!(at(&app), Some(1));
+        press(&mut app, KeyCode::Char('N'));
+        assert_eq!(at(&app), Some(0));
+        press(&mut app, KeyCode::Char('N'));
+        assert_eq!(at(&app), Some(2), "N wraps back");
+        press(&mut app, KeyCode::Char('G'));
+        assert_eq!(at(&app), Some(13));
+        typed(&mut app, "gg");
+        assert_eq!(at(&app), Some(0));
+        typed(&mut app, "gt");
+        assert_eq!(app.view.name, "table");
+        typed(&mut app, "gT");
+        assert_eq!(app.view.name, "status");
+        press(&mut app, KeyCode::Char('V'));
+        assert_ne!(app.view.name, "status", "V goes the other way round");
+        assert!(matches!(key(&mut app, ctrl('o')), Some(Effect::Back)));
+    }
+
+    #[test]
+    fn answer_mode_leaves_on_a_fast_key_and_an_opener_needs_a_quiet_gap() {
+        let t0 = Instant::now();
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        let mut app = app();
+        app.handle_at(KeyEvent::from(KeyCode::Char('i')), at(0));
+        assert!(app.answer.is_some(), "i opens answer mode too");
+        app.handle_at(KeyEvent::from(KeyCode::Char('x')), at(200));
+        assert!(app.answer.is_none(), "a fast first key leaves");
+        assert_eq!(
+            app.toast(),
+            Some("keys came too fast; nothing sent · a answers")
+        );
+        app.handle_at(KeyEvent::from(KeyCode::Char('a')), at(400));
+        assert!(
+            app.answer.is_none(),
+            "an opener right after a key opens nothing"
+        );
+        app.handle_at(KeyEvent::from(KeyCode::Char('a')), at(1_000));
+        assert!(app.answer.is_some(), "on its own it opens");
+        app.handle_at(KeyEvent::from(KeyCode::Esc), at(1_100));
+        assert!(app.answer.is_none(), "esc always leaves");
+        app.handle_at(KeyEvent::from(KeyCode::Char('a')), at(2_000));
+        app.handle_at(KeyEvent::from(KeyCode::Char('z')), at(2_400));
+        assert!(
+            app.answer.is_some(),
+            "a first key after GUARD is the answer"
+        );
+        assert_eq!(
+            app.answer.as_ref().unwrap().input.value(),
+            "",
+            "before the read, it waits"
+        );
+    }
+
+    /// Each old key says where it went and does nothing else; R, M and N, whose meaning
+    /// changed, act and say so once a run.
+    #[test]
+    fn old_keys_say_where_they_went() {
+        let mut app = app();
+        app.selected = Some(Spot::Row("local/claude".into()));
+        for (code, said) in [
+            (KeyCode::Char('s'), "mark seen is m now"),
+            (KeyCode::Char('S'), "sort by state is os now"),
+            (KeyCode::Char('r'), "reconnect is R now"),
+            (KeyCode::Char('Y'), "copy the place is yp now"),
+        ] {
+            assert!(press(&mut app, code).is_none(), "{code:?}");
+            assert_eq!(app.toast(), Some(said));
+        }
+        assert_eq!(app.sort, None, "S no longer sorts");
+        for (c, said) in [
+            ('s', "mark every done row seen is :seen now"),
+            ('k', "close is dd now"),
+        ] {
+            assert!(key(&mut app, ctrl(c)).is_none());
+            assert_eq!(app.toast(), Some(said));
+        }
+        assert!(matches!(
+            press(&mut app, KeyCode::Char('R')),
+            Some(Effect::Reconnect)
+        ));
+        assert_eq!(
+            app.toast(),
+            Some("reconnecting · R used to sort; harness is oh now")
+        );
+        app.toast = None;
+        press(&mut app, KeyCode::Char('R'));
+        assert_eq!(app.toast(), None, "said once a run");
     }
 
     #[test]
@@ -1617,12 +2234,36 @@ pub mod tests {
         app
     }
 
+    /// A key from a person: each press comes a little over GUARD after the one before, so no
+    /// typing guard drops it. The guards' own tests give `handle_at` exact times.
     pub fn press(app: &mut App, code: KeyCode) -> Option<Effect> {
-        app.handle(KeyEvent::from(code))
+        key(app, KeyEvent::from(code))
     }
 
-    fn ctrl_s(app: &mut App) -> Option<Effect> {
-        app.handle(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+    /// `o` and a sort letter.
+    pub fn sort(app: &mut App, letter: char) -> Option<Effect> {
+        press(app, KeyCode::Char('o'));
+        press(app, KeyCode::Char(letter))
+    }
+
+    pub fn key(app: &mut App, key: KeyEvent) -> Option<Effect> {
+        thread_local! {
+            static CLOCK: std::cell::Cell<Option<Instant>> = const { std::cell::Cell::new(None) };
+        }
+        let now = CLOCK.with(|clock| {
+            let now = clock
+                .get()
+                .map_or_else(Instant::now, |at| at + GUARD + Duration::from_millis(1));
+            clock.set(Some(now));
+            now
+        });
+        app.handle_at(key, now)
+    }
+
+    /// `:seen` and enter.
+    fn seen_all(app: &mut App) -> Option<Effect> {
+        typed(app, ":seen");
+        press(app, KeyCode::Enter)
     }
 
     fn selected(app: &App) -> String {
@@ -1678,17 +2319,17 @@ pub mod tests {
     }
 
     #[test]
-    fn ctrl_s_marks_only_unseen_done_rows_and_capital_s_sorts() {
+    fn colon_seen_marks_only_unseen_done_rows_and_o_s_sorts() {
         let mut app = App::default();
         let mut all = rows();
         all.push(row("mini/old-done", "done", "needs_you", false));
         all.push(row("mini/seen-done", "done", "quiet", true));
         all.push(row("mini/broken", "error", "needs_you", false));
         app.set_rows(all, hosts());
-        assert_eq!(press(&mut app, KeyCode::Char('S')), None, "S sorts now");
+        assert_eq!(typed(&mut app, "os").pop().flatten(), None, "o s sorts");
         assert_eq!(app.sort, Some((Col::State, Dir::Up)));
         assert_eq!(
-            ctrl_s(&mut app),
+            seen_all(&mut app),
             Some(Effect::SeenAll(vec![
                 "local/claude".into(),
                 "mini/old-done".into()
@@ -1701,7 +2342,7 @@ pub mod tests {
         }
         press(&mut app, KeyCode::Enter);
         assert_eq!(
-            ctrl_s(&mut app),
+            seen_all(&mut app),
             Some(Effect::SeenAll(vec!["mini/old-done".into()])),
             "a kept filter narrows it to the rows shown"
         );
@@ -1710,7 +2351,7 @@ pub mod tests {
             vec![row("mini/seat-b", "blocked", "needs_you", false)],
             hosts(),
         );
-        assert_eq!(ctrl_s(&mut app), None);
+        assert_eq!(seen_all(&mut app), None);
         assert_eq!(app.toast(), Some("no unseen done rows"));
     }
 
@@ -1742,11 +2383,11 @@ pub mod tests {
     }
 
     #[test]
-    fn s_sends_seen_for_the_selected_key() {
+    fn m_sends_seen_for_the_selected_key() {
         let mut app = app();
         press(&mut app, KeyCode::Char('j'));
         assert_eq!(
-            press(&mut app, KeyCode::Char('s')),
+            press(&mut app, KeyCode::Char('m')),
             Some(Effect::Seen {
                 key: "local/claude".into(),
                 label: "api › claude".into(),
@@ -1760,11 +2401,11 @@ pub mod tests {
     }
 
     #[test]
-    fn z_folds_then_unfolds_from_the_folded_header() {
+    fn za_folds_then_unfolds_from_the_folded_header_and_zo_zc_go_one_way() {
         let mut app = app();
         press(&mut app, KeyCode::Char('j'));
         press(&mut app, KeyCode::Char('j'));
-        press(&mut app, KeyCode::Char('z'));
+        typed(&mut app, "za");
         assert_eq!(
             app.selected,
             Some(Spot::Group(Bucket::Status(Group::Working))),
@@ -1775,18 +2416,22 @@ pub mod tests {
             count: 1,
             folded: true
         }));
-        press(&mut app, KeyCode::Char('z'));
-        assert!(app.folded.is_empty(), "z on a folded header opens it");
+        typed(&mut app, "za");
+        assert!(app.folded.is_empty(), "za on a folded header opens it");
         assert_eq!(selected(&app), "mini/codex");
+        typed(&mut app, "zo");
+        assert!(app.folded.is_empty(), "zo on a row does nothing");
+        typed(&mut app, "zc");
+        typed(&mut app, "zc");
+        assert_eq!(app.folded.len(), 1, "zc on a folded header does nothing");
+        typed(&mut app, "zo");
+        assert!(app.folded.is_empty());
     }
 
     #[test]
-    fn esc_unfolds_every_group_even_with_all_folded() {
+    fn zm_folds_every_group_and_zr_opens_them_all() {
         let mut app = app();
-        for _ in 0..3 {
-            press(&mut app, KeyCode::Char('z'));
-            press(&mut app, KeyCode::Char('j'));
-        }
+        typed(&mut app, "zM");
         assert_eq!(app.folded.len(), 3);
         assert!(
             app.spots()
@@ -1794,6 +2439,8 @@ pub mod tests {
                 .all(|spot| matches!(spot, Spot::Group(_)))
         );
         press(&mut app, KeyCode::Esc);
+        assert_eq!(app.folded.len(), 3, "esc no longer opens folds");
+        typed(&mut app, "zR");
         assert!(app.folded.is_empty());
         assert!(app.current().is_some());
     }
@@ -1875,7 +2522,7 @@ pub mod tests {
             assert_eq!(press(&mut app, code), None, "{code:?}");
         }
         assert_eq!(selected(&app), "mini/seat-b");
-        assert!(!app.filtering && !app.picking_status && !app.commanding);
+        assert!(!app.filtering && app.pending.is_none() && !app.commanding);
         assert_eq!(app.answer.as_ref().unwrap().input.value(), "js1f:q");
         press(&mut app, KeyCode::Esc);
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
@@ -2054,7 +2701,7 @@ pub mod tests {
     #[test]
     fn a_new_row_in_needs_you_unfolds_it() {
         let mut app = app();
-        press(&mut app, KeyCode::Char('z'));
+        typed(&mut app, "za");
         assert!(app.folded.contains(&Bucket::Status(Group::NeedsYou)));
         app.set_rows(rows(), hosts());
         assert!(

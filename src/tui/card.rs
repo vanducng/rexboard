@@ -31,7 +31,7 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
     let Some(row) = app.current() else {
         return match &app.selected {
             Some(Spot::Group(group)) => vec![Line::styled(
-                fit(&format!("{} is folded · z opens it", group.title()), width),
+                fit(&format!("{} is folded · za opens it", group.title()), width),
                 theme::quiet(),
             )],
             _ => Vec::new(),
@@ -287,8 +287,8 @@ fn keys(app: &App, width: usize) -> Vec<Line<'static>> {
             let Some((key, what)) = all.get(c * rows + r) else {
                 break;
             };
-            spans.push(Span::styled(format!(" {key:<7} "), theme::strong()));
-            let room = KEY_COLUMN.min(width).saturating_sub(9);
+            spans.push(Span::styled(format!(" {key:<8} "), theme::strong()));
+            let room = KEY_COLUMN.min(width).saturating_sub(10);
             spans.push(Span::styled(fit(what, room), theme::quiet()));
         }
         lines.push(Line::from(spans));

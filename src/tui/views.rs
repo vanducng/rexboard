@@ -124,7 +124,7 @@ mod tests {
     use ratatui::crossterm::event::KeyCode;
 
     use super::*;
-    use crate::tui::app::tests::{app, hosts, press, row};
+    use crate::tui::app::tests::{app, hosts, press, row, sort};
     use crate::tui::app::{App, Spot};
     use crate::tui::columns::{Col, Dir};
 
@@ -332,26 +332,28 @@ mod tests {
         press(&mut app, KeyCode::Char('j'));
         let picked = app.selected.clone();
         assert_eq!(picked, Some(Spot::Row("local/fin".into())));
-        for key in ['v', 'A', 'A', 'v', 'S', 'v'] {
-            press(&mut app, KeyCode::Char(key));
-            assert_eq!(app.selected, picked, "after {key}");
+        for keys in ["v", "oa", "oa", "v", "os", "v"] {
+            for key in keys.chars() {
+                press(&mut app, KeyCode::Char(key));
+            }
+            assert_eq!(app.selected, picked, "after {keys}");
         }
         press(&mut app, KeyCode::Esc);
         assert_eq!(app.selected, picked, "after esc");
     }
 
     #[test]
-    fn shift_letters_sort_flip_and_esc_clears() {
+    fn o_letters_sort_flip_and_esc_clears() {
         let mut app = app();
-        press(&mut app, KeyCode::Char('A'));
+        sort(&mut app, 'a');
         assert_eq!(
             app.sort,
             Some((Col::Age, Dir::Down)),
             "the longest wait first"
         );
-        press(&mut app, KeyCode::Char('A'));
+        sort(&mut app, 'a');
         assert_eq!(app.sort, Some((Col::Age, Dir::Up)), "the same letter flips");
-        press(&mut app, KeyCode::Char('R'));
+        sort(&mut app, 'h');
         assert_eq!(
             app.sort,
             Some((Col::Harness, Dir::Up)),
@@ -367,7 +369,7 @@ mod tests {
         let mut app = app();
         for column in COLUMNS.iter().filter(|c| c.letter.is_some()) {
             let letter = column.letter.unwrap();
-            let press_it = |app: &mut App| press(app, KeyCode::Char(letter));
+            let press_it = |app: &mut App| sort(app, letter);
             press_it(&mut app);
             assert_eq!(app.sort, Some((column.id, column.first)), "{letter} once");
             press_it(&mut app);
@@ -417,8 +419,8 @@ mod tests {
     fn digits_count_needs_you_rows_in_the_order_shown() {
         let mut app = App::default();
         app.set_rows(mixed(), hosts());
-        press(&mut app, KeyCode::Char('A'));
-        press(&mut app, KeyCode::Char('A'));
+        sort(&mut app, 'a');
+        sort(&mut app, 'a');
         assert_eq!(app.sort, Some((Col::Age, Dir::Up)));
         press(&mut app, KeyCode::Char('1'));
         assert_eq!(
@@ -440,6 +442,7 @@ mod tests {
         }
         assert_eq!(app.selected, Some(Spot::Row("mini/run".into())));
         press(&mut app, KeyCode::Char('z'));
+        press(&mut app, KeyCode::Char('a'));
         press(&mut app, KeyCode::Char('k'));
         // In table, select the working row, then come back to status.
         press(&mut app, KeyCode::Char('v'));
@@ -455,18 +458,5 @@ mod tests {
             Some(Spot::Group(Bucket::Status(Group::Working))),
             "the folded group's header, not the first row"
         );
-    }
-
-    #[test]
-    fn the_first_capital_s_of_a_run_says_bulk_seen_moved() {
-        let mut app = app();
-        press(&mut app, KeyCode::Char('S'));
-        assert_eq!(
-            app.toast(),
-            Some("sorted by state · bulk seen is ctrl+s now")
-        );
-        app.toast = None;
-        press(&mut app, KeyCode::Char('S'));
-        assert_eq!(app.toast(), None, "once per run");
     }
 }

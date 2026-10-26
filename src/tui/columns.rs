@@ -107,7 +107,7 @@ pub type Sort = (Col, Dir);
 pub struct Column {
     pub id: Col,
     pub header: &'static str,
-    /// Shift and this letter sorts by the column.
+    /// `o` and this letter sorts by the column.
     pub letter: Option<char>,
     /// The direction its first press sorts in: the longest wait first for AGE and TURN.
     pub first: Dir,
@@ -137,8 +137,8 @@ const fn column(
     }
 }
 
-/// Every column, left to right. Sort letters follow k9s: S state, A age, T turn, R harness
-/// (runtime), O host, W where, E session, N window, B block, M msg.
+/// Every column, left to right. Sort letters, after `o`: s state, a age, t turn, h harness, o host,
+/// w where, e session, n window, b block, m msg.
 pub const COLUMNS: [Column; 11] = [
     column(
         Col::Glyph,
@@ -152,7 +152,7 @@ pub const COLUMNS: [Column; 11] = [
     column(
         Col::State,
         "STATE",
-        Some('S'),
+        Some('s'),
         Dir::Up,
         100..=u16::MAX,
         Width::Fixed(11),
@@ -161,7 +161,7 @@ pub const COLUMNS: [Column; 11] = [
     column(
         Col::Age,
         "AGE",
-        Some('A'),
+        Some('a'),
         Dir::Down,
         ALWAYS,
         Width::Fixed(7),
@@ -170,7 +170,7 @@ pub const COLUMNS: [Column; 11] = [
     column(
         Col::Turn,
         "TURN",
-        Some('T'),
+        Some('t'),
         Dir::Down,
         140..=u16::MAX,
         Width::Fixed(7),
@@ -179,7 +179,7 @@ pub const COLUMNS: [Column; 11] = [
     column(
         Col::Harness,
         "HARNESS",
-        Some('R'),
+        Some('h'),
         Dir::Up,
         60..=u16::MAX,
         Width::Fixed(8),
@@ -188,7 +188,7 @@ pub const COLUMNS: [Column; 11] = [
     column(
         Col::Host,
         "HOST",
-        Some('O'),
+        Some('o'),
         Dir::Up,
         60..=u16::MAX,
         Width::Fixed(8),
@@ -197,7 +197,7 @@ pub const COLUMNS: [Column; 11] = [
     column(
         Col::Where,
         "WHERE",
-        Some('W'),
+        Some('w'),
         Dir::Up,
         0..=SPLIT - 1,
         Width::Where,
@@ -206,7 +206,7 @@ pub const COLUMNS: [Column; 11] = [
     column(
         Col::Session,
         "SESSION",
-        Some('E'),
+        Some('e'),
         Dir::Up,
         SPLIT..=u16::MAX,
         Width::Part(0),
@@ -215,7 +215,7 @@ pub const COLUMNS: [Column; 11] = [
     column(
         Col::Window,
         "WINDOW",
-        Some('N'),
+        Some('n'),
         Dir::Up,
         SPLIT..=u16::MAX,
         Width::Part(1),
@@ -224,7 +224,7 @@ pub const COLUMNS: [Column; 11] = [
     column(
         Col::Block,
         "BLOCK",
-        Some('B'),
+        Some('b'),
         Dir::Up,
         SPLIT..=u16::MAX,
         Width::Part(2),
@@ -233,7 +233,7 @@ pub const COLUMNS: [Column; 11] = [
     column(
         Col::Msg,
         "MSG",
-        Some('M'),
+        Some('m'),
         Dir::Up,
         ALWAYS,
         Width::Msg,
@@ -289,15 +289,12 @@ fn field_columns() -> Vec<&'static Column> {
     fields.values().copied().collect()
 }
 
-/// The sort letter for a field named `name`: its first letter no other column or key has.
+/// The sort letter for a field named `name`: its first letter no other column has.
 pub fn free_letter(name: &str, taken: &[char]) -> Option<char> {
     name.chars()
         .filter(char::is_ascii_alphabetic)
-        .map(|c| c.to_ascii_uppercase())
-        .find(|c| {
-            // G goes to the last row and Y copies a row's place.
-            !matches!(c, 'G' | 'Y') && by_letter(*c).is_none() && !taken.contains(c)
-        })
+        .map(|c| c.to_ascii_lowercase())
+        .find(|c| by_letter(*c).is_none() && !taken.contains(c))
 }
 
 /// A header cell: its text, and which of its characters to underline (the sort letter).
@@ -500,7 +497,7 @@ impl Columns {
                 };
                 let underline = c
                     .letter
-                    .and_then(|letter| c.header.find(letter))
+                    .and_then(|letter| c.header.find(letter.to_ascii_uppercase()))
                     .filter(|_| text.starts_with(c.header));
                 HeaderCell { text, underline }
             })
@@ -648,11 +645,11 @@ mod tests {
 
     #[test]
     fn a_click_on_the_sort_arrow_flips_the_sort() {
-        use crate::tui::app::tests::press;
-        use ratatui::crossterm::event::KeyCode;
-        for (width, letter, sorted) in [(140, 'A', Col::Age), (100, 'O', Col::Host)] {
+        use crate::tui::app::tests::sort;
+
+        for (width, letter, sorted) in [(140, 'a', Col::Age), (100, 'o', Col::Host)] {
             let mut app = table(width);
-            press(&mut app, KeyCode::Char(letter));
+            sort(&mut app, letter);
             let first = app.sort;
             let header = line(&buffer(&app, width, 30), 2);
             let x = header.chars().position(|c| c == '↑' || c == '↓').unwrap();
@@ -667,13 +664,13 @@ mod tests {
 
     #[test]
     fn at_100_the_arrow_follows_a_name_with_no_gap_before_it() {
-        use crate::tui::app::tests::press;
-        use ratatui::crossterm::event::KeyCode;
+        use crate::tui::app::tests::sort;
+
         let mut app = table(100);
-        press(&mut app, KeyCode::Char('O'));
+        sort(&mut app, 'o');
         let header = line(&buffer(&app, 100, 30), 2);
         assert!(header.contains("HARNESS HOST↑"), "{header}");
-        press(&mut app, KeyCode::Char('A'));
+        sort(&mut app, 'a');
         let header = line(&buffer(&app, 100, 30), 2);
         assert!(
             header.contains("STATE     ↓AGE"),
@@ -944,8 +941,8 @@ mod tests {
 
     #[test]
     fn e_n_and_b_sort_by_session_window_and_block_and_again_reverse() {
-        use crate::tui::app::tests::press;
-        use ratatui::crossterm::event::KeyCode;
+        use crate::tui::app::tests::sort;
+
         let mut app = App::default();
         app.set_rows(
             vec![
@@ -956,14 +953,14 @@ mod tests {
             hosts(),
         );
         for (letter, col, up) in [
-            ('E', Col::Session, ["blk-b", "blk-c", "blk-a"]),
-            ('N', Col::Window, ["blk-c", "blk-a", "blk-b"]),
-            ('B', Col::Block, ["blk-a", "blk-b", "blk-c"]),
+            ('e', Col::Session, ["blk-b", "blk-c", "blk-a"]),
+            ('n', Col::Window, ["blk-c", "blk-a", "blk-b"]),
+            ('b', Col::Block, ["blk-a", "blk-b", "blk-c"]),
         ] {
-            press(&mut app, KeyCode::Char(letter));
+            sort(&mut app, letter);
             assert_eq!(app.sort, Some((col, Dir::Up)), "{letter}");
             assert_eq!(order(&app), up, "{letter}");
-            press(&mut app, KeyCode::Char(letter));
+            sort(&mut app, letter);
             assert_eq!(app.sort, Some((col, Dir::Down)), "{letter} again");
             let mut down = up;
             down.reverse();
@@ -1136,7 +1133,7 @@ mod tests {
                 None,
                 Some('S'),
                 Some('A'),
-                Some('R'),
+                Some('H'),
                 Some('O'),
                 Some('W'),
                 Some('M')

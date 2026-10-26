@@ -4,6 +4,7 @@ mod card;
 mod clipboard;
 mod columns;
 mod full;
+mod keys;
 mod prefs;
 mod screen;
 mod status;
@@ -208,7 +209,7 @@ fn apply(app: &mut App, msg: Msg) -> Option<Effect> {
             app.set_rows(rows.rows, rows.hosts);
         }
         Msg::Gone(why) => {
-            app.say(format!("{why} · r reconnects"));
+            app.say(format!("{why} · R reconnects"));
             app.link = Link::Lost(why);
         }
         Msg::Peek(key, lines) => app.peeked(&key, lines),

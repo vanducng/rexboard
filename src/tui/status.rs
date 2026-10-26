@@ -139,7 +139,7 @@ pub mod tests {
     }
 
     #[test]
-    fn f_f_and_esc_clear_it() {
+    fn ff_and_esc_clear_it() {
         let all = shown(&every_status());
         let mut app = every_status();
         pick(&mut app, 'e');
@@ -148,7 +148,8 @@ pub mod tests {
         pick(&mut app, 'e');
         press(&mut app, KeyCode::Char('f'));
         press(&mut app, KeyCode::Esc);
-        assert_eq!((app.status, shown(&app)), (None, all.clone()), "f esc");
+        assert_eq!(app.status, Some(Status::Error), "f esc only cancels the f");
+        assert!(app.pending.is_none());
         pick(&mut app, 'e');
         press(&mut app, KeyCode::Esc);
         assert_eq!((app.status, shown(&app)), (None, all), "esc");
@@ -160,8 +161,8 @@ pub mod tests {
         pick(&mut app, 'w');
         pick(&mut app, 'x');
         assert_eq!(app.status, Some(Status::Working));
-        assert!(!app.picking_status);
-        assert_eq!(app.toast(), Some("f takes w d q p e u i; f or esc clears"));
+        assert!(app.pending.is_none());
+        assert_eq!(app.toast(), Some("f takes w d q p e u i; ff clears"));
     }
 
     #[test]
@@ -173,7 +174,7 @@ pub mod tests {
             ratatui::crossterm::event::KeyModifiers::CONTROL,
         ));
         assert!(matches!(quit, Some(crate::tui::app::Effect::Quit)));
-        assert!(!app.picking_status);
+        assert!(app.pending.is_none());
         assert_eq!(app.status, None);
     }
 
@@ -205,6 +206,7 @@ pub mod tests {
     fn a_filter_opens_folded_groups_and_digits_count_what_shows() {
         let mut app = every_status();
         press(&mut app, KeyCode::Char('z'));
+        press(&mut app, KeyCode::Char('a'));
         assert!(!app.folded.is_empty());
         pick(&mut app, 'd');
         assert!(app.folded.is_empty(), "the done rows are not hidden");
