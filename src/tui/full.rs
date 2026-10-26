@@ -180,7 +180,10 @@ fn cut(line: &str, width: usize) -> Line<'static> {
         break;
     }
     if marked {
-        kept.push(Span::styled("…", theme::dim()));
+        // On the row's own background, so a coloured band has no notch at the cut.
+        let bg = kept.last().and_then(|span| span.style.bg);
+        let mark = bg.map_or_else(theme::dim, |bg| theme::dim().bg(bg));
+        kept.push(Span::styled("…", mark));
     }
     Line::from(kept)
 }

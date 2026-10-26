@@ -1416,10 +1416,16 @@ mod tests {
         );
         assert_eq!(buffer[(79, 1)].symbol(), "…");
         assert!(buffer[(79, 1)].modifier.contains(Modifier::DIM));
-        assert_ne!(
+        assert_eq!(
             buffer[(79, 1)].bg,
             Color::Rgb(0, 64, 0),
-            "the mark is the board's"
+            "the mark sits on the row's band, with no notch"
+        );
+        let plain = full_cells(&[&format!("{} end", "x".repeat(120))], 80);
+        assert_eq!(
+            plain[(79, 1)].bg,
+            Color::Reset,
+            "an uncoloured row's mark has no background"
         );
         let padded = format!("\x1b[48;2;0;64;0m+ added{}\x1b[0m", " ".repeat(150));
         let buffer = full_cells(&[&padded], 80);
