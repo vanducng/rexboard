@@ -177,6 +177,10 @@ pub struct App {
     pub hidden: bool,
     /// tui.json's motion, written back when `c` saves the file.
     pub motion: super::prefs::Motion,
+    /// tui.json's icons, written back the same way.
+    pub icons: super::prefs::Icons,
+    /// Whether the card's facts take Nerd Font glyphs: REXBOARD_ICONS, else tui.json's icons.
+    pub nerd: bool,
     /// The terminal's size at the last draw, which `<` and `>` move the pane against and a
     /// click is read against.
     pub width: u16,
@@ -638,6 +642,7 @@ impl App {
         super::prefs::Prefs {
             detail_hidden: self.hidden,
             motion: self.motion,
+            icons: self.icons,
         }
     }
 
@@ -2178,7 +2183,7 @@ pub mod tests {
 
     #[test]
     fn the_board_redraws_fast_only_while_a_working_row_is_on_screen() {
-        let spin = Some(Duration::from_millis(80));
+        let spin = Some(Duration::from_millis(160));
         let mut app = app();
         app.drawn.set((3, 0, 20));
         assert_eq!(app.frame_every(), spin, "codex is in the list");

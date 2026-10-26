@@ -7,12 +7,11 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, Peek, Spot};
+use super::screen::Screen;
 use super::theme;
 use super::view::key_rows;
 use crate::board::Row;
-use crate::output::{
-    BREAK, age, chop, clean, fit, harness, in_state, name, path, span, state_word,
-};
+use crate::output::{BREAK, age, chop, clean, fit, in_state, name, path, state_word};
 use crate::pane::bare_title;
 
 /// Text wraps at this width however wide the board, so a line stays readable.
@@ -46,7 +45,7 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
         .filter(|sent| sent.key == row.key)
         .map(|sent| sent.text.as_str());
     let right = sent.map(str::to_owned).or_else(|| fresh(row, peek, now));
-    let mut lines = vec![bar(row, right, now, width)];
+    let mut lines = vec![bar(row, right, now, width, false)];
     let msg = clean(row.pane.msg.as_deref().unwrap_or_default());
     let mut segments = msg.split(BREAK).map(str::trim).filter(|s| !s.is_empty());
     match segments.next() {
@@ -76,64 +75,87 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
             theme::quiet(),
         ));
     }
-    let mut meta = vec![format!("source {}", row.pane.source)];
-    if !title.is_empty() {
-        meta.insert(0, format!("title {title}"));
+    let mut meta = super::meta::lines(app, row, text);
+    meta.insert(0, Line::default());
+    // A blocked row's ask and tail are what it asks, so they are never cut for the facts; the
+    // facts take the rows left. Any other message gives way to the facts, down to its headline.
+    let blocked = row.pane.state == "blocked";
+    if room > 0 && !blocked {
+        let over = (lines.len() + meta.len()).saturating_sub(room);
+        shorten(&mut lines, over, text);
     }
-    lines.push(Line::styled(
-        fit(&format!(" {}", meta.join(" · ")), text),
-        theme::quiet(),
-    ));
-    lines.extend(
-        extension_lines(app, row)
-            .into_iter()
-            .map(|line| Line::styled(fit(&line, text), theme::quiet())),
-    );
-    if let Some(peek) = peek {
-        let room = room.saturating_sub(lines.len());
-        lines.extend(tail(peek, text, room));
-    }
-    lines
-}
-
-/// Each extension's fields on the row, one line per extension in `enabled` order:
-/// ` session-prefix · project api`, or ` lane desk` for a lone field named like its extension.
-fn extension_lines(app: &App, row: &Row) -> Vec<String> {
-    let mut lines: Vec<(&str, Vec<(&str, String)>)> = Vec::new();
-    for (field, _) in &app.fields {
-        let Some(value) = row.ext.get(&field.id) else {
-            continue;
-        };
-        let ext = field
-            .id
-            .split_once('.')
-            .map_or(field.id.as_str(), |(e, _)| e);
-        let shown = (field.name.as_str(), clean(value));
-        match lines.iter_mut().find(|(e, _)| *e == ext) {
-            Some((_, parts)) => parts.push(shown),
-            None => lines.push((ext, vec![shown])),
+    let tail = peek.map_or_else(Vec::new, |peek| {
+        let mut rows = room.saturating_sub(lines.len());
+        if !blocked {
+            rows = rows.saturating_sub(meta.len());
+        } else if let Some(dialog) = dialog_rows(peek, text) {
+            // The dialog is the ask; the output above it gives way to the facts.
+            rows = rows.min(dialog);
         }
+        tail(peek, text, rows)
+    });
+    if room > 0 {
+        let left = room.saturating_sub(lines.len() + tail.len());
+        // The blank line alone is no facts.
+        meta.truncate(if left < 2 { 0 } else { left });
     }
+    lines.extend(tail);
+    lines.extend(meta);
     lines
-        .into_iter()
-        .map(|(ext, parts)| {
-            let parts: Vec<String> = parts.iter().map(|(n, v)| format!("{n} {v}")).collect();
-            match &parts[..] {
-                [one] if one.starts_with(&format!("{ext} ")) => format!(" {one}"),
-                _ => format!(" {ext} · {}", parts.join(" · ")),
-            }
-        })
-        .collect()
 }
 
-/// The first line: the row's state and place, how the turn went, and how fresh the tail is, or
-/// the answer the board last sent it.
-/// `━━ ✓ done · seat-a · api › main · mini · claude · ended 4m ago · turn 6m12s ━━ captured …`
+/// The rows a tail's dialog takes `width` wide, from its opening to the end, as `tail` draws
+/// them; None when the tail shows no dialog.
+fn dialog_rows(peek: &Peek, width: usize) -> Option<usize> {
+    let Some(Ok(lines)) = &peek.lines else {
+        return None;
+    };
+    // The parse drops blank lines at the end, which the tail still draws.
+    let blank = lines
+        .iter()
+        .rev()
+        .take_while(|l| l.trim().is_empty())
+        .count();
+    let count = Screen::parse(&lines.join("\n"), None).dialog? + blank;
+    let room = width.saturating_sub(theme::GUTTER.width()).max(1);
+    Some(
+        lines[lines.len().saturating_sub(count)..]
+            .iter()
+            .map(|line| chop(&clean(line), room).len())
+            .sum(),
+    )
+}
+
+/// The message `over` lines shorter, keeping the bar and the headline; the last kept line ends
+/// in `…`.
+fn shorten(lines: &mut Vec<Line<'static>>, over: usize, width: usize) {
+    let keep = lines.len().saturating_sub(over).max(2);
+    if keep >= lines.len() {
+        return;
+    }
+    lines.truncate(keep);
+    if let Some(last) = lines.last_mut() {
+        let text: String = last.spans.iter().map(|s| s.content.as_ref()).collect();
+        let style = last.spans.first().map_or(last.style, |s| s.style);
+        *last = Line::styled(
+            fit(&format!("{}…", text.trim_end()), width)
+                .trim_end()
+                .to_owned(),
+            style,
+        );
+    }
+}
+
+/// The first line: the row's state, its name and how long it has been so, then how fresh the
+/// tail is, or the answer the board last sent it. The full view, which has no list or facts
+/// beside it, also names where the row is and its host.
+/// `━━ ✓ done · seat-a · ended 4m ago ━━━━━━ captured …`
 pub(super) fn bar(
     row: &Row,
     right: Option<String>,
     now: DateTime<Utc>,
     width: usize,
+    placed: bool,
 ) -> Line<'static> {
     let mut state = state_word(row);
     if let Some(kind) = &row.pane.kind {
@@ -153,17 +175,20 @@ pub(super) fn bar(
             parts.join(" · ")
         ))
     };
-    // The list row shows the place, host and harness, so on a narrow bar they give way before
-    // the outcome.
-    let labels = [row.pane.session.as_str(), row.pane.tab.as_str()];
-    let least = path(&labels, usize::MAX).width().min(12);
-    let mut extra = vec![row.pane.host.clone(), harness(row)];
-    while !extra.is_empty() && line(Some(""), &extra).width() + least > room {
-        extra.pop();
-    }
-    let left = match room.checked_sub(line(Some(""), &extra).width()) {
-        Some(place) if place >= least => line(Some(&path(&labels, place)), &extra),
-        _ => line(None, &extra),
+    let left = if placed {
+        // On a narrow bar the host gives way first, then the place, before the outcome.
+        let labels = [row.pane.session.as_str(), row.pane.tab.as_str()];
+        let least = path(&labels, usize::MAX).width().min(12);
+        let mut extra = vec![row.pane.host.clone()];
+        while !extra.is_empty() && line(Some(""), &extra).width() + least > room {
+            extra.pop();
+        }
+        match room.checked_sub(line(Some(""), &extra).width()) {
+            Some(place) if place >= least => line(Some(&path(&labels, place)), &extra),
+            _ => line(None, &extra),
+        }
+    } else {
+        line(None, &[])
     };
     let left = fit(&left, room).trim_end().to_owned() + " ";
     let fill = width.saturating_sub(ends.width() + left.width() + right.width());
@@ -185,16 +210,15 @@ pub(super) fn bar(
     Line::from(spans)
 }
 
-/// How the turn stands: `ended 4m ago · turn 6m12s`, `waiting 12s`, `for 2m`. Nothing for a
+/// How the turn stands: `ended 4m ago`, `waiting 12s`, `for 2m`. Nothing for a
 /// row with no report to date it.
 pub(crate) fn outcome(row: &Row, now: DateTime<Utc>) -> Option<String> {
     let since = in_state(row, now);
     if since == "-" {
         return None;
     }
-    let turn = row.last_turn.map(|secs| format!(" · turn {}", span(secs)));
     Some(match row.pane.state.as_str() {
-        "done" => format!("ended {since} ago{}", turn.unwrap_or_default()),
+        "done" => format!("ended {since} ago"),
         "blocked" => format!("waiting {since}"),
         "error" => format!("failed {since} ago"),
         _ => format!("for {since}"),

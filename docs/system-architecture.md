@@ -63,11 +63,13 @@ rexboard reaches Rex only through the `rex` command: `rex do` for the scripts, `
 | `src/tui/keys.rs` | The keymap: one table per layer (the board, the full view) of key sequences, what they do, and how `?` and the footers name them. Dispatch, `?` and every footer read it, and tests check that no key is bound twice and every key does something |
 | `src/tui/query.rs` | The board's views, `/` filter, `f` status and `o` sort run headless for `ls --view/--filter/--status/--sort` and `seen --all-done`, so the CLI lists what the board would |
 | `src/tui/columns.rs`, `views.rs`, `status.rs` | Which columns a width shows; views (a grouping plus a sort); the `f` status filter |
-| `src/tui/card.rs` | The turn card: the selected row's bar, headline, ask or body, and tail |
+| `src/tui/card.rs` | The turn card: the selected row's bar, headline, ask or body, tail, and its facts at the foot |
+| `src/tui/meta.rs` | The card's facts: host, harness, turn, where, extension fields, title and source, each once under a label, in aligned columns |
+| `src/tui/icons.rs` | The Nerd Font glyphs the facts take with `"icons": "nerd"`, pinned by name and code point; nothing else in `src/tui/` writes a private-use glyph, and a test checks it |
 | `src/tui/full.rs`, `vt.rs` | The full view, read again every 2s; `vt.rs` keeps only a line's colours (SGR) and turns them into styles |
 | `src/tui/answer.rs`, `screen.rs` | Answer mode: its keys and card, and what it reads off a pane (options, the input line, a draft) |
 | `src/tui/clipboard.rs` | `yy` and `yp`: `pbcopy`, `wl-copy` or `xclip` |
-| `src/tui/theme.rs` | The one style system: the roles text takes (`quiet`, `strong`, `accent`, `alert`, `note`, `header`, `selected`, `cut_mark` and the rest), and `face`, how each row state looks (its glyph or animation frames and their interval, the glyph it holds under reduced motion, colour and modifiers). Nothing else in `src/tui/` picks a colour or a glyph, and a test checks it. The board redraws at the shortest interval of an animated glyph on screen (the spinner's 80 ms), otherwise once a second |
+| `src/tui/theme.rs` | The one style system: the roles text takes (`quiet`, `strong`, `accent`, `alert`, `note`, `header`, `selected`, `cut_mark` and the rest), and `face`, how each row state looks (its glyph or animation frames and their interval, the glyph it holds under reduced motion, colour and modifiers). Nothing else in `src/tui/` picks a colour or a glyph, and a test checks it. The board redraws at the shortest interval of an animated glyph on screen (the spinner's 160 ms), otherwise once a second |
 | `src/tui/prefs.rs` | `tui.json` |
 
 serve uses std threads and channels, with no async runtime. Collectors, extension runners, the socket listener and each connection run on their own thread, and only the reducer thread touches the board. A runner sends its results to the reducer and never waits on it, so a slow adapter cannot hold up rows.
@@ -83,7 +85,7 @@ serve uses std threads and channels, with no async runtime. Collectors, extensio
 | `state.json` | `{"v":1,"panes":{KEY:{state,kind,since,since_estimated,turn_started,last_turn,seen}},"jumps":[KEY,KEY]}`, where `jumps` holds the last two jumps, older first, for `jump -`. Written through a temp file and a rename at most once a second, and on stop. Entries for a host that has not sent its first snapshot this run are kept as loaded |
 | `transitions.jsonl` | One line per state change: `{at, host, block_id, from, to, kind}`. Over 5 MB at serve start, it moves to `transitions.jsonl.1`, replacing the older one |
 | `serve.log` | serve's output when a command started it. A client clears it first when it is over 1 MB |
-| `tui.json` | The board's own settings on this machine, `{"detail_hidden": BOOL, "motion": "full" \| "reduced"}`: whether `c` hid the turn card, and whether the spinner holds still. The board writes it on each `c`, keeping `motion`; a missing or unreadable file means shown and full motion, and an old `detail` key is ignored |
+| `tui.json` | The board's own settings on this machine, `{"detail_hidden": BOOL, "motion": "full" \| "reduced", "icons": "text" \| "nerd"}`: whether `c` hid the turn card, whether the spinner holds still, and whether the card's facts take Nerd Font glyphs. The board writes it on each `c`, keeping `motion` and `icons`; a missing or unreadable file means shown, full motion and words, and an old `detail` key is ignored |
 
 On start, serve takes the lock, removes a stale socket, then stops observers a dead serve left behind. A recorded pid is stopped only if it is still its own process group, its parent is init or the recorded serve, and its command is the recorded `rex` running `do - --all --fail-fast`. Anything else is skipped and logged, because the pid may now belong to another program.
 

@@ -50,6 +50,11 @@ pub struct Field {
     /// Its short name, or its id when two extensions declare the same name.
     pub name: String,
     pub title: String,
+    #[serde(default)]
+    pub icon: Option<String>,
+    /// Its extension's mark.
+    #[serde(default)]
+    pub extension_icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]

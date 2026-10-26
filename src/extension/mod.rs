@@ -30,6 +30,9 @@ pub struct Manifest {
     pub fields: Vec<Field>,
     #[serde(default)]
     pub provides: Provides,
+    /// The mark the card gives this extension's fields with `"icons": "nerd"`.
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 fn every() -> u64 {
@@ -45,6 +48,9 @@ fn timeout() -> u64 {
 pub struct Field {
     pub name: String,
     pub title: String,
+    /// The field's own mark on the card with `"icons": "nerd"`.
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -191,16 +197,35 @@ fn check(m: &Manifest, dir: &Path) -> Result<(), String> {
             m.timeout, m.every
         ));
     }
+    if let Some(icon) = m.icon.as_deref().filter(|icon| !is_icon(icon)) {
+        return Err(format!(
+            "icon {icon:?} must be one character, one cell wide"
+        ));
+    }
     let mut seen = BTreeSet::new();
     for field in &m.fields {
         if !is_name(&field.name) {
             return Err(format!("field {:?} must be [a-z0-9-]+", field.name));
+        }
+        if let Some(icon) = field.icon.as_deref().filter(|icon| !is_icon(icon)) {
+            return Err(format!(
+                "field {:?}'s icon {icon:?} must be one character, one cell wide",
+                field.name
+            ));
         }
         if !seen.insert(&field.name) {
             return Err(format!("field {:?} is declared twice", field.name));
         }
     }
     Ok(())
+}
+
+/// One printable character one cell wide, as the card's label column takes it.
+fn is_icon(icon: &str) -> bool {
+    let mut chars = icon.chars();
+    chars.next().is_some_and(|c| !c.is_control())
+        && chars.next().is_none()
+        && unicode_width::UnicodeWidthStr::width(icon) == 1
 }
 
 pub(crate) fn is_name(name: &str) -> bool {
@@ -272,6 +297,24 @@ pub mod tests {
         assert!(ext.declares("rig") && !ext.declares("project"));
     }
 
+    fn with_icon(name: &str, fields: &[&str], icon: &str) -> String {
+        manifest(name, fields).replace(
+            "contract = 1\n",
+            &format!("contract = 1\nicon = \"{icon}\"\n"),
+        )
+    }
+
+    #[test]
+    fn an_extension_and_its_fields_may_each_name_a_one_cell_icon() {
+        let root = tempfile::tempdir().unwrap();
+        let text = with_icon("fake", &["rig"], "\u{ea7e}") + "icon = \"\u{f502}\"\n";
+        let ext = load(&write(root.path(), "fake", &text)).unwrap();
+        assert_eq!(ext.manifest.icon.as_deref(), Some("\u{ea7e}"));
+        assert_eq!(ext.manifest.fields[0].icon.as_deref(), Some("\u{f502}"));
+        let plain = load(&write(root.path(), "plain", &manifest("plain", &["rig"]))).unwrap();
+        assert_eq!(plain.manifest.icon, None, "optional");
+    }
+
     #[test]
     fn a_bad_manifest_says_why() {
         let root = tempfile::tempdir().unwrap();
@@ -306,6 +349,19 @@ pub mod tests {
                 "twice",
                 manifest("twice", &["rig", "rig"]),
                 "declared twice",
+            ),
+            (
+                "wide",
+                with_icon("wide", &[], "中"),
+                "icon \"中\" must be one character, one cell wide",
+            ),
+            ("pair", with_icon("pair", &[], "ab"), "one character"),
+            ("ctl", with_icon("ctl", &[], "\\u001b"), "one character"),
+            ("none", with_icon("none", &[], ""), "one character"),
+            (
+                "mark",
+                manifest("mark", &["rig"]) + "icon = \"ab\"\n",
+                "field \"rig\"'s icon \"ab\" must be one character",
             ),
         ];
         for (dir, text, why) in cases {

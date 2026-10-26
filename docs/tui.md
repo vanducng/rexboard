@@ -67,12 +67,12 @@ One table in `src/tui/theme.rs` says how each state looks, and the list, the tur
 | `✗` | error | red, bold |
 | `✓` | done, not yet seen | green, bold |
 | `✓` | done and seen | dim |
-| `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` | working: one frame every 80 ms, from the board's own clock | yellow |
+| `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` | working: one frame every 160 ms, from the board's own clock | yellow |
 | `○` | idle, or a `working` report the board doubts (`idle?`) | dim |
 | `·` | no status, or a state read from the title only | dim |
 | `◌` | its host is down | dim, and so is the row |
 
-The board redraws every 80 ms only while a working row is on screen: in the list, on the turn card's bar or on the full view's bar. Otherwise it keeps its once-a-second tick.
+The board redraws every 160 ms only while a working row is on screen: in the list, on the turn card's bar or on the full view's bar. Otherwise it keeps its once-a-second tick.
 
 The rest of the board's text takes one of a few roles, also in `theme.rs`, so a new screen picks a role rather than a colour:
 
@@ -151,7 +151,7 @@ The keys are vim's where vim has one, and plain keys or vim's own ctrl chords ot
 | `dd` | Close the selected row's pane. The footer asks, in red, `close WHERE on HOST, ending HARNESS (STATE)? y closes`, with WHERE as the list tells twins apart (`api › main #2`) and the state when it is blocked or working, with its kind (`blocked · question`); a narrow footer drops `ending …`, then cuts WHERE in the middle, never the key. `dd` only asks when its first `d` comes on its own, 300 ms after the key before (else `keys came too fast; nothing closed · dd closes`). Only `y` closes it, with `rex block close`, and only once the question has been up for 300 ms: a key sooner says `nothing closed (keys came too fast)`, and any other key says `nothing closed`. Either way that key does nothing else. The question goes if its row leaves the board. A pane whose process is `tmux` adds `(tmux keeps running)`: closing it ends the tmux client, not the session. The board's own pane, and any pane running `rexboard`, are never closed. Not in `pick` |
 | `yy` / `yp` | Copy the selected row's message (`yy`), or where its pane is as `SESSION › WINDOW › BLOCK @HOST` (`yp`), to the clipboard of the machine the board runs on: `pbcopy` on macOS, `wl-copy` under Wayland, else `xclip`. Both go without escape sequences or control characters, so a paste cannot end early and run what follows. The footer says what it copied (`copied "Tests pass: 12 passed"`, `copied api › main › seat-b @local`), or why not (`could not copy: no clipboard to copy to`). Rex does not pass OSC 52 from a pane to the Mac's clipboard, so the board does not use it |
 | `R` | Reconnect to serve |
-| `?` | Show every key in the card, in as many columns as fit; `?`, `q` or `esc` hides it |
+| `?` | Show every key in the card, in as many columns as fit, right above the footer; the list keeps every row above it. `?`, `q` or `esc` hides it |
 | `esc` | Drop a waiting prefix; else close the key table; else clear the `/` filter, the status filter and the sort |
 | `q`, `ctrl-c` | `q` closes the layer in front (the key table, the full view) and quits only from the bare board; `ctrl-c` always quits (in answer mode it only leaves it) |
 
@@ -166,33 +166,47 @@ The board redraws when serve sends rows, on a key, and once a second for the clo
 The card is the selected row in full, under the list, as wide as the board:
 
 ```
-━━ ✓ done · seat-a · api › main · mini · claude · ended 4m ago · turn 6m12s ━━━━━━ captured 11:21:14 · 8s ━━
+━━ ✓ done · seat-a · ended 4m ago ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ captured 11:21:14 · 8s ━━
  Opened PR #31; CI is green.
    Pushed feat/turn-card and opened PR #31.
    Next step is yours: review and merge.
- title seat-a · source native
+
+ where   api › main › seat-a
+ host    mini     harness claude   turn    6m
+ session-prefix project api
+ title   seat-a   source  native
 ```
 
-1. **The bar:** the glyph, the state (with its kind, as in `blocked · permission`), the block, `session › window`, the host and the harness, then how the turn stands: `ended 4m ago · turn 6m12s` for a done row, `waiting 12s` for a blocked one, `failed 2m ago`, or `for 2m` in any other state. When the bar is short of room, the window, then the harness, the host and the place give way, never the outcome. On the right, how fresh the pane's tail is: `captured 11:21:14 · 8s`, or `newer report · space refreshes` once the row has reported since.
+1. **The bar:** what you scan first. The glyph and the state (with its kind, as in `blocked · permission`), the block, and how the turn stands: `ended 4m ago` for a done row, `waiting 12s` for a blocked one, `failed 2m ago`, or `for 2m` in any other state. On the right, how fresh the pane's tail is: `captured 11:21:14 · 8s`, or `newer report · space refreshes` once the row has reported since.
 2. **The headline**, in bold: the message's first line (see [Agent status](agent-status.md)), else the title.
 3. **The ask or the body:** the message's other lines, wrapped. A blocked row's ask is never cut: its card grows as far as the list's last 3 rows.
-4. A failed jump's reason, `may be stale:` for a suspect row, the title and `source`, and each extension's fields on the row (`fake · rig api`).
+4. A failed jump's reason, and `may be stale:` for a suspect row.
 5. The pane's tail, when it has been read, newest line at the bottom.
+6. **The facts**, after one blank line, at the foot of the card: each once, under a dim label, in aligned columns. First `where` (`session › window › block`), which tells two rows of the same name apart, then `host`, `harness` and `turn` (how long the last turn ran), then each extension's fields on the row, then `title` and `source`. When the card is wide, the short facts share a row, up to three; narrow, each takes its own. `where` gives way from its session and window, cut in the middle, and never cuts the block's name while it fits at all.
+7. **An extension's row** starts with the extension's name, dim, then each field's name, dim, and its value: `session-prefix project api`, or `lane desk` for a lone field named like its extension. The label column is as wide as the built-in labels, so a longer extension name runs past it and widens only its own row.
+
+A long message gives way to the facts: it is cut, down to its headline, and the last line it keeps ends in `…`. A blocked row's ask and dialog are what it asks, so neither is cut for the facts: its tail shows only the dialog, from the rule above it (with no dialog on screen, as much of the tail as fits), and the facts get the rows left, from the first, or none on a short screen, where the list's row still has its host, harness and where.
 
 A row with no status record says `no status from this pane` and `space captures the screen`.
 
-The card is 8 rows, or 40% of the body when that is more, and always leaves the list 3 rows under its column header. Text wraps at 120 columns however wide the board. `c` hides it.
+The card is 8 rows, or 40% of the body when that is more, and always leaves the list 3 rows under its column header. A card that needs fewer rows sits on the footer, and the room it does not need opens above its bar, so the space a short card leaves is never a band between it and the footer. Text wraps at 120 columns however wide the board. `c` hides it.
 
 Reading a card does not mark a row seen. `m` does, and so does `n` or `tab` off a `done` row whose card has shown for at least a second. The tail of a blocked row is read by itself once its card has shown for 300 ms, once per report, so the ask can be checked against the screen; moving through rows reads none.
 
-`c`'s choice lives in `tui.json` beside serve's `state.json` (`~/.local/state/rexboard/tui.json`, or under `XDG_STATE_HOME`), as `detail_hidden` (missing means shown), next to `motion` (see [Style](#style)), which `c` keeps as it was. The file is read when the board starts and written on each `c`. The side pane's old width key is ignored.
+`c`'s choice lives in `tui.json` beside serve's `state.json` (`~/.local/state/rexboard/tui.json`, or under `XDG_STATE_HOME`), as `detail_hidden` (missing means shown), next to `motion` (see [Style](#style)) and `icons` (see [Icons](#icons)), which `c` keeps as they were. The file is read when the board starts and written on each `c`. The side pane's old width key is ignored.
+
+### Icons
+
+With `"icons": "nerd"` in `tui.json`, or `REXBOARD_ICONS=nerd` for one run, the card's facts take a Nerd Font glyph in place of each word label: the host, the harness's own mark (Claude, Codex, OpenCode, Gemini and pi each have one, any other harness a robot), the turn, the title, and how the status arrived (native, bridge or inferred). `where` leads with the session's mark and gives the window and the block their own: `<session> api › <window> main › <block> seat-a`. An extension's group takes a package mark, and its name moves into the value: `<package> session-prefix · project api`. `REXBOARD_ICONS=text` turns them off for a run; the environment wins, then `tui.json`, then words. Any other value is words.
+
+Nerd mode needs a Nerd Font **Mono** variant from Nerd Fonts **3.5.0** or later: the Claude, OpenAI, robot and inferred marks are new in 3.5.0, and a non-Mono font draws glyphs wider than the one cell the board gives them. To check, print the host mark and see that it takes one cell between the bars: `printf '|\xee\xad\x90|\n'`. The board never guesses the font. Column headers, the bar, the list and every other screen keep their words in both modes, and the state glyphs are the same. Every glyph is pinned by its Nerd Fonts name and code point in `src/tui/icons.rs`, each a single code point in the Basic Multilingual Plane, one cell wide.
 
 ## Full view
 
-`space` gives the selected row's pane the whole terminal: the card's bar on top, the pane's lines in between, and the keys at the bottom. There is no list.
+`space` gives the selected row's pane the whole terminal: a bar on top, the pane's lines in between, and the keys at the bottom. There is no list, and no facts, so the bar is the card's with where the row is and its host added: `session › window` and the host give way, in that order from the host, when the bar is short of room, never the outcome.
 
 ```
-━━ ⠋ working · seat-b · api › main · mini · claude · for 2m ━━━━━━━━━━━ live · 1s · following ━━
+━━ ⠋ working · seat-b · api › main · mini · for 2m ━━━━━━━━━━━━━━━━━━ live · 1s · following ━━
 ...the pane's last lines, newest at the bottom...
 space back · j/k scroll · a answer · enter jump · gg/G top, bottom · ctrl-d/u half page · ctrl-f/b page
 ```

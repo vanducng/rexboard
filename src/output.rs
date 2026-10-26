@@ -16,7 +16,7 @@ const SHORT_TAB: usize = 6;
 /// The narrowest WHAT gets before WHERE gives up columns too.
 const WHAT_MIN: usize = 16;
 
-const SEP: &str = " › ";
+pub const SEP: &str = " › ";
 
 /// The terminal's width when stdout is one; piped output keeps every column whole.
 pub fn terminal_width() -> Option<usize> {

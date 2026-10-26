@@ -102,6 +102,7 @@ pub fn draw(frame: &mut Frame, app: &App, full: &Full, row: &Row, now: DateTime<
             Some(right(full, peek, now, width)),
             now,
             width,
+            true,
         )),
         top,
     );
