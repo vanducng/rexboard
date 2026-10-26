@@ -70,7 +70,8 @@ impl Answer {
     /// What the pane must still show for `action` to go out.
     pub fn expect(&self) -> Option<Expect> {
         Some(Expect {
-            updated_at: self.updated_at.clone(),
+            state: self.row.pane.state.clone(),
+            kind: self.row.pane.kind.clone(),
             fingerprint: self.screen.as_ref()?.fingerprint.clone()?,
             title: (self.row.pane.source == "bridge").then(|| self.row.pane.title.clone()),
         })

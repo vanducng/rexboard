@@ -41,7 +41,10 @@ impl Action {
 /// What the operator saw, which the pane must still show when the key goes out.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Expect {
-    pub updated_at: String,
+    /// What the agent was waiting on: its main record's state and kind. A new report of the same
+    /// (a hook's notification for the same dialog) is no change.
+    pub state: String,
+    pub kind: Option<String>,
     pub fingerprint: String,
     /// For a tmux seat, the title of the seat that was on screen.
     pub title: Option<String>,
@@ -59,7 +62,8 @@ pub fn send(
         "block_id": pane.block_id,
         "max_bytes": BYTES,
         "expect": {
-            "updated_at": expect.updated_at,
+            "state": expect.state,
+            "kind": expect.kind,
             "fingerprint": expect.fingerprint,
             "title": expect.title,
         },
@@ -82,9 +86,10 @@ pub fn send(
     }
     let field = |name: &str| reply[name].as_str().map(clean).unwrap_or_default();
     Err(match reply["code"].as_str() {
-        Some("status_changed") => {
-            "the agent's status changed since it was read; nothing sent".to_owned()
-        }
+        Some("status_changed") => format!(
+            "the agent's status changed since it was read ({}); nothing sent",
+            field("detail")
+        ),
         Some("dialog_up") => "a dialog is up; pick a number; nothing sent".to_owned(),
         Some("not_harness") => format!(
             "{} is in front, not the agent; nothing sent",
@@ -135,7 +140,8 @@ mod tests {
 
     fn expect() -> Expect {
         Expect {
-            updated_at: "2026-01-01T00:00:00Z".into(),
+            state: "blocked".into(),
+            kind: Some("permission".into()),
             fingerprint: " ❯ 1. Yes\n   2. No".into(),
             title: None,
         }
@@ -160,7 +166,8 @@ mod tests {
         assert_eq!(args["action"], json!({ "pick": "1" }), "a digit, no Enter");
         assert_eq!(args["session_id"], "session:api");
         assert_eq!(args["block_id"], "block:seat-b");
-        assert_eq!(args["expect"]["updated_at"], "2026-01-01T00:00:00Z");
+        assert_eq!(args["expect"]["state"], "blocked");
+        assert_eq!(args["expect"]["kind"], "permission");
         assert_eq!(args["expect"]["fingerprint"], " ❯ 1. Yes\n   2. No");
         let script = std::fs::read_to_string(dir.path().join("script")).unwrap();
         assert!(script.contains("function tail(") && script.contains("block.event"));
@@ -193,8 +200,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         for (reply, text) in [
             (
-                json!({ "code": "status_changed" }),
-                "the agent's status changed since it was read; nothing sent",
+                json!({ "code": "status_changed", "detail": "blocked/permission → working" }),
+                "the agent's status changed since it was read (blocked/permission → working); nothing sent",
             ),
             (
                 json!({ "code": "dialog_up" }),

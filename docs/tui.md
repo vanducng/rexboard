@@ -141,7 +141,7 @@ The mode is bound to the row's host and pane, not its place in the list, so a re
 
 Before anything is sent, one `rex do` on the pane's host checks, in order, that:
 
-1. the pane's status report is the one the board read (else `the agent's status changed since it was read; nothing sent`);
+1. the agent still waits on the same thing: its status has the state and kind the board read. A fresh report of the same, such as the hook's notification a few seconds after a permission dialog opens, is no change. Else `the agent's status changed since it was read (blocked/permission → working); nothing sent`, naming what moved;
 2. an agent, not a shell, is in front (else `zsh is in front, not the agent; nothing sent`); a tmux seat must still show the same seat's title;
 3. the dialog's options, or the input line and the line above it, are still on the last 40 lines, whole (else `the screen changed since it was read; nothing sent`);
 4. for a line, no dialog is up: options 1 and 2 with no input line below them (else `a dialog is up; pick a number; nothing sent`). Text into a dialog would be read as its highlighted option, so this holds whatever the board believes it shows.
