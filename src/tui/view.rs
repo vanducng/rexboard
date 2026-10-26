@@ -2540,6 +2540,7 @@ mod extension_tests {
             id: id.into(),
             name: id.split_once('.').unwrap().1.into(),
             title: title.into(),
+            ..Field::default()
         }
     }
 
@@ -2807,6 +2808,23 @@ mod extension_tests {
             lines[place + 1].ends_with(" fake · rig api")
                 && lines[place + 2].ends_with(" session-prefix · project api"),
             "a glyph cannot name its extension, so the value does:\n{text}"
+        );
+        for (field, _) in &mut app.fields {
+            if field.id == "fake.rig" {
+                field.extension_icon = Some("\u{ea7e}".into());
+                field.icon = Some("\u{f502}".into());
+            }
+        }
+        let text = render(&app, 80, 30);
+        assert!(
+            text.contains("\n \u{ea7e} \u{f502} api\n"),
+            "its own marks, and no name to repeat:\n{text}"
+        );
+        app.nerd = false;
+        let text = render(&app, 80, 30);
+        assert!(
+            !text.contains('\u{ea7e}') && text.contains(" fake           rig api"),
+            "words mode ignores them:\n{text}"
         );
     }
 

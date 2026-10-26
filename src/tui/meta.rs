@@ -8,6 +8,7 @@ use super::app::App;
 use super::icons;
 use super::theme;
 use crate::board::Row;
+use crate::client::Field;
 use crate::output::{SEP, clean, fit, harness, labels, path, span};
 use crate::pane::bare_title;
 
@@ -181,7 +182,7 @@ fn plain_place(row: &Row, max: usize) -> String {
 /// by the extension: `session-prefix`, `project api`. A lone field named like its extension is
 /// labelled by it alone: `lane`, `desk`.
 fn extension_groups(app: &App, row: &Row) -> Vec<(String, String)> {
-    let mut groups: Vec<(&str, Vec<(&str, String)>)> = Vec::new();
+    let mut groups: Vec<(&str, Vec<(&Field, String)>)> = Vec::new();
     for (field, _) in &app.fields {
         let Some(value) = row.ext.get(&field.id) else {
             continue;
@@ -190,31 +191,38 @@ fn extension_groups(app: &App, row: &Row) -> Vec<(String, String)> {
             .id
             .split_once('.')
             .map_or(field.id.as_str(), |(e, _)| e);
-        let shown = (field.name.as_str(), clean(value));
+        let shown = (field, clean(value));
         match groups.iter_mut().find(|(e, _)| *e == ext) {
             Some((_, parts)) => parts.push(shown),
             None => groups.push((ext, vec![shown])),
         }
     }
+    let mark = |field: &Field| match (app.nerd, field.icon.as_deref()) {
+        (true, Some(icon)) => icon.to_owned(),
+        _ => field.name.clone(),
+    };
     groups
         .into_iter()
         .map(|(ext, parts)| {
             let value = match &parts[..] {
-                [(name, value)] if *name == ext => value.clone(),
+                [(field, value)] if field.name == ext => value.clone(),
                 _ => parts
                     .iter()
-                    .map(|(n, v)| format!("{n} {v}"))
+                    .map(|(field, value)| format!("{} {value}", mark(field)))
                     .collect::<Vec<_>>()
                     .join(" · "),
             };
-            // A glyph cannot say which extension it is, so its name moves into the value.
-            if app.nerd {
-                (
+            if !app.nerd {
+                return (ext.to_owned(), value);
+            }
+            match parts[0].0.extension_icon.as_deref() {
+                Some(icon) => (icon.to_owned(), value),
+                // The package mark cannot say which extension it is, so the name moves into the
+                // value.
+                None => (
                     icons::EXTENSION.glyph.to_owned(),
                     format!("{ext} · {value}"),
-                )
-            } else {
-                (ext.to_owned(), value)
+                ),
             }
         })
         .collect()

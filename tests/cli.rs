@@ -2446,7 +2446,13 @@ fn ext_new_scaffold_passes_ext_test_unchanged() {
 fn ext_fields_reach_the_board_in_enabled_order_before_any_run() {
     use std::io::{BufRead, BufReader, Write};
     let serve = Serve::new();
-    extension(&serve, "zeta", "", "", "sleep 30");
+    extension(
+        &serve,
+        "zeta",
+        "icon = \"\u{ea7e}\"\n",
+        "icon = \"\u{f502}\"\n",
+        "sleep 30",
+    );
     extension(&serve, "alpha", "", "", "sleep 30");
     serve.config("[extensions]\nenabled = [\"zeta\", \"alpha\"]\n");
     serve.rows(&[]);
@@ -2458,9 +2464,12 @@ fn ext_fields_reach_the_board_in_enabled_order_before_any_run() {
     assert_eq!(
         reply["fields"],
         serde_json::json!([
-            { "id": "zeta.rig", "name": "zeta.rig", "title": "RIG" },
+            {
+                "id": "zeta.rig", "name": "zeta.rig", "title": "RIG",
+                "icon": "\u{f502}", "extension_icon": "\u{ea7e}",
+            },
             { "id": "alpha.rig", "name": "alpha.rig", "title": "RIG" },
         ]),
-        "both declare rig, so both go by id; zeta first, as enabled"
+        "both declare rig, so both go by id; zeta first, as enabled; only declared icons go"
     );
 }

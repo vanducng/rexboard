@@ -120,7 +120,17 @@ impl Running {
             for field in &ext.manifest.fields {
                 let id = super::field_id(ext.name(), &field.name);
                 let shown = names[&id].clone();
-                fields.push(json!({ "id": id, "name": shown, "title": field.title }));
+                let mut entry = json!({ "id": id, "name": shown, "title": field.title });
+                // Only a declared icon goes on the wire, so a field without one reads as before.
+                for (key, icon) in [
+                    ("icon", &field.icon),
+                    ("extension_icon", &ext.manifest.icon),
+                ] {
+                    if let Some(icon) = icon {
+                        entry[key] = json!(icon);
+                    }
+                }
+                fields.push(entry);
             }
         }
         fields
