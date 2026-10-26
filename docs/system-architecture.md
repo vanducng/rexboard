@@ -26,10 +26,10 @@ rexboard reaches Rex only through the `rex` command: `rex do` for these scripts,
 
 | Kind | Rex API calls | Script |
 | --- | --- | --- |
-| Read | `server.version`, `session.list`, `session.view`, `session.list_blocks`, and on each terminal block `program_status`, `title` and `process` | `lib.lua`, `observer.lua` |
-| Read, events | `session.attach_all` with `event_scope = "session"`, then `block_event` (`program_status_changed`, `program_status_removed`, `title_changed`, `process_changed`, `child_exited`), `block_created`, `block_closed`, `window_created`, `window_closed`, `session_label_changed`, `window_label_changed`, `active_window_changed`, `session_created` and `session_destroyed` | `lib.lua`, `observer.lua` |
-| Read, to find the Rex app | `client.list`, and `server.whoami` for a remote host | `app.lua`, `jump.lua` |
-| Write, a jump only | `session.attach` (`session.focus_block` acts only on an attached session), `session.focus_block` on the pane's host, then `client.perform` with `action = "session.select"` on this Mac's Rex app | `jump.lua` |
+| Read | `server.version`, `session.attach_all` with `event_scope = "session"`, `session.list`, `session.view`, `session.list_blocks`, and on each terminal block `program_status`, `title` and `process` | `lib.lua`, `observer.lua`, `snapshot.lua` |
+| Events | `block_event` (`program_status_changed`, `program_status_removed`, `title_changed`, `process_changed`, `child_exited`), `block_created`, `block_closed`, `window_created`, `window_closed`, `session_label_changed`, `window_label_changed`, `active_window_changed`, `session_created` and `session_destroyed`. `observer.lua` hears them because serve runs it with `rex do - --all`, which listens to every session | `observer.lua` |
+| Read, for a jump | `client.list`, `server.whoami` for a remote host, and `session.attach` on the pane's session, a read that `session.focus_block` needs | `app.lua`, `jump.lua` |
+| Write, a jump only | `session.focus_block` on the pane's host, then `client.perform` with `action = "session.select"` on this Mac's Rex app | `jump.lua` |
 
 ## Pieces
 
