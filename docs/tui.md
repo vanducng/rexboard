@@ -38,7 +38,7 @@ The board is built to live in a narrow column, so the narrow layout is the main 
 
   Glyphs: `◉` blocked, `✖` error, `●` done, `◐` working, `○` idle or seen done, `·` unknown. Blocked and error are red, unseen done green, working yellow, the rest dim. Time in state is `≥5h43m` when estimated and `-` for a pane with no status record. A harness read from the title, with no record, ends in `?` (`claude?`). A `working` report more than 120 seconds old on a pane that looks idle (an idle `✳ ` title, or a shell back in front) is not trusted: the row shows `idle?` (from 100 columns; narrower, its `○` glyph), dim, under `UNREPORTED`, and the turn card says `may be stale:` and why. The check cannot see inside tmux: with `tmux` in front the title is tmux's, so only a shell back in front makes such a row suspect. serve checks this every second, since time alone can make a report suspect. Rows of a host that is down, and every row while serve is stopped, are dim. The selected row has a raised background. A pane labelled `shell`, or named after its foreground process, tells you nothing, so its path is `session › window` (also below 100 columns), and its `BLOCK` is its title, else its window. When a path is too long, the window is cut first (to `…` below 6 columns), then the session down to an 8-column stem, then the last label. Rows on one host that would still read the same, as shown, end in `#N`, their place among those rows by window and then by block age. A number can shift when a twin's title changes and it stops reading the same; once split the `#N` goes on `BLOCK`, and a long session, window or block keeps both ends with `…` in the middle. Below 60 columns, where there is no host column, a row from a host other than `local` also gets `@HOST` when a twin is on another host; at 50 columns that reads `api…way › pair #1`, `api…way › pair #2` and `ap…y › pair @mini`. The suffix is never cut: the path gives way first, down to `…`. When rows do not fit, the last line says how many are below (`↓ 4 more`).
 - **Turn card**, for the selected row, under the list at full width, at every width (see [Turn card](#turn-card)). `c` hides it.
-- **Footer:** the keys that fit, most needed first (`j/k move · s seen · / filter · ? keys` at 50 columns, then `tab next`, `enter jump`, `a answer`, `space zoom` and `v view` as they fit, so 80 columns ends at `enter jump`; `v view` shows after `/ filter`), or the filter being typed, or a message for 3 seconds. A zoomed card starts the footer with `space returns ·` (and drops `space zoom`), and a kept filter with `/mini · esc clears ·`. While `c` has the card hidden, `c card` follows `? keys`. It goes before `space zoom` when the footer is narrow, so at 80 columns the footer shows `c card` and drops `space zoom`. A filter that matches nothing says `no rows match "mini" · esc clears` in the list. With the card hidden, below 100 columns, a rule sits above the footer when the screen is 20 rows or more.
+- **Footer:** the keys that fit, most needed first (`j/k move · s seen · / filter · ? keys` at 50 columns, then `tab next`, `enter jump`, `a answer`, `space full` and `v view` as they fit, so 80 columns ends at `enter jump`; `v view` shows after `/ filter`), or the filter being typed, or a message for 3 seconds. A kept filter starts the footer with `/mini · esc clears ·`. While `c` has the card hidden, `c card` follows `? keys`. It goes before `space full` when the footer is narrow, so at 80 columns the footer shows `c card` and drops `space full`. A filter that matches nothing says `no rows match "mini" · esc clears` in the list. With the card hidden, below 100 columns, a rule sits above the footer when the screen is 20 rows or more.
 
 Long labels are cut to fit: a session, window or block label to 24 columns with `…` in the middle, and every cell at its column's edge with `…`. Widths count CJK and emoji as two columns. Colours are ANSI named colours only, so the terminal's theme carries through.
 
@@ -68,7 +68,7 @@ In the `table` view a click on a column's header sorts by that column, as its le
 | `1`-`9` | Select the nth `NEEDS YOU` row, counted in the order shown (so a sort changes which row a digit picks), opening its group if it is folded |
 | `/` | Filter rows by host, session, window, block, title, state, message or harness; `enter` keeps it, `esc` clears it |
 | `f`, then a letter | Show one status only (see [Status filter](#status-filter)). `f f` or `esc` clears it |
-| `space` | Zoom the card to the whole body and read the end of the pane: its last 48 KiB, the last 200 lines kept, with escape sequences removed, newest at the bottom. A host that does not answer in 3 seconds shows `the pane did not answer within 3s`, and a newer read replaces one still running. `space` again or `esc` returns |
+| `space` | Open the [full view](#full-view) of the selected row's pane, read again every 2 seconds while it is open. `space` again or `esc` returns |
 | `tab` | The next row that needs you, after the selected one, round to the first. Leaving a `done` row whose card showed for at least a second marks it seen; a blocked or erroring row is never marked |
 | `s` | Mark the selected pane seen, through serve. The message names it `session › block` (`session › window` for a generic block label). A blocked or erroring pane stays in `NEEDS YOU`, and the message says so |
 | `ctrl+s` | Mark every unseen `done` row the list shows seen (a kept filter narrows it), through serve, and say how many (`9 done rows marked seen`). Blocked and erroring rows are left alone. Before v0.2 this was `S`, which now sorts by state; the `?` table says `(was S)`, and the first `S` of a run says `sorted by state · bulk seen is ctrl+s now` |
@@ -77,12 +77,12 @@ In the `table` view a click on a column's header sorts by that column, as its le
 | `S` `A` `T` `R` `O` `W` `E` `N` `B` `M` | Sort by `STATE`, `AGE`, `TURN`, `HARNESS` (runtime), `HOST`, `WHERE`, `SESSION`, `WINDOW`, `BLOCK` or `MSG`. The same letter again flips the direction, and a third time clears the sort. See [Views](#views) |
 | click, wheel | In the `table` view: a click on a column header sorts by it, as its letter does; a click on a row selects it; the wheel moves the selection |
 | `z` | Fold the selected row's group, or open the folded group the selection is on. `NEEDS YOU` opens by itself when a new row enters it |
-| `c` | Hide or show the turn card. Hidden, the list fills the body, the footer shows `c card`, and the choice is kept in `tui.json`. A zoom, the key table or a failed jump's reason still opens the card until it goes. `pick` has no card and ignores `c` |
+| `c` | Hide or show the turn card. Hidden, the list fills the body, the footer shows `c card`, and the choice is kept in `tui.json`. The key table or a failed jump's reason still opens the card until it goes. `pick` has no card and ignores `c` |
 | `?` | Show every key in the card, in as many columns as fit; `?` or `esc` hides it |
 | `enter` | Go to the pane in the Rex window you are in, on its host, and mark it seen, as [`rexboard jump`](cli.md#rexboard-jump-next-and-pick) does. The footer says `going to SESSION › PANE…` until the jump ends, then where it went; Enter during a jump says one is already running. A failed jump's reason stays in the footer until the next key, and in full in the turn card. The board stays open |
 | `a` | Answer the selected row from the board: pick a dialog's option or reply with a line. See [Answer mode](#answer-mode) |
 | `r` | Reconnect to serve |
-| `esc` | Clear the `/` filter, the status filter and the sort, end a zoom, close the key table, and open every folded group |
+| `esc` | Clear the `/` filter, the status filter and the sort, close the key table, and open every folded group |
 | `q`, `ctrl-c` | Quit (in answer mode, `ctrl-c` only leaves it) |
 
 The board redraws when serve sends rows, on a key, and once a second for the clock and the times in state. SIGTERM and SIGHUP (closing its window) quit it the same way as `q`, so the terminal is left as it was, and the board exits on its own within a second if its terminal goes away.
@@ -107,11 +107,30 @@ The card is the selected row in full, under the list, as wide as the board:
 
 A row with no status record says `no status from this pane` and `space captures the screen`.
 
-The card is 8 rows, or 40% of the body when that is more, and always leaves the list 3 rows under its column header. Text wraps at 120 columns however wide the board. `space` zooms it to the whole body, and `c` hides it.
+The card is 8 rows, or 40% of the body when that is more, and always leaves the list 3 rows under its column header. Text wraps at 120 columns however wide the board. `c` hides it.
 
 Reading a card does not mark a row seen. `s` does, and so does `tab` off a `done` row whose card has shown for at least a second. The tail of a blocked row is read by itself once its card has shown for 300 ms, once per report, so the ask can be checked against the screen; moving through rows reads none.
 
 `c`'s choice lives in `tui.json` beside serve's `state.json` (`~/.local/state/rexboard/tui.json`, or under `XDG_STATE_HOME`), as `detail_hidden` (missing means shown). The file is read when the board starts and written on each `c`. The side pane's old width key is ignored, and `<` and `>` say once that they are gone.
+
+## Full view
+
+`space` gives the selected row's pane the whole terminal: the card's bar on top, the pane's lines in between, and the keys at the bottom. There is no list.
+
+```
+━━ ● working · seat-b · api › main · mini · claude · for 2m ━━━━━━━━━━━ live · 1s · following ━━
+...the pane's last lines, newest at the bottom...
+space back · j/k scroll · a answer · enter jump · g/G top, bottom · pgup/pgdn page · q quit
+```
+
+A narrow terminal drops whole keys from the end of the footer: 80 columns ends at `g/G top, bottom`.
+
+- **Lines:** the end of the pane as tail.lua reads it: its last 48 KiB, the last 200 lines kept, escape sequences removed, so text only and no colours. Each line keeps the pane's own layout at any width: a line longer than the terminal is cut at the edge and ends in a dim `…`, never wrapped, and nothing caps the width. `enter` shows it whole in the pane.
+- **Live:** while the view is open it reads the pane again every 2 seconds, counted from when the last read was asked, and asks again only once that read is back, so a slow host is never asked twice. Only the open row is read. Closing the view stops the reads, and the board's own tail of a blocked row waits while it is open. The bar says `live · 1s · following`, how long ago the last read came back.
+- **Failed reads:** a host that does not answer in 3 seconds, or any failed read, leaves the last lines up and puts the reason and their age in the bar, `the pane did not answer within 3s · 2m old · retrying`. The reason is cut to half the bar, so the row's name keeps its room. With no lines yet, the bar says only `… · retrying` and the reason shows whole in red in the body.
+- **Scroll:** the view follows the bottom. `k` or `up`, `pgup`, `g` or `home`, and the mouse wheel in the table view move up and pause it: the bar says `paused · G follows`, or `paused · newer below · G follows` once a read has brought lines the screen is not showing, and the lines hold still while reads go on. `j` or `down` and `pgdn` move back down, and reaching the bottom, or `G` or `end`, follows again with the newest read.
+- **Keys:** `a` leaves for [answer mode](#answer-mode) on the row the view shows, and `enter` jumps to its pane, even when a filter or a folded group has moved the board's selection since; `space` or `esc` returns to the board, and `q` or `ctrl+c` quits. Other keys do nothing while the view is open. A jump's progress, a failed jump's reason and a passing message take the footer as they do on the board.
+- The view closes by itself when its row leaves the board, and the footer says so: `seat-b left the board`.
 
 ## Answer mode
 

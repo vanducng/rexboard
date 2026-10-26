@@ -30,7 +30,7 @@ pub const KEYS: [(&str, &str); 22] = [
     ("1-9", "the nth NEEDS YOU row"),
     ("s", "mark seen"),
     ("ctrl+s", "mark done rows seen (was S)"),
-    ("space", "zoom the card and its tail"),
+    ("space", "full view of the pane, live"),
     ("tab", "the next row that needs you"),
     ("/", "filter; enter keeps it"),
     ("f", "one status: w d q p e u i"),
@@ -51,6 +51,11 @@ pub const KEYS: [(&str, &str); 22] = [
 ];
 
 pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
+    if let Some(full) = &app.full
+        && let Some(row) = app.rows.iter().find(|row| row.key == full.key)
+    {
+        return super::full::draw(frame, app, full, row, now);
+    }
     let area = frame.area();
     let card = app.card_shown();
     let ruled = !card && tier(area.width) != Tier::Wide && area.height >= 20;
@@ -81,13 +86,10 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
     footer(frame, bottom, app);
 }
 
-/// The card's rows: all of the body zoomed; else at least 8 and 40% of it, more for the key table
+/// The card's rows: at least 8 and 40% of the body, more for the key table
 /// or a blocked row's ask, which is never cut, but always leaving the list 3 rows under its column
 /// header, when it has one.
 fn card_height(app: &App, now: DateTime<Utc>, body: Rect, headed: bool) -> u16 {
-    if app.zoom {
-        return body.height;
-    }
     let most = body.height.saturating_sub(LIST_FLOOR + u16::from(headed));
     if let Some(answer) = &app.answer {
         let lines = |rows: u16| {
@@ -454,6 +456,19 @@ fn row_line(
     Line::from(spans)
 }
 
+/// What the footer says instead of its keys: a passing message, a running jump or why one failed.
+pub(super) fn note(app: &App) -> Option<(&str, Style)> {
+    let accent = Style::new().fg(theme::ACCENT);
+    app.toast()
+        .map(|text| (text, accent))
+        .or_else(|| app.going.as_deref().map(|text| (text, accent)))
+        .or_else(|| {
+            app.failed
+                .as_deref()
+                .map(|text| (text, Style::new().fg(Color::Red)))
+        })
+}
+
 fn footer(frame: &mut Frame, area: Rect, app: &App) {
     let width = usize::from(area.width);
     if app.commanding {
@@ -480,35 +495,12 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         frame.render_widget(Paragraph::new(answer.footer(width)), area);
         return;
     }
-    if let Some(toast) = app.toast() {
-        frame.render_widget(
-            Paragraph::new(Line::styled(
-                fit(toast, width),
-                Style::new().fg(theme::ACCENT),
-            )),
-            area,
-        );
-        return;
-    }
-    let held = app
-        .going
-        .as_deref()
-        .map(|text| (text, Style::new().fg(theme::ACCENT)))
-        .or_else(|| {
-            app.failed
-                .as_deref()
-                .map(|text| (text, Style::new().fg(Color::Red)))
-        });
-    if let Some((text, style)) = held {
+    if let Some((text, style)) = note(app) {
         frame.render_widget(Paragraph::new(Line::styled(fit(text, width), style)), area);
         return;
     }
     let mut spans: Vec<Span> = Vec::new();
     let mut used = 0;
-    if app.zoom {
-        used += "space returns · ".width();
-        spans.push(Span::styled("space returns · ", theme::dim()));
-    }
     let query = app.filter.value();
     if !query.is_empty() {
         let kept = fit(&format!("/{query}"), 16).trim_end().to_owned();
@@ -518,7 +510,7 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
     }
     // The essentials first, so a narrow board keeps them; then `tab next`, which works through
     // the rows that need you, and `v view` last, one `?` away. `v view` shows after `/ filter`.
-    // While the card is hidden, `c card` says so, and `space zoom` shows after it when it fits.
+    // While the card is hidden, `c card` says so, and `space full` shows after it when it fits.
     let keys: Vec<(&str, &str)> = if app.pick {
         vec![("enter", "go"), ("j/k", "move"), ("/", "filter")]
     } else {
@@ -535,7 +527,7 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
             ("tab", "next"),
             ("enter", "jump"),
             ("a", "answer"),
-            ("space", "zoom"),
+            ("space", "full"),
             ("v", "view"),
             ("1-9", "select"),
         ]);
@@ -549,9 +541,6 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
     let quit = format!("{quit_key}{quit_what}");
     let mut shown: Vec<(&str, &str)> = Vec::new();
     for (key, what) in keys {
-        if key == "space" && app.zoom {
-            continue;
-        }
         let sep = if shown.is_empty() { 0 } else { " · ".width() };
         let piece = sep + key.width() + 1 + what.width();
         if used + piece + quit.width() + 2 > width {
@@ -587,7 +576,7 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
 mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
-    use ratatui::crossterm::event::KeyCode;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use super::*;
     use crate::tui::app::tests::{app, hosts, press, row};
@@ -1283,30 +1272,245 @@ mod tests {
         );
     }
 
+    /// The board with seat-b's full view open and `lines` read from its pane at 05:42:59.
+    fn full_of(lines: Vec<String>) -> App {
+        let mut app = fuller();
+        press(&mut app, KeyCode::Char(' '));
+        app.peeked("mini/seat-b", Ok(lines));
+        app.peek.as_mut().unwrap().at = Some(
+            DateTime::parse_from_rfc3339("2026-01-01T05:42:59Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+        app
+    }
+
+    fn numbered(n: usize) -> Vec<String> {
+        (1..=n).map(|n| format!("peek line {n}")).collect()
+    }
+
     #[test]
-    fn space_zooms_the_card_and_asks_for_the_tail_and_space_or_esc_returns() {
+    fn space_opens_the_full_view_and_space_or_esc_returns() {
         let mut app = fuller();
         let effect = press(&mut app, KeyCode::Char(' '));
         assert!(
             matches!(effect, Some(Effect::Peek { ref key, .. }) if key == "mini/seat-b"),
             "{effect:?}"
         );
-        assert!(app.zoom);
         let text = render(&app, 80, 30);
+        assert!(!text.contains("NEEDS YOU"), "no list:\n{text}");
         assert!(
-            !text.contains("NEEDS YOU"),
-            "the card takes the body:\n{text}"
-        );
-        assert!(
-            text.lines().last().unwrap().starts_with("space returns · "),
+            text.lines().next().unwrap().ends_with(" capturing… ━━"),
             "{text}"
         );
-        assert!(!text.lines().last().unwrap().contains("space zoom"));
+        assert!(text.contains(" capturing…\n"), "{text}");
         assert_eq!(press(&mut app, KeyCode::Char(' ')), None);
-        assert!(!app.zoom && render(&app, 80, 30).contains("NEEDS YOU"));
+        assert!(app.full.is_none() && render(&app, 80, 30).contains("NEEDS YOU"));
         press(&mut app, KeyCode::Char(' '));
         press(&mut app, KeyCode::Esc);
-        assert!(!app.zoom, "esc returns too");
+        assert!(app.full.is_none(), "esc returns too");
+    }
+
+    #[test]
+    fn full_view_takes_the_terminal_and_cuts_long_lines_at_80_140_and_200() {
+        let long = format!("start {} end", "x".repeat(300));
+        let mut lines = numbered(60);
+        lines.push(long);
+        lines.push("last line".into());
+        let app = full_of(lines);
+        for width in [80u16, 140, 200] {
+            let text = render(&app, width, 30);
+            let rows: Vec<&str> = text.lines().collect();
+            assert_eq!(rows.len(), 30);
+            assert!(
+                rows[0].starts_with("━━") && rows[0].contains("seat-b"),
+                "{text}"
+            );
+            assert!(
+                rows[0].ends_with(" live · 1s · following ━━"),
+                "{}",
+                rows[0]
+            );
+            let footer = match width {
+                80 => "space back · j/k scroll · a answer · enter jump · g/G top, bottom",
+                _ => {
+                    "space back · j/k scroll · a answer · enter jump · g/G top, bottom · pgup/pgdn page · q quit"
+                }
+            };
+            assert_eq!(rows[29], footer, "whole keys only");
+            assert_eq!(rows[28], "last line", "the newest line sits on the bottom");
+            assert!(
+                rows[27].starts_with("start x") && rows[27].ends_with("x…"),
+                "cut, not wrapped, and marked: {}",
+                rows[27]
+            );
+            assert_eq!(
+                rows[27].width(),
+                usize::from(width),
+                "full width, no 120 cap"
+            );
+            assert_eq!(rows[26], "peek line 60");
+            assert_eq!(rows[1], "peek line 35", "28 rows of body");
+            assert!(!text.contains(" end"), "{text}");
+        }
+    }
+
+    #[test]
+    fn full_view_scrolling_pauses_on_the_lines_it_had_and_g_follows_again() {
+        let mut app = full_of(numbered(200));
+        app.height = 30;
+        press(&mut app, KeyCode::Char('k'));
+        let text = render(&app, 80, 30);
+        assert!(
+            text.lines().next().unwrap().contains("paused · G follows"),
+            "{text}"
+        );
+        assert_eq!(text.lines().nth(28), Some("peek line 199"));
+        app.peeked("mini/seat-b", Ok(numbered(201)));
+        let text = render(&app, 80, 30);
+        assert!(
+            text.lines()
+                .next()
+                .unwrap()
+                .contains(" paused · newer below · G follows ━━"),
+            "{text}"
+        );
+        assert!(!text.contains("peek line 201"), "held while paused");
+        press(&mut app, KeyCode::PageUp);
+        assert_eq!(render(&app, 80, 30).lines().nth(28), Some("peek line 171"));
+        press(&mut app, KeyCode::Char('g'));
+        assert_eq!(render(&app, 80, 30).lines().nth(1), Some("peek line 1"));
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!(render(&app, 80, 30).lines().nth(1), Some("peek line 2"));
+        press(&mut app, KeyCode::Char('G'));
+        let text = render(&app, 80, 30);
+        assert_eq!(
+            text.lines().nth(28),
+            Some("peek line 201"),
+            "follows the newest read"
+        );
+        assert!(text.lines().next().unwrap().contains("following"), "{text}");
+    }
+
+    #[test]
+    fn full_view_keeps_its_lines_when_a_read_fails() {
+        let mut app = full_of(numbered(40));
+        app.peeked("mini/seat-b", Err("rex timed out".into()));
+        let text = render(&app, 80, 30);
+        assert!(
+            text.lines()
+                .next()
+                .unwrap()
+                .ends_with(" rex timed out · 1s old · retrying ━━"),
+            "{text}"
+        );
+        assert_eq!(text.lines().nth(28), Some("peek line 40"));
+        app.peeked("mini/seat-b", Ok(numbered(41)));
+        let text = render(&app, 80, 30);
+        assert!(
+            !text.contains("retrying") && text.contains("peek line 41"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn full_view_reads_its_row_every_two_seconds_and_stops_on_close() {
+        use crate::tui::full::EVERY;
+        let mut app = fuller();
+        press(&mut app, KeyCode::Char(' '));
+        let t0 = app.full.as_ref().unwrap().asked;
+        assert_eq!(app.live(t0 + EVERY * 5), None, "never two reads at once");
+        app.peeked("mini/seat-b", Ok(numbered(3)));
+        assert_eq!(app.live(t0 + Duration::from_secs(1)), None);
+        let effect = app.live(t0 + EVERY);
+        assert!(
+            matches!(effect, Some(Effect::Peek { ref key, .. }) if key == "mini/seat-b"),
+            "{effect:?}"
+        );
+        assert_eq!(app.live(t0 + EVERY * 2), None, "the read is out");
+        assert_eq!(
+            app.auto_tail(t0 + EVERY * 30),
+            None,
+            "the view does its own reads"
+        );
+        app.peeked("mini/seat-b", Ok(numbered(4)));
+        assert!(app.live(t0 + EVERY * 2).is_some());
+        press(&mut app, KeyCode::Esc);
+        app.peeked("mini/seat-b", Ok(numbered(5)));
+        assert_eq!(app.live(t0 + EVERY * 60), None, "closed, it reads no more");
+    }
+
+    #[test]
+    fn full_view_keys_answer_jump_quit_and_leave_the_board_keys_alone() {
+        let mut app = full_of(numbered(3));
+        assert_eq!(
+            press(&mut app, KeyCode::Char('s')),
+            None,
+            "s does not mark seen"
+        );
+        assert!(app.full.is_some());
+        assert!(
+            matches!(press(&mut app, KeyCode::Enter), Some(Effect::Jump(row)) if row.key == "mini/seat-b")
+        );
+        assert_eq!(press(&mut app, KeyCode::Char('q')), Some(Effect::Quit));
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert_eq!(app.handle(ctrl_c), Some(Effect::Quit));
+        press(&mut app, KeyCode::Char('a'));
+        assert!(app.full.is_none());
+        assert_eq!(
+            app.answer.as_ref().map(|answer| answer.row.key.as_str()),
+            Some("mini/seat-b")
+        );
+    }
+
+    #[test]
+    fn full_view_says_why_a_first_read_failed_and_shows_a_failed_jump() {
+        let mut app = fuller();
+        press(&mut app, KeyCode::Char(' '));
+        app.peeked("mini/seat-b", Err("rex timed out".into()));
+        let text = render(&app, 80, 30);
+        assert!(
+            text.lines()
+                .next()
+                .unwrap()
+                .ends_with(" rex timed out · retrying ━━"),
+            "{text}"
+        );
+        assert_eq!(text.lines().nth(1), Some(" rex timed out"));
+        assert!(
+            app.live(app.full.as_ref().unwrap().asked + crate::tui::full::EVERY)
+                .is_some()
+        );
+        app.failed = Some("that pane is gone".into());
+        assert_eq!(
+            render(&app, 80, 30).lines().last(),
+            Some("that pane is gone")
+        );
+    }
+
+    #[test]
+    fn full_view_cuts_a_long_failure_so_the_name_keeps_its_room() {
+        let mut app = full_of(numbered(3));
+        app.peeked(
+            "mini/seat-b",
+            Err(format!("peek failed: {}", "detail ".repeat(20))),
+        );
+        let bar = render(&app, 80, 30).lines().next().unwrap().to_owned();
+        assert!(bar.contains("seat-b"), "{bar}");
+        assert!(bar.ends_with("… · 1s old · retrying ━━"), "{bar}");
+    }
+
+    #[test]
+    fn full_view_closes_when_its_row_goes() {
+        let mut app = full_of(numbered(3));
+        let rows = app
+            .rows
+            .iter()
+            .filter(|row| row.key != "mini/seat-b")
+            .cloned()
+            .collect();
+        app.set_rows(rows, hosts());
+        assert!(app.full.is_none() && render(&app, 80, 30).contains("WORKING"));
     }
 
     #[test]
@@ -1478,27 +1682,6 @@ mod tests {
         let card = card_of(&render(&app, 80, 30));
         assert_eq!(card[1], " no status from this pane");
         assert_eq!(card[2], "   space captures the screen");
-    }
-
-    #[test]
-    fn zoomed_the_tail_fills_the_card_with_its_newest_lines() {
-        let mut app = fuller();
-        app.zoom = true;
-        app.peek = Some(Peek {
-            key: "mini/seat-b".into(),
-            lines: Some(Ok((1..=200).map(|n| format!("peek line {n}")).collect())),
-            at: None,
-            updated_at: None,
-        });
-        for (width, height) in [(80u16, 30u16), (80, 8)] {
-            let text = render(&app, width, height);
-            assert!(text.contains("peek line 200"), "{width}x{height}:\n{text}");
-            let numbers: Vec<usize> = text
-                .lines()
-                .filter_map(|l| l.split("peek line ").nth(1)?.trim().parse().ok())
-                .collect();
-            assert!(numbers.windows(2).all(|w| w[1] == w[0] + 1), "{numbers:?}");
-        }
     }
 
     #[test]
