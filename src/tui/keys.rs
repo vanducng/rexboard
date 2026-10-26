@@ -40,6 +40,8 @@ pub enum Act {
     OpenAll,
     FoldAll,
     Card,
+    CardDown,
+    CardUp,
     Full,
     Answer,
     Seen,
@@ -279,6 +281,14 @@ pub const BOARD: &[Entry] = &[
         "card",
     ),
     e(
+        Act::CardDown,
+        &[&[ctrl('e')]],
+        "ctrl-e/y",
+        "scroll the card down, up",
+        "scroll card",
+    ),
+    e(Act::CardUp, &[&[ctrl('y')]], "", "", "card up"),
+    e(
         Act::Full,
         &[&[c(' ')]],
         "space",
@@ -416,6 +426,7 @@ pub const FOOTER: &[Act] = &[
     Act::Full,
     Act::NextView,
     Act::Nth,
+    Act::CardDown,
 ];
 
 /// The full view, in the order its footer lists it.

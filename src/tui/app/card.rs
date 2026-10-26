@@ -14,10 +14,12 @@ impl App {
             detail_hidden: self.hidden,
             motion: self.motion,
             icons: self.icons,
+            card_height: self.card_height,
         }
     }
 
-    /// Notes which row's card shows from `now`; the board calls it after every change.
+    /// Notes which row's card shows from `now`, and lets go of a scroll once another row's
+    /// does; the board calls it after every change.
     pub fn note_card(&mut self, now: Instant) {
         let key = self
             .card_shown()
@@ -27,6 +29,10 @@ impl App {
             Some(key) if self.shown.as_ref().is_some_and(|(shown, _)| *shown == key) => {}
             Some(key) => self.shown = Some((key, now)),
             None => self.shown = None,
+        }
+        if self.card_scroll.as_ref().map(|(key, _)| key) != self.shown.as_ref().map(|(key, _)| key)
+        {
+            self.card_scroll = None;
         }
     }
 
@@ -46,6 +52,18 @@ impl App {
         }
         self.tailed = Some(want);
         self.tail()
+    }
+
+    /// ctrl-e and ctrl-y: the card's text a line down or up from where the last draw left it.
+    pub(super) fn card_scroll(&mut self, by: isize) {
+        let drawn = self.card_drawn.get();
+        if drawn.last == 0 {
+            return self.say("nothing more to scroll");
+        }
+        if let Some(row) = self.current() {
+            let at = drawn.at.saturating_add_signed(by).min(drawn.last);
+            self.card_scroll = Some((row.key.clone(), at));
+        }
     }
 
     /// Asks for the current row's tail; the card shows it when it comes.

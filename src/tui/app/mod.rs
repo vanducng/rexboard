@@ -138,6 +138,16 @@ pub enum Link {
     Lost(String),
 }
 
+/// The card's last draw: its rows on screen while its text can scroll, how far it is scrolled,
+/// and the most it can be.
+#[derive(Default, Clone, Copy)]
+pub struct CardDrawn {
+    pub top: u16,
+    pub bottom: u16,
+    pub at: usize,
+    pub last: usize,
+}
+
 #[derive(Default)]
 pub struct App {
     /// Agent rows in board order, as serve sends them.
@@ -163,6 +173,11 @@ pub struct App {
     /// Keys whose meaning changed (`R`, `M`, `N`), told once a run.
     told: BTreeSet<char>,
     told_table: bool,
+    /// ctrl-e and ctrl-y: the row whose card text is scrolled, and how far. Another row starts
+    /// where its card opens.
+    pub card_scroll: Option<(String, usize)>,
+    /// Where the card was last drawn, for the keys and the wheel that scroll it.
+    pub card_drawn: std::cell::Cell<CardDrawn>,
     /// Where the list's rows were last drawn: the first row's line, the first item shown, and
     /// how many rows fit. The draw sets it, so a click can find the row under it.
     pub drawn: std::cell::Cell<(u16, usize, usize)>,
@@ -187,6 +202,8 @@ pub struct App {
     pub motion: super::prefs::Motion,
     /// tui.json's icons, written back the same way.
     pub icons: super::prefs::Icons,
+    /// tui.json's card height, written back the same way; None is the default.
+    pub card_height: Option<super::prefs::CardHeight>,
     /// Whether the card's facts take Nerd Font glyphs: REXBOARD_ICONS, else tui.json's icons.
     pub nerd: bool,
     /// The terminal's size at the last draw, which `<` and `>` move the pane against and a
@@ -422,6 +439,8 @@ impl App {
                 }
                 self.on_screen(act);
             }
+            Act::CardDown => self.card_scroll(1),
+            Act::CardUp => self.card_scroll(-1),
             Act::HalfDown => self.page(1, 2),
             Act::HalfUp => self.page(-1, 2),
             Act::PageDown => self.page(1, 1),

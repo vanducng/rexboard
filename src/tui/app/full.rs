@@ -45,7 +45,10 @@ impl App {
             .as_ref()
             .map(|full| crate::tui::full::lines(full, self.peek.as_ref()).to_vec())
             .unwrap_or_default();
-        (lines, usize::from(self.height.saturating_sub(2)).max(1))
+        (
+            lines,
+            usize::from(self.height.saturating_sub(2 + crate::tui::view::FOOTER_GAP)).max(1),
+        )
     }
 
     pub(super) fn full_scroll(&mut self, by: isize) {

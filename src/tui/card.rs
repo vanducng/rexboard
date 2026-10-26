@@ -6,7 +6,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
-use super::app::{App, Peek, Spot};
+use super::app::{App, CardDrawn, Peek, Spot};
 use super::screen::Screen;
 use super::theme;
 use super::view::key_rows;
@@ -19,7 +19,8 @@ const TEXT: usize = 120;
 /// One entry of the key table: the key, a space and what it does.
 const KEY_COLUMN: usize = 40;
 
-/// The card's lines for a board `width` wide, with the tail filling up to `room` lines.
+/// The card's lines for a board `width` wide in `room` rows: the bar, then its text scrolled
+/// where ctrl-e and ctrl-y left it, with the tail filling what the text leaves.
 pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Line<'static>> {
     if let Some(answer) = &app.answer {
         return answer.lines(now, width, room);
@@ -45,7 +46,8 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
         .filter(|sent| sent.key == row.key)
         .map(|sent| sent.text.as_str());
     let right = sent.map(str::to_owned).or_else(|| fresh(row, peek, now));
-    let mut lines = vec![bar(row, right, now, width, false)];
+    let bar = bar(row, right, now, width, false);
+    let mut lines = Vec::new();
     let msg = clean(row.pane.msg.as_deref().unwrap_or_default());
     let mut segments = msg.split(BREAK).map(str::trim).filter(|s| !s.is_empty());
     match segments.next() {
@@ -77,31 +79,74 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
     }
     let mut meta = super::meta::lines(app, row, text);
     meta.insert(0, Line::default());
-    // A blocked row's ask and tail are what it asks, so they are never cut for the facts; the
-    // facts take the rows left. Any other message gives way to the facts, down to its headline.
+    let window = room.saturating_sub(1);
     let blocked = row.pane.state == "blocked";
-    if room > 0 && !blocked {
-        let over = (lines.len() + meta.len()).saturating_sub(room);
-        shorten(&mut lines, over, text);
-    }
     let tail = peek.map_or_else(Vec::new, |peek| {
-        let mut rows = room.saturating_sub(lines.len());
-        if !blocked {
-            rows = rows.saturating_sub(meta.len());
-        } else if let Some(dialog) = dialog_rows(peek, text) {
-            // The dialog is the ask; the output above it gives way to the facts.
-            rows = rows.min(dialog);
-        }
+        let rows = match blocked.then(|| dialog_rows(peek, text)).flatten() {
+            // The dialog is the ask, so it is whole however far the card scrolls.
+            Some(dialog) => dialog,
+            // As much as fits under the ask, with a row left for the facts' `↓` below.
+            None if blocked => window.saturating_sub(lines.len() + 1),
+            None => window.saturating_sub(lines.len() + meta.len()),
+        };
         tail(peek, text, rows)
     });
-    if room > 0 {
-        let left = room.saturating_sub(lines.len() + tail.len());
-        // The blank line alone is no facts.
-        meta.truncate(if left < 2 { 0 } else { left });
-    }
     lines.extend(tail);
+    // A blocked row opens scrolled down to the end of its dialog; any other at the top.
+    let anchor = blocked.then_some(lines.len());
     lines.extend(meta);
-    lines
+    let wanted = app
+        .card_scroll
+        .as_ref()
+        .filter(|(key, _)| *key == row.key)
+        .map(|(_, at)| *at);
+    let (shown, at, last) = scrolled(lines, window, wanted, anchor);
+    app.card_drawn.set(CardDrawn {
+        at,
+        last,
+        ..CardDrawn::default()
+    });
+    std::iter::once(bar).chain(shown).collect()
+}
+
+/// `window` rows of `text` from `at`, with a dim `↑ N above` and `↓ N more` where it is cut; and
+/// the scroll it shows and the most it can take.
+fn scrolled(
+    mut text: Vec<Line<'static>>,
+    window: usize,
+    at: Option<usize>,
+    anchor: Option<usize>,
+) -> (Vec<Line<'static>>, usize, usize) {
+    if text.len() <= window || window < 3 {
+        text.truncate(window);
+        return (text, 0, 0);
+    }
+    let last = text.len() - (window - 1);
+    // The rows of text that show from `at`, and whether a marker takes the bottom row.
+    let fits = |at: usize| {
+        let rows = window - usize::from(at > 0);
+        if text.len() - at > rows {
+            (rows - 1, true)
+        } else {
+            (rows, false)
+        }
+    };
+    let at = at
+        .or_else(|| anchor.map(|end| (0..last).find(|&at| at + fits(at).0 >= end).unwrap_or(last)))
+        .unwrap_or(0)
+        .min(last);
+    let (rows, more) = fits(at);
+    let marker = |text: String| Line::styled(text, theme::quiet());
+    let mut shown = Vec::new();
+    if at > 0 {
+        shown.push(marker(format!(" {} {at} above · ctrl-y", theme::ABOVE)));
+    }
+    let below = text.len() - at - rows;
+    shown.extend(text.drain(at..at + rows));
+    if more {
+        shown.push(marker(format!(" {} {below} more · ctrl-e", theme::MORE)));
+    }
+    (shown, at, last)
 }
 
 /// The rows a tail's dialog takes `width` wide, from its opening to the end, as `tail` draws
@@ -124,26 +169,6 @@ fn dialog_rows(peek: &Peek, width: usize) -> Option<usize> {
             .map(|line| chop(&clean(line), room).len())
             .sum(),
     )
-}
-
-/// The message `over` lines shorter, keeping the bar and the headline; the last kept line ends
-/// in `…`.
-fn shorten(lines: &mut Vec<Line<'static>>, over: usize, width: usize) {
-    let keep = lines.len().saturating_sub(over).max(2);
-    if keep >= lines.len() {
-        return;
-    }
-    lines.truncate(keep);
-    if let Some(last) = lines.last_mut() {
-        let text: String = last.spans.iter().map(|s| s.content.as_ref()).collect();
-        let style = last.spans.first().map_or(last.style, |s| s.style);
-        *last = Line::styled(
-            fit(&format!("{}…", text.trim_end()), width)
-                .trim_end()
-                .to_owned(),
-            style,
-        );
-    }
 }
 
 /// The first line: the row's state, its name and how long it has been so, then how fresh the
@@ -341,6 +366,7 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::tui::app::testkit::*;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     #[test]
     fn the_card_says_who_where_how_and_what_at_80_140_and_200() {
@@ -372,16 +398,6 @@ mod tests {
                     "title seat-b title source native"
                 ],
                 "{width}: one blank line, then the facts, where first, each once:\n{text}"
-            );
-            let lines: Vec<&str> = text.lines().collect();
-            assert_eq!(
-                words(&lines[lines.len() - 2].to_owned()),
-                "title seat-b title source native",
-                "{width}: the card sits on the footer:\n{text}"
-            );
-            assert!(
-                lines[lines.len() - 8].trim().is_empty(),
-                "{width}: the room it does not need opens above it:\n{text}"
             );
             assert!(list_rows(&text) >= 3, "{width}:\n{text}");
         }
@@ -426,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn a_long_message_gives_way_to_the_facts() {
+    fn a_long_message_scrolls_with_ctrl_e_and_y_and_starts_over_on_another_row() {
         let mut app = fuller();
         let mut rows = app.rows.clone();
         let done = rows.iter_mut().find(|r| r.key == "local/claude").unwrap();
@@ -434,20 +450,118 @@ mod tests {
         app.set_rows(rows, hosts());
         app.selected = Some(Spot::Row("local/claude".into()));
         let text = render(&app, 80, 30);
-        let lines: Vec<&str> = text.lines().collect();
-        let place = lines
-            .iter()
-            .position(|l| l.starts_with(" where "))
-            .expect(&text);
-        assert!(lines[place - 1].trim().is_empty(), "{text}");
+        let card = card_of(&text);
+        assert_eq!(card[1], " Opened PR #31.", "{text}");
         assert!(
-            lines[place - 2].ends_with("word…"),
-            "the cut is marked:\n{text}"
+            card[2].starts_with("   word word"),
+            "the message, whole:\n{text}"
         );
+        let more = card.last().unwrap();
         assert!(
-            lines[lines.len() - 2].contains("source"),
-            "the facts end the card:\n{text}"
+            more.starts_with(" ↓ ") && more.ends_with(" more · ctrl-e"),
+            "{text}"
         );
+        assert!(!text.contains(" where "), "the facts are below:\n{text}");
+        let ctrl = |app: &mut App, c: char| {
+            key(app, KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
+            card_of(&render(app, 80, 30))
+        };
+        let down = ctrl(&mut app, 'e');
+        assert_eq!(down[1], " ↑ 1 above · ctrl-y", "{down:#?}");
+        assert!(down[2].starts_with("   word word"), "{down:#?}");
+        for _ in 0..100 {
+            ctrl(&mut app, 'e');
+        }
+        let end = ctrl(&mut app, 'e');
+        assert!(end[1].starts_with(" ↑ "), "{end:#?}");
+        assert!(
+            end.last().unwrap().contains("source"),
+            "the facts end it, and it stops there: {end:#?}"
+        );
+        let up = ctrl(&mut app, 'y');
+        assert!(up.last().unwrap().ends_with(" more · ctrl-e"), "{up:#?}");
+        for k in ['j', 'k'] {
+            press(&mut app, KeyCode::Char(k));
+            app.note_card(std::time::Instant::now());
+        }
+        assert_eq!(
+            card_of(&render(&app, 80, 30)),
+            card,
+            "another row starts it over"
+        );
+    }
+
+    #[test]
+    fn tui_json_sets_the_card_height_and_the_wheel_over_the_card_scrolls_it() {
+        use crate::tui::prefs::CardHeight;
+        let mut app = fuller();
+        let mut rows = app.rows.clone();
+        let done = rows.iter_mut().find(|r| r.key == "local/claude").unwrap();
+        done.pane.msg = Some(format!("Opened PR #31. ⏎ {}", "word ".repeat(400)));
+        app.set_rows(rows, hosts());
+        app.selected = Some(Spot::Row("local/claude".into()));
+        let bar = |app: &App| {
+            let text = render(app, 80, 30);
+            text.lines().position(|l| l.starts_with("━━")).unwrap()
+        };
+        assert_eq!(bar(&app), 30 - 1 - 10, "40% of a 27-row body");
+        app.card_height = Some(CardHeight::Rows(12));
+        assert_eq!(bar(&app), 30 - 1 - 12);
+        app.card_height = Some(CardHeight::Percent(50));
+        assert_eq!(bar(&app), 30 - 1 - 13);
+        app.card_height = Some(CardHeight::Percent(10));
+        assert_eq!(bar(&app), 30 - 1 - 8, "at least 8 rows");
+        render(&app, 80, 30);
+        let card = app.card_drawn.get();
+        app.scroll(card.top + 2, false);
+        assert_eq!(card_of(&render(&app, 80, 30))[1], " ↑ 1 above · ctrl-y");
+        app.scroll(card.top + 2, true);
+        assert_eq!(card_of(&render(&app, 80, 30))[1], " Opened PR #31.");
+        app.scroll(card.top - 3, false);
+        assert_ne!(
+            app.selected,
+            Some(Spot::Row("local/claude".into())),
+            "over the list it moves the selection"
+        );
+        app.selected = Some(Spot::Row("local/claude".into()));
+        press(&mut app, KeyCode::Char('/'));
+        render(&app, 80, 30);
+        app.scroll(card.top + 2, false);
+        assert_eq!(
+            card_of(&render(&app, 80, 30))[1],
+            " Opened PR #31.",
+            "with a prompt open the wheel leaves the card alone"
+        );
+    }
+
+    #[test]
+    fn the_card_keeps_one_height_for_every_row() {
+        let long = (1..=40)
+            .map(|n| format!("step {n}"))
+            .collect::<Vec<_>>()
+            .join(" ⏎ ");
+        for (width, height) in [(80u16, 30u16), (140, 40)] {
+            let mut tops = Vec::new();
+            for app in [fuller(), asking("Bash: ls"), asking(&long)] {
+                let mut app = app;
+                for _ in 0..4 {
+                    let text = render(&app, width, height);
+                    let lines: Vec<&str> = text.lines().collect();
+                    tops.push(lines.iter().position(|l| l.starts_with("━━")).unwrap());
+                    assert!(list_rows(&text) >= 3, "{text}");
+                    assert_eq!(
+                        lines[lines.len() - 2],
+                        "",
+                        "{width}: a blank row above the footer"
+                    );
+                    press(&mut app, KeyCode::Char('j'));
+                }
+            }
+            assert!(
+                tops.windows(2).all(|w| w[0] == w[1]),
+                "{width}x{height}: {tops:?}"
+            );
+        }
     }
 
     #[test]
@@ -521,7 +635,7 @@ mod tests {
     }
 
     #[test]
-    fn a_blocked_rows_tail_keeps_the_whole_dialog_and_the_facts_take_what_is_left() {
+    fn a_blocked_row_opens_at_the_end_of_its_dialog_and_scrolls_up_to_the_rest() {
         let mut app = asking("Bash: touch zz-probe-file-2");
         let screen = include_str!("../../tests/fixtures/screens/claude-permission.txt");
         // A real pane: plenty of earlier output, then the rule Claude draws above its dialog.
@@ -535,61 +649,93 @@ mod tests {
             updated_at: None,
         });
         let ask = [
+            "Bash: touch zz-probe-file-2",
+            "Bash command",
             "Do you want to proceed?",
             "❯ 1. Yes",
             "2. Yes, and always",
             "4. No",
             "Esc to cancel",
         ];
-        for (width, height, facts) in [(80u16, 30u16, false), (140, 60, true), (200, 60, true)] {
+        for (width, height) in [(140u16, 60u16), (200, 60)] {
             let text = render(&app, width, height);
             for line in ask {
                 assert!(text.contains(line), "{width}x{height}: {line}:\n{text}");
             }
-            // A 30-row card has room for the question and its options, as before the facts;
-            // a taller one shows the dialog from its opening.
-            assert_eq!(
-                text.contains("Bash command"),
-                facts,
-                "{width}x{height}:\n{text}"
+            let card = card_of(&text);
+            assert!(
+                card[1].starts_with(" Bash: touch"),
+                "{width}x{height}: from the top:\n{text}"
             );
             assert!(
-                !text.contains("earlier output"),
-                "{width}x{height}: only the dialog:\n{text}"
-            );
-            assert_eq!(
-                text.contains(" where "),
-                facts,
-                "{width}x{height}: the facts take the rows left:\n{text}"
+                card.last().unwrap().ends_with(" more · ctrl-e"),
+                "{width}x{height}: the facts below:\n{text}"
             );
         }
+        let text = render(&app, 80, 30);
+        let card = card_of(&text);
+        assert!(
+            card[1].starts_with(" ↑ ") && card[1].ends_with(" above · ctrl-y"),
+            "{text}"
+        );
+        assert!(
+            text.contains("❯ 1. Yes") && text.contains("Esc to cancel"),
+            "{text}"
+        );
+        assert!(
+            card.last().unwrap().ends_with(" more · ctrl-e"),
+            "the facts below:\n{text}"
+        );
+        assert!(!text.contains("earlier output"), "only the dialog:\n{text}");
+        let mut seen = text;
+        for _ in 0..20 {
+            key(
+                &mut app,
+                KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL),
+            );
+            seen += &render(&app, 80, 30);
+        }
+        for line in ask {
+            assert!(seen.contains(line), "ctrl-y reaches {line}");
+        }
+        assert!(!seen.contains("earlier output"), "{seen}");
     }
 
     #[test]
-    fn a_blocked_ask_is_never_cut_and_the_list_keeps_3_rows() {
-        let ask = (1..=6)
-            .map(|n| format!("line {n} of the question"))
-            .collect::<Vec<_>>()
-            .join(" ⏎ ");
-        let app = asking(&ask);
-        let text = render(&app, 80, 30);
+    fn a_long_blocked_ask_opens_at_its_end_and_the_list_holds_still() {
+        let list = list_rows(&render(&fuller(), 80, 30));
+        let ask = |lines: usize| {
+            (1..=lines)
+                .map(|n| format!("line {n} of the question"))
+                .collect::<Vec<_>>()
+                .join(" ⏎ ")
+        };
+        let text = render(&asking(&ask(6)), 80, 30);
         for n in 1..=6 {
             assert!(
                 text.contains(&format!("line {n} of the question")),
                 "{text}"
             );
         }
-        assert!(list_rows(&text) >= 3, "{text}");
-        let long = (1..=40)
-            .map(|n| format!("step {n}"))
-            .collect::<Vec<_>>()
-            .join(" ⏎ ");
-        let text = render(&asking(&long), 80, 30);
+        assert_eq!(list_rows(&text), list, "{text}");
+        let text = render(&asking(&ask(40)), 80, 30);
+        assert_eq!(list_rows(&text), list, "{text}");
+        let card = card_of(&text);
+        assert!(card[1].starts_with(" ↑ "), "{text}");
+        assert!(text.contains("line 40 of the question"), "{text}");
+        let mut app = asking("Allow it?");
+        app.peek = Some(Peek {
+            key: "mini/seat-b".into(),
+            lines: Some(Ok((1..=50).map(|n| format!("output {n}")).collect())),
+            at: Some(Utc::now()),
+            updated_at: None,
+        });
+        let card = card_of(&render(&app, 80, 30));
         assert_eq!(
-            list_rows(&text),
-            3,
-            "the ask grows to the list's floor:\n{text}"
+            card[1], " Allow it?",
+            "no dialog: the ask, then the tail: {card:#?}"
         );
+        assert!(card[card.len() - 2].ends_with("output 50"), "{card:#?}");
     }
 
     #[test]
