@@ -704,25 +704,27 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled(kept, theme::bright()));
         spans.push(Span::styled(" · esc clears · ", theme::dim()));
     }
-    // The essentials first, so a narrow board keeps them; `v view` then shows after `/ filter`,
-    // and `c pane`, which says the pane is hidden, after `? keys`.
-    let mut keys: Vec<(&str, &str)> = if app.pick {
+    // The essentials first, so a narrow board keeps them; `v view` then shows after `/ filter`.
+    // While the pane is hidden, `c pane` says so ahead of `space peek`, which then gives way
+    // before `enter jump` and shows after `c pane` when it fits.
+    let keys: Vec<(&str, &str)> = if app.pick {
         vec![("enter", "go"), ("j/k", "move"), ("/", "filter")]
     } else {
-        vec![
+        let mut keys = vec![
             ("j/k", "move"),
             ("s", "seen"),
             ("/", "filter"),
             ("?", "keys"),
             ("v", "view"),
-            ("space", "peek"),
-            ("enter", "jump"),
-            ("1-9", "select"),
-        ]
+        ];
+        if app.hidden {
+            keys.extend([("c", "pane"), ("enter", "jump"), ("space", "peek")]);
+        } else {
+            keys.extend([("space", "peek"), ("enter", "jump")]);
+        }
+        keys.push(("1-9", "select"));
+        keys
     };
-    if app.hidden && !app.pick {
-        keys.push(("c", "pane"));
-    }
     let (quit_key, quit_what) = if app.pick {
         ("esc", " cancel")
     } else {
@@ -742,7 +744,7 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         used += piece;
         shown.push((key, what));
     }
-    for (moved, after) in [("v", "/"), ("c", "?")] {
+    for (moved, after) in [("v", "/"), ("space", "c")] {
         if let Some(at) = shown.iter().position(|&(key, _)| key == moved) {
             let piece = shown.remove(at);
             let to = shown
@@ -974,7 +976,7 @@ mod tests {
     }
 
     #[test]
-    fn while_hidden_the_footer_says_c_pane_after_the_keys_and_drops_it_first() {
+    fn while_hidden_the_footer_says_c_pane_after_the_keys_ahead_of_space_peek() {
         let mut app = fuller();
         let footer = |app: &App, width| render(app, width, 40).lines().last().unwrap().to_owned();
         assert!(!footer(&app, 140).contains("c pane"), "shown: no cue");
@@ -990,6 +992,12 @@ mod tests {
             "{}",
             footer(&app, 140)
         );
+        let eighty = footer(&app, 80);
+        assert!(
+            eighty.contains("? keys · c pane · enter jump") && !eighty.contains("space peek"),
+            "c pane takes space peek's room at 80: {eighty}"
+        );
+        assert!(eighty.ends_with("q quit"), "and still fits: {eighty}");
         let narrow = footer(&app, 50);
         assert!(
             narrow.contains("? keys") && !narrow.contains("c pane"),
