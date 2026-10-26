@@ -10,6 +10,19 @@ pub struct Prefs {
     /// so an existing choice carries over.
     #[serde(default)]
     pub detail_hidden: bool,
+    #[serde(default)]
+    pub motion: Motion,
+}
+
+/// `"motion": "reduced"` holds the working spinner still.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Motion {
+    Reduced,
+    /// Any other value too, so a typo keeps the rest of the file.
+    #[default]
+    #[serde(other)]
+    Full,
 }
 
 /// A missing or unreadable tui.json is the defaults. Keys this build does not know, such as the
@@ -42,6 +55,7 @@ mod tests {
         assert_eq!(load(&path), Prefs::default(), "missing");
         let kept = Prefs {
             detail_hidden: true,
+            motion: Motion::Reduced,
         };
         save(&path, &kept).unwrap();
         assert_eq!(load(&path), kept);
@@ -49,6 +63,15 @@ mod tests {
         assert!(
             load(&path).detail_hidden,
             "a file with the old width keeps its choice"
+        );
+        std::fs::write(&path, r#"{"detail_hidden": true, "motion": "still"}"#).unwrap();
+        assert_eq!(
+            load(&path),
+            Prefs {
+                detail_hidden: true,
+                motion: Motion::Full
+            },
+            "an unknown motion is full and keeps the rest"
         );
         std::fs::write(&path, r#"{"detail": 0.4}"#).unwrap();
         assert!(!load(&path).detail_hidden, "a file from before c shows it");

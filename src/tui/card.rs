@@ -128,7 +128,7 @@ fn extension_lines(app: &App, row: &Row) -> Vec<String> {
 
 /// The first line: the row's state and place, how the turn went, and how fresh the tail is, or
 /// the answer the board last sent it.
-/// `━━ ● done · seat-a · api › main · mini · claude · ended 4m ago · turn 6m12s ━━ captured …`
+/// `━━ ✓ done · seat-a · api › main · mini · claude · ended 4m ago · turn 6m12s ━━ captured …`
 pub(super) fn bar(
     row: &Row,
     right: Option<String>,
@@ -261,7 +261,16 @@ fn keys(app: &App, width: usize) -> Vec<Line<'static>> {
     let all = key_rows(app);
     let columns = (width / KEY_COLUMN).max(1);
     let rows = all.len().div_ceil(columns);
-    let mut lines = vec![Line::styled(fit(" keys", width), theme::accent())];
+    let motion = " · tui.json's \"motion\": \"reduced\" stills the spinner";
+    let title = if " keys".width() + motion.width() <= width {
+        Line::from(vec![
+            Span::styled(" keys", theme::accent()),
+            Span::styled(motion, theme::quiet()),
+        ])
+    } else {
+        Line::styled(fit(" keys", width), theme::accent())
+    };
+    let mut lines = vec![title];
     for r in 0..rows {
         let mut spans = Vec::new();
         for c in 0..columns {
