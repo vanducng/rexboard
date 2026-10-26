@@ -52,11 +52,13 @@ pub fn arrange(rows: Vec<Row>, fields: Vec<Field>, query: &Query) -> Result<Vec<
     let mut shown = listed(&app);
     for filter in query.filters {
         app.filter = Input::new(filter.clone());
+        // As the board's `/` does, a `key:` no row has is plain text, so `failed: 2` or a URL
+        // searches the message; the note says so in case the key was a typo.
         if let Some(key) = app.unknown_key() {
-            return Err(Error::usage_with(
-                format!("--filter {filter}: no key named {key}; {}", keys(&app)),
-                &["rexboard ls --json"],
-            ));
+            eprintln!(
+                "note: --filter {filter}: no key named {key}, so it matches as text; {}",
+                keys(&app)
+            );
         }
         let kept: BTreeSet<usize> = listed(&app).into_iter().collect();
         shown.retain(|i| kept.contains(i));
@@ -184,4 +186,41 @@ fn keys(app: &App) -> String {
     let mut keys = vec!["host", "state", "harness", "session", "window", "block"];
     keys.extend(app.fields.iter().map(|(field, _)| field.name.as_str()));
     format!("keys: {}", keys.join(", "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::app::tests::app;
+
+    #[test]
+    fn a_filter_keeps_what_the_boards_slash_keeps_unknown_keys_as_text() {
+        let board = app();
+        let fields: Vec<Field> = board.fields.iter().map(|(f, _)| f.clone()).collect();
+        for text in [
+            "seat-b msg",
+            "host:mini",
+            "codex",
+            "nope:1",
+            "failed: 2",
+            "https://x.y/z",
+        ] {
+            let mut slash = app();
+            slash.filter = Input::new(text.to_owned());
+            let want: Vec<String> = listed(&slash)
+                .into_iter()
+                .map(|i| slash.rows[i].key.clone())
+                .collect();
+            let query = Query {
+                filters: &[text.to_owned()],
+                ..Query::default()
+            };
+            let got: Vec<String> = arrange(board.rows.clone(), fields.clone(), &query)
+                .unwrap()
+                .into_iter()
+                .map(|row| row.key)
+                .collect();
+            assert_eq!(got, want, "{text}");
+        }
+    }
 }

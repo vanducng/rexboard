@@ -8,6 +8,9 @@ use crate::client::{self, Field};
 use crate::error::{Error, Result};
 use crate::output::{BREAK, clean, harness, labels, path, span, state_word};
 
+/// Marks the pane's own lines, as the card does, apart from what the agent reported.
+const GUTTER: &str = " │ ";
+
 /// The most `--tail` reads, as the card does.
 const TAIL_MOST: usize = 200;
 
@@ -40,22 +43,27 @@ pub fn show(key: &str, tail: Option<usize>, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// The card as plain text: who and how it stands, the message, then its facts and the tail.
+/// The card as plain text, in its order: the bar, the message, the tail in its gutter, then the
+/// facts, where first.
 fn text(row: &Row, fields: &[Field], tail: Option<&[String]>) -> String {
-    let mut state = state_word(row);
-    if let Some(kind) = &row.pane.kind {
-        state = format!("{state} · {kind}");
-    }
-    let mut head = vec![crate::output::name(row), state];
+    let mut head = vec![state_word(row)];
+    head.extend(row.pane.kind.clone());
+    head.push(crate::output::name(row));
     head.extend(crate::tui::card::outcome(row, Utc::now()));
     let mut out = format!("{}\n", clean(&head.join(" · ")));
     let msg = clean(row.pane.msg.as_deref().unwrap_or_default());
     for line in msg.split(BREAK).map(str::trim).filter(|l| !l.is_empty()) {
         out.push_str(&format!("{line}\n"));
     }
-    let mut facts = vec![("host", row.pane.host.clone()), ("harness", harness(row))];
+    for line in tail.unwrap_or_default() {
+        out.push_str(&format!("{GUTTER}{line}\n"));
+    }
+    let mut facts = vec![
+        ("where", place(row)),
+        ("host", row.pane.host.clone()),
+        ("harness", harness(row)),
+    ];
     facts.extend(row.last_turn.map(|secs| ("turn", span(secs))));
-    facts.push(("where", place(row)));
     for field in fields {
         if let Some(value) = row.ext.get(&field.id) {
             facts.push((field.name.as_str(), clean(value)));
@@ -75,12 +83,6 @@ fn text(row: &Row, fields: &[Field], tail: Option<&[String]>) -> String {
     out.push('\n');
     for (label, value) in facts {
         out.push_str(&format!("{label:<width$}  {value}\n"));
-    }
-    if let Some(tail) = tail {
-        out.push('\n');
-        for line in tail {
-            out.push_str(&format!("{line}\n"));
-        }
     }
     out
 }

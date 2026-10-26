@@ -23,7 +23,7 @@ pub enum Command {
     Ls(LsArgs),
     /// Stream the agent rows (`--json`) or raw events (`--raw`) from this host and every `rex hosts` entry.
     Watch(WatchArgs),
-    /// Run the board daemon behind ls, watch --json and seen. They start it when it is not running.
+    /// Run the daemon the board and the other commands share. They start it when it is not running.
     Serve(ServeArgs),
     /// Open the board: agent panes grouped by what they need. `rexboard` with no command opens it
     /// in a terminal.
@@ -32,6 +32,7 @@ pub enum Command {
     Seen(SeenArgs),
     /// What the board's card says about a pane, by its `key`; `--tail N` adds its last lines.
     Show {
+        /// HOST/BLOCK_ID, the key from ls --json.
         #[arg(value_name = "KEY")]
         key: String,
         /// Also read the pane's last N lines, as the card does (at most 200).
@@ -117,6 +118,7 @@ pub struct WatchArgs {
 
 #[derive(Debug, Args)]
 pub struct SeenArgs {
+    /// HOST/BLOCK_ID, the key from ls --json.
     #[arg(value_name = "KEY", required_unless_present = "all_done")]
     pub key: Option<String>,
     /// Every unseen done row, or those --host and --filter keep.
@@ -153,8 +155,8 @@ pub struct LsArgs {
     /// error, unreported, idle.
     #[arg(long, value_name = "STATUS")]
     pub status: Option<String>,
-    /// Sort within each group by a column (age, turn, harness, host, ...) or a field, with
-    /// `:asc` or `:desc`.
+    /// Sort within each group by a column (state, age, turn, harness, host, where, session,
+    /// window, block, msg) or a field, with `:asc` or `:desc`.
     #[arg(long, value_name = "COLUMN[:asc|:desc]")]
     pub sort: Option<String>,
 }

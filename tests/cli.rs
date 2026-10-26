@@ -2557,7 +2557,6 @@ fn ls_takes_the_boards_view_filter_status_and_sort() {
         (&["--status", "x"][..], "no status named x"),
         (&["--sort", "nope"][..], "no column named nope to sort by"),
         (&["--sort", "age:up"][..], "the direction is asc or desc"),
-        (&["--filter", "nope:1"][..], "no key named nope"),
     ] {
         serve
             .cmd()
@@ -2574,6 +2573,21 @@ fn ls_takes_the_boards_view_filter_status_and_sort() {
         .args(["ls", "--direct", "--view", "table"])
         .assert()
         .code(2);
+    serve
+        .cmd()
+        .args(["ls", "--json", "--filter", "runner?"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("mini/block:web-ask"));
+    serve
+        .cmd()
+        .args(["ls", "--json", "--filter", "which: runner"])
+        .assert()
+        .success()
+        .stdout("[]\n")
+        .stderr(predicate::str::contains(
+            "note: --filter which: runner: no key named which, so it matches as text",
+        ));
 }
 
 #[test]
@@ -2635,10 +2649,21 @@ fn show_says_what_the_card_does_and_reads_the_tail() {
         .assert()
         .success()
         .stdout(
-            predicate::str::starts_with("seat-d · done · ended")
-                .and(predicate::str::contains("\nTests pass\nAll 12 green\n"))
-                .and(predicate::str::contains("\nwhere    web › main › seat-d\n"))
+            predicate::str::starts_with("done · seat-d · ended")
+                .and(predicate::str::contains(
+                    "\nTests pass\nAll 12 green\n\nwhere    web › main › seat-d\nhost     mini\n",
+                ))
                 .and(predicate::str::contains("\nkey      mini/block:web-done\n")),
+        );
+    serve
+        .cmd()
+        .args(["show", "mini/block:web-ask", "--tail", "2"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::starts_with("blocked · question · seat-q · waiting").and(
+                predicate::str::contains("\n │ Allow Bash: cargo test? (y/n)\n\nwhere "),
+            ),
         );
     serve
         .cmd()
