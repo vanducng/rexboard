@@ -10,6 +10,10 @@ on:
       tag:
         description: Existing release tag to rebuild and upload, like v0.2.0
         required: true
+      homebrew_only:
+        description: Only publish the Homebrew formula from the release's existing assets
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -36,7 +40,7 @@ jobs:
   tag:
     needs: release-please
     if: >-
-      always() && (needs.release-please.outputs.created == 'true'
+      always() && !inputs.homebrew_only && (needs.release-please.outputs.created == 'true'
       || github.ref_type == 'tag' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     outputs:
@@ -53,6 +57,7 @@ jobs:
 
   build:
     needs: tag
+    if: ${{ !cancelled() && needs.tag.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -94,6 +99,7 @@ jobs:
 
   publish:
     needs: [tag, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -109,3 +115,51 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/SHA256SUMS
+
+  homebrew:
+    needs: [tag, publish]
+    if: ${{ !cancelled() && (needs.publish.result == 'success' || inputs.homebrew_only) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ needs.tag.outputs.name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: render the formula from the release's SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p SHA256SUMS -D "$RUNNER_TEMP"
+          scripts/homebrew-formula.sh "$TAG" "$RUNNER_TEMP/SHA256SUMS" > "$RUNNER_TEMP/rexboard.rb"
+          cat "$RUNNER_TEMP/rexboard.rb"
+      - name: commit it to vanducng/homebrew-tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::notice::HOMEBREW_TAP_GITHUB_TOKEN not set, skipping the Homebrew tap publish"
+            exit 0
+          fi
+          tap="$RUNNER_TEMP/tap"
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/vanducng/homebrew-tap.git" "$tap"
+          cp "$RUNNER_TEMP/rexboard.rb" "$tap/Formula/rexboard.rb"
+          cd "$tap"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/rexboard.rb
+          if git diff --cached --quiet; then
+            echo "Formula/rexboard.rb is already at $TAG"
+            exit 0
+          fi
+          git commit -m "rexboard ${TAG#v}"
+          for attempt in 1 2 3; do
+            if git pull --rebase && git push; then
+              exit 0
+            fi
+            echo "push to the tap failed (attempt $attempt)" >&2
+            sleep 5
+          done
+          exit 1

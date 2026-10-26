@@ -6,13 +6,23 @@ An attention board for coding-agent panes across [Rex](https://www.superlogical.
 
 ## Install
 
-Needs Rex, with its `rex` CLI on your PATH. Jumps and `rexboard window` also need the Rex app.
+Needs Rex, with its `rex` CLI on your PATH. Jumps and `rexboard window` also need the Rex app. Prebuilt for macOS on Apple silicon and Linux x86_64; elsewhere, build from source (below).
+
+With Homebrew:
+
+```bash
+brew install vanducng/tap/rexboard
+```
+
+Without it, this installs the latest release into `~/.local/bin`, after checking it against the release's `SHA256SUMS`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vanducng/rexboard/main/install.sh | sh
 ```
 
-This installs the latest release for macOS on Apple silicon or Linux x86_64 into `~/.local/bin`, after checking it against the release's `SHA256SUMS`. Or build from source with Rust 1.88 or newer:
+Switching from that to Homebrew? Remove `~/.local/bin/rexboard` first, so the two do not shadow each other.
+
+Build from source with Rust 1.88 or newer:
 
 ```bash
 cargo install --locked --git https://github.com/vanducng/rexboard
