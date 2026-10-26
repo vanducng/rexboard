@@ -11,9 +11,10 @@
 set -euo pipefail
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo=$(CDPATH= cd -- "$here/.." && pwd)
-# 140x24: SESSION, WINDOW and BLOCK get their own columns, and the turn card has room.
+# 140x30: SESSION, WINDOW and BLOCK get their own columns, an extension field gets one, and the
+# turn card has room under every row.
 cols=140
-rows=24
+rows=30
 tmux_socket=zzdemo
 if [[ -x "$HOME/.cargo/bin/cargo" ]]; then
   export PATH="$HOME/.cargo/bin:$PATH"
@@ -62,6 +63,11 @@ ours=1
 hosts=$(rex hosts --json | python3 -c 'import json, sys; print(len(json.load(sys.stdin).get("hosts") or []))')
 [[ "$hosts" == 0 ]] || { echo "the demo Rex server has hosts; refusing to record" >&2; exit 1; }
 
+# The repo's example extension gives each row a PROJECT column: its session label up to the `-`.
+mkdir -p "$XDG_CONFIG_HOME/rexboard/extensions"
+cp -R "$repo/examples/extensions/session-prefix" "$XDG_CONFIG_HOME/rexboard/extensions/"
+printf '[extensions]\nenabled = ["session-prefix"]\n' >"$XDG_CONFIG_HOME/rexboard/config.toml"
+
 # Answer mode sends only to a pane whose foreground is an agent, so the demo panes run under a
 # copy of bash named like one.
 mkdir -p "$root/bin"
@@ -93,8 +99,8 @@ case "$seat" in
     key=; while [ "$key" != 1 ]; do read -r -s -n 1 key; done
     clear; title "⠋ seat-a@demo"; printf '● Running the full test suite.\n  running 12 tests\n'
     report working "Running the full test suite"
-    sleep 6; title "✳ seat-a@demo"; printf '  test result: ok. 12 passed\n'
-    report done "Tests pass: 12 passed ⏎ The nested parser case is fixed and covered by a new test. Ready for review." ;;
+    sleep 9; title "✳ seat-a@demo"; printf '  test result: ok. 12 passed\n'
+    report done "Tests pass: 12 passed ⏎ The nested parser case is fixed and covered by a new test." ;;
   seat-b)
     title "✳ seat-b@demo"; printf '● Posted 2 comments on the parser change.\n'
     report done "Review posted with 2 comments ⏎ Both are about naming in src/parser.rs; nothing blocks the merge." ;;
@@ -105,26 +111,69 @@ case "$seat" in
     printf 'Enter to select · ↑/↓ to navigate · Esc to cancel\n'
     report blocked "Which test runner should the web package use? ⏎ 1. vitest: fast, native ESM ⏎ 2. jest: familiar, more plugins" question ;;
   seat-d)
-    title "⠋ seat-d@demo"; printf '● Writing the release notes.\n'
-    report working "Writing the release notes" ;;
+    # A coloured diff that grows while the full view follows it, then a done report.
+    title "⠋ seat-d@demo"; report working "Updating the style docs"
+    printf '\033[1mdiff --git a/docs/tui.md b/docs/tui.md\033[0m\n\033[36m@@ -36,6 +36,18 @@ ## Style\033[0m\n'
+    printf ' One table says how each state looks.\n'
+    printf '\033[31m-  Glyphs: blocked, error, done, working, idle.\033[0m\n'
+    at 0
+    while IFS= read -r line; do
+      sleep 1.5
+      case "$line" in
+        +*) printf '\033[32m%s\033[0m\n' "$line" ;;
+        -*) printf '\033[31m%s\033[0m\n' "$line" ;;
+        @*) printf '\033[36m%s\033[0m\n' "$line" ;;
+        *) printf '%s\n' "$line" ;;
+      esac
+    done <<'DIFF'
++| State    | Shape | Colour |
++|----------|-------|--------|
++| blocked  | !     | red    |
++| question | ?     | red    |
++| error    | ✗     | red    |
++| done     | ✓     | green  |
++| working  | ⠹     | yellow |
++| idle     | ○     | dim    |
+ 
+-Spinners turn once a second.
++Working rows spin a braille dot every 80 ms.
++Reduced motion holds it still as ⠿.
+@@ -58,4 +70,9 @@ ## Turn card
+ Set it in tui.json:
++
++```json
++{ "motion": "reduced" }
++```
++Or for one run: REXBOARD_REDUCED_MOTION=1
+DIFF
+    sleep 0.3; title "✳ seat-d@demo"
+    report done "Style docs updated ⏎ A shape table and a reduced motion note in docs/tui.md." ;;
   seat-e)
     title "✳ seat-e@demo"; printf 'Ready.\n' ;;
+  seat-f)
+    title "✳ seat-f@demo"; printf 'Waiting for input.\n'
+    report idle "Waiting for input" ;;
+  seat-g)
+    title "✳ seat-g@demo"; printf 'error: 2 errors in the release build\n'
+    report error "Build failed: 2 errors in the release build" ;;
 esac
 exec sleep 600
 PANE
 
 go="$root/go"
 agent="$root/bin/claude"
-rex new api --window build -- "$agent" "$root/pane.sh" seat-a "$go" >/dev/null
-rex run -s api --focus=false -- "$agent" "$root/pane.sh" seat-b "$go" >/dev/null
-rex new web --window deploy -- "$agent" "$root/pane.sh" seat-c "$go" >/dev/null
-rex run -s web --focus=false -- "$agent" "$root/pane.sh" seat-d "$go" >/dev/null
-rex run -s web --focus=false -- "$agent" "$root/pane.sh" seat-e "$go" >/dev/null
+rex new api-gateway --window build -- "$agent" "$root/pane.sh" seat-a "$go" >/dev/null
+rex run -s api-gateway --focus=false -- "$agent" "$root/pane.sh" seat-b "$go" >/dev/null
+rex run -s api-gateway --focus=false -- "$agent" "$root/pane.sh" seat-g "$go" >/dev/null
+rex new web-app --window deploy -- "$agent" "$root/pane.sh" seat-c "$go" >/dev/null
+rex run -s web-app --focus=false -- "$agent" "$root/pane.sh" seat-d "$go" >/dev/null
+rex run -s web-app --focus=false -- "$agent" "$root/pane.sh" seat-e "$go" >/dev/null
+rex run -s web-app --focus=false -- "$agent" "$root/pane.sh" seat-f "$go" >/dev/null
 sleep 1
 # Pane and tab labels, by the seat each pane titles itself with.
 rex do - >/dev/null <<'LUA'
 local tabs = { ["seat-a"] = "build", ["seat-b"] = "review", ["seat-c"] = "deploy",
-  ["seat-d"] = "docs", ["seat-e"] = "notes" }
+  ["seat-d"] = "docs", ["seat-e"] = "notes", ["seat-f"] = "infra", ["seat-g"] = "release" }
 rex.call("session.attach_all", { event_scope = "session" })
 for _, s in ipairs(rex.call("session.list").sessions or {}) do
   for _, b in ipairs((rex.call("session.list_blocks", { session_id = s.session_id }) or {}).blocks or {}) do
@@ -147,15 +196,19 @@ k() { for key in "$@"; do tmux -L "$tmux_socket" send-keys -t demo "$key"; sleep
 for _ in $(seq 1 100); do tmux -L "$tmux_socket" capture-pane -p -t demo 2>/dev/null | grep -q 'NEEDS YOU' && break; sleep 0.1; done
 sleep 1.5
 touch "$go"
-# A done row's two-line card; the permission row's ask and screen; `a`, `2` once to show that a
-# lasting option asks again, then `1`, answers it from the board; the question row zoomed; the
-# card hidden and back; `tab` through the rows that need you.
-sleep 2; k 2; sleep 3.5
-k 2; sleep 3
-k a; sleep 4.5; k 2; sleep 2; k 1; sleep 3.5
-k 1; sleep 2; k Space; sleep 3; k Space
-sleep 1; k c; sleep 2; k c
-sleep 1; k Tab; sleep 2.5; k Tab; sleep 3
+# The spinners and every shape; a done row's card, then `m` marks it seen; the permission row's
+# ask, `a` on its own, `2` once to show that a lasting option asks again, then `1` answers it from
+# the board; `z` shows what may follow it and `za` folds a group and opens it again; `/docs`
+# narrows the list to the docs row, whose live, coloured full view follows its diff; `q` back as
+# it finishes, then `dd` asks before `y` closes it.
+# Every opener (`a`, the first `d`) comes after a pause, as the typing guard asks.
+sleep 2.5; k 3; sleep 2.2
+k m; sleep 1.2
+k 2; sleep 2
+k a; sleep 3; k 2; sleep 2; k 1; sleep 2.5
+k z; sleep 1.5; k a; sleep 1.2; k z a; sleep 0.8
+k / d o c s Enter; sleep 1.5; k Space; sleep 4; k q; sleep 1.2
+k d d; sleep 3; k y; sleep 1.8; k Escape; sleep 1.5
 k q
 for _ in $(seq 1 100); do tmux -L "$tmux_socket" has-session -t demo 2>/dev/null || break; sleep 0.1; done
 
@@ -185,6 +238,6 @@ PY
 cp "$cast" "$repo/docs/assets/demo.cast"
 # Dracula-like colours, with palette 8 (the board's selected row) a quiet raise over the page.
 theme=282a36,f8f8f2,21222c,ff5555,50fa7b,f1fa8c,8be9fd,ff79c6,8be9fd,f8f8f2,3a3f52,ff6e6e,69ff94,ffffa5,a4ffff,ff92df,a4ffff,ffffff
-agg --theme "$theme" --font-size 14 --idle-time-limit 2 --fps-cap 15 --last-frame-duration 3 \
+agg --theme "$theme" --font-size 12 --idle-time-limit 2 --fps-cap 8 --last-frame-duration 3 \
   "$repo/docs/assets/demo.cast" "$repo/docs/assets/demo.gif" >/dev/null 2>&1
 echo "wrote docs/assets/demo.cast and docs/assets/demo.gif"
