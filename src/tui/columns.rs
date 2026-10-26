@@ -395,7 +395,7 @@ mod tests {
     /// The list's width beside the detail pane, or the whole width under it.
     fn list_width(app: &App, width: u16) -> usize {
         if width >= 100 && !app.pick {
-            usize::from(width) - 39
+            usize::from(width) - usize::from(crate::tui::detail::width(width, app.detail)) - 1
         } else {
             usize::from(width)
         }
@@ -415,7 +415,10 @@ mod tests {
             let buf = buffer(&app, width, 30);
             let list = list_width(&app, width);
             let header: String = line(&buf, 2).chars().take(list).collect();
-            let columns = Columns::new(width, list);
+            let columns = Columns::new(
+                crate::tui::detail::columns_board(width, list, app.pick),
+                list,
+            );
             let row_y = (3..buf.area.height)
                 .find(|&y| line(&buf, y).contains("seat-b msg"))
                 .unwrap();
@@ -451,9 +454,35 @@ mod tests {
     }
 
     #[test]
-    fn turn_shows_from_140_columns_with_a_dash_for_no_turn() {
-        assert!(!line(&buffer(&app(), 139, 30), 2).contains("TURN"));
+    fn where_and_msg_keep_their_100_column_widths_at_any_pane_width() {
+        let mut app = app();
+        for width in 100..=240u16 {
+            for share in [None, Some(0.0), Some(0.3), Some(0.4), Some(0.5), Some(0.9)] {
+                app.detail = share;
+                let header: String = line(&buffer(&app, width, 30), 2)
+                    .chars()
+                    .take(list_width(&app, width))
+                    .collect();
+                let at = |name: &str| header.find(name).unwrap();
+                assert!(
+                    at("MSG") - at("WHERE") >= 15 && header.len() - at("MSG") >= 10,
+                    "{width} at {share:?}:\n{header}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn turn_shows_once_the_list_has_room_with_a_dash_for_no_turn() {
+        let mut narrow = app();
+        narrow.detail = Some(38.0 / 139.0);
+        assert!(!line(&buffer(&narrow, 139, 30), 2).contains("TURN"));
+        assert!(
+            !line(&buffer(&app(), 140, 30), 2).contains("TURN"),
+            "a 93-column list beside the default 46"
+        );
         let mut app = App::default();
+        app.detail = Some(38.0 / 140.0);
         let mut timed = row("local/quick", "done", "needs_you", false);
         timed.last_turn = Some(125);
         let untimed = row("local/fresh", "blocked", "needs_you", false);

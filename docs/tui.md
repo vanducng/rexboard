@@ -16,7 +16,9 @@ The board is built to live in a narrow column, so the narrow layout is the main 
   | under 60 | `AGE` · `WHERE` (`session › pane`) · `MSG` |
   | 60-99 | adds `HARNESS` and `HOST` |
   | 100-139 | adds `STATE`, and the tab in `WHERE`: `session › tab › pane` |
-  | 140 and up | adds `TURN` |
+  | 140 and up | adds `TURN` once the list has 101 columns beside the detail pane: from 140 with a 38-column pane, from 152 with the default third |
+
+  Beside the detail pane the list picks these columns by its own width, as if the pane were 38 columns, so a wider pane never squeezes `WHERE` and `MSG` below their widths at 100 columns.
 
   Each column answers one question:
 
@@ -31,7 +33,7 @@ The board is built to live in a narrow column, so the narrow layout is the main 
   | `MSG` | What did it say? | The record's message, else the title |
 
   Glyphs: `◉` blocked, `✖` error, `●` done, `◐` working, `○` idle or seen done, `·` unknown. Blocked and error are red, unseen done green, working yellow, the rest dim. Time in state is `≥5h43m` when estimated and `-` for a pane with no status record. A harness read from the title, with no record, ends in `?` (`claude?`). A `working` report more than 120 seconds old on a pane that looks idle (an idle `✳ ` title, or a shell back in front) is not trusted: the row shows `idle?` (from 100 columns; narrower, its `○` glyph), dim, under `UNREPORTED`, and the detail says `may be stale:` and why. The check cannot see inside tmux: with `tmux` in front the title is tmux's, so only a shell back in front makes such a row suspect. serve checks this every second, since time alone can make a report suspect. Rows of a host that is down, and every row while serve is stopped, are dim. The selected row has a raised background. A pane labelled `shell`, or named after its foreground process, tells you nothing, so its path is `session › tab` (also below 100 columns). When a path is too long, the tab is cut first (to `…` below 6 columns), then the session down to an 8-column stem, then the last label. Rows that would still read the same end in `#N`, the pane's place among its tab's agent panes. Below 60 columns, where there is no host column, a row from a host other than `local` also gets `@HOST` when a twin is on another host; at 50 columns that reads `api…way › pair #1`, `api…way › pair #2` and `ap…y › pair @mini`. The suffix is never cut: the path gives way first, down to `…`. When rows do not fit, the last line says how many are below (`↓ 4 more`).
-- **Detail pane**, for the selected row: at 100 columns and up on the right (38 columns), with the pane label (for a generic one, the title, else the tab), then `state` (with its kind, as in `blocked · permission`, and `(reported)` when the report is suspect), `in state`, `msg` (wrapped to three lines on the right, two underneath), `host`, `session`, `tab`, `title` (without its leading status glyph), `harness`, `source` and `last rpt` (the time of the last report, or `none`). Below 100 columns it sits underneath the list, sized to its content up to half the screen, and leaves out `in state`, and `msg` when the row shows it whole.
+- **Detail pane**, for the selected row: at 100 columns and up on the right (a third of the width, at least 38 columns; `<` and `>` resize it, see [Detail width](#detail-width)), with the pane label (for a generic one, the title, else the tab), then `state` (with its kind, as in `blocked · permission`, and `(reported)` when the report is suspect), `in state`, `msg` (wrapped to three lines on the right, two underneath), `host`, `session`, `tab`, `title` (without its leading status glyph), `harness`, `source` and `last rpt` (the time of the last report, or `none`). Below 100 columns it sits underneath the list, sized to its content up to half the screen, and leaves out `in state`, and `msg` when the row shows it whole.
 - **Footer:** the keys that fit, most needed first (`j/k move · s seen · / filter · ? keys` at 50 columns; from 54, `v view` shows after `/ filter`), or the filter being typed, or a message for 3 seconds. An open peek starts the footer with `space closes ·` (and drops `space peek`), and a kept filter with `/mini · esc clears ·`. A filter that matches nothing says `no rows match "mini" · esc clears` in the list. Below 100 columns a rule sits above the footer when the screen is 20 rows or more.
 
 Long labels are cut to fit: a `session`, `tab` or `pane` label to 24 columns with `…` in the middle, and every cell at its column's edge with `…`. Widths count CJK and emoji as two columns. Colours are ANSI named colours only, so the terminal's theme carries through.
@@ -47,7 +49,7 @@ A view is a way of grouping the rows plus a sort. The view and sort last for the
 | `harness` | One per harness (`CLAUDE`, `CODEX`), a to z, with `?` (no harness) last | The `status` view's order |
 | `host` | One per host (`LOCAL`, `MINI`), a to z | The `status` view's order |
 
-Shift and a column's letter sorts by that column inside each group: `S` state, `A` age, `T` turn, `R` harness (runtime), `O` host, `W` where, `M` msg. Sorting works as in k9s: Shift and the letter, again to flip. The first press sorts `AGE` and `TURN` longest first (`↓`), `STATE` most urgent first (blocked, error, done, working, idle; `↑`) and the text columns a to z (`↑`). The same letter again flips it, and `esc` clears it. A row with no value (no status record to date it, no finished turn) sorts last either way. In the `status` view, `NEEDS YOU` keeps its blocked rows first under any sort. `T` sorts by turn even below 140 columns, where the `TURN` column is not drawn. In the `host` view rows leave out `@HOST`, since their group names the host.
+Shift and a column's letter sorts by that column inside each group: `S` state, `A` age, `T` turn, `R` harness (runtime), `O` host, `W` where, `M` msg. Sorting works as in k9s: Shift and the letter, again to flip. The first press sorts `AGE` and `TURN` longest first (`↓`), `STATE` most urgent first (blocked, error, done, working, idle; `↑`) and the text columns a to z (`↑`). The same letter again flips it, and `esc` clears it. A row with no value (no status record to date it, no finished turn) sorts last either way. In the `status` view, `NEEDS YOU` keeps its blocked rows first under any sort. `T` sorts by turn even when the `TURN` column is not drawn. In the `host` view rows leave out `@HOST`, since their group names the host.
 
 The column header underlines each column's sort letter and puts `↑` or `↓` just left of the sorted column's name. When the view is not `status`, or a sort is set, the top bar says so after `rexboard`: `view: flat ↓age`. The selection stays on its row when the view or the sort changes.
 
@@ -67,6 +69,7 @@ The column header underlines each column's sort letter and puts `↑` or `↓` j
 | `:` | Open a view by name. Tab completes a name (`fl` to `flat`), Enter opens it (or the one view the text starts), Esc cancels. An unknown name says `no view "nope"` |
 | `S` `A` `T` `R` `O` `W` `M` | Sort by `STATE`, `AGE`, `TURN`, `HARNESS` (runtime), `HOST`, `WHERE` or `MSG`. The same letter again flips the direction. See [Views](#views) |
 | `z` | Fold the selected row's group, or open the folded group the selection is on. `NEEDS YOU` opens by itself when a new row enters it |
+| `<` / `>` | Narrow / widen the detail pane by 5% of the width, from 100 columns. The width is kept per machine (see [Detail width](#detail-width)) |
 | `?` | Show every key in the detail pane; `?` or `esc` hides it |
 | `enter` | Go to the pane in the main Rex window, on its host, and mark it seen, as [`rexboard jump`](cli.md#rexboard-jump-next-and-pick) does. The footer says `going to SESSION › PANE…` until the jump ends, then where it went; Enter during a jump says one is already running. A failed jump's reason stays in the footer until the next key, and in full in the detail pane. The board stays open |
 | `r` | Reconnect to serve |
@@ -74,6 +77,12 @@ The column header underlines each column's sort letter and puts `↑` or `↓` j
 | `q`, `ctrl-c` | Quit |
 
 The board redraws when serve sends rows, on a key, and once a second for the clock and the times in state. SIGTERM and SIGHUP (closing its window) quit it the same way as `q`, so the terminal is left as it was, and the board exits on its own within a second if its terminal goes away.
+
+## Detail width
+
+From 100 columns the detail pane sits on the right. It starts at a third of the width, but never under 38 columns: 38 at 100 columns, 46 at 140, 66 at 200. `<` narrows it and `>` widens it by 5% of the width per press. It never leaves the list fewer than 61 columns, the list's width at 100 columns, so at 100 columns the pane is always 38, and at 140 it runs from 38 to 78. A press at either end changes nothing and says `the detail pane is as wide as it goes` or `the detail pane is as narrow as it goes`.
+
+The width is kept as a share of the board's width, so it follows the window when that resizes. It lives in `tui.json` beside serve's `state.json` (`~/.local/state/rexboard/tui.json`, or under `XDG_STATE_HOME`), is read when the board starts and written on each press. A missing or unreadable `tui.json` means the default third. Below 100 columns, where the pane sits under the list, `<` and `>` only say `< and > size the detail pane on boards wider than 100 columns`; `pick` has no pane and ignores them.
 
 ## Status filter
 
