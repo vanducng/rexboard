@@ -3,6 +3,10 @@
 
 use super::*;
 
+/// An idle prompt, as a fast host reads it back.
+pub const IDLE: &str = "────\n❯\u{a0}\n";
+pub const DIALOG: &str = " ❯ 1. Yes\n   2. Yes, and don't ask again\n   3. No\n Esc to cancel\n";
+
 /// seat-b blocked and two working rows, with the status filter on working and the full
 /// view open on pi, which then finishes and leaves the filter.
 pub fn viewing_pi_as_it_leaves_the_filter() -> App {
