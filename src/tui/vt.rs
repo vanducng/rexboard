@@ -181,6 +181,22 @@ mod tests {
             .collect()
     }
 
+    /// Rex's vt for `printf '\e[31mone\ntwo\e[0m\nthree\n'`: it restates the style at each
+    /// line's start and resets it at the end, so every line stands alone.
+    #[test]
+    fn a_colour_across_lines_comes_back_on_each_line_from_rex() {
+        let vt = "\x1b[0m\x1b[38;5;1mone\x1b[0m\r\n\x1b[0m\x1b[38;5;1mtwo\x1b[0m\r\nthree\r\n";
+        let lines: Vec<Vec<(String, Style)>> = vt.lines().map(styles).collect();
+        let red = Style::new().fg(Color::Indexed(1));
+        assert_eq!(lines[0], [("one".to_owned(), red)]);
+        assert_eq!(
+            lines[1],
+            [("two".to_owned(), red)],
+            "the second line is red on its own"
+        );
+        assert_eq!(lines[2], [("three".to_owned(), Style::new())]);
+    }
+
     #[test]
     fn cursor_forward_is_spaces_and_other_escapes_go() {
         assert_eq!(
