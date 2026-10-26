@@ -97,8 +97,7 @@ impl Error {
             Self::Config(_) => vec![CONFIG_DOC.to_owned()],
             Self::ContractMismatch(_) => vec![
                 "rexboard --version".to_owned(),
-                "curl -fsSL https://raw.githubusercontent.com/vanducng/rexboard/main/install.sh | sh"
-                    .to_owned(),
+                "brew upgrade rexboard".to_owned(),
             ],
             _ => vec!["rexboard --help".to_owned()],
         }

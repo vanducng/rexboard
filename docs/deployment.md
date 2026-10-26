@@ -49,7 +49,7 @@ brew install vanducng/tap/rexboard
 brew upgrade rexboard
 ```
 
-Without it, `install.sh` at the repo root is the installer. Switching from it to Homebrew, remove `~/.local/bin/rexboard` first, so the two do not shadow each other:
+Without Homebrew, or for a release other than the latest (the tap keeps only the latest), `install.sh` at the repo root is the installer. Switching from it to Homebrew, remove `~/.local/bin/rexboard` first, so the two do not shadow each other:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vanducng/rexboard/main/install.sh | sh
