@@ -63,6 +63,8 @@ struct Response {
     contract: u32,
     #[serde(default)]
     rows: BTreeMap<String, RowOut>,
+    #[serde(flatten)]
+    unknown: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,8 +72,12 @@ struct RowOut {
     #[serde(default)]
     fields: BTreeMap<String, Value>,
     #[serde(default)]
-    status: Option<Status>,
+    status: Option<Value>,
+    #[serde(flatten)]
+    unknown: BTreeMap<String, Value>,
 }
+
+const STATUS_KEYS: [&str; 3] = ["state", "kind", "msg"];
 
 /// A fallback status, for a row with no native record.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -112,10 +118,18 @@ pub fn parse(out: &[u8], ext: &Extension, keys: &BTreeSet<String>) -> Result<Par
         ));
     }
     let mut parsed = Parsed::default();
+    for name in response.unknown.keys() {
+        parsed.problems.push(format!("unknown key {name}"));
+    }
     for (key, row) in response.rows {
         if !keys.contains(&key) {
             parsed.problems.push(format!("unknown row {key}"));
             continue;
+        }
+        for name in row.unknown.keys() {
+            parsed
+                .problems
+                .push(format!("row {key}: unknown key {name}"));
         }
         let mut item = Item::default();
         for (name, value) in row.fields {
@@ -135,13 +149,10 @@ pub fn parse(out: &[u8], ext: &Extension, keys: &BTreeSet<String>) -> Result<Par
                     .push(format!("field {name} is not a string")),
             }
         }
-        item.status = match row
-            .status
-            .map(|status| (status_problem(&status, ext), status))
-        {
-            Some((None, status)) => Some(status),
-            Some((Some(why), _)) => {
-                parsed.problems.push(why);
+        item.status = match row.status.map(|status| read_status(status, ext)) {
+            Some(Ok(status)) => Some(status),
+            Some(Err(why)) => {
+                parsed.problems.push(format!("row {key}: {why}"));
                 None
             }
             None => None,
@@ -149,6 +160,18 @@ pub fn parse(out: &[u8], ext: &Extension, keys: &BTreeSet<String>) -> Result<Par
         parsed.rows.insert(key, item);
     }
     Ok(parsed)
+}
+
+/// A row's status, or why it cannot be used.
+fn read_status(value: Value, ext: &Extension) -> Result<Status, String> {
+    if let Value::Object(map) = &value
+        && let Some(name) = map.keys().find(|k| !STATUS_KEYS.contains(&k.as_str()))
+    {
+        return Err(format!("unknown status key {name}"));
+    }
+    let status: Status =
+        serde_json::from_value(value).map_err(|err| format!("a status that is not one: {err}"))?;
+    status_problem(&status, ext).map_or(Ok(status), Err)
 }
 
 /// Why a row's status cannot be used, if it cannot.
@@ -204,6 +227,96 @@ mod tests {
         assert_eq!(
             parsed.problems,
             ["undeclared field other", "unknown row local/nope"]
+        );
+    }
+
+    #[test]
+    fn an_unknown_key_anywhere_is_named_and_the_rest_kept() {
+        let out = br#"{"contract": 1, "note": "x", "rows": {"local/b1": {
+            "fields": {"rig": "api"}, "feilds": {},
+            "status": {"state": "idle", "mesage": "typo"}}}}"#;
+        let parsed = parse(out, &ext(true), &keys()).unwrap();
+        assert_eq!(parsed.rows["local/b1"].fields["rig"], "api");
+        assert_eq!(parsed.rows["local/b1"].status, None);
+        assert_eq!(
+            parsed.problems,
+            [
+                "unknown key note",
+                "row local/b1: unknown key feilds",
+                "row local/b1: unknown status key mesage"
+            ]
+        );
+    }
+
+    /// The fenced blocks in docs/extensions.md whose info string is `lang`.
+    fn doc_blocks(lang: &str) -> Vec<&'static str> {
+        let doc = include_str!("../../docs/extensions.md");
+        let open = format!("```{lang}\n");
+        doc.split(open.as_str())
+            .skip(1)
+            .map(|rest| rest.split("```").next().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn doc_samples() {
+        let [request] = doc_blocks("json request")[..] else {
+            panic!("one request sample")
+        };
+        let [response] = doc_blocks("json response")[..] else {
+            panic!("one response sample")
+        };
+        let request: Value = serde_json::from_str(request).unwrap();
+        let keys_of =
+            |v: &Value| -> BTreeSet<String> { v.as_object().unwrap().keys().cloned().collect() };
+        let row = RowIn {
+            key: "mini/b".into(),
+            host: "mini".into(),
+            session: "api".into(),
+            tab: "main".into(),
+            pane: "b".into(),
+            title: String::new(),
+            process: None,
+            harness: None,
+            state: "idle".into(),
+            source: "native".into(),
+        };
+        let ours = serde_json::to_value(Request {
+            contract: CONTRACT,
+            extension: "x",
+            settings: &Value::Null,
+            rows: std::slice::from_ref(&row),
+        })
+        .unwrap();
+        assert_eq!(keys_of(&request), keys_of(&ours));
+        assert_eq!(keys_of(&request["rows"][0]), keys_of(&ours["rows"][0]));
+
+        let root = tempfile::tempdir().unwrap();
+        let text = manifest("session-prefix", &["project"]) + "[provides]\nstatus = true\n";
+        let ext = crate::extension::load(&write(root.path(), "session-prefix", &text)).unwrap();
+        let sent = BTreeSet::from([request["rows"][0]["key"].as_str().unwrap().to_owned()]);
+        let parsed = parse(response.as_bytes(), &ext, &sent).unwrap();
+        assert_eq!(parsed.problems, Vec::<String>::new());
+        assert_eq!(parsed.rows["mini/block:7f3a"].fields["project"], "api");
+        assert_eq!(
+            parsed.rows["mini/block:7f3a"]
+                .status
+                .as_ref()
+                .unwrap()
+                .state,
+            "working"
+        );
+
+        let adapter = include_str!("../../examples/extensions/session-prefix/adapter");
+        let uncommented: String = adapter
+            .lines()
+            .filter(|line| !line.starts_with("# "))
+            .map(|line| format!("{line}\n"))
+            .collect();
+        assert_eq!(
+            doc_blocks("sh")[1],
+            uncommented,
+            "the doc shows the example's adapter"
         );
     }
 

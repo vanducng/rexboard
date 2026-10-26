@@ -398,6 +398,21 @@ pub fn call(request: &Value) -> Result<Value> {
     ))
 }
 
+/// One request to a serve that is already running; None when none is, so asking never starts
+/// one.
+pub fn ask_running(request: &Value) -> Result<Option<Value>> {
+    let Some(mut stream) = connect(&Paths::find()?)? else {
+        return Ok(None);
+    };
+    send(&mut stream, request)?;
+    read(&mut BufReader::new(stream), &mut String::new())
+}
+
+/// Every row serve has, plain shells too, as serve sends them to extensions.
+pub fn all_rows() -> Result<Vec<Row>> {
+    Ok(rows(call(&json!({ "cmd": "rows" }))?)?.rows)
+}
+
 fn rows(value: Value) -> Result<Rows> {
     serde_json::from_value(value)
         .map_err(|err| Error::serve(format!("serve sent rows in an unexpected shape: {err}")))

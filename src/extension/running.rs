@@ -44,7 +44,7 @@ impl Running {
         };
         let found = discover(&roots(&config.dirs()));
         for problem in found.problems {
-            self.say(problem);
+            self.say(problem.to_string());
         }
         let mut want: BTreeMap<String, (Extension, Value)> = BTreeMap::new();
         for name in &config.enabled {

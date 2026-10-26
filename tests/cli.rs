@@ -2246,3 +2246,156 @@ fn ext_a_disabled_extension_leaves_the_rows_at_the_next_rescan() {
         seat["ext"] == serde_json::json!({}) && seat["source"] == "inferred"
     });
 }
+
+/// Copies the shipped example extension into the serve's config dir.
+fn example(serve: &Serve) {
+    let from =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/extensions/session-prefix");
+    let to = serve
+        .dir
+        .path()
+        .join("config/rexboard/extensions/session-prefix");
+    std::fs::create_dir_all(&to).unwrap();
+    for file in ["extension.toml", "adapter"] {
+        std::fs::copy(from.join(file), to.join(file)).unwrap();
+    }
+}
+
+#[test]
+fn ext_ls_shows_enabled_disabled_and_broken_with_why() {
+    let serve = Serve::new();
+    extension(&serve, "fake", "", "", &answers("{}"));
+    extension(&serve, "idle", "", "", &answers("{}"));
+    let broken = serve.dir.path().join("config/rexboard/extensions/broken");
+    std::fs::create_dir_all(&broken).unwrap();
+    std::fs::write(
+        broken.join("extension.toml"),
+        "name = \"broken\"\ncontract = 2\ncmd = [\"x\"]\n",
+    )
+    .unwrap();
+    serve.config("[extensions]\nenabled = [\"fake\", \"broken\", \"ghost\"]\n");
+    let out = serve.cmd().args(["ext", "ls"]).assert().success();
+    let out = out.get_output();
+    let text = String::from_utf8_lossy(&out.stdout);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(
+        lines[0].split_whitespace().collect::<Vec<_>>().join(" "),
+        "NAME CONTRACT ENABLED LAST RUN DIR"
+    );
+    let line = |name: &str| {
+        lines
+            .iter()
+            .find(|l| l.starts_with(&format!("{name} ")))
+            .unwrap_or_else(|| panic!("{name}:\n{text}"))
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    assert!(line("fake").starts_with("fake 1 yes - "), "{text}");
+    assert!(line("idle").starts_with("idle 1 no - "), "{text}");
+    assert!(
+        line("broken").starts_with(
+            "broken - yes broken: contract 2 is not supported; this rexboard speaks contract 1"
+        ),
+        "{text}"
+    );
+    assert_eq!(line("ghost"), "ghost - yes enabled, but not found -");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("serve is not running"),
+        "no serve was started"
+    );
+    assert!(!serve.socket().exists(), "ext ls never starts serve");
+    serve.rows(&[]);
+    eventually("the last run from serve", || {
+        let out = serve.cmd().args(["ext", "ls", "--json"]).output().unwrap();
+        let list: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).unwrap();
+        list.iter()
+            .any(|e| e["name"] == "fake" && e["last_run"]["ok"] == true)
+    });
+}
+
+#[test]
+fn ext_test_passes_the_example_and_names_an_undeclared_field() {
+    let serve = Serve::new();
+    example(&serve);
+    serve
+        .cmd()
+        .args(["ext", "test", "session-prefix"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "session-prefix (not enabled): answered in",
+        ))
+        .stdout(predicate::str::contains(format!("  {SEAT}  project=api\n")));
+    extension(
+        &serve,
+        "fake",
+        "",
+        "",
+        &answers(r#"{"local/block:api-seat-a": {"fields": {"rig": "api", "other": "x"}}}"#),
+    );
+    serve
+        .cmd()
+        .args(["ext", "test", "fake"])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("problem: undeclared field other"))
+        .stderr(predicate::str::contains(
+            "fake's answer breaks contract 1 in 1 way",
+        ));
+}
+
+#[test]
+fn ext_test_reads_rows_from_a_file_and_says_what_a_failed_run_did() {
+    let serve = Serve::new();
+    extension(&serve, "fake", "", "", "echo oops >&2; exit 3");
+    let rows = serve.dir.path().join("rows.json");
+    std::fs::write(&rows, "[]").unwrap();
+    serve
+        .cmd()
+        .args(["ext", "test", "fake", "--rows"])
+        .arg(&rows)
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("ext fake: oops"))
+        .stderr(predicate::str::contains("fake: exited with"));
+    assert!(!serve.socket().exists(), "--rows needs no serve");
+    serve
+        .cmd()
+        .args(["ext", "test", "nope", "--rows"])
+        .arg(&rows)
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("no extension named nope"));
+}
+
+#[test]
+fn ext_new_scaffold_passes_ext_test_unchanged() {
+    let serve = Serve::new();
+    serve
+        .cmd()
+        .args(["ext", "new", "foo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("rexboard ext test foo"));
+    let manifest = std::fs::read_to_string(
+        serve
+            .dir
+            .path()
+            .join("config/rexboard/extensions/foo/extension.toml"),
+    )
+    .unwrap();
+    assert!(manifest.starts_with("name = \"foo\"\n"), "{manifest}");
+    serve
+        .cmd()
+        .args(["ext", "test", "foo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!("  {SEAT}  project=api\n")));
+    serve
+        .cmd()
+        .args(["ext", "new", "foo"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("is already there"));
+}

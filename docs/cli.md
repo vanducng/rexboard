@@ -211,6 +211,17 @@ Each lands the Rex app on the pane, on its host, and marks it seen through serve
 | 1 | `NOBODY_NEEDS_YOU`: `next`, or `jump N`, with nothing in `needs_you`; prints `nobody needs you`. `NOT_FOUND`: no such key, or no row N. `AMBIGUOUS_CLIENT`: no app client named, and no app connected, none on the unix socket, or more than one there; the message says which, and the next steps name each app (`open the Rex app` when there is none). `CONFIG`: config.toml cannot be read or has an unknown key, or `client` names no app. `REX`: a step in Rex failed; the message names it. `pick`: esc |
 | 2 | `USAGE`: TARGET is neither a key nor a number, or `pick` without a terminal |
 
+## `rexboard ext`
+
+```sh
+rexboard ext ls                       # each extension found: contract, enabled, last run, dir
+rexboard ext test my-tool             # run it once against serve's rows and check the answer
+rexboard ext test my-tool --rows f    # against the rows in f (`rexboard ls --json --all > f`)
+rexboard ext new my-tool              # start one from the example
+```
+
+`ext ls` never starts serve; without it, `LAST RUN` shows `-`. `ext test` exits 1 with `EXTENSION` when the answer breaks contract 1, when the run fails, or when there is no such extension; it prints the fields per row and every problem first. `ext new` fails with `EXTENSION` when the directory is already there. Each takes `--json`. [Extensions](extensions.md#commands) has the output of each and the contract.
+
 ## `rexboard upgrade`
 
 ```bash
