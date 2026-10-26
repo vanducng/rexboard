@@ -18,7 +18,7 @@
 set -euo pipefail
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo=$(CDPATH= cd -- "$here/.." && pwd)
-all=(hero board card answer full moving filter views close extensions cli icons)
+all=(hero board card answer full moving filter views sort close extensions cli icons)
 if [[ $# -gt 0 ]]; then scenes=("$@"); else scenes=("${all[@]}"); fi
 for scene in "${scenes[@]}"; do
   case " ${all[*]} " in
@@ -55,7 +55,8 @@ record_scene() {
     # These two redraw the whole list on most keys, so a smaller, slower GIF keeps them light.
     moving) cols=120 rows=26 fps=6 title="rexboard: moving with vim keys" ;;
     filter) cols=120 rows=26 fps=6 title="rexboard: filter by text, key and status" ;;
-    views) cols=120 rows=26 fps=6 title="rexboard: views and sorting" ;;
+    views) cols=120 rows=26 fps=6 title="rexboard: views" ;;
+    sort) cols=120 rows=26 fps=6 title="rexboard: sorting by a column" ;;
     close) title="rexboard: copy, and close a pane after asking" ;;
     extensions) kind=shell title="rexboard: a column from an extension" ;;
     cli) kind=shell cols=120 rows=28 title="rexboard: the CLI as an API" ;;
@@ -110,20 +111,30 @@ record_scene() {
   printf '[extensions]\nenabled = ["session-prefix"]\n' >"$XDG_CONFIG_HOME/rexboard/config.toml"
   # `rexboard` by name for the shell scenes, and a clipboard that is a file here.
   ln -s "$board" "$root/bin/rexboard"
-  printf '#!/bin/sh\ncat >"%s/clipboard"\n' "$root" >"$root/bin/pbcopy"
-  chmod +x "$root/bin/pbcopy"
+  for copy in pbcopy wl-copy xclip; do
+    printf '#!/bin/sh\ncat >"%s/clipboard"\n' "$root" >"$root/bin/$copy"
+    chmod +x "$root/bin/$copy"
+  done
 
-  # Answer mode sends only to a pane whose foreground is an agent, so the demo panes run under a
-  # copy of bash named like one.
-  cp /bin/bash "$root/bin/claude"
+  # Answer mode sends only to a pane whose foreground is an agent, so the demo panes run under
+  # copies of bash named like the four harnesses' processes.
+  grok=grok-1.0.0-darwin-arm64
+  for name in claude codex pi "$grok"; do cp /bin/bash "$root/bin/$name"; done
   cat >"$root/pane.sh" <<'PANE'
 # One demo pane: wait for the go file, then play a timeline of titles, screens and status reports.
 seat=$1 go=$2
+# Each harness reports under its own app name.
+case "$seat" in
+  seat-b | seat-e) app=codex ;;
+  seat-f) app=grok-build ;;
+  seat-g) app=pi ;;
+  *) app=claude-code ;;
+esac
 title() { printf '\033]2;%s\007' "$1"; }
 report() { # state, message (lines joined with " ⏎ "), [kind]
   local kind=""
   [ -n "${3:-}" ] && kind=":kind=$3"
-  printf '\033]7501;state=%s%s:app=claude-code:msg=%s\007' "$1" "$kind" "$(printf '%s' "$2" | base64)"
+  printf '\033]7501;state=%s%s:app=%s:msg=%s\007' "$1" "$kind" "$app" "$(printf '%s' "$2" | base64)"
 }
 # at N: wait until N seconds after the go file appears.
 now=0
@@ -211,20 +222,23 @@ DIFF
     clear; title "⠋ seat-h@demo"; printf '❯ %s\n\n● Adding a test for the empty input.\n' "$reply"
     report working "Adding a test for the empty input" ;;
 esac
-exec sleep 600
+# Hold the pane with a builtin, so the harness's own process stays in front.
+mkfifo "$go.$seat"
+read -r -t 600 <>"$go.$seat" || :
 PANE
 
   go="$root/go"
-  agent="$root/bin/claude"
-  rex new api-gateway --window build -- "$agent" "$root/pane.sh" seat-a "$go" >/dev/null
-  rex run -s api-gateway --focus=false -- "$agent" "$root/pane.sh" seat-b "$go" >/dev/null
-  rex run -s api-gateway --focus=false -- "$agent" "$root/pane.sh" seat-g "$go" >/dev/null
-  rex new web-app --window deploy -- "$agent" "$root/pane.sh" seat-c "$go" >/dev/null
-  rex run -s web-app --focus=false -- "$agent" "$root/pane.sh" seat-d "$go" >/dev/null
-  rex run -s web-app --focus=false -- "$agent" "$root/pane.sh" seat-e "$go" >/dev/null
-  rex run -s web-app --focus=false -- "$agent" "$root/pane.sh" seat-f "$go" >/dev/null
+  # pane HARNESS SEAT REX-ARGS...: one demo pane, under that harness's process name.
+  pane() { local bin=$1 seat=$2; shift 2; rex "$@" -- "$root/bin/$bin" "$root/pane.sh" "$seat" "$go" >/dev/null; }
+  pane claude seat-a new api-gateway --window build
+  pane codex seat-b run -s api-gateway --focus=false
+  pane pi seat-g run -s api-gateway --focus=false
+  pane claude seat-c new web-app --window deploy
+  pane claude seat-d run -s web-app --focus=false
+  pane codex seat-e run -s web-app --focus=false
+  pane "$grok" seat-f run -s web-app --focus=false
   if [[ "$scene" == answer ]]; then
-    rex run -s web-app --focus=false -- "$agent" "$root/pane.sh" seat-h "$go" >/dev/null
+    pane claude seat-h run -s web-app --focus=false
   fi
   sleep 1
   # Pane and tab labels, by the seat each pane titles itself with.
@@ -268,6 +282,7 @@ case "$scene" in
     run 'rexboard ext test session-prefix'
     run 'rexboard' ;;
   cli)
+    run 'rexboard ls --sort harness'
     run 'rexboard ls --status question'
     c=$(key seat-c)
     run "rexboard show $c"
@@ -299,6 +314,19 @@ SESSION
   tmux -L "$tmux_socket" set-option -t demo status off >/dev/null
   k() { local key; for key in "$@"; do tmux -L "$tmux_socket" send-keys -t demo "$key"; sleep 0.35; done; }
   lit() { local i; for ((i = 0; i < ${#1}; i++)); do tmux -L "$tmux_socket" send-keys -t demo -l "${1:i:1}"; sleep 0.07; done; }
+  # A click on the column header cell named $1, as the terminal sends it (SGR, 1-based).
+  click_header() {
+    local at x y
+    at=$(tmux -L "$tmux_socket" capture-pane -p -t demo | python3 -c '
+import sys
+for y, line in enumerate(sys.stdin, 1):
+    if "HARNESS" in line and sys.argv[1] in line:
+        print(line.index(sys.argv[1]) + 2, y)
+        break' "$1")
+    [[ -n "$at" ]] || { echo "$scene: no $1 header" >&2; exit 1; }
+    x=${at% *} y=${at#* }
+    tmux -L "$tmux_socket" send-keys -t demo -l $'\e'"[<0;$x;${y}M"$'\e'"[<0;$x;${y}m"
+  }
   wait_for() {
     local _
     for _ in $(seq 1 $((${2:-10} * 10))); do
@@ -363,9 +391,16 @@ SESSION
       k /; lit 'state:done'; k Enter; sleep 1.2; k Escape
       k f; sleep 1.4; k q; sleep 1.4; k f f; sleep 0.8 ;;
     views)
-      # The project view from the extension, the host view by name, and a sort and its flip.
-      sleep 1.5; k V; sleep 1.4; k :; lit 'host'; k Enter; sleep 1.4
-      k o; sleep 1.2; k a; sleep 1.2; k o a; sleep 1.2; k Escape; sleep 0.8 ;;
+      # The project view from the extension, then the harness and host views by name.
+      sleep 1.5; k V; sleep 1.6; k :; lit 'harness'; k Enter; sleep 1.8
+      k :; lit 'host'; k Enter; sleep 1.6 ;;
+    sort)
+      # `o` lists the letters; age, its flip, harness; in the table view a header click sorts
+      # and a second flips; `esc` clears it.
+      sleep 1.5; k o; sleep 1.8; k a; sleep 1.6; k o a; sleep 1.6; k o h; sleep 1.8
+      k :; lit 'table'; k Enter; sleep 1.8
+      click_header HOST; sleep 1.6; click_header HOST; sleep 1.6
+      k Escape; sleep 1.4 ;;
     close)
       # Copy a row's message and where it is, then `dd` asks and `y` closes the pane.
       sleep 2; k 3; sleep 1.5

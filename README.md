@@ -2,7 +2,7 @@
 
 An attention board for coding-agent panes across [Rex](https://www.superlogical.com/rex/docs) hosts: which agent is working, blocked or done, for how long, and a jump to its pane.
 
-<img alt="The rexboard board in a terminal: seven agent panes on demo sessions in NEEDS YOU, WORKING, QUIET and UNREPORTED, with a PROJECT column from an example extension, braille spinners on working rows and one shape per state. A done row's card shows its message and m marks it seen; a on the permission row opens answer mode over the dialog, pressing 2 once asks for a second press, 1 picks Yes and the card says sent 1 (Yes); z lists the keys that may follow it and za folds a group and opens it again; /docs filters to the docs row, whose live full view follows its coloured diff until it reports done; q goes back, and dd asks before y closes the finished pane" src="docs/assets/demo.gif" width="100%">
+<img alt="The rexboard board in a terminal: seven agent panes on demo sessions, from Claude Code, Codex, Grok and Pi, in NEEDS YOU, WORKING, QUIET and UNREPORTED, with a PROJECT column from an example extension, braille spinners on working rows and one shape per state. A done row's card shows its message and m marks it seen; a on the permission row opens answer mode over the dialog, pressing 2 once asks for a second press, 1 picks Yes and the card says sent 1 (Yes); z lists the keys that may follow it and za folds a group and opens it again; /docs filters to the docs row, whose live full view follows its coloured diff until it reports done; q goes back, and dd asks before y closes the finished pane" src="docs/assets/demo.gif" width="100%">
 
 ## Install
 
@@ -35,7 +35,7 @@ rexboard only reads Rex, except to jump to a pane and, from the board, to answer
 Each one is a short recording; open it to watch.
 
 <details><summary><b>The board at a glance</b>: one shape per state, a spinner while working, NEEDS YOU on top, and <code>?</code> for every key</summary>
-<img alt="The board: rows in NEEDS YOU, WORKING, QUIET and UNREPORTED, each with its state's shape, the working rows' spinners turning, then the ? key table above the footer" src="docs/assets/casts/board.gif" width="100%">
+<img alt="The board: rows from four harnesses in NEEDS YOU, WORKING, QUIET and UNREPORTED, each with its state's shape, the working rows' spinners turning, then the ? key table above the footer" src="docs/assets/casts/board.gif" width="100%">
 </details>
 
 <details><summary><b>The card</b>: what the agent said, then its facts; a long message scrolls with <code>ctrl-e</code> and <code>ctrl-y</code></summary>
@@ -58,12 +58,16 @@ Each one is a short recording; open it to watch.
 <img alt="/parser and /state:done each narrow the rows; f lists each status with its count, and q keeps only the question" src="docs/assets/casts/filter.gif" width="100%">
 </details>
 
-<details><summary><b>Views and sorting</b>: <code>V</code> or <code>:</code> for a view, <code>o</code> and a letter to sort</summary>
-<img alt="V opens the project view from the extension and :host the host view; o lists the sort letters, o a sorts by age, and o a again flips it" src="docs/assets/casts/views.gif" width="100%">
+<details><summary><b>Views</b>: <code>V</code> or <code>:</code> and a name to group the rows another way</summary>
+<img alt="V opens the project view from the extension, :harness groups the rows under claude, codex, grok-build and pi, and :host under their host" src="docs/assets/casts/views.gif" width="100%">
+</details>
+
+<details><summary><b>Sorting</b>: <code>o</code> and a column's letter, or a click on a header in the table view</summary>
+<img alt="o lists the sort letters; o a sorts by age, with an arrow on AGE and view: status ↓age in the top bar, and o a again flips it; o h sorts by harness; in the table view a click on HOST sorts by host and a second click flips it; esc clears the sort" src="docs/assets/casts/sort.gif" width="100%">
 </details>
 
 <details><summary><b>Copy and close</b>: <code>yy</code> the message, <code>yp</code> where it runs, <code>dd</code> asks before it closes a pane</summary>
-<img alt="yy copies a done row's message and yp where it runs; dd asks to close the pane, ending claude, and y closes it" src="docs/assets/casts/close.gif" width="100%">
+<img alt="yy copies a done row's message and yp where it runs; dd asks to close the pane, ending codex, and y closes it" src="docs/assets/casts/close.gif" width="100%">
 </details>
 
 <details><summary><b>Extensions</b>: a column from any tool; <code>ext ls</code> and <code>ext test</code> check it</summary>
@@ -71,7 +75,7 @@ Each one is a short recording; open it to watch.
 </details>
 
 <details><summary><b>The CLI as an API</b>: what the board shows, as text or JSON</summary>
-<img alt="rexboard ls --status question, rexboard show with the card's text, show --json through jq, rexboard hosts, and rexboard seen --all-done" src="docs/assets/casts/cli.gif" width="100%">
+<img alt="rexboard ls --sort harness, rexboard ls --status question, rexboard show with the card's text, show --json through jq, rexboard hosts, and rexboard seen --all-done" src="docs/assets/casts/cli.gif" width="100%">
 </details>
 
 <details><summary><b>Icons</b>: words by default, Nerd Font icons with <code>"icons": "nerd"</code></summary>
