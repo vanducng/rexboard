@@ -114,7 +114,7 @@ impl Error {
             Self::Config(_) => vec![CONFIG_DOC.to_owned()],
             Self::ContractMismatch(_) => vec![
                 "rexboard --version".to_owned(),
-                "brew upgrade rexboard".to_owned(),
+                "rexboard upgrade".to_owned(),
             ],
             _ => vec!["rexboard --help".to_owned()],
         }

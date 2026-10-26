@@ -19,7 +19,7 @@ rexboard                 # the board, in this terminal
 rexboard ls --json       # every agent pane, most urgent first, as JSON
 rexboard next            # go to the next pane that needs you
 rexboard pick            # choose a pane from the list and go to it
-rexboard upgrade         # upgrade, the way it was installed
+rexboard upgrade         # upgrade to the latest release
 ```
 
 The first command starts `rexboard serve` in the background. It watches this host and every host in `rex hosts`, and keeps what Rex does not: how long each pane has been in its state, and whether you have seen it.

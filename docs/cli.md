@@ -150,7 +150,7 @@ A line rexboard cannot read restarts that host's observer the same way: a line t
 | Exit | When |
 | --- | --- |
 | 0 | `--for` elapsed, Ctrl-C or SIGTERM, or stdout closed |
-| 1 | `REX_NOT_FOUND`: no `rex` CLI. `REX`: `rex hosts` failed. `CONTRACT_MISMATCH`: every host stopped and the last one stopped on a version mismatch; next steps `rexboard --version` and `brew upgrade rexboard` |
+| 1 | `REX_NOT_FOUND`: no `rex` CLI. `REX`: `rex hosts` failed. `CONTRACT_MISMATCH`: every host stopped and the last one stopped on a version mismatch; next steps `rexboard --version` and `rexboard upgrade` |
 | 2 | `USAGE`: neither `--json` nor `--raw`, a bad flag, or `--host` names no host |
 
 ## `rexboard board`
@@ -218,13 +218,13 @@ rexboard upgrade           # upgrade to the latest release, the way rexboard was
 rexboard upgrade --check   # only say whether a newer release is out
 ```
 
-`upgrade` asks GitHub for the latest release (the tag `releases/latest` points to, through `curl`). When this rexboard is that version or newer it prints `already the latest (0.4.0)` and changes nothing. Otherwise it upgrades the binary it runs from, found from its own path with links resolved:
+`upgrade` asks GitHub for the latest release (the tag `releases/latest` points to, through `curl`). When this rexboard is that version it prints `rexboard 0.4.0 is the latest`, as `--check` does, and changes nothing (a newer build says `rexboard 0.5.0 (the latest release is 0.4.0)`). When a newer release is out, `--check` prints `0.4.0 is out (you have 0.3.0): run rexboard upgrade`. Otherwise it upgrades the binary it runs from, found from its own path with links resolved:
 
 - under a Homebrew `Cellar`: `brew upgrade vanducng/tap/rexboard`;
-- anywhere else: the release's `install.sh`, into the same directory (`REXBOARD_INSTALL_DIR`), which checks the archive against `SHA256SUMS`;
-- a cargo build (`target/debug` or `target/release`) or `~/.cargo/bin`, and a directory you cannot write: nothing runs, and the command fails with `UPGRADE`, naming what to run instead. It never uses `sudo`.
+- anywhere else: the release's `install.sh`, into the same directory (`REXBOARD_INSTALL_DIR`), which checks the archive against `SHA256SUMS`. It is fetched into a new private directory (`mktemp -d`), which is removed after;
+- a cargo build (a `target` directory with `debug` or `release` under it), a `cargo install`, a binary not named `rexboard`, or a directory you cannot write: nothing runs. The command fails with `UPGRADE` and names what to run instead; for a directory you cannot write, that is the same installer with your own `sudo`. rexboard never runs `sudo` itself.
 
-The output of `brew` or `install.sh` goes to stderr. Then the new binary is asked its version: `upgraded rexboard 0.3.0 -> 0.4.0`. serve is stopped (as `serve --stop` does), so the next command starts the new one; a board that is open keeps running the old version until you reopen it. `update` is another name for `upgrade`.
+The output of `brew` or `install.sh` goes to stderr. Then the new binary is asked its version: `upgraded rexboard 0.3.0 -> 0.4.0; serve stopped, the next command starts the new one; reopen an open board`. serve is stopped as `serve --stop` does, and a board that is open keeps running the old version until you reopen it. Right after a release, the Homebrew tap and the release archives can lag `releases/latest` by a few minutes: brew then leaves the old version (`the tap may not have 0.4.0 yet`, next steps `brew update` and `rexboard upgrade`), and `install.sh` fails (`its archives may still be uploading; retry in a few minutes`). `update` is another name for `upgrade`.
 
 With `--json`, `--check` prints `{"ok":true,"current":"0.3.0","latest":"0.4.0","newer":true}`, and `upgrade` prints `{"ok":true,"from":"0.3.0","to":"0.4.0","upgraded":true,"method":"brew","serve_stopped":true}` (`method` is `brew` or `install.sh`; with nothing to do, `{"ok":true,"from":"0.4.0","to":"0.4.0","upgraded":false}`).
 

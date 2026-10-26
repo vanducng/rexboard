@@ -9,6 +9,10 @@ use crate::error::{Error, Result};
 
 const REPO: &str = "vanducng/rexboard";
 const FORMULA: &str = "vanducng/tap/rexboard";
+const INSTALL_SH: &str = "https://raw.githubusercontent.com/vanducng/rexboard/main/install.sh";
+/// Fetches install.sh (`$1`) into a new private directory (mktemp -d: a random name, mode 0700),
+/// so no other user can swap the script, runs it, and removes the directory.
+const FETCH_AND_RUN: &str = r#"d=$(mktemp -d) && trap 'rm -rf "$d"' EXIT && curl -fsSL -o "$d/install.sh" "$1" && sh "$d/install.sh""#;
 
 /// How this binary was installed, from its resolved path.
 #[derive(Debug, PartialEq)]
@@ -17,27 +21,51 @@ pub enum Method {
     Brew { installed: PathBuf },
     /// install.sh into the directory this binary is in.
     Script { dir: PathBuf },
-    /// Neither: how it was installed, and what upgrades it.
-    Other { how: &'static str, run: String },
+    /// Neither: why upgrade leaves it alone, and what upgrades it.
+    Other { why: String, run: String },
 }
 
 pub fn method(exe: &Path) -> Method {
-    let text = exe.to_string_lossy();
-    if let Some((prefix, _)) = text.split_once("/Cellar/rexboard/") {
+    let dir = exe.parent().unwrap_or(Path::new("/")).to_owned();
+    let name = exe.file_name().unwrap_or_default().to_string_lossy();
+    if name != "rexboard" {
+        return Method::Other {
+            why: format!(
+                "this rexboard is named {name} ({}), and only a binary named rexboard is replaced",
+                exe.display()
+            ),
+            run: format!(
+                "curl -fsSL {INSTALL_SH} | REXBOARD_INSTALL_DIR={} sh",
+                dir.display()
+            ),
+        };
+    }
+    if let Some((prefix, _)) = exe.to_string_lossy().split_once("/Cellar/rexboard/") {
         return Method::Brew {
             installed: Path::new(prefix).join("opt/rexboard/bin/rexboard"),
         };
     }
-    let dir = exe.parent().unwrap_or(Path::new("/")).to_owned();
-    if dir.ends_with("target/debug") || dir.ends_with("target/release") {
+    let parts: Vec<_> = dir.iter().collect();
+    let cargo_build = parts.iter().position(|p| *p == "target").is_some_and(|at| {
+        parts[at + 1..]
+            .iter()
+            .any(|p| *p == "debug" || *p == "release")
+    });
+    if cargo_build {
         return Method::Other {
-            how: "a cargo build",
+            why: format!(
+                "this rexboard is a cargo build ({}); upgrade it the same way",
+                exe.display()
+            ),
             run: "git pull && cargo build --release".to_owned(),
         };
     }
     if dir.ends_with(".cargo/bin") {
         return Method::Other {
-            how: "installed with cargo install",
+            why: format!(
+                "this rexboard was installed with cargo install ({}); upgrade it the same way",
+                exe.display()
+            ),
             run: format!("cargo install --locked --git https://github.com/{REPO}"),
         };
     }
@@ -65,6 +93,7 @@ pub enum Outcome {
     },
     Latest {
         current: String,
+        latest: String,
     },
     Upgraded {
         from: String,
@@ -85,18 +114,11 @@ pub fn upgrade(sys: &mut impl System, exe: &Path, current: &str, check: bool) ->
     if !older(current, &latest) {
         return Ok(Outcome::Latest {
             current: current.to_owned(),
+            latest,
         });
     }
     let (installed, how) = match method(exe) {
-        Method::Other { how, run } => {
-            return Err(Error::upgrade(
-                format!(
-                    "this rexboard is {how} ({}), so upgrade it the same way",
-                    exe.display()
-                ),
-                &[&run],
-            ));
-        }
+        Method::Other { why, run } => return Err(Error::upgrade(why, &[&run])),
         Method::Brew { installed } => {
             sys.run("brew", &["upgrade", FORMULA], &[])?;
             (installed, "brew")
@@ -108,6 +130,15 @@ pub fn upgrade(sys: &mut impl System, exe: &Path, current: &str, check: bool) ->
     };
     let to = sys.version_of(&installed).unwrap_or_default();
     if !older(current, &to) {
+        if how == "brew" && to == current {
+            return Err(Error::upgrade(
+                format!(
+                    "after brew upgrade, rexboard is still {current}: the tap may not have \
+                     {latest} yet; it follows a release by a few minutes"
+                ),
+                &["brew update", "rexboard upgrade"],
+            ));
+        }
         let said = if to.is_empty() { "no version" } else { &to };
         return Err(Error::upgrade(
             format!(
@@ -131,27 +162,46 @@ pub fn upgrade(sys: &mut impl System, exe: &Path, current: &str, check: bool) ->
 
 /// Runs the release's own install.sh into `dir`, the directory this binary is in.
 fn install_sh(sys: &mut impl System, dir: &Path, latest: &str) -> Result<()> {
+    let shown = dir.display();
     if !sys.writable(dir) {
         return Err(Error::upgrade(
-            format!("cannot write {}, where this rexboard is", dir.display()),
-            &[&format!("brew install {FORMULA}")],
+            format!("cannot write {shown}, where this rexboard is, and rexboard never runs sudo"),
+            &[
+                &format!("curl -fsSL {INSTALL_SH} | sudo REXBOARD_INSTALL_DIR={shown} sh"),
+                &format!("sudo rm {shown}/rexboard && brew install {FORMULA}"),
+            ],
         ));
     }
     let tag = format!("v{latest}");
-    let script = std::env::temp_dir().join(format!("rexboard-install-{}.sh", std::process::id()));
-    let script = script.to_string_lossy();
     let url = format!("https://raw.githubusercontent.com/{REPO}/{tag}/install.sh");
-    sys.run("curl", &["-fsSL", "-o", &script, &url], &[])?;
-    let ran = sys.run(
+    sys.run(
         "sh",
-        &[&script],
+        &["-c", FETCH_AND_RUN, "sh", &url],
         &[
-            ("REXBOARD_INSTALL_DIR", &dir.to_string_lossy()),
+            ("REXBOARD_INSTALL_DIR", &shown.to_string()),
             ("REXBOARD_VERSION", &tag),
         ],
-    );
-    let _ = std::fs::remove_file(&*script);
-    ran
+    )
+    .map_err(|_| {
+        Error::upgrade(
+            format!(
+                "install.sh did not install {latest}: its archives may still be uploading; \
+                 retry in a few minutes"
+            ),
+            &["rexboard upgrade"],
+        )
+    })
+}
+
+/// What `--check`, and an upgrade with nothing to do, say.
+fn standing(current: &str, latest: &str) -> String {
+    if older(current, latest) {
+        format!("{latest} is out (you have {current}): run rexboard upgrade")
+    } else if current == latest {
+        format!("rexboard {current} is the latest")
+    } else {
+        format!("rexboard {current} (the latest release is {latest})")
+    }
 }
 
 /// The version in the URL `releases/latest` redirects to, as in `.../releases/tag/v0.4.0`.
@@ -223,20 +273,12 @@ pub fn run(check: bool, as_json: bool) -> Result<()> {
     let exe = exe.canonicalize().unwrap_or(exe);
     let outcome = upgrade(&mut Real, &exe, &crate::serve::version(), check)?;
     let (line, body) = match outcome {
-        Outcome::Checked { current, latest } => {
-            let newer = older(&current, &latest);
-            let line = if newer {
-                format!("rexboard {current}; {latest} is out: rexboard upgrade")
-            } else {
-                format!("rexboard {current} is the latest")
-            };
-            (
-                line,
-                json!({ "ok": true, "current": current, "latest": latest, "newer": newer }),
-            )
-        }
-        Outcome::Latest { current } => (
-            format!("already the latest ({current})"),
+        Outcome::Checked { current, latest } => (
+            standing(&current, &latest),
+            json!({ "ok": true, "current": current, "latest": latest, "newer": older(&current, &latest) }),
+        ),
+        Outcome::Latest { current, latest } => (
+            standing(&current, &latest),
             json!({ "ok": true, "from": current, "to": current, "upgraded": false }),
         ),
         Outcome::Upgraded {
@@ -249,6 +291,7 @@ pub fn run(check: bool, as_json: bool) -> Result<()> {
             if serve_stopped {
                 line.push_str("; serve stopped, the next command starts the new one");
             }
+            line.push_str("; reopen an open board");
             (
                 line,
                 json!({ "ok": true, "from": from, "to": to, "upgraded": true, "method": method, "serve_stopped": serve_stopped }),
@@ -273,6 +316,7 @@ mod tests {
         latest: &'static str,
         after: Option<&'static str>,
         writable: bool,
+        fails: bool,
         ran: Vec<String>,
         stops: usize,
     }
@@ -282,6 +326,7 @@ mod tests {
             latest,
             after,
             writable: true,
+            fails: false,
             ran: Vec::new(),
             stops: 0,
         }
@@ -299,6 +344,9 @@ mod tests {
                 envs.collect::<String>(),
                 args.join(" ")
             ));
+            if self.fails {
+                return Err(Error::upgrade(format!("{program} failed"), &[]));
+            }
             Ok(())
         }
 
@@ -339,19 +387,36 @@ mod tests {
                 dir: path("/Users/u/.local/bin").to_owned()
             }
         );
-        for (exe, how) in [
+        for (exe, why) in [
             ("/work/rexboard/target/release/rexboard", "a cargo build"),
             ("/work/rexboard/target/debug/rexboard", "a cargo build"),
+            (
+                "/work/rexboard/target/aarch64-apple-darwin/release/rexboard",
+                "a cargo build",
+            ),
             (
                 "/Users/u/.cargo/bin/rexboard",
                 "installed with cargo install",
             ),
+            ("/Users/u/.local/bin/rexboard-0.3", "named rexboard-0.3"),
+            (
+                "/opt/homebrew/Cellar/rexboard/0.3.0/bin/rb",
+                "only a binary named rexboard",
+            ),
         ] {
             assert!(
-                matches!(method(path(exe)), Method::Other { how: h, .. } if h == how),
-                "{exe}"
+                matches!(method(path(exe)), Method::Other { why: w, .. } if w.contains(why)),
+                "{exe}: {:?}",
+                method(path(exe))
             );
         }
+        assert!(
+            matches!(
+                method(path("/tmp/build/release/rexboard")),
+                Method::Script { .. }
+            ),
+            "a release dir outside a target dir is an ordinary install"
+        );
     }
 
     #[test]
@@ -389,7 +454,8 @@ mod tests {
             assert_eq!(
                 upgrade(&mut sys, exe, current, false).unwrap(),
                 Outcome::Latest {
-                    current: current.into()
+                    current: current.into(),
+                    latest: "0.4.0".into()
                 }
             );
             assert!(sys.ran.is_empty(), "{current}");
@@ -426,25 +492,57 @@ mod tests {
                 ..
             }
         ));
-        let [curl, sh] = sys.ran.as_slice() else {
-            panic!("{:?}", sys.ran);
-        };
-        let script = curl
-            .strip_prefix("curl -fsSL -o ")
-            .and_then(|rest| {
-                rest.strip_suffix(
-                    " https://raw.githubusercontent.com/vanducng/rexboard/v0.4.0/install.sh",
-                )
-            })
-            .unwrap_or_else(|| panic!("{curl}"));
         assert_eq!(
-            sh,
-            &format!(
-                "REXBOARD_INSTALL_DIR=/Users/u/.local/bin REXBOARD_VERSION=v0.4.0 sh {script}"
-            )
+            sys.ran,
+            [format!(
+                "REXBOARD_INSTALL_DIR=/Users/u/.local/bin REXBOARD_VERSION=v0.4.0 sh -c {FETCH_AND_RUN} \
+                 sh https://raw.githubusercontent.com/vanducng/rexboard/v0.4.0/install.sh"
+            )]
         );
-        assert!(!sh.contains("sudo"));
+        assert!(
+            FETCH_AND_RUN.contains("mktemp -d") && !FETCH_AND_RUN.contains("https://"),
+            "a private dir, and the URL as an argument"
+        );
+        assert!(!sys.ran[0].contains("sudo"));
         assert_eq!(sys.stops, 1);
+    }
+
+    #[test]
+    fn install_sh_runs_from_a_private_dir_that_is_removed_after() {
+        let dir = tempfile::tempdir().unwrap();
+        let (script, out) = (dir.path().join("install.sh"), dir.path().join("out"));
+        std::fs::write(
+            &script,
+            r#"here=$(dirname "$0"); ls -ld "$here" | cut -c1-10 > "$OUT"; echo "$here $REXBOARD_INSTALL_DIR" >> "$OUT""#,
+        )
+        .unwrap();
+        let url = format!("file://{}", script.display());
+        let status = Command::new("sh")
+            .args(["-c", FETCH_AND_RUN, "sh", &url])
+            .env("OUT", &out)
+            .env("REXBOARD_INSTALL_DIR", "/x/bin")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let text = std::fs::read_to_string(&out).unwrap();
+        let (mode, rest) = text.split_once('\n').unwrap();
+        let (here, target) = rest.trim().split_once(' ').unwrap();
+        assert_eq!(mode, "drwx------", "only this user can reach the script");
+        assert_eq!(target, "/x/bin");
+        assert!(!Path::new(here).exists(), "{here} is removed after");
+    }
+
+    #[test]
+    fn what_check_and_nothing_to_do_say() {
+        assert_eq!(
+            standing("0.3.0", "0.4.0"),
+            "0.4.0 is out (you have 0.3.0): run rexboard upgrade"
+        );
+        assert_eq!(standing("0.4.0", "0.4.0"), "rexboard 0.4.0 is the latest");
+        assert_eq!(
+            standing("0.5.0", "0.4.0"),
+            "rexboard 0.5.0 (the latest release is 0.4.0)"
+        );
     }
 
     #[test]
@@ -472,6 +570,15 @@ mod tests {
             err.to_string().contains("cannot write /usr/local/bin"),
             "{err}"
         );
+        assert_eq!(
+            err.next_steps(),
+            [
+                "curl -fsSL https://raw.githubusercontent.com/vanducng/rexboard/main/install.sh \
+                 | sudo REXBOARD_INSTALL_DIR=/usr/local/bin sh",
+                "sudo rm /usr/local/bin/rexboard && brew install vanducng/tap/rexboard",
+            ],
+            "the same installer into the same dir, with the user's own sudo"
+        );
         assert!(sys.ran.is_empty());
         assert_eq!(sys.stops, 0);
     }
@@ -483,10 +590,27 @@ mod tests {
         let err = upgrade(&mut sys, exe, "0.3.0", false).unwrap_err();
         assert!(
             err.to_string().contains(
-                "after brew, /opt/homebrew/opt/rexboard/bin/rexboard reports 0.3.0, not 0.4.0"
+                "rexboard is still 0.3.0: the tap may not have 0.4.0 yet; it follows a release by a few minutes"
             ),
             "{err}"
         );
+        assert_eq!(err.next_steps(), ["brew update", "rexboard upgrade"]);
+        assert_eq!(sys.stops, 0);
+        let mut sys = fake("0.4.0", None);
+        sys.fails = true;
+        let err = upgrade(
+            &mut sys,
+            Path::new("/Users/u/.local/bin/rexboard"),
+            "0.3.0",
+            false,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("its archives may still be uploading; retry in a few minutes"),
+            "{err}"
+        );
+        assert_eq!(err.next_steps(), ["rexboard upgrade"]);
         assert_eq!(sys.stops, 0);
     }
 
