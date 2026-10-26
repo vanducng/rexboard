@@ -210,3 +210,25 @@ Each lands the Rex app on the pane, on its host, and marks it seen through serve
 | 0 | Jumped |
 | 1 | `NOBODY_NEEDS_YOU`: `next`, or `jump N`, with nothing in `needs_you`; prints `nobody needs you`. `NOT_FOUND`: no such key, or no row N. `AMBIGUOUS_CLIENT`: no app client named, and no app connected, none on the unix socket, or more than one there; the message says which, and the next steps name each app (`open the Rex app` when there is none). `CONFIG`: config.toml cannot be read or has an unknown key, or `client` names no app. `REX`: a step in Rex failed; the message names it. `pick`: esc |
 | 2 | `USAGE`: TARGET is neither a key nor a number, or `pick` without a terminal |
+
+## `rexboard upgrade`
+
+```bash
+rexboard upgrade           # upgrade to the latest release, the way rexboard was installed
+rexboard upgrade --check   # only say whether a newer release is out
+```
+
+`upgrade` asks GitHub for the latest release (the tag `releases/latest` points to, through `curl`). When this rexboard is that version or newer it prints `already the latest (0.4.0)` and changes nothing. Otherwise it upgrades the binary it runs from, found from its own path with links resolved:
+
+- under a Homebrew `Cellar`: `brew upgrade vanducng/tap/rexboard`;
+- anywhere else: the release's `install.sh`, into the same directory (`REXBOARD_INSTALL_DIR`), which checks the archive against `SHA256SUMS`;
+- a cargo build (`target/debug` or `target/release`) or `~/.cargo/bin`, and a directory you cannot write: nothing runs, and the command fails with `UPGRADE`, naming what to run instead. It never uses `sudo`.
+
+The output of `brew` or `install.sh` goes to stderr. Then the new binary is asked its version: `upgraded rexboard 0.3.0 -> 0.4.0`. serve is stopped (as `serve --stop` does), so the next command starts the new one; a board that is open keeps running the old version until you reopen it. `update` is another name for `upgrade`.
+
+With `--json`, `--check` prints `{"ok":true,"current":"0.3.0","latest":"0.4.0","newer":true}`, and `upgrade` prints `{"ok":true,"from":"0.3.0","to":"0.4.0","upgraded":true,"method":"brew","serve_stopped":true}` (`method` is `brew` or `install.sh`; with nothing to do, `{"ok":true,"from":"0.4.0","to":"0.4.0","upgraded":false}`).
+
+| Exit | When |
+| --- | --- |
+| 0 | Upgraded, already the latest, or checked |
+| 1 | `UPGRADE`: the latest release could not be found, `brew` or `install.sh` failed, the binary still reports the old version afterwards, or this install is not one `upgrade` can replace; the next step says what to run |

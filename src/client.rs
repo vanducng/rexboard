@@ -282,7 +282,7 @@ fn serve_version(paths: &Paths) -> Version {
 }
 
 /// Whether version `a` comes before `b`, by their dotted numbers; never for one that is not.
-fn older(a: &str, b: &str) -> bool {
+pub(crate) fn older(a: &str, b: &str) -> bool {
     let parts = |v: &str| -> Option<Vec<u64>> { v.split('.').map(|p| p.parse().ok()).collect() };
     matches!((parts(a), parts(b)), (Some(a), Some(b)) if a < b)
 }
@@ -596,7 +596,7 @@ pub fn stop_serve(json: bool) -> Result<()> {
 }
 
 /// Stops the serve on `paths`; false when none was running.
-fn stop(paths: &Paths) -> Result<bool> {
+pub(crate) fn stop(paths: &Paths) -> Result<bool> {
     let pid = match connect(paths)? {
         Some(mut stream) => {
             let pid = recorded_pid(paths);
