@@ -95,10 +95,15 @@ fn board(pick: bool) -> Result<Option<Row>> {
                         }
                         changed = true;
                     }
-                    Event::Mouse(click)
-                        if click.kind == MouseEventKind::Down(MouseButton::Left) =>
-                    {
-                        app.click(click.column, click.row);
+                    Event::Mouse(mouse) => {
+                        match mouse.kind {
+                            MouseEventKind::Down(MouseButton::Left) => {
+                                app.click(mouse.column, mouse.row);
+                            }
+                            MouseEventKind::ScrollUp => app.scroll(true),
+                            MouseEventKind::ScrollDown => app.scroll(false),
+                            _ => {}
+                        }
                         changed = true;
                     }
                     Event::Resize(..) => changed = true,

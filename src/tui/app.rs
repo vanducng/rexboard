@@ -92,6 +92,10 @@ pub struct App {
     pub view: View,
     pub sort: Option<Sort>,
     told_ctrl_s: bool,
+    told_table: bool,
+    /// Where the list's rows were last drawn: the first row's line, the first item shown, and
+    /// how many rows fit. The draw sets it, so a click can find the row under it.
+    pub drawn: std::cell::Cell<(u16, usize, usize)>,
     pub folded: BTreeSet<Bucket>,
     pub peek: Option<Peek>,
     /// The `?` key table is open in the detail pane.
@@ -272,6 +276,10 @@ impl App {
             self.unfold_all();
         }
         self.view = view;
+        if self.clicks() && !self.told_table {
+            self.told_table = true;
+            self.say("click a header to sort · hold Option (iTerm2) or Shift to select text");
+        }
         // A row in a group this view keeps folded rests on that group's header, as `z` does.
         if let Some(group) = self.current().and_then(|row| bucket(&self.view, row))
             && self.folded.contains(&group)
@@ -346,18 +354,36 @@ impl App {
         self.view.group_by.is_none() && !self.pick
     }
 
-    /// A click at `x`, `y`: on a column's header cell it sorts as that column's letter does.
+    /// A click at `x`, `y` in the table view: on a column's header cell it sorts as that
+    /// column's letter does, on its arrow it flips the sort, and on a row it selects the row.
     pub fn click(&mut self, x: u16, y: u16) {
         use super::detail::{columns_board, list};
         use super::view::{HEADED, HEADER_ROW};
-        if !self.clicks() || self.height < HEADED || y != HEADER_ROW {
+        let items = self.items();
+        let list = usize::from(list(self.width, self.detail, self.pick));
+        if !self.clicks() || items.is_empty() || usize::from(x) >= list {
             return;
         }
-        let list = usize::from(list(self.width, self.detail, self.pick));
-        let columns = Columns::new(columns_board(self.width, list, self.pick), list);
-        if let Some(letter) = columns.at(usize::from(x)).and_then(|c| c.letter) {
-            self.sort_by(letter);
+        if self.height >= HEADED && y == HEADER_ROW {
+            let columns = Columns::new(columns_board(self.width, list, self.pick), list);
+            if let Some(letter) = columns.at(usize::from(x), self.sort).and_then(|c| c.letter) {
+                self.sort_by(letter);
+            }
+            return;
         }
+        let (first, offset, room) = self.drawn.get();
+        if let Some(below) = y.checked_sub(first).map(usize::from)
+            && below < room
+            && let Some(&Item::Row(i)) = items.get(offset + below)
+        {
+            self.selected = Some(Spot::Row(self.rows[i].key.clone()));
+        }
+    }
+
+    /// The wheel moves the selection, as `k` and `j` do; with the mouse captured the terminal no
+    /// longer turns it into arrow keys.
+    pub fn scroll(&mut self, up: bool) {
+        self.step(if up { -1 } else { 1 });
     }
 
     pub fn handle(&mut self, key: KeyEvent) -> Option<Effect> {

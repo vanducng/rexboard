@@ -322,6 +322,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
     };
     let at = items.iter().position(|item| is_selected(app, item));
     let offset = at.map_or(0, |at| (at + 1).saturating_sub(room));
+    app.drawn.set((area.y, offset, room));
     let places = if columns.has(Col::Where) {
         wheres(
             &app.rows,
