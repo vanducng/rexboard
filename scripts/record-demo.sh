@@ -11,9 +11,9 @@
 set -euo pipefail
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo=$(CDPATH= cd -- "$here/.." && pwd)
-# 140 columns: the width at which the list beside the default detail pane splits WHERE.
+# 140x24: SESSION, WINDOW and BLOCK get their own columns, and the turn card has room.
 cols=140
-rows=20
+rows=24
 tmux_socket=zzdemo
 if [[ -x "$HOME/.cargo/bin/cargo" ]]; then
   export PATH="$HOME/.cargo/bin:$PATH"
@@ -62,11 +62,15 @@ ours=1
 hosts=$(rex hosts --json | python3 -c 'import json, sys; print(len(json.load(sys.stdin).get("hosts") or []))')
 [[ "$hosts" == 0 ]] || { echo "the demo Rex server has hosts; refusing to record" >&2; exit 1; }
 
+# Answer mode sends only to a pane whose foreground is an agent, so the demo panes run under a
+# copy of bash named like one.
+mkdir -p "$root/bin"
+cp /bin/bash "$root/bin/claude"
 cat >"$root/pane.sh" <<'PANE'
-# One demo pane: wait for the go file, then play a timeline of titles and status reports.
+# One demo pane: wait for the go file, then play a timeline of titles, screens and status reports.
 seat=$1 go=$2
 title() { printf '\033]2;%s\007' "$1"; }
-report() { # state, message, [kind]
+report() { # state, message (lines joined with " ⏎ "), [kind]
   local kind=""
   [ -n "${3:-}" ] && kind=":kind=$3"
   printf '\033]7501;state=%s%s:app=claude-code:msg=%s\007' "$1" "$kind" "$(printf '%s' "$2" | base64)"
@@ -76,26 +80,33 @@ now=0
 at() { while [ ! -e "$go" ]; do sleep 0.1; done; sleep $(($1 - now)); now=$1; }
 case "$seat" in
   seat-a)
-    title "⠋ seat-a@demo"; printf '$ cargo test --workspace\n   Compiling parser v0.3.0\n'
-    at 0; report working "Running the test suite"
-    at 12; printf 'running 12 tests\ntest parser::nested ... ok\n'; report blocked "Allow Bash: cargo test --workspace" permission
-    at 26; title "⠋ seat-a@demo"; report working "Fixing the nested parser case"
-    at 36; title "✳ seat-a@demo"; printf 'test result: ok. 12 passed\n'; report done "Tests pass: 12 passed" ;;
+    title "⠋ seat-a@demo"; printf '● Fixing the nested parser case.\n\n'
+    report working "Fixing the nested parser case"
+    at 5
+    printf '● Bash(cargo test --workspace --features full)\n\n'
+    printf ' Bash command\n\n   cargo test --workspace --features full\n   Run the full test suite\n\n'
+    printf ' Do you want to proceed?\n'
+    printf ' ❯ 1. Yes\n   2. Yes, and don'"'"'t ask again for cargo test commands in /work/api\n'
+    printf '   3. No, and tell Claude what to do differently\n'
+    report blocked "Bash wants to run: cargo test --workspace --features full" permission
+    # The board's answer: one key, read here with nothing else in front.
+    key=; while [ "$key" != 1 ]; do read -r -s -n 1 key; done
+    clear; title "⠋ seat-a@demo"; printf '● Running the full test suite.\n  running 12 tests\n'
+    report working "Running the full test suite"
+    sleep 6; title "✳ seat-a@demo"; printf '  test result: ok. 12 passed\n'
+    report done "Tests pass: 12 passed ⏎ The nested parser case is fixed and covered by a new test. Ready for review." ;;
   seat-b)
-    title "⠋ seat-b@demo"; printf 'Reading src/parser.rs\nReading tests/parser.rs\n'
-    at 0; report working "Reviewing the parser change"
-    at 18; title "✳ seat-b@demo"; printf 'Posted 2 comments\n'; report done "Review posted with 2 comments" ;;
+    title "✳ seat-b@demo"; printf '● Posted 2 comments on the parser change.\n'
+    report done "Review posted with 2 comments ⏎ Both are about naming in src/parser.rs; nothing blocks the merge." ;;
   seat-c)
     title "✳ seat-c@demo"
-    printf 'Read src/app.tsx (84 lines)\nRead src/board.tsx (120 lines)\n'
-    printf 'Edit src/app.tsx\n'
-    printf '  - import { Board } from "./board";\n  + import { Board, Row } from "./board";\n'
-    printf '  - export function App() {\n  + export function App({ rows }: { rows: Row[] }) {\n'
-    printf '  -   return <Board />;\n  +   return <Board rows={rows} />;\n    }\n'
-    printf '\nAllow Edit to src/app.tsx?\n  1. Yes\n  2. Yes, and allow all edits this session\n  3. No\n'
-    report blocked "Allow Edit: src/app.tsx" permission ;;
+    printf ' ☐ Test runner\n\nWhich test runner should the web package use?\n\n'
+    printf '❯ 1. vitest\n     Fast, native ESM, works with Vite\n  2. jest\n     Familiar, more plugins\n  3. Type something.\n\n'
+    printf 'Enter to select · ↑/↓ to navigate · Esc to cancel\n'
+    report blocked "Which test runner should the web package use? ⏎ 1. vitest: fast, native ESM ⏎ 2. jest: familiar, more plugins" question ;;
   seat-d)
-    title "✳ seat-d@demo"; printf 'Docs updated.\n'; report idle "Waiting for input" ;;
+    title "⠋ seat-d@demo"; printf '● Writing the release notes.\n'
+    report working "Writing the release notes" ;;
   seat-e)
     title "✳ seat-e@demo"; printf 'Ready.\n' ;;
 esac
@@ -103,11 +114,12 @@ exec sleep 600
 PANE
 
 go="$root/go"
-rex new api --window build -- sh "$root/pane.sh" seat-a "$go" >/dev/null
-rex run -s api --focus=false -- sh "$root/pane.sh" seat-b "$go" >/dev/null
-rex new web --window deploy -- sh "$root/pane.sh" seat-c "$go" >/dev/null
-rex run -s web --focus=false -- sh "$root/pane.sh" seat-d "$go" >/dev/null
-rex run -s web --focus=false -- sh "$root/pane.sh" seat-e "$go" >/dev/null
+agent="$root/bin/claude"
+rex new api --window build -- "$agent" "$root/pane.sh" seat-a "$go" >/dev/null
+rex run -s api --focus=false -- "$agent" "$root/pane.sh" seat-b "$go" >/dev/null
+rex new web --window deploy -- "$agent" "$root/pane.sh" seat-c "$go" >/dev/null
+rex run -s web --focus=false -- "$agent" "$root/pane.sh" seat-d "$go" >/dev/null
+rex run -s web --focus=false -- "$agent" "$root/pane.sh" seat-e "$go" >/dev/null
 sleep 1
 # Pane and tab labels, by the seat each pane titles itself with.
 rex do - >/dev/null <<'LUA'
@@ -135,14 +147,16 @@ k() { for key in "$@"; do tmux -L "$tmux_socket" send-keys -t demo "$key"; sleep
 for _ in $(seq 1 100); do tmux -L "$tmux_socket" capture-pane -p -t demo 2>/dev/null | grep -q 'NEEDS YOU' && break; sleep 0.1; done
 sleep 1.5
 touch "$go"
-# The board, then a peek that fills the detail pane, the pane wider and back, one status only,
-# the table view sorted by a column, and the key table.
-sleep 3; k 1; sleep 1; k Space; sleep 4; k Space
-sleep 1; k '>' '>'; sleep 2.5; k '<' '<'
-sleep 1.5; k f p; sleep 3.5; k Escape
-sleep 2; k v; sleep 3; k A; sleep 2.5; k E; sleep 3
-k '?'; sleep 3.5; k '?'
-sleep 6; k q
+# A done row's two-line card; the permission row's ask and screen; `a`, `2` once to show that a
+# lasting option asks again, then `1`, answers it from the board; the question row zoomed; the
+# card hidden and back; `tab` through the rows that need you.
+sleep 2; k 2; sleep 3.5
+k 2; sleep 3
+k a; sleep 4.5; k 2; sleep 2; k 1; sleep 3.5
+k 1; sleep 2; k Space; sleep 3; k Space
+sleep 1; k c; sleep 2; k c
+sleep 1; k Tab; sleep 2.5; k Tab; sleep 3
+k q
 for _ in $(seq 1 100); do tmux -L "$tmux_socket" has-session -t demo 2>/dev/null || break; sleep 0.1; done
 
 python3 - "$cast" "${REXBOARD_DEMO_DENY:-}" <<'PY'
@@ -154,6 +168,11 @@ header["command"] = "rexboard board"
 header.pop("env", None)
 header.get("term", {}).pop("type", None)
 lines[0] = json.dumps(header)
+# End on the board, not on the screen it leaves behind when it quits.
+for i, line in enumerate(lines[1:], 1):
+    if line.strip() and "\x1b[?1049l" in json.loads(line)[2]:
+        lines = lines[:i]
+        break
 blob = "\n".join(lines)
 deny = ["/Users/", "/home/", "/tmp/", "/private/", "claude.ai", ".ts.net"]
 if deny_file:
