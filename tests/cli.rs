@@ -651,9 +651,32 @@ impl Serve {
 }
 
 impl Drop for Serve {
+    /// Stops until serve.lock stays free for 200ms: a spare serve that a racing command started
+    /// can take the lock after the first stop.
     fn drop(&mut self) {
-        let _ = self.cmd().args(["serve", "--stop"]).ok();
+        let lock = self.file("serve.lock");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
+            let _ = self.cmd().args(["serve", "--stop"]).ok();
+            let free_since = std::time::Instant::now();
+            while !held(&lock) {
+                if free_since.elapsed() >= std::time::Duration::from_millis(200) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        }
     }
+}
+
+/// Whether something holds the flock on `path`, as rexboard's own probe asks.
+fn held(path: &std::path::Path) -> bool {
+    use std::os::fd::AsRawFd;
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) };
+    rc != 0
 }
 
 /// Polls `check` every 20ms for up to 10s.
@@ -761,7 +784,7 @@ fn hold_lock(serve: &Serve) -> (std::process::Child, i32) {
 }
 
 #[test]
-fn a_held_lock_without_a_socket_names_the_serve_to_stop() {
+fn a_lock_held_by_another_program_is_left_alone() {
     let serve = Serve::new();
     let (mut sh, pid) = hold_lock(&serve);
     let out = serve
@@ -773,16 +796,190 @@ fn a_held_lock_without_a_socket_names_the_serve_to_stop() {
         .stderr
         .clone();
     let text = String::from_utf8_lossy(&out);
+    let alive = unsafe { libc::kill(pid, 0) } == 0;
     unsafe { libc::kill(pid, libc::SIGTERM) };
     sh.wait().unwrap();
+    assert!(alive, "the holder was not signalled");
     assert!(
-        text.contains(&format!("serve (pid {pid}) holds"))
-            && text.contains("does not answer on")
-            && text.contains("the next command starts a new one"),
+        text.contains(&format!(
+            "serve.lock names pid {pid}, which does not answer and is not rexboard, so it was left alone"
+        )),
         "{text}"
     );
-    assert!(text.contains("rexboard serve --stop"), "{text}");
+    assert!(text.contains("kill <the pid lsof shows>"), "{text}");
+    assert!(!text.contains("restarted serve"), "{text}");
     assert_eq!(serve.observer_starts(), 0, "no second serve was started");
+}
+
+/// The lines `rexboard ls --json` printed on stderr, and its rows.
+fn ls_with_stderr(cmd: &mut Command) -> (String, Vec<serde_json::Value>) {
+    let out = cmd
+        .args(["ls", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    (
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+        serde_json::from_slice(&out.stdout).unwrap(),
+    )
+}
+
+#[test]
+fn a_rexboard_serve_that_does_not_answer_is_replaced_once() {
+    let serve = Serve::new();
+    serve.rows(&[]);
+    let old = serve.pid();
+    // Still serve, still holding the lock, but nobody can reach it, as after an upgrade that
+    // moved the socket.
+    std::fs::remove_file(serve.socket()).unwrap();
+    let (said, rows) = ls_with_stderr(&mut serve.cmd());
+    assert!(!rows.is_empty());
+    assert!(
+        said.contains(&format!("restarted serve (pid {old} did not answer) -> ")),
+        "{said}"
+    );
+    assert_ne!(
+        unsafe { libc::kill(old as i32, 0) },
+        0,
+        "serve {old} is gone"
+    );
+    assert_ne!(serve.pid(), old, "a new serve holds the lock");
+    let log = std::fs::read_to_string(serve.file("serve.log")).unwrap();
+    assert_eq!(log.matches("restarted serve").count(), 1, "{log}");
+    let (said, _) = ls_with_stderr(&mut serve.cmd());
+    assert!(!said.contains("restarted"), "only once: {said}");
+}
+
+/// Runs `ls --json` 12 times at once; the stderr of each one that failed.
+fn twelve_at_once(serve: &Serve) -> Vec<String> {
+    let clients: Vec<_> = (0..12)
+        .map(|_| {
+            std::process::Command::new(assert_cmd::cargo::cargo_bin("rexboard"))
+                .env_remove("XDG_RUNTIME_DIR")
+                .envs(serve.envs())
+                .args(["ls", "--json"])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    clients
+        .into_iter()
+        .map(|client| client.wait_with_output().unwrap())
+        .filter(|out| !out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stderr).into_owned())
+        .collect()
+}
+
+fn restarts(serve: &Serve) -> usize {
+    std::fs::read_to_string(serve.file("serve.log"))
+        .unwrap_or_default()
+        .matches("restarted serve")
+        .count()
+}
+
+#[test]
+fn many_commands_at_once_heal_a_silent_serve_once_and_all_get_rows() {
+    let serve = Serve::new();
+    serve.rows(&[]);
+    std::fs::remove_file(serve.socket()).unwrap();
+    let failed = twelve_at_once(&serve);
+    assert!(failed.is_empty(), "every command got rows: {failed:#?}");
+    assert_eq!(restarts(&serve), 1, "one restart");
+}
+
+#[test]
+fn many_commands_at_once_replace_an_older_serve_once() {
+    let serve = Serve::new();
+    serve
+        .cmd()
+        .env("REXBOARD_TEST_VERSION", "0.0.1")
+        .arg("serve")
+        .assert()
+        .success();
+    let failed = twelve_at_once(&serve);
+    assert!(failed.is_empty(), "every command got rows: {failed:#?}");
+    assert_eq!(restarts(&serve), 1, "one restart");
+}
+
+#[test]
+fn an_older_serve_is_restarted_once_and_a_newer_one_is_kept() {
+    let serve = Serve::new();
+    serve
+        .cmd()
+        .env("REXBOARD_TEST_VERSION", "0.0.1")
+        .arg("serve")
+        .assert()
+        .success();
+    let old = serve.pid();
+    let (said, rows) = ls_with_stderr(&mut serve.cmd());
+    assert!(!rows.is_empty());
+    let mine = env!("CARGO_PKG_VERSION");
+    assert!(
+        said.contains(&format!("restarted serve 0.0.1 -> {mine}")),
+        "{said}"
+    );
+    assert_ne!(serve.pid(), old, "a new serve holds the lock");
+    let (said, _) = ls_with_stderr(&mut serve.cmd());
+    assert!(
+        !said.contains("restarted"),
+        "the same version stays: {said}"
+    );
+
+    let newer = Serve::new();
+    newer
+        .cmd()
+        .env("REXBOARD_TEST_VERSION", "99.0.0")
+        .arg("serve")
+        .assert()
+        .success();
+    let kept = newer.pid();
+    let (said, _) = ls_with_stderr(&mut newer.cmd());
+    assert!(!said.contains("restarted"), "a newer serve is kept: {said}");
+    assert_eq!(newer.pid(), kept);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn serve_stop_finds_a_serve_whose_binary_was_deleted() {
+    let serve = Serve::new();
+    let bin_dir = tempfile::tempdir().unwrap();
+    let copy = bin_dir.path().join("rexboard");
+    std::fs::copy(assert_cmd::cargo::cargo_bin("rexboard"), &copy).unwrap();
+    // Under sh, which reaps it, so like a real serve it is not the test's child.
+    let mut sh = std::process::Command::new("sh")
+        .args(["-c", r#""$0" serve --foreground >/dev/null 2>&1 & wait"#])
+        .arg(&copy)
+        .env_remove("XDG_RUNTIME_DIR")
+        .envs(serve.envs())
+        .spawn()
+        .unwrap();
+    eventually("the copied serve answers", || serve.socket().exists());
+    let pid = serve.pid();
+    // A failed assertion must not leave the copied serve running and cargo test waiting on sh.
+    struct Kill(i64);
+    impl Drop for Kill {
+        fn drop(&mut self) {
+            unsafe { libc::kill(self.0 as i32, libc::SIGKILL) };
+        }
+    }
+    let _kill = Kill(pid);
+    std::fs::remove_file(&copy).unwrap();
+    std::fs::remove_file(serve.socket()).unwrap();
+    serve
+        .cmd()
+        .args(["serve", "--stop"])
+        .assert()
+        .success()
+        .stdout("serve stopped\n");
+    sh.wait().unwrap();
+    assert_ne!(
+        unsafe { libc::kill(pid as i32, 0) },
+        0,
+        "serve {pid} is gone"
+    );
 }
 
 #[test]
@@ -824,9 +1021,9 @@ fn serve_stop_signals_nothing_when_the_lock_names_another_program() {
     assert!(alive, "the holder was not signalled");
     assert!(
         text.contains(&format!(
-            "serve.lock names pid {pid}, which is not rexboard"
-        )),
-        "{text}"
+            "serve.lock names pid {pid}, which does not answer and is not rexboard, so it was left alone"
+        )) && !text.contains("retry"),
+        "the same refusal as any command's: {text}"
     );
 }
 
