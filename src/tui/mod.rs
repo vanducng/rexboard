@@ -18,7 +18,7 @@ mod vt;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -35,8 +35,54 @@ use crate::state::Paths;
 use crate::{interrupted, jump, rex, send, stop_on_signals};
 
 use app::{App, Effect, Link};
-use effects::{act, apply, listen, tui_json};
+use effects::{Msg, act, apply, listen, tui_json};
 use screen::Screen;
+
+/// The board as tui.json, the environment and the pane it runs in set it up.
+fn start_app(pick: bool) -> App {
+    let mut app = App::default();
+    app.pick = pick;
+    let prefs = tui_json()
+        .map(|path| prefs::load(&path))
+        .unwrap_or_default();
+    app.hidden = prefs.detail_hidden;
+    app.motion = prefs.motion;
+    app.icons = prefs.icons;
+    app.nerd = match std::env::var("REXBOARD_ICONS").as_deref() {
+        Ok("nerd") => true,
+        Ok("text") => false,
+        _ => prefs.icons == prefs::Icons::Nerd,
+    };
+    theme::set_motion(
+        prefs.motion == prefs::Motion::Full
+            && std::env::var("REXBOARD_REDUCED_MOTION").as_deref() != Ok("1"),
+    );
+    app.own = std::env::var("REX_BLOCK").ok().filter(|id| !id.is_empty());
+    app
+}
+
+/// Applies every message waiting and acts on what they ask: whether any came, or None once the
+/// senders are gone.
+fn drain(
+    app: &mut App,
+    rx: &Receiver<Msg>,
+    tx: &Sender<Msg>,
+    generation: &Arc<AtomicU64>,
+) -> Option<bool> {
+    let mut changed = false;
+    loop {
+        match rx.recv_timeout(Duration::ZERO) {
+            Ok(msg) => {
+                if let Some(effect) = apply(app, msg) {
+                    act(effect, tx, generation);
+                }
+                changed = true;
+            }
+            Err(RecvTimeoutError::Timeout) => return Some(changed),
+            Err(RecvTimeoutError::Disconnected) => return None,
+        }
+    }
+}
 
 /// What the process exits with when a signal or a lost terminal ends it.
 static LEAVE_CODE: AtomicI32 = AtomicI32::new(0);
@@ -66,24 +112,7 @@ fn board(pick: bool) -> Result<Option<Row>> {
     // Before the subscriber thread, which may restart serve and say so.
     client::QUIET.store(true, Ordering::Relaxed);
     listen(&tx, &generation);
-    let mut app = App::default();
-    app.pick = pick;
-    let prefs = tui_json()
-        .map(|path| prefs::load(&path))
-        .unwrap_or_default();
-    app.hidden = prefs.detail_hidden;
-    app.motion = prefs.motion;
-    app.icons = prefs.icons;
-    app.nerd = match std::env::var("REXBOARD_ICONS").as_deref() {
-        Ok("nerd") => true,
-        Ok("text") => false,
-        _ => prefs.icons == prefs::Icons::Nerd,
-    };
-    theme::set_motion(
-        prefs.motion == prefs::Motion::Full
-            && std::env::var("REXBOARD_REDUCED_MOTION").as_deref() != Ok("1"),
-    );
-    app.own = std::env::var("REX_BLOCK").ok().filter(|id| !id.is_empty());
+    let mut app = start_app(pick);
     let mut terminal = ratatui::init();
     let _restore = Restore;
     let mut tick = Instant::now();
@@ -116,17 +145,10 @@ fn board(pick: bool) -> Result<Option<Row>> {
                     _ => {}
                 }
             }
-            loop {
-                match rx.recv_timeout(Duration::ZERO) {
-                    Ok(msg) => {
-                        if let Some(effect) = apply(&mut app, msg) {
-                            act(effect, &tx, &generation);
-                        }
-                        changed = true;
-                    }
-                    Err(RecvTimeoutError::Timeout) => break,
-                    Err(RecvTimeoutError::Disconnected) => return Ok(None),
-                }
+            match drain(&mut app, &rx, &tx, &generation) {
+                Some(true) => changed = true,
+                Some(false) => {}
+                None => return Ok(None),
             }
             let now = Instant::now();
             app.note_card(now);
