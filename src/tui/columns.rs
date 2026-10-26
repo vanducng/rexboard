@@ -89,8 +89,8 @@ pub enum Dir {
 impl Dir {
     pub fn arrow(self) -> char {
         match self {
-            Dir::Up => '↑',
-            Dir::Down => '↓',
+            Dir::Up => theme::SORT_UP,
+            Dir::Down => theme::SORT_DOWN,
         }
     }
 
@@ -445,7 +445,7 @@ impl Columns {
             .iter()
             .map(|(c, width)| {
                 let text = match c.id {
-                    Col::Glyph => theme::glyph(row).to_owned(),
+                    Col::Glyph => theme::glyph(row, now).to_owned(),
                     Col::State => state(row),
                     Col::Age => in_state(row, now),
                     Col::Turn => row.last_turn.map_or_else(|| "-".to_owned(), span),

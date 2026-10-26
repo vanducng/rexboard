@@ -6,13 +6,11 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local, Utc};
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 use unicode_width::UnicodeWidthStr;
 
-use super::card::GUTTER;
 use super::screen::{Choice, Screen};
 use super::theme;
 use crate::board::Row;
@@ -205,7 +203,7 @@ impl Answer {
             below.extend(
                 chop(why, width.saturating_sub(1).max(1))
                     .into_iter()
-                    .map(|line| Line::styled(format!(" {line}"), Style::new().fg(Color::Red))),
+                    .map(|line| Line::styled(format!(" {line}"), theme::alert())),
             );
         }
         below.push(self.reply_line(width));
@@ -220,18 +218,19 @@ impl Answer {
     /// `━━ ANSWER → seat-b · web › deploy · local · claude ━━━ captured 11:22:01 · 1s ━━`
     fn bar(&self, now: DateTime<Utc>, width: usize) -> Line<'static> {
         let row = &self.row;
+        let ends = theme::BAR_END;
         let right = match (self.captured, &self.screen) {
             (Some(at), _) => format!(
-                " captured {} · {} ━━",
+                " captured {} · {} {ends}",
                 at.with_timezone(&Local).format("%H:%M:%S"),
                 age(&at.to_rfc3339(), now)
             ),
-            (None, None) => " capturing… ━━".to_owned(),
-            (None, Some(_)) => "━━".to_owned(),
+            (None, None) => format!(" capturing… {ends}"),
+            (None, Some(_)) => ends.to_owned(),
         };
         let place = path(&[row.pane.session.as_str(), row.pane.tab.as_str()], 24);
         let mut parts = vec![name(row), place, row.pane.host.clone(), harness(row)];
-        let room = width.saturating_sub("━━".width() + right.width() + 1);
+        let room = width.saturating_sub(ends.width() + right.width() + 1);
         let text = |parts: &[String]| clean(&format!(" ANSWER → {} ", parts.join(" · ")));
         // Harness, then host, give way before the place is cut.
         while parts.len() > 2 && text(&parts).width() > room {
@@ -239,13 +238,12 @@ impl Answer {
         }
         let left = fit(&text(&parts), room);
         let left = left.trim_end().to_owned() + " ";
-        let fill = width.saturating_sub("━━".width() + left.width() + right.width());
-        let red = Style::new().fg(Color::Red);
+        let fill = width.saturating_sub(ends.width() + left.width() + right.width());
         Line::from(vec![
-            Span::styled("━━", red),
-            Span::styled(left, red.add_modifier(Modifier::BOLD)),
-            Span::styled("━".repeat(fill), red),
-            Span::styled(right, red),
+            Span::styled(ends, theme::alert()),
+            Span::styled(left, theme::alert_label()),
+            Span::styled(theme::RULE.repeat(fill), theme::alert()),
+            Span::styled(right, theme::alert()),
         ])
     }
 
@@ -256,7 +254,7 @@ impl Answer {
             .options
             .last()
             .map_or(screen.lines.len(), |c| c.line + 1);
-        let text = width.saturating_sub(GUTTER.width()).max(1);
+        let text = width.saturating_sub(theme::GUTTER.width()).max(1);
         // Each row, and the digit when it is an option's first row.
         let mut rows: Vec<(Line<'static>, Option<char>)> = Vec::new();
         for (i, line) in screen.lines[..end].iter().enumerate().rev() {
@@ -282,13 +280,13 @@ impl Answer {
                 first.push_str(&mark);
             }
             let style = if choice.is_some() {
-                theme::bright()
+                theme::strong()
             } else {
-                theme::dim()
+                theme::quiet()
             };
             for (at, piece) in pieces.into_iter().enumerate().rev() {
                 let line = Line::from(vec![
-                    Span::styled(GUTTER, theme::dim()),
+                    Span::styled(theme::GUTTER, theme::quiet()),
                     Span::styled(piece, style),
                 ]);
                 rows.push((line, choice.filter(|_| at == 0).map(|c| c.digit)));
@@ -310,7 +308,7 @@ impl Answer {
             return Line::styled(fit(&format!(" sending {what}…"), width), theme::accent());
         }
         if self.screen.is_none() {
-            return Line::styled(fit(" reading the pane…", width), theme::dim());
+            return Line::styled(fit(" reading the pane…", width), theme::quiet());
         }
         if let Some(choice) = self.armed_now(now) {
             let text = format!(" press {} again to send it: {}", choice.digit, choice.label);
@@ -318,11 +316,14 @@ impl Answer {
         }
         // A dialog takes no text, so the reply line shows no cursor to invite it.
         if self.screen.as_ref().is_some_and(|s| !s.options.is_empty()) {
-            return Line::styled(" ›", theme::dim());
+            return Line::styled(format!(" {}", theme::PROMPT), theme::quiet());
         }
         Line::styled(
-            fit(&format!(" › {}▏", self.input.value()), width),
-            theme::bright(),
+            fit(
+                &format!(" {} {}{}", theme::PROMPT, self.input.value(), theme::CURSOR),
+                width,
+            ),
+            theme::strong(),
         )
     }
 
@@ -352,12 +353,12 @@ impl Answer {
         };
         let gap = width.saturating_sub(keys.width() + CHECKED.width());
         if gap < 4 {
-            return Line::styled(fit(&keys, width), theme::bright());
+            return Line::styled(fit(&keys, width), theme::strong());
         }
         Line::from(vec![
-            Span::styled(keys, theme::bright()),
+            Span::styled(keys, theme::strong()),
             Span::raw(" ".repeat(gap)),
-            Span::styled(CHECKED, theme::dim()),
+            Span::styled(CHECKED, theme::quiet()),
         ])
     }
 }
