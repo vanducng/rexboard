@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/vanducng/rexboard/compare/v0.4.0...v0.5.0) (2026-10-26)
+
+
+### Features
+
+* **tui:** peek reads only the end of a pane, within 3 seconds ([#37](https://github.com/vanducng/rexboard/issues/37)) ([fdd7fc1](https://github.com/vanducng/rexboard/commit/fdd7fc1076ff7f3af629e551cee129b0ab254194))
+
 ## [0.4.0](https://github.com/vanducng/rexboard/compare/v0.3.0...v0.4.0) (2026-10-26)
 
 
