@@ -26,8 +26,8 @@ pub fn width(board: u16, share: Option<f64>) -> u16 {
 /// The width whose column set a list `list` wide gets. Beside the pane that is the list plus the
 /// narrowest pane and its rule, so a list squeezed to 61 columns keeps the 100-column set and
 /// TURN shows only when the list itself has room; with no pane on the right it is the board.
-pub fn columns_board(board: u16, list: usize, pick: bool) -> u16 {
-    if board >= 100 && !pick {
+pub fn columns_board(board: u16, list: usize, beside: bool) -> u16 {
+    if beside {
         u16::try_from(list)
             .unwrap_or(u16::MAX)
             .saturating_add(MIN + 1)
@@ -36,10 +36,9 @@ pub fn columns_board(board: u16, list: usize, pick: bool) -> u16 {
     }
 }
 
-/// The list's width on a board `board` wide: beside the pane and its rule from 100 columns, else
-/// the whole board.
-pub fn list(board: u16, share: Option<f64>, pick: bool) -> u16 {
-    if board >= 100 && !pick {
+/// The list's width on a board `board` wide: beside the pane and its rule, else the whole board.
+pub fn list(board: u16, share: Option<f64>, beside: bool) -> u16 {
+    if beside {
         board.saturating_sub(width(board, share) + 1)
     } else {
         board
@@ -59,11 +58,14 @@ pub fn step(board: u16, share: Option<f64>, wider: bool) -> f64 {
     f64::from(width(board, Some(f64::from(next) / f64::from(board)))) / f64::from(board)
 }
 
-#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Prefs {
     /// The detail pane's share of the board's width; none is the default third.
     #[serde(default)]
     pub detail: Option<f64>,
+    /// `c` hid the detail pane; missing is shown.
+    #[serde(default)]
+    pub detail_hidden: bool,
 }
 
 /// A missing or unreadable tui.json is the defaults.
@@ -135,7 +137,7 @@ mod tests {
         board.width = 200;
         let effect = press(&mut board, KeyCode::Char('>'));
         assert_eq!(width(200, board.detail), 76);
-        assert!(matches!(effect, Some(Effect::SaveDetail(share)) if Some(share) == board.detail));
+        assert!(matches!(effect, Some(Effect::SavePrefs(prefs)) if prefs.detail == board.detail));
         press(&mut board, KeyCode::Char('<'));
         press(&mut board, KeyCode::Char('<'));
         assert_eq!(width(200, board.detail), 56);
@@ -196,8 +198,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("rexboard/tui.json");
         assert_eq!(load(&path), Prefs::default(), "missing");
-        save(&path, &Prefs { detail: Some(0.4) }).unwrap();
-        assert_eq!(load(&path), Prefs { detail: Some(0.4) });
+        let kept = Prefs {
+            detail: Some(0.4),
+            detail_hidden: true,
+        };
+        save(&path, &kept).unwrap();
+        assert_eq!(load(&path), kept);
+        std::fs::write(&path, r#"{"detail": 0.4}"#).unwrap();
+        assert!(
+            !load(&path).detail_hidden,
+            "a file from before c shows the pane"
+        );
         for bad in ["{", "[]", r#"{"detail": "wide"}"#, r#"{"detail": -1}"#] {
             std::fs::write(&path, bad).unwrap();
             assert_eq!(load(&path), Prefs::default(), "{bad}");
