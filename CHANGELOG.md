@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/vanducng/rexboard/compare/v0.5.0...v0.6.0) (2026-10-26)
+
+
+### Features
+
+* **tui:** a turn card at the bottom shows how each agent's turn ended ([#40](https://github.com/vanducng/rexboard/issues/40)) ([7987416](https://github.com/vanducng/rexboard/commit/79874167e0da074914814774b6c3a0e8daa2c42b))
+* **tui:** answer an agent from the board with a guarded answer mode ([#42](https://github.com/vanducng/rexboard/issues/42)) ([d9e72ed](https://github.com/vanducng/rexboard/commit/d9e72eda00ce1b1cff28bffce29683bc5d155c1e))
+
 ## [0.5.0](https://github.com/vanducng/rexboard/compare/v0.4.0...v0.5.0) (2026-10-26)
 
 
