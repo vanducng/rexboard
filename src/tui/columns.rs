@@ -395,7 +395,7 @@ mod tests {
     /// The list's width beside the detail pane, or the whole width under it.
     fn list_width(app: &App, width: u16) -> usize {
         if width >= 100 && !app.pick {
-            usize::from(width) - 39
+            usize::from(width) - usize::from(crate::tui::detail::width(width, app.detail)) - 1
         } else {
             usize::from(width)
         }

@@ -30,6 +30,8 @@ pub enum Effect {
     SeenAll(Vec<String>),
     /// Go to this row's pane.
     Jump(Box<Row>),
+    /// Keep the detail pane's new share of the width in tui.json.
+    SaveDetail(f64),
     Reconnect,
     Quit,
 }
@@ -96,6 +98,10 @@ pub struct App {
     pub link: Link,
     /// `rexboard pick`: the list alone; enter goes and esc gives up.
     pub pick: bool,
+    /// The detail pane's share of the width (`<` `>`), from tui.json; none is the default.
+    pub detail: Option<f64>,
+    /// The terminal's width at the last draw, which `<` and `>` move the pane against.
+    pub width: u16,
     /// `going to …` while a jump runs; a second Enter starts nothing.
     pub going: Option<String>,
     /// Why the last jump failed, until the next key.
@@ -487,6 +493,14 @@ impl App {
             KeyCode::Char('r') => {
                 self.link = Link::Connecting;
                 return Some(Effect::Reconnect);
+            }
+            KeyCode::Char(c @ ('<' | '>')) if self.width >= 100 && !self.pick => {
+                let share = super::detail::step(self.width, self.detail, c == '>');
+                self.detail = Some(share);
+                return Some(Effect::SaveDetail(share));
+            }
+            KeyCode::Char('<' | '>') if !self.pick => {
+                self.say("< and > size the detail pane from 100 columns");
             }
             _ => {}
         }

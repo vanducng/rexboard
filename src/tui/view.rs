@@ -15,9 +15,6 @@ use crate::board::Row;
 use crate::output::{clean, fit, in_state, name, wheres};
 use crate::pane::bare_title;
 
-/// Width of the detail pane when it sits on the right.
-const DETAIL: u16 = 38;
-
 /// Below this many rows the column header and the blank row above it are left out, so no row
 /// is lost to them.
 const HEADED: u16 = 12;
@@ -25,7 +22,7 @@ const HEADED: u16 = 12;
 const STOPPED: &str = "serve stopped · r reconnects";
 
 /// The `?` table: every key, in the order an operator reaches for them.
-pub const KEYS: [(&str, &str); 17] = [
+pub const KEYS: [(&str, &str); 18] = [
     ("j/k", "move; g/G first, last"),
     ("1-9", "the nth NEEDS YOU row"),
     ("s", "mark seen"),
@@ -41,6 +38,7 @@ pub const KEYS: [(&str, &str); 17] = [
     ("z", "fold or open a group"),
     ("enter", "go to the pane"),
     ("r", "reconnect to serve"),
+    ("< >", "narrow, widen the detail pane"),
     ("?", "this table"),
     ("q", "quit"),
 ];
@@ -62,7 +60,7 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
         let [list_area, rule, detail_area] = Layout::horizontal([
             Constraint::Min(40),
             Constraint::Length(1),
-            Constraint::Length(DETAIL),
+            Constraint::Length(super::detail::width(area.width, app.detail)),
         ])
         .areas(body);
         list(frame, list_area, app, area, now);
@@ -795,7 +793,7 @@ mod tests {
         assert!(wide.contains("│"), "the detail pane is on the right at 140");
         assert!(narrow.contains("─────"), "and underneath below 100");
         assert!(
-            wide.contains("2-openrig:ri…89abcdef#l2 › rig"),
+            wide.contains("2-openrig:…abcdef#l2 › rig"),
             "the pane stays whole:\n{wide}"
         );
     }
@@ -1028,6 +1026,8 @@ mod tests {
             rows.push(r);
         }
         app.set_rows(rows, hosts());
+        // WHERE's elision at the list width a 38-column pane leaves.
+        app.detail = Some(38.0 / 120.0);
         let text = render(&app, 120, 36);
         for want in [
             "api-gateway › … › seat-r",
