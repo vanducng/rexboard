@@ -1,6 +1,8 @@
-//! Answers a pane: one `rex do` (`send.lua`) re-checks the pane and sends a digit or a line.
+//! Acts on a pane: answers it (one `rex do` with `send.lua` re-checks the pane and sends a digit
+//! or a line), or closes it.
 
 use std::path::Path;
+use std::process::Stdio;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -104,6 +106,30 @@ pub fn send(
             step => format!("send failed at {step}: {}; nothing sent", field("error")),
         },
     })
+}
+
+/// Closes the pane with `rex [-S host] block close BLOCK`.
+pub fn close(rex: &Path, pane: &Pane) -> std::result::Result<(), String> {
+    let mut cmd = rex::command(rex);
+    if pane.host != "local" {
+        cmd.args(["-S", &pane.host]);
+    }
+    cmd.args(["block", "close", &pane.block_id])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let out = rex::spawn(&mut cmd)
+        .and_then(|child| child.wait_with_output())
+        .map_err(|err| format!("close failed: could not run {}: {err}", rex.display()))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let why = stderr.lines().find(|line| !line.trim().is_empty());
+    Err(format!(
+        "close failed: {}",
+        why.map_or_else(|| out.status.to_string(), clean)
+    ))
 }
 
 #[cfg(test)]
@@ -240,6 +266,39 @@ mod tests {
                 Err(text.to_owned())
             );
         }
+    }
+
+    #[test]
+    fn close_asks_rex_to_close_the_block_on_its_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let rex = fake_rex(dir.path(), &json!({}));
+        let argv = || std::fs::read_to_string(dir.path().join("argv")).unwrap();
+        close(&rex, &pane("mini")).unwrap();
+        assert_eq!(argv(), "-S mini block close block:seat-b\n");
+        close(&rex, &pane("local")).unwrap();
+        assert_eq!(argv(), "block close block:seat-b\n", "no -S for this host");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("env")).unwrap(),
+            "",
+            "no REX_BLOCK, REX_SESSION or REX_CLIENT reaches rex"
+        );
+    }
+
+    #[test]
+    fn close_says_why_rex_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let rex = dir.path().join("rex");
+        std::fs::write(
+            &rex,
+            "#!/bin/sh\necho 'error: block not found' >&2\nexit 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&rex, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            close(&rex, &pane("local")),
+            Err("close failed: error: block not found".to_owned())
+        );
     }
 
     #[test]

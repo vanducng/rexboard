@@ -1679,6 +1679,48 @@ fn jump_marks_seen() {
 }
 
 #[test]
+fn jump_back_alternates_between_the_last_two_and_survives_a_restart() {
+    let serve = needing();
+    let jump = |target: &str| -> String {
+        let out = serve
+            .needing_cmd()
+            .args(["--json", "jump", target])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let reply: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        reply["key"].as_str().unwrap().to_owned()
+    };
+    serve
+        .needing_cmd()
+        .args(["--json", "jump", "-"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("no previous jump yet"));
+    let (a, b) = ("mini/block:seat-new", "mini/block:seat-old");
+    jump(a);
+    jump(b);
+    assert_eq!(jump("-"), a);
+    assert_eq!(jump("-"), b, "and back again, as cd - does");
+    serve.cmd().args(["serve", "--stop"]).assert().success();
+    assert_eq!(jump("-"), a, "the last two jumps are kept in state.json");
+    let out = serve
+        .needing_cmd()
+        .args(["jump", "-"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "jumped to web › build › seat-old on mini\n"
+    );
+}
+
+#[test]
 fn jump_ambiguous_client_lists_labels() {
     let serve = needing();
     serve

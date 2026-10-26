@@ -1,6 +1,7 @@
 mod answer;
 mod app;
 mod card;
+mod clipboard;
 mod columns;
 mod full;
 mod prefs;
@@ -49,7 +50,9 @@ enum Msg {
     Gone(String),
     Peek(String, std::result::Result<Vec<String>, String>),
     Say(String),
-    Jumped(std::result::Result<String, String>),
+    /// A failure the footer shows in the alert role until the next key.
+    Failed(String),
+    Went(std::result::Result<String, String>),
     Screen(String, std::result::Result<Screen, String>),
     Sent {
         key: String,
@@ -210,7 +213,8 @@ fn apply(app: &mut App, msg: Msg) -> Option<Effect> {
         }
         Msg::Peek(key, lines) => app.peeked(&key, lines),
         Msg::Say(text) => app.say(text),
-        Msg::Jumped(result) => app.jumped(result),
+        Msg::Failed(why) => app.failed = Some(why),
+        Msg::Went(result) => app.went(result),
         Msg::Screen(key, screen) => app.screen(&key, screen),
         Msg::Sent { key, what, result } => return app.sent(&key, &what, result),
     }
@@ -252,7 +256,34 @@ fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
                 let result = jump::go(&row)
                     .map(|()| format!("jumped to {}", path(&labels(&row, true), usize::MAX)))
                     .map_err(|err| err.to_string());
-                let _ = tx.send(Msg::Jumped(result));
+                let _ = tx.send(Msg::Went(result));
+            });
+        }
+        Effect::Back => {
+            thread::spawn(move || {
+                let result = jump::previous()
+                    .and_then(|row| jump::go(&row).map(|()| row))
+                    .map(|row| format!("back to {}", path(&labels(&row, true), usize::MAX)))
+                    .map_err(|err| err.to_string());
+                let _ = tx.send(Msg::Went(result));
+            });
+        }
+        Effect::Close(row) => {
+            thread::spawn(move || {
+                let place = path(&labels(&row, false), usize::MAX);
+                let result = rex::locate()
+                    .map_err(|err| format!("close failed: {err}"))
+                    .and_then(|rex| send::close(&rex, &row.pane))
+                    .map(|()| format!("closed {place} on {}", row.pane.host));
+                let _ = tx.send(Msg::Went(result));
+            });
+        }
+        Effect::Copy { text, shown } => {
+            thread::spawn(move || {
+                let _ = tx.send(match clipboard::copy(&text) {
+                    Ok(()) => Msg::Say(format!("copied {shown}")),
+                    Err(why) => Msg::Failed(format!("could not copy: {why}")),
+                });
             });
         }
         Effect::Peek {

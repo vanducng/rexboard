@@ -191,6 +191,7 @@ Marks a pane seen, by the `key` from `ls --json`: it leaves `needs_you` if it wa
 ```bash
 rexboard jump mini/block:web-seat-b   # by the key from ls --json
 rexboard jump 1                       # the first NEEDS YOU row
+rexboard jump -                       # back to the pane before the last jump
 rexboard next                         # the next pane that needs you
 rexboard next --back                  # the other way
 rexboard pick                         # choose from the board's list
@@ -201,14 +202,16 @@ Each lands the Rex app on the pane, on its host, and marks it seen through serve
 1. focuses the pane on the server that owns it (`session.focus_block`);
 2. asks this Mac's Rex app to select the pane's session and tab (`client.perform session.select`). On this host that is the app client named by `REX_CLIENT`, else `client` in config.toml, else the only app connected over the unix socket. On a remote host it is the app connected from this Mac's Tailscale node. The app has 5 seconds to answer. It does not answer while the Mac's screen is locked; the jump then fails with `REX`, `the Rex app on NAME did not answer within 5s; it does not answer while the Mac's screen is locked`, and the next step `unlock the Mac, then rexboard jump KEY`. With `--json`, Rex's own words are in `error.detail`.
 
-`next` picks from `needs_you` in board order: blocked, then error, then unseen done, each longest waiting first. It starts after the pane it runs in (`REX_BLOCK`); outside a pane, after the pane the last jump went to (serve keeps that in memory, so a restart starts from the top). It goes to unseen rows first, so repeated `next` works through the queue; once every row is seen, the blocked and erroring ones cycle. `pick` opens the board's list without the turn card: Enter jumps and exits 0, esc exits 1.
+`next` picks from `needs_you` in board order: blocked, then error, then unseen done, each longest waiting first. It starts after the pane it runs in (`REX_BLOCK`); outside a pane, after the pane the last jump went to (serve keeps it in `state.json`, so it survives a restart). It goes to unseen rows first, so repeated `next` works through the queue; once every row is seen, the blocked and erroring ones cycle. `pick` opens the board's list without the turn card: Enter jumps and exits 0, esc exits 1.
+
+`jump -` goes to the pane the jump before the last one went to, and the two swap, as `cd -` does, so a second `jump -` comes back. Every jump counts: `jump`, `next`, `pick` and the board's `enter` and `-`. With no earlier jump it fails with `NOT_FOUND`, `no previous jump yet`; when that pane has left the board, `previous pane is gone`.
 
 `jump` and `next` print `jumped to SESSION › TAB › PANE on HOST`; with `--json`, `{"ok":true,"key":...}`.
 
 | Exit | When |
 | --- | --- |
 | 0 | Jumped |
-| 1 | `NOBODY_NEEDS_YOU`: `next`, or `jump N`, with nothing in `needs_you`; prints `nobody needs you`. `NOT_FOUND`: no such key, or no row N. `AMBIGUOUS_CLIENT`: no app client named, and no app connected, none on the unix socket, or more than one there; the message says which, and the next steps name each app (`open the Rex app` when there is none). `CONFIG`: config.toml cannot be read or has an unknown key, or `client` names no app. `REX`: a step in Rex failed; the message names it. `pick`: esc |
+| 1 | `NOBODY_NEEDS_YOU`: `next`, or `jump N`, with nothing in `needs_you`; prints `nobody needs you`. `NOT_FOUND`: no such key, no row N, or no previous pane for `jump -`. `AMBIGUOUS_CLIENT`: no app client named, and no app connected, none on the unix socket, or more than one there; the message says which, and the next steps name each app (`open the Rex app` when there is none). `CONFIG`: config.toml cannot be read or has an unknown key, or `client` names no app. `REX`: a step in Rex failed; the message names it. `pick`: esc |
 | 2 | `USAGE`: TARGET is neither a key nor a number, or `pick` without a terminal |
 
 ## `rexboard ext`
