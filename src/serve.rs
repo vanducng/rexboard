@@ -35,6 +35,19 @@ const SAVE_EVERY: Duration = Duration::from_secs(1);
 const HEARTBEAT: Duration = Duration::from_secs(1);
 const SUBSCRIBER_BUFFER: usize = 4;
 const RESCAN: Duration = Duration::from_secs(300);
+
+/// How often serve rescans. Debug builds take REXBOARD_TEST_RESCAN_SECS, so a test can see a
+/// rescan without waiting five minutes.
+fn rescan_every() -> Duration {
+    if cfg!(debug_assertions)
+        && let Some(secs) = std::env::var("REXBOARD_TEST_RESCAN_SECS")
+            .ok()
+            .and_then(|secs| secs.parse().ok())
+    {
+        return Duration::from_secs(secs);
+    }
+    RESCAN
+}
 /// `rows` waits this long at most for every host's first snapshot after serve starts.
 const READY_WITHIN: Duration = Duration::from_secs(5);
 
@@ -307,7 +320,7 @@ impl Reducer {
                     lock.write(&record(children.clone()))?;
                 }
             }
-            if now.duration_since(rescanned) >= RESCAN {
+            if now.duration_since(rescanned) >= rescan_every() {
                 rescanned = now;
                 self.rescan();
             }
@@ -356,7 +369,7 @@ impl Reducer {
     }
 
     fn rescan_now(&mut self) {
-        self.extensions.sync();
+        self.sync_extensions();
         match collector::hosts() {
             Ok(labels) => self.set_hosts(&labels),
             Err(err) => {
@@ -368,7 +381,7 @@ impl Reducer {
 
     /// `rex hosts` can be slow over the network, so later scans run off the reducer thread.
     fn rescan(&mut self) {
-        self.extensions.sync();
+        self.sync_extensions();
         let tx = self.tx.clone();
         thread::spawn(move || match collector::hosts() {
             Ok(labels) => {
@@ -451,6 +464,22 @@ impl Reducer {
         eprintln!("warning: {host} stopped and will not restart: {err}");
         self.hosts.insert(host.to_owned(), "stopped");
         self.board.mark_stale(host)
+    }
+
+    /// Re-reads the extensions; one that stopped takes its fields and status off the rows, since
+    /// no later run of it will.
+    fn sync_extensions(&mut self) {
+        let now = chrono::Utc::now();
+        let mut changed = false;
+        for name in self.extensions.sync() {
+            changed |= !self
+                .board
+                .extension(&name, &BTreeMap::new(), false, now)
+                .is_empty();
+        }
+        if changed {
+            self.rows_changed();
+        }
     }
 
     /// An extension's run: its state for `ext ls` and the board, and its rows when it sent any.

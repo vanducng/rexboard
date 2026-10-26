@@ -19,6 +19,8 @@ use super::contract::{self, Item, MAX_OUTPUT, Parsed, Request, RowIn};
 
 /// A failing extension keeps its last good result for this many runs, then loses it.
 pub const KEEP_FOR: u32 = 3;
+/// The most of an adapter's stderr that reaches serve.log per run.
+const STDERR_KEEP: u64 = 4096;
 
 /// How the last run went, as serve reports it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -177,22 +179,22 @@ pub fn run_once(
     });
     let stderr = child.stderr.take().expect("piped stderr");
     thread::spawn(move || {
-        let mut text = String::new();
-        let _ = std::io::BufReader::new(stderr).read_to_string(&mut text);
-        for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        for line in stderr_lines(stderr) {
             eprintln!("ext {name}: {line}");
         }
     });
     let limit = Duration::from_secs(ext.manifest.timeout);
     let deadline = Instant::now() + limit;
+    let pid = child.id() as i32;
     let status = loop {
-        if let Ok(Some(status)) = child.try_wait() {
-            break status;
+        if exited(pid) {
+            // Whatever the adapter left running would hold its pipes open past the run.
+            kill_group(pid);
+            break child.wait().map_err(|err| err.to_string())?;
         }
         let late = Instant::now() >= deadline;
         if late || stopped() {
-            let pid = child.id() as i32;
-            unsafe { libc::kill(-pid, libc::SIGKILL) };
+            kill_group(pid);
             let _ = child.wait();
             return Err(if late {
                 format!("timed out after {}s and was stopped", limit.as_secs())
@@ -209,6 +211,36 @@ pub fn run_once(
     }
     let keys = rows.iter().map(|row| row.key.clone()).collect();
     contract::parse(&out, ext, &keys)
+}
+
+/// Whether the adapter has exited, without reaping it: until it is reaped its pid still names
+/// its process group, so the group can be killed without reaching a process that reused the pid.
+fn exited(pid: i32) -> bool {
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let flags = libc::WEXITED | libc::WNOHANG | libc::WNOWAIT;
+    let rc = unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &raw mut info, flags) };
+    rc == 0 && unsafe { info.si_pid() } != 0
+}
+
+fn kill_group(pid: i32) {
+    unsafe { libc::kill(-pid, libc::SIGKILL) };
+}
+
+/// The first STDERR_KEEP bytes of an adapter's stderr as lines, and how much more was dropped.
+/// The rest is still read, so the adapter never blocks on a full pipe.
+fn stderr_lines(mut stderr: impl Read) -> Vec<String> {
+    let mut kept = Vec::new();
+    let _ = stderr.by_ref().take(STDERR_KEEP).read_to_end(&mut kept);
+    let dropped = std::io::copy(&mut stderr, &mut std::io::sink()).unwrap_or(0);
+    let mut lines: Vec<String> = String::from_utf8_lossy(&kept)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(str::to_owned)
+        .collect();
+    if dropped > 0 {
+        lines.push(format!("{dropped} more bytes of stderr dropped"));
+    }
+    lines
 }
 
 #[cfg(test)]
@@ -275,6 +307,37 @@ mod tests {
             started.elapsed() < Duration::from_secs(3),
             "{:?}",
             started.elapsed()
+        );
+    }
+
+    #[test]
+    fn what_an_adapter_leaves_running_is_stopped_with_it() {
+        let root = tempfile::tempdir().unwrap();
+        let script = "sleep 30 &\ncat > /dev/null\necho '{\"contract\": 1, \"rows\": {}}'";
+        let ext = adapter(root.path(), script, "every = 2\ntimeout = 1\n");
+        let started = Instant::now();
+        assert!(run_once(&ext, &Value::Null, &rows(), &|| false).is_ok());
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn stderr_is_kept_to_a_few_kb_and_the_rest_counted() {
+        let small = stderr_lines("warning: slow\n\nsecond\n".as_bytes());
+        assert_eq!(small, ["warning: slow", "second"]);
+        let big = format!("{}\n", "x".repeat(99)).repeat(10_000);
+        let lines = stderr_lines(big.as_bytes());
+        let kept: usize = lines[..lines.len() - 1].iter().map(String::len).sum();
+        assert!(kept <= STDERR_KEEP as usize, "{kept}");
+        assert_eq!(
+            lines.last().unwrap(),
+            &format!(
+                "{} more bytes of stderr dropped",
+                big.len() - STDERR_KEEP as usize
+            )
         );
     }
 

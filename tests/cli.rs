@@ -2190,3 +2190,41 @@ fn ext_a_hanging_adapter_never_delays_rows() {
     );
     assert!(started.elapsed() < std::time::Duration::from_secs(10));
 }
+
+#[test]
+fn ext_a_disabled_extension_leaves_the_rows_at_the_next_rescan() {
+    let serve = Serve::new();
+    extension(
+        &serve,
+        "fake",
+        "",
+        "[provides]\nstatus = true\n",
+        &answers(
+            r#"{"local/block:api-seat-a": {"fields": {"rig": "api"}, "status": {"state": "working"}}}"#,
+        ),
+    );
+    serve.config("[extensions]\nenabled = [\"fake\"]\n");
+    let rows = || {
+        let out = serve
+            .cmd()
+            .env("REXBOARD_TEST_RESCAN_SECS", "1")
+            .args(["ls", "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        serde_json::from_slice::<Vec<serde_json::Value>>(&out).unwrap()
+    };
+    eventually("the field and status", || {
+        let all = rows();
+        let seat = row(&all, SEAT);
+        seat["ext"]["fake.rig"] == "api" && seat["source"] == "fake"
+    });
+    serve.config("[extensions]\nenabled = []\n");
+    eventually("both to go at the next rescan", || {
+        let all = rows();
+        let seat = row(&all, SEAT);
+        seat["ext"] == serde_json::json!({}) && seat["source"] == "inferred"
+    });
+}

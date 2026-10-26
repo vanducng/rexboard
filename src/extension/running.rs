@@ -32,13 +32,14 @@ impl Running {
     }
 
     /// Reads config.toml and the extension roots again: runs what is newly enabled, stops what
-    /// is no longer, and restarts one whose manifest or settings changed.
-    pub fn sync(&mut self) {
+    /// is no longer, and restarts one whose manifest or settings changed. Returns the names that
+    /// stopped for good, whose fields and status should leave the rows.
+    pub fn sync(&mut self) -> Vec<String> {
         let config = match crate::config::load() {
             Ok(config) => config.extensions,
             Err(err) => {
                 self.say(format!("ext: config not read, extensions unchanged: {err}"));
-                return;
+                return Vec::new();
             }
         };
         let found = discover(&roots(&config.dirs()));
@@ -56,6 +57,12 @@ impl Running {
                 )),
             }
         }
+        let stopped: Vec<String> = self
+            .runners
+            .keys()
+            .filter(|name| !want.contains_key(*name))
+            .cloned()
+            .collect();
         self.runners.retain(|name, runner| {
             want.get(name)
                 .is_some_and(|(ext, settings)| *ext == runner.ext && *settings == runner.settings)
@@ -67,6 +74,7 @@ impl Running {
                 self.runners.insert(name, runner);
             }
         }
+        stopped
     }
 
     fn say(&mut self, line: String) {

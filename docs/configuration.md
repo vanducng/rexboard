@@ -46,7 +46,7 @@ title = "PROJECT"
 status = false           # true lets it give rows with no record a status
 ```
 
-serve runs each enabled extension on its own thread: every `every` seconds it writes the current rows to the adapter's stdin as JSON and reads fields per row back from its stdout. A row's own status record always wins over an extension's status. A failing run (an error exit, bad JSON, another contract or a timeout) keeps the last good answer for 3 runs, then drops it. Problems go to `serve.log`, as `ext NAME: …`, along with the adapter's stderr. `ls --json` shows each row's fields under `ext`.
+serve runs each enabled extension on its own thread: every `every` seconds it writes the current rows to the adapter's stdin as JSON and reads fields per row back from its stdout. A row's own status record always wins over an extension's status. A failing run (an error exit, bad JSON, another contract or a timeout) keeps the last good answer for 3 runs, then drops it. Problems go to `serve.log`, as `ext NAME: …`, along with the first 4 KiB of the adapter's stderr per run. Anything the adapter leaves running, such as a process started with `&`, is stopped when it exits. `ls --json` shows each row's fields under `ext`; an extension that stops running takes its fields and status off the rows.
 
 An extension runs with your permissions and sees every row's labels and titles, so enable only adapters you trust. serve reads the manifests and `[extensions]` when it starts and each time it rescans; `rexboard serve --stop` picks up a change at once.
 
