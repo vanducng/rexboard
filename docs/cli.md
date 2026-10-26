@@ -1,6 +1,6 @@
 # CLI
 
-`rexboard --help`, and `--help` on each command, is the full command contract. This page covers output, fields and exit codes. Every command takes `--json`: JSON on stdout, and errors as JSON on stderr, `{"ok":false,"error":{"code":...,"message":...,"next_steps":[...]}}`. Exit 1 is a failure, exit 2 bad usage. Any command can also fail with `IO` (exit 1) when a file it needs cannot be read or written. `rexboard --version` prints the version.
+`rexboard --help`, and `--help` on each command, is the full command contract. This page covers output, fields and exit codes. Every command takes `--json`: JSON on stdout, and errors as JSON on stderr, `{"ok":false,"error":{"code":...,"message":...,"next_steps":[...]}}`. Exit 1 is a failure; exit 2 is bad usage, or every host unreachable (`HOSTS_UNREACHABLE`). Any command can also fail with `IO` (exit 1) when a file it needs cannot be read or written. `rexboard --version` prints the version.
 
 ## Finding Rex
 
