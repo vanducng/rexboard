@@ -17,12 +17,14 @@ use crate::pane::bare_title;
 
 /// Below this many rows the column header and the blank row above it are left out, so no row
 /// is lost to them.
-const HEADED: u16 = 12;
+pub(super) const HEADED: u16 = 12;
+/// The column header's row when there is one: under the top bar and its blank row.
+pub(super) const HEADER_ROW: u16 = 2;
 
 const STOPPED: &str = "serve stopped · r reconnects";
 
 /// The `?` table: every key, in the order an operator reaches for them.
-pub const KEYS: [(&str, &str); 19] = [
+pub const KEYS: [(&str, &str); 20] = [
     ("j/k", "move; g/G first, last"),
     ("1-9", "the nth NEEDS YOU row"),
     ("s", "mark seen"),
@@ -30,11 +32,12 @@ pub const KEYS: [(&str, &str); 19] = [
     ("space", "peek at the pane"),
     ("/", "filter; enter keeps it"),
     ("f", "one status: w d q p e u i"),
-    ("v", "status, flat, harness, host"),
+    ("v", "status, table, harness, host"),
     (":", "a view by name; tab completes"),
     ("S A T", "sort by state, age, turn"),
     ("R O W M", "by harness, host, where, msg"),
     ("E N B", "by session, window, block"),
+    ("click", "a header sorts, in table"),
     ("esc", "clear filters/sort/peek/folds"),
     ("z", "fold or open a group"),
     ("enter", "go to the pane"),
@@ -157,7 +160,7 @@ fn count(n: usize, noun: &str) -> String {
     }
 }
 
-/// `view: flat ↓age`, unless the board is on the status view with no sort.
+/// `view: table ↓age`, unless the board is on the status view with no sort.
 fn view_label(app: &App) -> Option<String> {
     let only = app.status.map(|status| format!("only {}", status.name()));
     if app.view == View::default() && app.sort.is_none() {
@@ -319,6 +322,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
     };
     let at = items.iter().position(|item| is_selected(app, item));
     let offset = at.map_or(0, |at| (at + 1).saturating_sub(room));
+    app.drawn.set((area.y, offset, room));
     let places = if columns.has(Col::Where) {
         wheres(
             &app.rows,
@@ -1408,10 +1412,10 @@ mod tests {
         press(&mut app, KeyCode::Char('v'));
         press(&mut app, KeyCode::Char('A'));
         let top = render(&app, 120, 30).lines().next().unwrap().to_owned();
-        assert!(top.starts_with("rexboard · view: flat ↓age · "), "{top}");
+        assert!(top.starts_with("rexboard · view: table ↓age · "), "{top}");
         let narrow = render(&app, 50, 30).lines().next().unwrap().to_owned();
         assert!(
-            narrow.contains("view: flat ↓age"),
+            narrow.contains("view: table ↓age"),
             "it stays at 50: {narrow}"
         );
     }
@@ -1429,7 +1433,7 @@ mod tests {
         let text = render(&app, 120, 30);
         for want in [
             "ctrl+s",
-            "v       status, flat, harness, host",
+            "v       status, table, harness, host",
             ":       a view by name; tab completes",
             "S A T   sort by state, age, turn",
             "R O W M by harness, host, where, msg",
@@ -1512,7 +1516,7 @@ mod tests {
         press(&mut app, KeyCode::Char('A'));
         let top = render(&app, 120, 30).lines().next().unwrap().to_owned();
         assert!(
-            top.starts_with("rexboard · view: flat ↓age · only question · "),
+            top.starts_with("rexboard · view: table ↓age · only question · "),
             "{top}"
         );
     }

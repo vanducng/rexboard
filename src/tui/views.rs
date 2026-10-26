@@ -1,5 +1,5 @@
-//! Views: a group-by key plus a sort. `status` is the board as serve orders it; `flat`, `harness`
-//! and `host` regroup the same rows.
+//! Views: a group-by key plus a sort. `status` is the board as serve orders it; `table`,
+//! `harness` and `host` regroup the same rows.
 
 use super::columns::{Sort, compare};
 use super::theme;
@@ -24,7 +24,7 @@ pub struct View {
 pub fn views() -> Vec<View> {
     [
         ("status", Some(Key::Status)),
-        ("flat", None),
+        ("table", None),
         ("harness", Some(Key::Harness)),
         ("host", Some(Key::Host)),
     ]
@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn flat_sorted_by_age_goes_down_flips_up_and_clears() {
         let rows = mixed();
-        let flat = named("flat");
+        let flat = named("table");
         let down = arrange(&rows, &flat, Some((Col::Age, Dir::Down)));
         assert_eq!(down.len(), 1);
         assert_eq!(down[0].0, None, "flat has no group header");
@@ -291,7 +291,7 @@ mod tests {
     fn a_row_with_no_age_sorts_last_either_way() {
         let mut rows = mixed();
         rows[1].pane.source = "inferred".into();
-        let flat = named("flat");
+        let flat = named("table");
         for dir in [Dir::Up, Dir::Down] {
             let order = keys(&rows, &arrange(&rows, &flat, Some((Col::Age, dir))));
             assert_eq!(order.last().unwrap(), "local/new", "{dir:?}");
@@ -312,7 +312,7 @@ mod tests {
             press(&mut app, KeyCode::Char('v'));
             seen.push(app.view.name.clone());
         }
-        assert_eq!(seen, ["status", "flat", "harness", "host", "status"]);
+        assert_eq!(seen, ["status", "table", "harness", "host", "status"]);
     }
 
     #[test]
@@ -353,26 +353,55 @@ mod tests {
     }
 
     #[test]
+    fn every_sort_letter_sorts_then_flips_then_clears() {
+        use crate::tui::columns::COLUMNS;
+        let mut app = app();
+        for column in COLUMNS.iter().filter(|c| c.letter.is_some()) {
+            let letter = column.letter.unwrap();
+            let press_it = |app: &mut App| press(app, KeyCode::Char(letter));
+            press_it(&mut app);
+            assert_eq!(app.sort, Some((column.id, column.first)), "{letter} once");
+            press_it(&mut app);
+            assert_eq!(
+                app.sort,
+                Some((column.id, column.first.flip())),
+                "{letter} twice"
+            );
+            press_it(&mut app);
+            assert_eq!(app.sort, None, "{letter} a third time clears");
+        }
+    }
+
+    #[test]
     fn the_colon_prompt_completes_and_names_a_missing_view() {
         let mut app = app();
         press(&mut app, KeyCode::Char(':'));
-        type_in(&mut app, "fl");
+        type_in(&mut app, "ta");
         press(&mut app, KeyCode::Tab);
-        assert_eq!(app.command.value(), "flat");
+        assert_eq!(app.command.value(), "table");
         press(&mut app, KeyCode::Enter);
-        assert_eq!(app.view.name, "flat");
+        assert_eq!(app.view.name, "table");
         assert!(!app.commanding);
         press(&mut app, KeyCode::Char(':'));
         type_in(&mut app, "h");
         press(&mut app, KeyCode::Tab);
         assert_eq!(app.command.value(), "h", "harness and host share only h");
         press(&mut app, KeyCode::Esc);
-        assert_eq!(app.view.name, "flat", "esc cancels");
+        assert_eq!(app.view.name, "table", "esc cancels");
         press(&mut app, KeyCode::Char(':'));
         type_in(&mut app, "nope");
         press(&mut app, KeyCode::Enter);
         assert_eq!(app.toast(), Some("no view \"nope\""));
-        assert_eq!(app.view.name, "flat");
+        assert_eq!(app.view.name, "table");
+    }
+
+    #[test]
+    fn flat_still_opens_the_table_view() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char(':'));
+        type_in(&mut app, "flat");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.view.name, "table");
     }
 
     #[test]
@@ -403,7 +432,7 @@ mod tests {
         assert_eq!(app.selected, Some(Spot::Row("mini/run".into())));
         press(&mut app, KeyCode::Char('z'));
         press(&mut app, KeyCode::Char('k'));
-        // In flat, select the working row, then come back to status.
+        // In table, select the working row, then come back to status.
         press(&mut app, KeyCode::Char('v'));
         while app.selected != Some(Spot::Row("mini/run".into())) {
             press(&mut app, KeyCode::Char('j'));

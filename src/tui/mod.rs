@@ -13,7 +13,9 @@ use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use ratatui::crossterm::event::{self, Event, KeyEventKind};
+use ratatui::crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind, MouseButton, MouseEventKind,
+};
 use serde_json::json;
 
 use crate::board::Row;
@@ -69,8 +71,11 @@ fn board(pick: bool) -> Result<Option<Row>> {
     let mut terminal = ratatui::init();
     let _restore = Restore;
     let mut tick = Instant::now();
+    let mut mouse = false;
     loop {
-        app.width = terminal.size().map_or(0, |size| size.width);
+        let size = terminal.size().unwrap_or_default();
+        (app.width, app.height) = (size.width, size.height);
+        sync_mouse(&mut std::io::stdout(), &app, &mut mouse);
         terminal
             .draw(|frame| view::draw(frame, &app, chrono::Utc::now()))
             .unwrap_or_else(|_| leave());
@@ -87,6 +92,17 @@ fn board(pick: bool) -> Result<Option<Row>> {
                             Some(Effect::Jump(row)) if pick => return Ok(Some(*row)),
                             Some(effect) => act(effect, &tx, &generation),
                             None => {}
+                        }
+                        changed = true;
+                    }
+                    Event::Mouse(mouse) => {
+                        match mouse.kind {
+                            MouseEventKind::Down(MouseButton::Left) => {
+                                app.click(mouse.column, mouse.row);
+                            }
+                            MouseEventKind::ScrollUp => app.scroll(true),
+                            MouseEventKind::ScrollDown => app.scroll(false),
+                            _ => {}
                         }
                         changed = true;
                     }
@@ -146,6 +162,7 @@ fn terminal_gone() -> bool {
 /// drop when it cannot show the cursor, and printing to a terminal that is gone panics inside
 /// the panic hook, which aborts. A signal can come just before its terminal goes.
 fn leave() -> ! {
+    let _ = mouse_capture(&mut std::io::stdout(), false);
     let _ = ratatui::try_restore();
     let _ = ratatui::crossterm::execute!(std::io::stdout(), ratatui::crossterm::cursor::Show);
     std::process::exit(LEAVE_CODE.load(Ordering::SeqCst))
@@ -304,10 +321,29 @@ fn seen_message(label: &str, state: &str) -> String {
     }
 }
 
+/// Mouse capture stops the terminal's own text selection, so it is on only while clicks sort.
+fn sync_mouse(out: &mut impl std::io::Write, app: &App, on: &mut bool) {
+    if app.clicks() != *on {
+        *on = app.clicks();
+        let _ = mouse_capture(out, *on);
+    }
+}
+
+fn mouse_capture(out: &mut impl std::io::Write, on: bool) -> std::io::Result<()> {
+    if on {
+        ratatui::crossterm::execute!(out, EnableMouseCapture)
+    } else {
+        ratatui::crossterm::execute!(out, DisableMouseCapture)
+    }
+}
+
+/// Puts the terminal back on the way out, panics included (they unwind through it): mouse
+/// capture off, whether or not it was on, then raw mode and the screen.
 struct Restore;
 
 impl Drop for Restore {
     fn drop(&mut self) {
+        let _ = mouse_capture(&mut std::io::stdout(), false);
         // try_restore: restore() prints its error, which panics once the terminal is gone.
         let _ = ratatui::try_restore();
     }
@@ -316,6 +352,40 @@ impl Drop for Restore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mouse_capture_follows_the_table_view_and_never_reaches_pick() {
+        use ratatui::crossterm::event::KeyCode;
+        let mut app = app::tests::app();
+        let mut on = false;
+        let mut out = Vec::new();
+        let mut step = |app: &App, out: &mut Vec<u8>| {
+            out.clear();
+            sync_mouse(out, app, &mut on);
+            String::from_utf8_lossy(out).into_owned()
+        };
+        assert_eq!(step(&app, &mut out), "", "status: off, nothing written");
+        app::tests::press(&mut app, KeyCode::Char('v'));
+        assert!(step(&app, &mut out).contains("\x1b[?1000h"), "table: on");
+        assert_eq!(step(&app, &mut out), "", "only on a change");
+        app::tests::press(&mut app, KeyCode::Char('v'));
+        assert!(step(&app, &mut out).contains("\x1b[?1000l"), "harness: off");
+        let mut pick = app::tests::app();
+        pick.pick = true;
+        pick.view = views::views().remove(1);
+        assert!(!pick.clicks(), "pick keeps text selection");
+    }
+
+    #[test]
+    fn restoring_turns_mouse_capture_off() {
+        let mut out = Vec::new();
+        mouse_capture(&mut out, false).unwrap();
+        let text = String::from_utf8_lossy(&out);
+        assert!(
+            text.contains("\x1b[?1000l") && text.contains("\x1b[?1006l"),
+            "{text:?}"
+        );
+    }
 
     #[test]
     fn a_line_padded_with_blanks_takes_one_row() {

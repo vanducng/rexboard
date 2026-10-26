@@ -348,6 +348,24 @@ impl Columns {
             .map_or(0, |(_, w)| *w)
     }
 
+    /// The sortable column a click at `x` on the header means: the sort arrow means the column it
+    /// marks, else the column whose cell spans `x`.
+    pub fn at(&self, x: usize, sort: Option<Sort>) -> Option<&'static Column> {
+        if let Some((at, id, _)) = self.arrow(sort)
+            && at == x
+        {
+            return Some(column_of(id));
+        }
+        let mut start = 0;
+        for (c, width) in &self.cols {
+            if x < start + width {
+                return c.letter.map(|_| *c);
+            }
+            start += width;
+        }
+        None
+    }
+
     pub fn has(&self, id: Col) -> bool {
         self.cols.iter().any(|(c, _)| c.id == id)
     }
@@ -376,9 +394,28 @@ impl Columns {
             .collect()
     }
 
+    /// Where the sorted column's arrow goes, as a column on the line: in the gap just left of its
+    /// name, so no name moves, unless that gap is a single space, where it would join the two
+    /// names; then just after the name, when the cell has room.
+    fn arrow(&self, sort: Option<Sort>) -> Option<(usize, Col, char)> {
+        let (id, dir) = sort?;
+        let at = self.cols.iter().position(|(c, _)| c.id == id)?;
+        let start: usize = self.cols[..at].iter().map(|(_, w)| w).sum();
+        let (column, width) = self.cols[at];
+        let room = if id == Col::Msg { width } else { width - 1 };
+        let gap = at > 0 && {
+            let (before, before_width) = self.cols[at - 1];
+            before.header.len() + 1 < before_width
+        };
+        if !gap && column.header.len() < room {
+            Some((start + column.header.len(), id, dir.arrow()))
+        } else {
+            (at > 0).then(|| (start - 1, id, dir.arrow()))
+        }
+    }
+
     /// The header line's cells, at the same widths as the rows'. Each sort letter is
-    /// underlined, and the sorted column's arrow sits in the gap just left of its name, so no
-    /// name moves.
+    /// underlined, and the sorted column's arrow is placed as `arrow` says.
     pub fn header(&self, sort: Option<Sort>) -> Vec<HeaderCell> {
         let mut cells: Vec<HeaderCell> = self
             .cols
@@ -395,13 +432,17 @@ impl Columns {
                 HeaderCell { text, underline }
             })
             .collect();
-        if let Some((id, dir)) = sort
-            && let Some(at) = self.cols.iter().position(|(c, _)| c.id == id)
-            && at > 0
-        {
-            let before = &mut cells[at - 1].text;
-            before.pop();
-            before.push(dir.arrow());
+        if let Some((x, _, arrow)) = self.arrow(sort) {
+            let mut start = 0;
+            for (cell, (_, width)) in cells.iter_mut().zip(&self.cols) {
+                if x < start + width {
+                    let mut chars: Vec<char> = cell.text.chars().collect();
+                    chars[x - start] = arrow;
+                    cell.text = chars.into_iter().collect();
+                    break;
+                }
+                start += width;
+            }
         }
         cells
     }
@@ -504,6 +545,153 @@ mod tests {
                 "{width}: the header names exactly the columns drawn"
             );
         }
+    }
+
+    #[test]
+    fn a_click_on_each_header_cell_sorts_by_its_column_in_the_table_view() {
+        use crate::tui::detail::{columns_board, list};
+        for (width, share) in [
+            (100, None),
+            (140, None),
+            (140, Some(38.0 / 140.0)),
+            (200, None),
+        ] {
+            let mut app = app();
+            app.view = crate::tui::views::views().remove(1);
+            (app.width, app.height, app.detail) = (width, 30, share);
+            let header = line(&buffer(&app, width, 30), 2);
+            let list = usize::from(list(width, share, false));
+            let columns = Columns::new(columns_board(width, list, false), list);
+            for (column, _) in columns.cols.iter().filter(|(c, _)| c.letter.is_some()) {
+                let x = header.find(column.header).unwrap();
+                for at in [x, x + column.header.len() - 1] {
+                    app.sort = None;
+                    app.click(at as u16, 2);
+                    assert_eq!(
+                        app.sort,
+                        Some((column.id, column.first)),
+                        "{width}/{share:?}: {} at {at}:\n{header}",
+                        column.header
+                    );
+                }
+            }
+            app.sort = None;
+            app.click(3, 5);
+            app.click(width - 2, 2);
+            assert_eq!(
+                app.sort, None,
+                "{width}: a click on a row or in the detail pane does not sort"
+            );
+        }
+        let mut status = app();
+        (status.width, status.height) = (140, 30);
+        status.click(10, 2);
+        assert_eq!(status.sort, None, "clicks sort only in the table view");
+    }
+
+    fn table(width: u16) -> App {
+        let mut app = app();
+        app.view = crate::tui::views::views().remove(1);
+        (app.width, app.height) = (width, 30);
+        app
+    }
+
+    #[test]
+    fn a_click_on_the_sort_arrow_flips_the_sort() {
+        use crate::tui::app::tests::press;
+        use ratatui::crossterm::event::KeyCode;
+        for (width, letter, sorted) in [(140, 'A', Col::Age), (100, 'O', Col::Host)] {
+            let mut app = table(width);
+            press(&mut app, KeyCode::Char(letter));
+            let first = app.sort;
+            let header = line(&buffer(&app, width, 30), 2);
+            let x = header.chars().position(|c| c == '↑' || c == '↓').unwrap();
+            app.click(x as u16, 2);
+            assert_eq!(
+                app.sort,
+                first.map(|(id, dir)| (id, dir.flip())),
+                "{width}: the arrow flips {sorted:?}:\n{header}"
+            );
+        }
+    }
+
+    #[test]
+    fn at_100_the_arrow_follows_a_name_with_no_gap_before_it() {
+        use crate::tui::app::tests::press;
+        use ratatui::crossterm::event::KeyCode;
+        let mut app = table(100);
+        press(&mut app, KeyCode::Char('O'));
+        let header = line(&buffer(&app, 100, 30), 2);
+        assert!(header.contains("HARNESS HOST↑"), "{header}");
+        press(&mut app, KeyCode::Char('A'));
+        let header = line(&buffer(&app, 100, 30), 2);
+        assert!(
+            header.contains("STATE     ↓AGE"),
+            "a gap keeps it before the name: {header}"
+        );
+    }
+
+    #[test]
+    fn with_no_rows_a_click_does_nothing() {
+        let mut app = App::default();
+        app.view = crate::tui::views::views().remove(1);
+        (app.width, app.height) = (140, 30);
+        app.click(30, 2);
+        assert_eq!(app.sort, None);
+    }
+
+    #[test]
+    fn the_wheel_moves_and_a_click_selects_a_row_in_the_table_view() {
+        use crate::tui::app::Spot;
+        let mut board = table(140);
+        let buf = buffer(&board, 140, 30);
+        let y = (3..30)
+            .find(|&y| line(&buf, y).contains("seat-a msg"))
+            .unwrap();
+        board.click(10, y);
+        assert_eq!(board.selected, Some(Spot::Row("local/seat-a".into())));
+        board.scroll(true);
+        assert_ne!(
+            board.selected,
+            Some(Spot::Row("local/seat-a".into())),
+            "up moves"
+        );
+        board.scroll(false);
+        assert_eq!(
+            board.selected,
+            Some(Spot::Row("local/seat-a".into())),
+            "down comes back"
+        );
+        board.click(10, 28);
+        assert_eq!(
+            board.selected,
+            Some(Spot::Row("local/seat-a".into())),
+            "below the rows nothing changes"
+        );
+        let mut status = app();
+        (status.width, status.height) = (140, 30);
+        let before = status.selected.clone();
+        buffer(&status, 140, 30);
+        status.click(10, y);
+        assert_eq!(status.selected, before, "row clicks are table-only");
+    }
+
+    #[test]
+    fn opening_the_table_view_says_how_to_sort_and_select_once() {
+        use crate::tui::app::tests::press;
+        use ratatui::crossterm::event::KeyCode;
+        let mut app = app();
+        press(&mut app, KeyCode::Char('v'));
+        assert_eq!(
+            app.toast(),
+            Some("click a header to sort · hold Option (iTerm2) or Shift to select text")
+        );
+        app.toast = None;
+        for _ in 0..4 {
+            press(&mut app, KeyCode::Char('v'));
+        }
+        assert_eq!(app.view.name, "table");
+        assert_eq!(app.toast(), None, "once per run");
     }
 
     #[test]

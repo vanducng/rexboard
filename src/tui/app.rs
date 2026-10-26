@@ -5,7 +5,7 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 
-use super::columns::{Sort, by_letter};
+use super::columns::{Columns, Sort, by_letter};
 use super::status::Status;
 use super::views::{Bucket, View, arrange, bucket, views};
 use crate::board::{Group, Row};
@@ -92,6 +92,10 @@ pub struct App {
     pub view: View,
     pub sort: Option<Sort>,
     told_ctrl_s: bool,
+    told_table: bool,
+    /// Where the list's rows were last drawn: the first row's line, the first item shown, and
+    /// how many rows fit. The draw sets it, so a click can find the row under it.
+    pub drawn: std::cell::Cell<(u16, usize, usize)>,
     pub folded: BTreeSet<Bucket>,
     pub peek: Option<Peek>,
     /// The `?` key table is open in the detail pane.
@@ -102,8 +106,10 @@ pub struct App {
     pub pick: bool,
     /// The detail pane's share of the width (`<` `>`), from tui.json; none is the default.
     pub detail: Option<f64>,
-    /// The terminal's width at the last draw, which `<` and `>` move the pane against.
+    /// The terminal's size at the last draw, which `<` and `>` move the pane against and a
+    /// click is read against.
     pub width: u16,
+    pub height: u16,
     /// `going to …` while a jump runs; a second Enter starts nothing.
     pub going: Option<String>,
     /// Why the last jump failed, until the next key.
@@ -270,6 +276,10 @@ impl App {
             self.unfold_all();
         }
         self.view = view;
+        if self.clicks() && !self.told_table {
+            self.told_table = true;
+            self.say("click a header to sort · hold Option (iTerm2) or Shift to select text");
+        }
         // A row in a group this view keeps folded rests on that group's header, as `z` does.
         if let Some(group) = self.current().and_then(|row| bucket(&self.view, row))
             && self.folded.contains(&group)
@@ -303,7 +313,11 @@ impl App {
 
     /// The `:` prompt's Enter: a view's name, or the start of exactly one.
     fn open(&mut self) {
-        let typed = self.command.value().trim().to_owned();
+        let typed = match self.command.value().trim() {
+            // `flat` was the table view's name before v0.3.
+            "flat" => "table".to_owned(),
+            typed => typed.to_owned(),
+        };
         let all = views();
         let found = all.iter().find(|v| v.name == typed).cloned().or_else(|| {
             let mut starts = all.iter().filter(|v| v.name.starts_with(&typed));
@@ -328,10 +342,48 @@ impl App {
             self.told_ctrl_s = true;
             self.say("sorted by state · bulk seen is ctrl+s now");
         }
-        self.sort = Some(match self.sort {
-            Some((id, dir)) if id == column.id => (id, dir.flip()),
-            _ => (column.id, column.first),
-        });
+        self.sort = match self.sort {
+            Some((id, dir)) if id == column.id && dir == column.first => Some((id, dir.flip())),
+            Some((id, _)) if id == column.id => None,
+            _ => Some((column.id, column.first)),
+        };
+    }
+
+    /// Whether clicks sort: in the table view, which turns mouse capture on, and not in pick.
+    pub fn clicks(&self) -> bool {
+        self.view.group_by.is_none() && !self.pick
+    }
+
+    /// A click at `x`, `y` in the table view: on a column's header cell it sorts as that
+    /// column's letter does, on its arrow it flips the sort, and on a row it selects the row.
+    pub fn click(&mut self, x: u16, y: u16) {
+        use super::detail::{columns_board, list};
+        use super::view::{HEADED, HEADER_ROW};
+        let items = self.items();
+        let list = usize::from(list(self.width, self.detail, self.pick));
+        if !self.clicks() || items.is_empty() || usize::from(x) >= list {
+            return;
+        }
+        if self.height >= HEADED && y == HEADER_ROW {
+            let columns = Columns::new(columns_board(self.width, list, self.pick), list);
+            if let Some(letter) = columns.at(usize::from(x), self.sort).and_then(|c| c.letter) {
+                self.sort_by(letter);
+            }
+            return;
+        }
+        let (first, offset, room) = self.drawn.get();
+        if let Some(below) = y.checked_sub(first).map(usize::from)
+            && below < room
+            && let Some(&Item::Row(i)) = items.get(offset + below)
+        {
+            self.selected = Some(Spot::Row(self.rows[i].key.clone()));
+        }
+    }
+
+    /// The wheel moves the selection, as `k` and `j` do; with the mouse captured the terminal no
+    /// longer turns it into arrow keys.
+    pub fn scroll(&mut self, up: bool) {
+        self.step(if up { -1 } else { 1 });
     }
 
     pub fn handle(&mut self, key: KeyEvent) -> Option<Effect> {
