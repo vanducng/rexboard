@@ -163,14 +163,14 @@ impl App {
     }
 
     /// `1`-`9`: the nth NEEDS YOU row, opening its group if it is folded.
-    pub(super) fn nth(&mut self, n: usize) {
+    /// The NEEDS YOU rows in list order, after opening every group that holds one.
+    fn needs_you_spots(&mut self) -> Vec<Spot> {
         for row in self.rows.iter().filter(|row| row.group == Group::NeedsYou) {
             if let Some(group) = bucket(&self.view, row) {
                 self.folded.remove(&group);
             }
         }
-        let pick = self
-            .items()
+        self.items()
             .into_iter()
             .filter_map(|item| match item {
                 Item::Row(i) if self.rows[i].group == Group::NeedsYou => {
@@ -178,7 +178,11 @@ impl App {
                 }
                 _ => None,
             })
-            .collect::<Vec<_>>();
+            .collect()
+    }
+
+    pub(super) fn nth(&mut self, n: usize) {
+        let pick = self.needs_you_spots();
         match pick.get(n) {
             Some(spot) => self.selected = Some(spot.clone()),
             None if pick.is_empty() => self.say("nobody needs you"),
@@ -200,21 +204,7 @@ impl App {
                 state: row.pane.state.clone(),
             })
         });
-        for row in self.rows.iter().filter(|row| row.group == Group::NeedsYou) {
-            if let Some(group) = bucket(&self.view, row) {
-                self.folded.remove(&group);
-            }
-        }
-        let waiting: Vec<Spot> = self
-            .items()
-            .into_iter()
-            .filter_map(|item| match item {
-                Item::Row(i) if self.rows[i].group == Group::NeedsYou => {
-                    Some(Spot::Row(self.rows[i].key.clone()))
-                }
-                _ => None,
-            })
-            .collect();
+        let waiting = self.needs_you_spots();
         let at = waiting
             .iter()
             .position(|spot| Some(spot) == self.selected.as_ref());
