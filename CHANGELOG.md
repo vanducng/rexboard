@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.0](https://github.com/vanducng/rexboard/compare/v0.6.2...v0.7.0) (2026-10-26)
+
+
+### Features
+
+* **cli:** rexboard ext ls, test and new, with an example extension ([#52](https://github.com/vanducng/rexboard/issues/52)) ([4031238](https://github.com/vanducng/rexboard/commit/40312384d74f048fd398895b3aec63dd7164bc54))
+* **serve:** run tool extensions over a versioned contract ([#46](https://github.com/vanducng/rexboard/issues/46)) ([f241b20](https://github.com/vanducng/rexboard/commit/f241b2009f6280e4e40a7a119cacca80ddf95c70))
+* **tui:** space opens a live full-screen view of the pane ([#50](https://github.com/vanducng/rexboard/issues/50)) ([2956df0](https://github.com/vanducng/rexboard/commit/2956df0a5b0c422846668a5cfda9bcf0243732d7))
+
+
+### Bug Fixes
+
+* **cli:** rexboard upgrade refreshes the brew tap first ([#51](https://github.com/vanducng/rexboard/issues/51)) ([81f68c5](https://github.com/vanducng/rexboard/commit/81f68c5b74982cb9ac04e476fda4ca567c241b1b))
+
 ## [0.6.2](https://github.com/vanducng/rexboard/compare/v0.6.1...v0.6.2) (2026-10-26)
 
 
