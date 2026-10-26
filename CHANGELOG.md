@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.0](https://github.com/vanducng/rexboard/compare/v0.7.0...v0.8.0) (2026-10-26)
+
+
+### Features
+
+* **tui:** a moving spinner for working and one shape per state ([#58](https://github.com/vanducng/rexboard/issues/58)) ([3b59692](https://github.com/vanducng/rexboard/commit/3b59692018d9b03d7b01428d752cb1837f3a00e3))
+* **tui:** extension fields as views, columns and filter keys ([#54](https://github.com/vanducng/rexboard/issues/54)) ([68038c6](https://github.com/vanducng/rexboard/commit/68038c6ca36b070bb80e162573650d5f7a35e9c7))
+* **tui:** the full view shows the pane's colours ([#53](https://github.com/vanducng/rexboard/issues/53)) ([301c427](https://github.com/vanducng/rexboard/commit/301c4277723da09a05ead4490bd8a5745fe4b103))
+
+
+### Bug Fixes
+
+* **tui:** the cut mark keeps a coloured row's band ([#55](https://github.com/vanducng/rexboard/issues/55)) ([59c5f8e](https://github.com/vanducng/rexboard/commit/59c5f8ec1361aa42222183924d30e13a34c07727))
+
 ## [0.7.0](https://github.com/vanducng/rexboard/compare/v0.6.2...v0.7.0) (2026-10-26)
 
 
