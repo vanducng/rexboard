@@ -167,15 +167,17 @@ pub fn run_once(
     let mut child =
         crate::rex::spawn(&mut cmd).map_err(|err| format!("could not run {}: {err}", argv[0]))?;
     let mut stdin = child.stdin.take().expect("piped stdin");
-    let writer = thread::spawn(move || stdin.write_all(&input));
+    // Never joined: an adapter that leaves its stdin unread must not hold the run.
+    thread::spawn(move || stdin.write_all(&input));
     let mut stdout = child.stdout.take().expect("piped stdout");
-    let reader = thread::spawn(move || {
+    let (out_tx, out_rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
         let mut out = Vec::new();
         let _ = stdout
             .by_ref()
             .take(MAX_OUTPUT as u64 + 1)
             .read_to_end(&mut out);
-        out
+        let _ = out_tx.send(out);
     });
     let stderr = child.stderr.take().expect("piped stderr");
     thread::spawn(move || {
@@ -204,8 +206,11 @@ pub fn run_once(
         }
         thread::sleep(Duration::from_millis(10));
     };
-    let _ = writer.join();
-    let out = reader.join().unwrap_or_default();
+    // A process that left the group (setsid) can still hold stdout open; the run's deadline
+    // bounds the wait for it, and the reader thread is left behind.
+    let out = out_rx
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .map_err(|_| "its output stayed open after it exited".to_owned())?;
     if !status.success() {
         return Err(format!("exited with {status}"));
     }
@@ -319,6 +324,21 @@ mod tests {
         assert!(run_once(&ext, &Value::Null, &rows(), &|| false).is_ok());
         assert!(
             started.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn a_child_that_leaves_the_group_cannot_hold_the_run() {
+        let root = tempfile::tempdir().unwrap();
+        let script = "python3 -c 'import os, time; os.setsid(); time.sleep(8)' &\ncat > /dev/null\nsleep 0.5\necho '{\"contract\": 1, \"rows\": {}}'";
+        let ext = adapter(root.path(), script, "every = 2\ntimeout = 1\n");
+        let started = Instant::now();
+        let err = run_once(&ext, &Value::Null, &rows(), &|| false).unwrap_err();
+        assert_eq!(err, "its output stayed open after it exited");
+        assert!(
+            started.elapsed() < Duration::from_millis(1500),
             "{:?}",
             started.elapsed()
         );
