@@ -85,11 +85,46 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
         fit(&format!(" {}", meta.join(" · ")), text),
         theme::dim(),
     ));
+    lines.extend(
+        extension_lines(app, row)
+            .into_iter()
+            .map(|line| Line::styled(fit(&line, text), theme::dim())),
+    );
     if let Some(peek) = peek {
         let room = room.saturating_sub(lines.len());
         lines.extend(tail(peek, text, room));
     }
     lines
+}
+
+/// Each extension's fields on the row, one line per extension in `enabled` order:
+/// ` session-prefix · project api`, or ` lane desk` for a lone field named like its extension.
+fn extension_lines(app: &App, row: &Row) -> Vec<String> {
+    let mut lines: Vec<(&str, Vec<(&str, String)>)> = Vec::new();
+    for (field, _) in &app.fields {
+        let Some(value) = row.ext.get(&field.id) else {
+            continue;
+        };
+        let ext = field
+            .id
+            .split_once('.')
+            .map_or(field.id.as_str(), |(e, _)| e);
+        let shown = (field.name.as_str(), clean(value));
+        match lines.iter_mut().find(|(e, _)| *e == ext) {
+            Some((_, parts)) => parts.push(shown),
+            None => lines.push((ext, vec![shown])),
+        }
+    }
+    lines
+        .into_iter()
+        .map(|(ext, parts)| {
+            let parts: Vec<String> = parts.iter().map(|(n, v)| format!("{n} {v}")).collect();
+            match &parts[..] {
+                [one] if one.starts_with(&format!("{ext} ")) => format!(" {one}"),
+                _ => format!(" {ext} · {}", parts.join(" · ")),
+            }
+        })
+        .collect()
 }
 
 /// The first line: the row's state and place, how the turn went, and how fresh the tail is, or

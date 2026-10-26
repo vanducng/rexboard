@@ -96,7 +96,7 @@ The adapter prints one JSON object on stdout and exits 0:
 - `fields` maps a declared field's name to a string, or to `null` for no value.
 - `status` is optional, and only allowed when the manifest sets `provides.status = true`. `state` is one of `idle`, `working`, `blocked`, `done` and `error`. `kind` and `msg` are optional.
 
-A row's fields reach `rexboard ls --json` under `ext`, by id: `"ext": {"session-prefix.project": "api"}`. A field's short name is its own (`project`), unless another enabled extension declares a field of the same name; then both go by id.
+A row's fields reach `rexboard ls --json` under `ext`, by id: `"ext": {"session-prefix.project": "api"}`. A field's short name is its own (`project`), unless another enabled extension declares a field of the same name; then both go by id. On the board each field gets a view, a column and a filter key; see [TUI](tui.md#extension-fields).
 
 A row's own status record always wins: an extension's status reaches only rows with none.
 

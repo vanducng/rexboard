@@ -183,18 +183,38 @@ fn view_label(app: &App) -> Option<String> {
     })
 }
 
+/// Hosts that are not up, then extensions whose last run failed: `mini down, ext fake failed`.
+/// Failed extensions that would not fit after `rexboard · ` collapse to `2 ext failed`.
+fn alerts(app: &App, width: usize) -> String {
+    let mut alerts: Vec<String> = app
+        .hosts
+        .iter()
+        .filter(|(_, state)| *state != "up")
+        .map(|(host, state)| format!("{host} {state}"))
+        .collect();
+    let failed: Vec<&str> = app
+        .ext_runs
+        .iter()
+        .filter(|(_, run)| !run.ok)
+        .map(|(name, _)| name.as_str())
+        .collect();
+    if !failed.is_empty() {
+        let named = format!("ext {} failed", failed.join(", "));
+        let with = alerts.iter().map(String::as_str).chain([named.as_str()]);
+        let room = width.saturating_sub("rexboard · ".width());
+        alerts.push(if with.collect::<Vec<_>>().join(", ").width() <= room {
+            named
+        } else {
+            format!("{} ext failed", failed.len())
+        });
+    }
+    alerts.join(", ")
+}
+
 fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
     let red = Style::new().fg(Color::Red);
     let (alert, alert_style) = match app.link {
-        Link::Up => (
-            app.hosts
-                .iter()
-                .filter(|(_, state)| *state != "up")
-                .map(|(host, state)| format!("{host} {state}"))
-                .collect::<Vec<_>>()
-                .join(", "),
-            red,
-        ),
+        Link::Up => (alerts(app, usize::from(area.width)), red),
         Link::Connecting => ("connecting to serve".to_owned(), theme::dim()),
         Link::Lost(_) => (STOPPED.to_owned(), red),
     };
@@ -291,7 +311,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
         return;
     }
     let width = usize::from(area.width);
-    let columns = Columns::new(board.width, width);
+    let columns = Columns::new(board.width, width, &app.field_columns());
     let area = if board.height >= HEADED {
         let [top, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
         let spans: Vec<Span> = columns
@@ -1853,5 +1873,267 @@ mod tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod extension_tests {
+    use std::collections::BTreeMap;
+
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::crossterm::event::KeyCode;
+
+    use super::*;
+    use crate::client::{ExtRun, Field};
+    use crate::tui::app::App;
+    use crate::tui::app::tests::{app, hosts, press};
+    use crate::tui::columns::{Col, Columns, Dir};
+
+    fn field(id: &str, title: &str) -> Field {
+        Field {
+            id: id.into(),
+            name: id.split_once('.').unwrap().1.into(),
+            title: title.into(),
+        }
+    }
+
+    /// Two extensions: `fake` gives `rig`, `session-prefix` gives `project`; one row has neither.
+    fn with_fields(extra: &[Field]) -> App {
+        let mut app = app();
+        let mut rows = app.rows.clone();
+        for (key, rig, project) in [
+            ("mini/seat-b", Some("api"), Some("api")),
+            ("local/claude", Some("web"), None),
+            ("mini/codex", Some("api"), Some("gateway")),
+            ("local/seat-a", None, None),
+        ] {
+            let row = rows.iter_mut().find(|r| r.key == key).unwrap();
+            row.ext
+                .extend(rig.map(|v| ("fake.rig".to_owned(), v.to_owned())));
+            row.ext
+                .extend(project.map(|v| ("session-prefix.project".to_owned(), v.to_owned())));
+        }
+        let mut fields = vec![
+            field("fake.rig", "RIG"),
+            field("session-prefix.project", "PROJECT"),
+        ];
+        fields.extend_from_slice(extra);
+        app.set_extensions(fields, BTreeMap::new());
+        app.set_rows(rows, hosts());
+        app
+    }
+
+    fn render(app: &App, width: u16, height: u16) -> String {
+        let now = DateTime::parse_from_rfc3339("2026-01-01T05:43:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| draw(frame, app, now)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn header_row(app: &App, width: u16) -> String {
+        render(app, width, 30)
+            .lines()
+            .nth(usize::from(HEADER_ROW))
+            .unwrap()
+            .to_owned()
+    }
+
+    fn keys(app: &App) -> Vec<String> {
+        app.items()
+            .into_iter()
+            .filter_map(|item| match item {
+                crate::tui::app::Item::Row(i) => Some(app.rows[i].key.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn v_reaches_a_view_per_field_grouped_by_value_with_none_last() {
+        let mut app = with_fields(&[]);
+        let names: Vec<String> = app.views().into_iter().map(|v| v.name).collect();
+        assert_eq!(
+            names,
+            ["status", "table", "harness", "host", "rig", "project"]
+        );
+        for _ in 0..4 {
+            press(&mut app, KeyCode::Char('v'));
+        }
+        assert_eq!(app.view.name, "rig");
+        let text = render(&app, 120, 30);
+        let groups: Vec<&str> = text
+            .lines()
+            .filter(|l| l.contains(" (") && l.contains("┄"))
+            .map(|l| l.split(" ┄").next().unwrap())
+            .collect();
+        assert_eq!(groups, ["API (2)", "WEB (1)", "- (1)"], "{text}");
+    }
+
+    #[test]
+    fn field_columns_follow_host_from_120_titled_from_the_manifest() {
+        let app = with_fields(&[field("third.owner", "OWNER")]);
+        let at = |width| header_row(&app, width);
+        let words = |line: String| {
+            line.split_whitespace()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        assert!(!at(119).contains("RIG"), "{}", at(119));
+        let mid = words(at(140));
+        let host = mid.iter().position(|w| w.starts_with("HOST")).unwrap();
+        assert_eq!(&mid[host + 1..host + 3], ["RIG", "PROJECT"], "{mid:?}");
+        assert!(
+            !mid.contains(&"OWNER".to_owned()),
+            "only two below 160: {mid:?}"
+        );
+        assert!(words(at(160)).contains(&"OWNER".to_owned()), "{}", at(160));
+        let text = render(&app, 140, 30);
+        let seat_b = text.lines().find(|l| l.contains("seat-b")).unwrap();
+        assert!(seat_b.contains(" api "), "{seat_b}");
+        let seat_a = text.lines().find(|l| l.contains("seat-a")).unwrap();
+        assert!(seat_a.contains(" -  "), "no value is -: {seat_a}");
+    }
+
+    #[test]
+    fn a_fields_column_hides_in_its_own_view_and_sorts_by_its_free_letter() {
+        let mut app = with_fields(&[]);
+        let cells = Columns::new(140, 140, &app.field_columns()).header(None);
+        let rig = cells.iter().find(|c| c.text.starts_with("RIG")).unwrap();
+        assert_eq!(rig.underline, Some(1), "R is HARNESS's, so I");
+        let project = cells
+            .iter()
+            .find(|c| c.text.starts_with("PROJECT"))
+            .unwrap();
+        assert_eq!(project.underline, Some(0));
+        press(&mut app, KeyCode::Char('v'));
+        press(&mut app, KeyCode::Char('I'));
+        assert_eq!(app.sort, Some((Col::Field("fake.rig"), Dir::Up)));
+        assert_eq!(
+            keys(&app),
+            ["mini/seat-b", "mini/codex", "local/claude", "local/seat-a"],
+            "api, api, web, then none"
+        );
+        app.view = app.views().into_iter().find(|v| v.name == "rig").unwrap();
+        let header = header_row(&app, 140);
+        assert!(
+            !header.contains("RIG") && header.contains("PROJECT"),
+            "{header}"
+        );
+    }
+
+    #[test]
+    fn keyed_filter_terms_match_one_key_each_and_and_together() {
+        let mut app = with_fields(&[]);
+        let mut filtered = |query: &str| {
+            app.filter = query.to_owned().into();
+            keys(&app)
+        };
+        assert_eq!(filtered("rig:api state:blocked"), ["mini/seat-b"]);
+        assert_eq!(filtered("fake.rig:API"), ["mini/seat-b", "mini/codex"]);
+        assert_eq!(filtered("project:gate"), ["mini/codex"]);
+        assert_eq!(
+            filtered("rig:web claude"),
+            ["local/claude"],
+            "free text too"
+        );
+        assert_eq!(
+            filtered("host:local window:main"),
+            ["local/claude", "local/seat-a"]
+        );
+        assert!(filtered("rig:nope").is_empty());
+        assert!(filtered("project:api").len() == 1, "no value never matches");
+        assert!(
+            filtered("nope:x").is_empty(),
+            "an unknown key is plain text"
+        );
+    }
+
+    #[test]
+    fn a_failed_extension_is_a_red_alert_that_collapses_when_narrow() {
+        let mut app = with_fields(&[]);
+        let failed = ExtRun {
+            ok: false,
+            error: Some("timed out".into()),
+        };
+        app.ext_runs = BTreeMap::from([("fake".to_owned(), failed.clone())]);
+        let top = |app: &App, width| render(app, width, 30).lines().next().unwrap().to_owned();
+        assert!(
+            top(&app, 50).starts_with("rexboard · ext fake failed"),
+            "{}",
+            top(&app, 50)
+        );
+        assert!(
+            top(&app, 120).contains(" · 4 agents · ext fake failed "),
+            "{}",
+            top(&app, 120)
+        );
+        app.ext_runs.insert("session-prefix".into(), failed);
+        app.hosts.insert("studio".into(), "down".into());
+        assert!(
+            top(&app, 120).contains("studio down, ext fake, session-prefix failed"),
+            "{}",
+            top(&app, 120)
+        );
+        assert!(
+            top(&app, 50).starts_with("rexboard · studio down, 2 ext failed"),
+            "{}",
+            top(&app, 50)
+        );
+    }
+
+    #[test]
+    fn the_card_lists_each_extensions_fields_under_source() {
+        let mut app = with_fields(&[]);
+        app.selected = Some(crate::tui::app::Spot::Row("mini/seat-b".into()));
+        let text = render(&app, 80, 30);
+        let source = text
+            .lines()
+            .position(|l| l.contains("source native"))
+            .expect(&text);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[source + 1], " fake · rig api");
+        assert_eq!(lines[source + 2], " session-prefix · project api");
+        let mut lone = with_fields(&[field("lane.lane", "LANE")]);
+        let mut rows = lone.rows.clone();
+        rows[0].ext.insert("lane.lane".into(), "desk".into());
+        lone.set_rows(rows, hosts());
+        lone.selected = Some(crate::tui::app::Spot::Row(lone.rows[0].key.clone()));
+        let text = render(&lone, 80, 30);
+        assert!(
+            text.contains("\n lane desk\n"),
+            "a lone field named like its extension: {text}"
+        );
+    }
+
+    #[test]
+    fn fields_that_go_take_their_view_and_sort_with_them_and_none_change_nothing() {
+        let mut app = with_fields(&[]);
+        app.view = app.views().into_iter().find(|v| v.name == "rig").unwrap();
+        press(&mut app, KeyCode::Char('P'));
+        app.set_extensions(Vec::new(), BTreeMap::new());
+        assert_eq!(app.view.name, "status");
+        assert_eq!(app.sort, None);
+        let mut plain = crate::tui::app::tests::app();
+        let before: Vec<String> = [50, 80, 120, 140, 200]
+            .map(|w| render(&plain, w, 30))
+            .into();
+        plain.set_extensions(Vec::new(), BTreeMap::new());
+        let after: Vec<String> = [50, 80, 120, 140, 200]
+            .map(|w| render(&plain, w, 30))
+            .into();
+        assert_eq!(before, after, "with no extensions the board is as it was");
     }
 }

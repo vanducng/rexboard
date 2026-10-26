@@ -13,6 +13,8 @@ use crate::board::Row;
 
 pub struct Running {
     runners: BTreeMap<String, Runner>,
+    /// The running ones in `enabled` order, which the board's columns follow.
+    order: Vec<String>,
     pub states: BTreeMap<String, RunState>,
     rows: Rows,
     tx: Sender<Report>,
@@ -24,6 +26,7 @@ impl Running {
     pub fn new(tx: Sender<Report>) -> Self {
         Self {
             runners: BTreeMap::new(),
+            order: Vec::new(),
             states: BTreeMap::new(),
             rows: Arc::new(Mutex::new(Vec::new())),
             tx,
@@ -68,6 +71,12 @@ impl Running {
                 .is_some_and(|(ext, settings)| *ext == runner.ext && *settings == runner.settings)
         });
         self.states.retain(|name, _| want.contains_key(name));
+        self.order = config
+            .enabled
+            .iter()
+            .filter(|name| want.contains_key(*name))
+            .cloned()
+            .collect();
         for (name, (ext, settings)) in want {
             if !self.runners.contains_key(&name) {
                 let runner = Runner::spawn(ext, settings, self.rows.clone(), self.tx.clone());
@@ -96,17 +105,22 @@ impl Running {
             .map(|runner| runner.ext.manifest.provides.status)
     }
 
-    /// The declared fields of the running extensions, by id, with the name the board shows and
-    /// the column title.
-    pub fn fields(&self) -> BTreeMap<String, Value> {
-        let exts: Vec<&Extension> = self.runners.values().map(|runner| &runner.ext).collect();
+    /// The declared fields of the running extensions, in `enabled` order and then each
+    /// manifest's: the id, the name the board shows, and the column title.
+    pub fn fields(&self) -> Vec<Value> {
+        let exts: Vec<&Extension> = self
+            .order
+            .iter()
+            .filter_map(|name| self.runners.get(name))
+            .map(|runner| &runner.ext)
+            .collect();
         let names = field_names(&exts);
-        let mut fields = BTreeMap::new();
+        let mut fields = Vec::new();
         for ext in exts {
             for field in &ext.manifest.fields {
                 let id = super::field_id(ext.name(), &field.name);
                 let shown = names[&id].clone();
-                fields.insert(id, json!({ "name": shown, "title": field.title }));
+                fields.push(json!({ "id": id, "name": shown, "title": field.title }));
             }
         }
         fields

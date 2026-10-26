@@ -6,12 +6,13 @@ use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 
 use super::answer::{Answer, Step};
-use super::columns::{Columns, Sort, by_letter};
+use super::columns::{Col, Column, Columns, Sort, by_letter, field_column, free_letter};
 use super::full::Full;
 use super::screen::Screen;
 use super::status::Status;
-use super::views::{Bucket, View, arrange, bucket, views};
+use super::views::{Bucket, Key, View, arrange, bucket, views};
 use crate::board::{Group, Row};
+use crate::client::{ExtRun, Field};
 use crate::output::{labels, name, path};
 use crate::pane::Pane;
 use crate::send::{Action, Expect};
@@ -118,6 +119,10 @@ pub struct App {
     pub rows: Vec<Row>,
     pub panes: usize,
     pub hosts: BTreeMap<String, String>,
+    /// The enabled extensions' fields in `enabled` order, each with its sort letter.
+    pub fields: Vec<(Field, Option<char>)>,
+    /// How each enabled extension's last run went.
+    pub ext_runs: BTreeMap<String, ExtRun>,
     pub selected: Option<Spot>,
     pub filter: Input,
     pub filtering: bool,
@@ -255,9 +260,24 @@ impl App {
             .count()
     }
 
+    /// The `/` text: `key:value` terms match one key each, and the rest matches any label as
+    /// one phrase, all ignoring case and all needing to match.
     fn matches_text(&self, row: &Row) -> bool {
         let query = self.filter.value().to_lowercase();
-        if query.is_empty() {
+        let mut free = Vec::new();
+        for term in query.split_whitespace() {
+            let keyed = term.split_once(':').and_then(|(key, want)| {
+                let value = self.value_of(row, key)?;
+                Some(value.is_some_and(|v| v.to_lowercase().contains(want)))
+            });
+            match keyed {
+                Some(true) => {}
+                Some(false) => return false,
+                None => free.push(term),
+            }
+        }
+        let free = free.join(" ");
+        if free.is_empty() {
             return true;
         }
         let p = &row.pane;
@@ -265,7 +285,94 @@ impl App {
             .into_iter()
             .chain(p.msg.as_ref())
             .chain(p.harness.as_ref())
-            .any(|field| field.to_lowercase().contains(&query))
+            .any(|field| field.to_lowercase().contains(&free))
+    }
+
+    /// What filter key `key` reads on a row: None when no key has that name, Some(None) when
+    /// the row has no value for it.
+    fn value_of<'a>(&self, row: &'a Row, key: &str) -> Option<Option<&'a str>> {
+        let p = &row.pane;
+        Some(Some(match key {
+            "host" => &p.host,
+            "state" => &p.state,
+            "harness" => return Some(p.harness.as_deref()),
+            "session" => &p.session,
+            "tab" | "window" => &p.tab,
+            "pane" | "block" => &p.pane,
+            _ => {
+                let (field, _) = self
+                    .fields
+                    .iter()
+                    .find(|(f, _)| f.name == key || f.id == key)?;
+                return Some(row.ext.get(&field.id).map(String::as_str));
+            }
+        }))
+    }
+
+    /// New fields and runs from serve. A view or sort on a field that is gone goes back to the
+    /// default.
+    pub fn set_extensions(&mut self, fields: Vec<Field>, runs: BTreeMap<String, ExtRun>) {
+        self.ext_runs = runs;
+        if self.fields.iter().map(|(f, _)| f).eq(&fields) {
+            return;
+        }
+        let mut taken = Vec::new();
+        self.fields = fields
+            .into_iter()
+            .map(|field| {
+                let letter = free_letter(&field.name, &taken);
+                taken.extend(letter);
+                (field, letter)
+            })
+            .collect();
+        if !self.views().contains(&self.view) {
+            self.view = View::default();
+        }
+        if let Some((Col::Field(id), _)) = self.sort
+            && !self.fields.iter().any(|(f, _)| f.id == id)
+        {
+            self.sort = None;
+        }
+    }
+
+    /// The columns of the fields, but for the one the view groups by, whose group header says it.
+    pub fn field_columns(&self) -> Vec<&'static Column> {
+        self.fields
+            .iter()
+            .map(|(f, letter)| field_column(f, *letter))
+            .filter(|c| {
+                self.view
+                    .group_by
+                    .is_none_or(|key| key != Key::Field(id_of(c)))
+            })
+            .collect()
+    }
+
+    /// The views `v` cycles through: the built-in ones, then one per field, by its name, or by
+    /// its id when a built-in view has that name.
+    pub fn views(&self) -> Vec<View> {
+        let mut all = views();
+        for (field, letter) in &self.fields {
+            let name = if all.iter().any(|v| v.name == field.name) {
+                field.id.clone()
+            } else {
+                field.name.clone()
+            };
+            let id = id_of(field_column(field, *letter));
+            all.push(View {
+                name,
+                group_by: Some(Key::Field(id)),
+            });
+        }
+        all
+    }
+
+    /// The column a sort letter names: a built-in one, or a field's.
+    fn column_by_letter(&self, letter: char) -> Option<&'static Column> {
+        by_letter(letter).or_else(|| {
+            let (field, _) = self.fields.iter().find(|(_, l)| *l == Some(letter))?;
+            Some(field_column(field, Some(letter)))
+        })
     }
 
     /// Headers and rows in the view's groups and order, filtered, with folded groups showing
@@ -376,7 +483,8 @@ impl App {
     /// the names share.
     fn complete(&mut self) {
         let typed = self.command.value().to_owned();
-        let names: Vec<String> = views()
+        let names: Vec<String> = self
+            .views()
             .into_iter()
             .map(|v| v.name)
             .filter(|name| name.starts_with(&typed))
@@ -401,7 +509,7 @@ impl App {
             "flat" => "table".to_owned(),
             typed => typed.to_owned(),
         };
-        let all = views();
+        let all = self.views();
         let found = all.iter().find(|v| v.name == typed).cloned().or_else(|| {
             let mut starts = all.iter().filter(|v| v.name.starts_with(&typed));
             match (starts.next(), starts.next()) {
@@ -417,7 +525,7 @@ impl App {
 
     /// Shift and a column's letter: sort by it, or flip it if it is already the sort.
     fn sort_by(&mut self, letter: char) {
-        let Some(column) = by_letter(letter) else {
+        let Some(column) = self.column_by_letter(letter) else {
             return;
         };
         // ponytail: one hint per run for S's move to ctrl+s; drop it in v0.3.
@@ -638,7 +746,7 @@ impl App {
             return;
         }
         if self.height >= HEADED && y == HEADER_ROW {
-            let columns = Columns::new(self.width, list);
+            let columns = Columns::new(self.width, list, &self.field_columns());
             if let Some(letter) = columns.at(usize::from(x), self.sort).and_then(|c| c.letter) {
                 self.sort_by(letter);
             }
@@ -760,11 +868,11 @@ impl App {
                 self.commanding = true;
             }
             KeyCode::Char('v') => {
-                let all = views();
+                let all = self.views();
                 let at = all.iter().position(|v| *v == self.view).unwrap_or(0);
                 self.show(all[(at + 1) % all.len()].clone());
             }
-            KeyCode::Char(c) if by_letter(c).is_some() => self.sort_by(c),
+            KeyCode::Char(c) if self.column_by_letter(c).is_some() => self.sort_by(c),
             KeyCode::Char('?') => self.keys = !self.keys,
             KeyCode::Esc if self.pick => return Some(Effect::Quit),
             KeyCode::Esc => {
@@ -996,6 +1104,14 @@ fn newer(a: Option<&str>, b: Option<&str>) -> bool {
     match (at(a), at(b)) {
         (Some(a), Some(b)) => a > b,
         _ => a != b,
+    }
+}
+
+/// A field column's id, as views and sorts name it.
+fn id_of(column: &Column) -> &'static str {
+    match column.id {
+        Col::Field(id) => id,
+        _ => unreachable!("a field column"),
     }
 }
 

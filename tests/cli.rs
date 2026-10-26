@@ -2399,3 +2399,26 @@ fn ext_new_scaffold_passes_ext_test_unchanged() {
         .code(1)
         .stderr(predicate::str::contains("is already there"));
 }
+
+#[test]
+fn ext_fields_reach_the_board_in_enabled_order_before_any_run() {
+    use std::io::{BufRead, BufReader, Write};
+    let serve = Serve::new();
+    extension(&serve, "zeta", "", "", "sleep 30");
+    extension(&serve, "alpha", "", "", "sleep 30");
+    serve.config("[extensions]\nenabled = [\"zeta\", \"alpha\"]\n");
+    serve.rows(&[]);
+    let mut stream = std::os::unix::net::UnixStream::connect(serve.socket()).unwrap();
+    writeln!(stream, "{}", serde_json::json!({ "cmd": "rows" })).unwrap();
+    let mut line = String::new();
+    BufReader::new(stream).read_line(&mut line).unwrap();
+    let reply: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(
+        reply["fields"],
+        serde_json::json!([
+            { "id": "zeta.rig", "name": "zeta.rig", "title": "RIG" },
+            { "id": "alpha.rig", "name": "alpha.rig", "title": "RIG" },
+        ]),
+        "both declare rig, so both go by id; zeta first, as enabled"
+    );
+}

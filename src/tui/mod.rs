@@ -190,7 +190,10 @@ fn leave() -> ! {
 /// A message from a thread; a refused answer asks for the pane to be read again.
 fn apply(app: &mut App, msg: Msg) -> Option<Effect> {
     match msg {
-        Msg::Rows(rows) => app.set_rows(rows.rows, rows.hosts),
+        Msg::Rows(rows) => {
+            app.set_extensions(rows.fields, rows.extensions);
+            app.set_rows(rows.rows, rows.hosts);
+        }
         Msg::Gone(why) => {
             app.say(format!("{why} · r reconnects"));
             app.link = Link::Lost(why);
