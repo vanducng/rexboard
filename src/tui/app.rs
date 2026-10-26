@@ -13,6 +13,8 @@ use crate::output::{labels, path};
 
 const TOAST: Duration = Duration::from_secs(3);
 
+const HIDDEN: &str = "the detail pane is hidden · c shows it";
+
 /// What a key asks the outside world to do.
 #[derive(Debug, PartialEq)]
 pub enum Effect {
@@ -30,8 +32,8 @@ pub enum Effect {
     SeenAll(Vec<String>),
     /// Go to this row's pane.
     Jump(Box<Row>),
-    /// Keep the detail pane's new share of the width in tui.json.
-    SaveDetail(f64),
+    /// Keep the detail pane's width and whether it is hidden in tui.json.
+    SavePrefs(super::detail::Prefs),
     Reconnect,
     Quit,
 }
@@ -106,6 +108,8 @@ pub struct App {
     pub pick: bool,
     /// The detail pane's share of the width (`<` `>`), from tui.json; none is the default.
     pub detail: Option<f64>,
+    /// `c` hid the detail pane, from tui.json.
+    pub hidden: bool,
     /// The terminal's size at the last draw, which `<` and `>` move the pane against and a
     /// click is read against.
     pub width: u16,
@@ -354,18 +358,38 @@ impl App {
         self.view.group_by.is_none() && !self.pick
     }
 
+    /// Whether the detail pane shows: unless `c` hid it, and always while a peek, the key table or
+    /// a failed jump's reason, which only it shows whole, is up.
+    pub fn pane_shown(&self) -> bool {
+        !self.hidden || self.keys || self.peek.is_some() || self.failed.is_some()
+    }
+
+    /// Whether the detail pane sits beside the list on a board `board` wide (from 100 columns);
+    /// below that it sits under it, and `pick` has none.
+    pub fn beside(&self, board: u16) -> bool {
+        board >= 100 && !self.pick && self.pane_shown()
+    }
+
+    fn prefs(&self) -> super::detail::Prefs {
+        super::detail::Prefs {
+            detail: self.detail,
+            detail_hidden: self.hidden,
+        }
+    }
+
     /// A click at `x`, `y` in the table view: on a column's header cell it sorts as that
     /// column's letter does, on its arrow it flips the sort, and on a row it selects the row.
     pub fn click(&mut self, x: u16, y: u16) {
         use super::detail::{columns_board, list};
         use super::view::{HEADED, HEADER_ROW};
         let items = self.items();
-        let list = usize::from(list(self.width, self.detail, self.pick));
+        let beside = self.beside(self.width);
+        let list = usize::from(list(self.width, self.detail, beside));
         if !self.clicks() || self.prompting() || items.is_empty() || usize::from(x) >= list {
             return;
         }
         if self.height >= HEADED && y == HEADER_ROW {
-            let columns = Columns::new(columns_board(self.width, list, self.pick), list);
+            let columns = Columns::new(columns_board(self.width, list, beside), list);
             if let Some(letter) = columns.at(usize::from(x), self.sort).and_then(|c| c.letter) {
                 self.sort_by(letter);
             }
@@ -570,6 +594,16 @@ impl App {
                 self.link = Link::Connecting;
                 return Some(Effect::Reconnect);
             }
+            KeyCode::Char('c') if !self.pick => {
+                self.hidden = !self.hidden;
+                if self.hidden {
+                    self.say(HIDDEN);
+                } else {
+                    self.toast = None;
+                }
+                return Some(Effect::SavePrefs(self.prefs()));
+            }
+            KeyCode::Char('<' | '>') if self.hidden && !self.pick => self.say(HIDDEN),
             KeyCode::Char(c @ ('<' | '>')) if self.width >= 100 && !self.pick => {
                 let wider = c == '>';
                 let share = super::detail::step(self.width, self.detail, wider);
@@ -583,7 +617,7 @@ impl App {
                     return None;
                 }
                 self.detail = Some(share);
-                return Some(Effect::SaveDetail(share));
+                return Some(Effect::SavePrefs(self.prefs()));
             }
             KeyCode::Char('<' | '>') if !self.pick => {
                 self.say("< and > size the detail pane on boards wider than 100 columns");
