@@ -185,8 +185,8 @@ fn install_sh(sys: &mut impl System, dir: &Path, latest: &str) -> Result<()> {
     .map_err(|_| {
         Error::upgrade(
             format!(
-                "install.sh did not install {latest}: its archives may still be uploading; \
-                 retry in a few minutes"
+                "install.sh failed (its output is above); if {latest} came out in the last few \
+                 minutes, its archives may still be uploading, so retry then"
             ),
             &["rexboard upgrade"],
         )
@@ -607,7 +607,7 @@ mod tests {
         .unwrap_err();
         assert!(
             err.to_string()
-                .contains("its archives may still be uploading; retry in a few minutes"),
+                .contains("install.sh failed (its output is above); if 0.4.0 came out in the last few minutes, its archives may still be uploading, so retry then"),
             "{err}"
         );
         assert_eq!(err.next_steps(), ["rexboard upgrade"]);
