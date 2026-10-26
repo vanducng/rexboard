@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/vanducng/rexboard/compare/v0.6.1...v0.6.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **tui:** answer a tmux seat whose dialog reports twice, and match the whole dialog ([#47](https://github.com/vanducng/rexboard/issues/47)) ([89589cc](https://github.com/vanducng/rexboard/commit/89589cc12729e8793f1c12cf7600f5564319d1eb))
+
 ## [0.6.1](https://github.com/vanducng/rexboard/compare/v0.6.0...v0.6.1) (2026-10-26)
 
 
