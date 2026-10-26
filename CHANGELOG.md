@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/vanducng/rexboard/compare/v0.8.0...v0.9.0) (2026-10-26)
+
+
+### Features
+
+* **tui:** back to the last pane, close with confirmation, copy a message or place ([#59](https://github.com/vanducng/rexboard/issues/59)) ([6f03476](https://github.com/vanducng/rexboard/commit/6f03476171aa670d69cb3bfc55ccf6f6e3ca59b1))
+* **tui:** vim-friendly keymap from one key table ([05cd17e](https://github.com/vanducng/rexboard/commit/05cd17e960e8cc2264f8f36a415b2e0e99a0c624))
+
 ## [0.8.0](https://github.com/vanducng/rexboard/compare/v0.7.0...v0.8.0) (2026-10-26)
 
 
