@@ -1,7 +1,9 @@
+mod answer;
 mod app;
 mod card;
 mod columns;
 mod prefs;
+mod screen;
 mod status;
 mod theme;
 mod view;
@@ -23,9 +25,10 @@ use crate::client::{self, Rows};
 use crate::error::{Error, Result};
 use crate::output::{clean, labels, path};
 use crate::state::Paths;
-use crate::{interrupted, jump, rex, stop_on_signals};
+use crate::{interrupted, jump, rex, send, stop_on_signals};
 
 use app::{App, Effect, Link};
+use screen::Screen;
 
 /// Peek keeps this many lines from the end of the pane, enough for a 200-row pane; each draw shows
 /// the newest that fit, so a resize needs no new capture.
@@ -42,6 +45,12 @@ enum Msg {
     Peek(String, std::result::Result<Vec<String>, String>),
     Say(String),
     Jumped(std::result::Result<String, String>),
+    Screen(String, std::result::Result<Screen, String>),
+    Sent {
+        key: String,
+        what: String,
+        result: std::result::Result<(), String>,
+    },
 }
 
 /// What the process exits with when a signal or a lost terminal ends it.
@@ -78,6 +87,7 @@ fn board(pick: bool) -> Result<Option<Row>> {
         .map(|path| prefs::load(&path))
         .unwrap_or_default();
     app.hidden = prefs.detail_hidden;
+    app.own = std::env::var("REX_BLOCK").ok().filter(|id| !id.is_empty());
     let mut terminal = ratatui::init();
     let _restore = Restore;
     let mut tick = Instant::now();
@@ -113,7 +123,9 @@ fn board(pick: bool) -> Result<Option<Row>> {
             loop {
                 match rx.recv_timeout(Duration::ZERO) {
                     Ok(msg) => {
-                        apply(&mut app, msg);
+                        if let Some(effect) = apply(&mut app, msg) {
+                            act(effect, &tx, &generation);
+                        }
                         changed = true;
                     }
                     Err(RecvTimeoutError::Timeout) => break,
@@ -174,7 +186,8 @@ fn leave() -> ! {
     std::process::exit(LEAVE_CODE.load(Ordering::SeqCst))
 }
 
-fn apply(app: &mut App, msg: Msg) {
+/// A message from a thread; a refused answer asks for the pane to be read again.
+fn apply(app: &mut App, msg: Msg) -> Option<Effect> {
     match msg {
         Msg::Rows(rows) => app.set_rows(rows.rows, rows.hosts),
         Msg::Gone(why) => {
@@ -189,7 +202,10 @@ fn apply(app: &mut App, msg: Msg) {
         }
         Msg::Say(text) => app.say(text),
         Msg::Jumped(result) => app.jumped(result),
+        Msg::Screen(key, screen) => app.screen(&key, screen),
+        Msg::Sent { key, what, result } => return app.sent(&key, &what, result),
     }
+    None
 }
 
 fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
@@ -248,6 +264,37 @@ fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
                 }
             });
         }
+        Effect::Read {
+            key,
+            host,
+            session,
+            block,
+        } => {
+            thread::spawn(move || {
+                let screen = rex::locate()
+                    .map_err(|err| format!("reading the pane failed: {err}"))
+                    .and_then(|rex| read(&rex, &host, &session, &block));
+                let _ = tx.send(Msg::Screen(key, screen));
+            });
+        }
+        Effect::Send {
+            key,
+            pane,
+            expect,
+            action,
+            what,
+        } => {
+            thread::spawn(move || {
+                let result = rex::locate()
+                    .map_err(|err| format!("send failed: {err}"))
+                    .and_then(|rex| send::send(&rex, &pane, &expect, &action));
+                // A reply marks the row seen, as a jump does.
+                if result.is_ok() {
+                    let _ = client::call(&json!({ "cmd": "seen", "key": key }));
+                }
+                let _ = tx.send(Msg::Sent { key, what, result });
+            });
+        }
         Effect::SavePrefs(prefs) => {
             let saved = tui_json()
                 .ok_or_else(|| "no state dir".to_owned())
@@ -303,34 +350,55 @@ fn peek(
     block: &str,
     cancelled: &dyn Fn() -> bool,
 ) -> Option<std::result::Result<Vec<String>, String>> {
-    match tail(rex, host, session, block, cancelled) {
-        Ok(lines) => Some(Ok(lines)),
+    match capture(rex, host, session, block, rex::TAIL, cancelled) {
+        Ok(reply) => Some(Ok(peek_lines(reply["text"].as_str().unwrap_or_default()))),
         Err(Error::Cancelled) => None,
-        Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::TimedOut => Some(Err(format!(
-            "the pane did not answer within {}s",
-            PEEK_WITHIN.as_secs()
-        ))),
-        Err(err) => Some(Err(format!("peek failed: {err}"))),
+        Err(err) => Some(Err(said(err, "peek failed"))),
     }
 }
 
-/// The last lines of a pane, as plain text with control characters removed: only the end of its
-/// scrollback is read (`tail.lua`), within PEEK_WITHIN, and `cancelled` stops it early.
-fn tail(
+/// What answer mode reads: the tail as the card reads it, and the input line with its styles.
+fn read(
     rex: &std::path::Path,
     host: &str,
     session: &str,
     block: &str,
+) -> std::result::Result<Screen, String> {
+    let reply = capture(rex, host, session, block, rex::READ, &|| false)
+        .map_err(|err| said(err, "reading the pane failed"))?;
+    Ok(Screen::parse(
+        reply["text"].as_str().unwrap_or_default(),
+        reply["vt"].as_str(),
+    ))
+}
+
+fn said(err: Error, what: &str) -> String {
+    match err {
+        Error::Io(err) if err.kind() == std::io::ErrorKind::TimedOut => {
+            format!("the pane did not answer within {}s", PEEK_WITHIN.as_secs())
+        }
+        err => format!("{what}: {err}"),
+    }
+}
+
+/// Runs a tail script on the pane's host: only the end of its scrollback is read (`tail.lua`),
+/// within PEEK_WITHIN, and `cancelled` stops it early.
+fn capture(
+    rex: &std::path::Path,
+    host: &str,
+    session: &str,
+    block: &str,
+    lua: &str,
     cancelled: &dyn Fn() -> bool,
-) -> Result<Vec<String>> {
+) -> Result<serde_json::Value> {
     let args = json!({ "session_id": session, "block_id": block, "max_bytes": PEEK_BYTES });
     let remote = (host != "local").then_some(host);
-    let reply = rex::run_script_with(rex, remote, rex::TAIL, &args, PEEK_WITHIN, cancelled)?;
+    let reply = rex::run_script_with(rex, remote, lua, &args, PEEK_WITHIN, cancelled)?;
     if reply["ok"] != true {
         let field = |name: &str| reply[name].as_str().unwrap_or("unknown").to_owned();
         return Err(Error::Rex(format!("{}: {}", field("step"), field("error"))));
     }
-    Ok(peek_lines(reply["text"].as_str().unwrap_or_default()))
+    Ok(reply)
 }
 
 /// The last lines of captured pane text, with every escape sequence and control character

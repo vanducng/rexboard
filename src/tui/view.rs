@@ -25,7 +25,7 @@ const LIST_FLOOR: u16 = 3;
 const STOPPED: &str = "serve stopped · r reconnects";
 
 /// The `?` table: every key, in the order an operator reaches for them.
-pub const KEYS: [(&str, &str); 21] = [
+pub const KEYS: [(&str, &str); 22] = [
     ("j/k", "move; g/G first, last"),
     ("1-9", "the nth NEEDS YOU row"),
     ("s", "mark seen"),
@@ -43,6 +43,7 @@ pub const KEYS: [(&str, &str); 21] = [
     ("esc", "clear filters/sort/peek/folds"),
     ("z", "fold or open a group"),
     ("enter", "go to the pane"),
+    ("a", "answer: pick an option, reply"),
     ("r", "reconnect to serve"),
     ("c", "hide or show the card"),
     ("?", "this table"),
@@ -88,6 +89,13 @@ fn card_height(app: &App, now: DateTime<Utc>, body: Rect, headed: bool) -> u16 {
         return body.height;
     }
     let most = body.height.saturating_sub(LIST_FLOOR + u16::from(headed));
+    if app.answer.is_some() {
+        let need = super::card::lines(app, now, usize::from(body.width), usize::from(most));
+        return (body.height * 2 / 5)
+            .max(8)
+            .max(need.len() as u16)
+            .min(most);
+    }
     let base = (body.height * 2 / 5).max(8);
     let asks = app.keys || app.current().is_some_and(|row| row.pane.state == "blocked");
     let need = if asks {
@@ -459,6 +467,10 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         frame.render_widget(Paragraph::new(status_keys(app, width)), area);
         return;
     }
+    if let Some(answer) = &app.answer {
+        frame.render_widget(Paragraph::new(answer.footer(width)), area);
+        return;
+    }
     if let Some(toast) = app.toast() {
         frame.render_widget(
             Paragraph::new(Line::styled(
@@ -513,6 +525,7 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         keys.extend([
             ("tab", "next"),
             ("enter", "jump"),
+            ("a", "answer"),
             ("space", "zoom"),
             ("v", "view"),
             ("1-9", "select"),
@@ -1490,5 +1503,78 @@ mod tests {
         app.toast = None;
         press(&mut app, KeyCode::Char('<'));
         assert_eq!(app.toast(), None, "once a run");
+    }
+
+    const PERMISSION: &str = "⏺ Bash(git push origin main --force-with-lease)\n Bash command\n   git push origin main --force-with-lease\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and don't ask again for git push commands in /work/project\n   3. No, and tell Claude what to do differently\n\n Esc to cancel · Tab to amend\n";
+
+    fn answering(text: &str) -> App {
+        let mut app = fuller();
+        let Some(Effect::Read { key, .. }) = press(&mut app, KeyCode::Char('a')) else {
+            panic!("a reads the pane");
+        };
+        app.screen(&key, Ok(crate::tui::screen::Screen::parse(text, None)));
+        app
+    }
+
+    #[test]
+    fn answer_mode_shows_a_red_bar_the_options_and_its_own_footer_at_80_and_140() {
+        let app = answering(PERMISSION);
+        for width in [80, 140] {
+            let text = render(&app, width, 24);
+            let card = card_of(&text);
+            assert!(
+                card[0].starts_with("━━ ANSWER → seat-b · api › main · mini · claude "),
+                "{text}"
+            );
+            assert!(card[0].contains("captured"), "{text}");
+            assert!(card.iter().any(|l| l == " │  ❯ 1. Yes"), "{text}");
+            assert!(
+                card.iter()
+                    .any(|l| l.contains("2. Yes, and don't ask") && l.ends_with("press 2 twice")),
+                "{text}"
+            );
+            assert!(
+                !text.contains("Esc to cancel"),
+                "chrome below the options is cut: {text}"
+            );
+            assert!(card.last().unwrap().starts_with(" › "), "{text}");
+            let footer = text.lines().last().unwrap();
+            assert!(
+                footer.starts_with("1-3 pick · esc back to board"),
+                "{footer}"
+            );
+            assert_eq!(
+                footer.contains("board keys are off"),
+                width == 140,
+                "the promise shows when it fits: {footer}"
+            );
+        }
+    }
+
+    #[test]
+    fn answer_mode_says_why_a_key_did_nothing_and_shows_a_pending_double_press() {
+        let mut app = answering(PERMISSION);
+        press(&mut app, KeyCode::Char('x'));
+        let text = render(&app, 100, 24);
+        assert!(
+            text.contains(" pick a number; this dialog takes no text"),
+            "{text}"
+        );
+        press(&mut app, KeyCode::Char('2'));
+        let text = render(&app, 100, 24);
+        assert!(
+            text.contains(" press 2 again to send it: Yes, and don't ask again"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn after_a_send_the_bar_says_what_went_where() {
+        let mut app = answering(PERMISSION);
+        press(&mut app, KeyCode::Char('1'));
+        app.sent("mini/seat-b", "1 (Yes)", Ok(()));
+        let text = render(&app, 140, 24);
+        let bar = &card_of(&text)[0];
+        assert!(bar.contains(" sent 1 (Yes) → seat-b "), "{bar}");
     }
 }

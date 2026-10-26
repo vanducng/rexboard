@@ -9,6 +9,7 @@ mod jump;
 mod output;
 mod pane;
 mod rex;
+mod send;
 mod serve;
 mod state;
 mod tui;

@@ -23,7 +23,7 @@
     <div class="diagram-container">
 <svg id="architecture" viewBox="0 0 1040 620" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="architecture-title architecture-desc">
   <title id="architecture-title">rexboard architecture</title>
-  <desc id="architecture-desc">rexboard is one Rust binary; Rex runs its Lua scripts. On each Rex host, local (this Mac) and mini, rex do runs observer.lua, which streams NDJSON to rexboard serve. serve keeps state on disk and answers the ls, watch and seen commands and the ratatui board over a unix socket. A jump, the one write to Rex, runs jump.lua: session.focus_block on the pane's host, then client.perform session.select on the Rex app.</desc>
+  <desc id="architecture-desc">rexboard is one Rust binary; Rex runs its Lua scripts. On each Rex host, local (this Mac) and mini, rex do runs observer.lua, which streams NDJSON to rexboard serve. serve keeps state on disk and answers the ls, watch and seen commands and the ratatui board over a unix socket. Two things write to Rex. A jump runs jump.lua: session.focus_block on the pane's host, then client.perform session.select on the Rex app. An answer from the board runs send.lua: it checks the pane, then sends one key or a paste and Enter with block.event.</desc>
   <defs>
     <style>
     #architecture { --paper: #f5f5f5; --ink: #2d3142; --muted: #4f5d75; --soft: #5f6b80; --accent: #eb6c36; --accent-tint: rgba(235,108,54,0.08); --link: #2e5aa8; --box: #ffffff; --wash: rgba(45,49,66,0.03); --wash2: rgba(45,49,66,0.05); --line: rgba(45,49,66,0.30); --zone-fill: rgba(45,49,66,0.02); --zone-stroke: rgba(45,49,66,0.12); }
@@ -112,7 +112,7 @@
     <rect class="mask" x="728" y="184" width="248" height="64" rx="6"/>
     <rect class="backend" x="728" y="184" width="248" height="64" rx="6"/>
     <text class="title-mono" x="852" y="212" text-anchor="middle">board · pick</text>
-    <text class="sub" x="852" y="231" text-anchor="middle">the TUI, ratatui · subscribes to rows</text>
+    <text class="sub" x="852" y="231" text-anchor="middle">the TUI · rows from serve · answers</text>
     <rect class="mask" x="728" y="296" width="248" height="64" rx="6"/>
     <rect class="focal" x="728" y="296" width="248" height="64" rx="6"/>
     <text class="title-mono" x="852" y="324" text-anchor="middle">jump · next</text>
@@ -122,7 +122,7 @@
     <line class="edge" x1="112" y1="548" x2="144" y2="548" marker-end="url(#architecture-arrow)"/>
     <text class="legend" x="152" y="552">reads</text>
     <line class="jump" x1="384" y1="548" x2="416" y2="548" marker-end="url(#architecture-arrow-link)"/>
-    <text class="legend" x="424" y="552">a jump, the only Rex API write</text>
+    <text class="legend" x="424" y="552">a write: a jump or an answer</text>
     <rect class="swatch" x="608" y="541" width="20" height="14" rx="2"/>
     <text class="legend" x="636" y="552">focal: serve and jumps</text>
     <text class="caption" x="32" y="588">A pane on local takes the same path through its own server.</text>
