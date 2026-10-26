@@ -48,13 +48,15 @@ A view is a way of grouping the rows plus a sort. The view and sort last for the
 | View | Groups | Order inside a group, with no sort |
 | --- | --- | --- |
 | `status` (the default) | `NEEDS YOU`, `WORKING`, `QUIET`, `UNREPORTED`, as above | As above |
-| `flat` | None: one list with no group headers | The `status` view's order |
+| `table` | None: one list with no group headers, sortable by any column with a key or a click | The `status` view's order |
 | `harness` | One per harness (`CLAUDE`, `CODEX`), a to z, with `?` (no harness) last | The `status` view's order |
 | `host` | One per host (`LOCAL`, `MINI`), a to z | The `status` view's order |
 
-Shift and a column's letter sorts by that column inside each group: `S` state, `A` age, `T` turn, `R` harness (runtime), `O` host, `W` where, `E` session, `N` window, `B` block, `M` msg. `W` sorts by the whole `session › window › block`, and `E`, `N` and `B` by one part, whether or not `WHERE` is split. Sorting works as in k9s: Shift and the letter, again to flip. The first press sorts `AGE` and `TURN` longest first (`↓`), `STATE` most urgent first (blocked, error, done, working, idle; `↑`) and the text columns a to z (`↑`). The same letter again flips it, and `esc` clears it. A row with no value (no status record to date it, no finished turn) sorts last either way. In the `status` view, `NEEDS YOU` keeps its blocked rows first under any sort. `T` sorts by turn even when the `TURN` column is not drawn. In the `host` view rows leave out `@HOST`, since their group names the host.
+Shift and a column's letter sorts by that column inside each group: `S` state, `A` age, `T` turn, `R` harness (runtime), `O` host, `W` where, `E` session, `N` window, `B` block, `M` msg. `W` sorts by the whole `session › window › block`, and `E`, `N` and `B` by one part, whether or not `WHERE` is split. Sorting works as in k9s: Shift and the letter, again to flip, a third time to clear. The first press sorts `AGE` and `TURN` longest first (`↓`), `STATE` most urgent first (blocked, error, done, working, idle; `↑`) and the text columns a to z (`↑`). The same letter again flips it; a third press, or `esc`, clears it. A row with no value (no status record to date it, no finished turn) sorts last either way. In the `status` view, `NEEDS YOU` keeps its blocked rows first under any sort. `T` sorts by turn even when the `TURN` column is not drawn. In the `host` view rows leave out `@HOST`, since their group names the host.
 
-The column header underlines each column's sort letter and puts `↑` or `↓` just left of the sorted column's name. When the view is not `status`, or a sort is set, the top bar says so after `rexboard`: `view: flat ↓age`. The selection stays on its row when the view or the sort changes.
+The column header underlines each column's sort letter and puts `↑` or `↓` just left of the sorted column's name. When the view is not `status`, or a sort is set, the top bar says so after `rexboard`: `view: table ↓age`. The selection stays on its row when the view or the sort changes.
+
+In the `table` view a click on a column's header sorts by that column, as its letter does: once to sort, again to flip, a third time to clear. Other clicks do nothing. Reading clicks needs mouse capture, which stops the terminal's own text selection, so rexboard turns it on only while the `table` view shows and off as you leave it or quit, including on a signal or a panic. In other views, and in `pick`, text selection works as usual and sorting is by letter only. Many terminals still select text in the `table` view with a modifier held (Option in iTerm2, Shift in many others). `flat`, the view's old name, still opens it from `:`.
 
 ## Keys
 
@@ -68,9 +70,10 @@ The column header underlines each column's sort letter and puts `↑` or `↓` j
 | `space` | Peek: the pane's newest lines, from `rex capture` (it keeps the last 200), with escape sequences removed. Long lines wrap, so the newest ones show whole, and the oldest drop off the top; the newest line is always on the last row. From 100 columns it fills the detail pane under the fields, headed `peek · HH:MM:SS`, the time of the capture. Below 100 it takes the fields' place, in up to half the screen, and the name line reads `PANE · peek · HH:MM:SS`. It is one capture, taken on `space`: a resize shows more or fewer lines from it. `space` again closes it |
 | `s` | Mark the selected pane seen, through serve. The message names it `session › block` (`session › window` for a generic block label). A blocked or erroring pane stays in `NEEDS YOU`, and the message says so |
 | `ctrl+s` | Mark every unseen `done` row the list shows seen (a kept filter narrows it), through serve, and say how many (`9 done rows marked seen`). Blocked and erroring rows are left alone. Before v0.2 this was `S`, which now sorts by state; the `?` table says `(was S)`, and the first `S` of a run says `sorted by state · bulk seen is ctrl+s now` |
-| `v` | Next view: `status`, `flat`, `harness`, `host`, then `status` again |
-| `:` | Open a view by name. Tab completes a name (`fl` to `flat`), Enter opens it (or the one view the text starts), Esc cancels. An unknown name says `no view "nope"` |
-| `S` `A` `T` `R` `O` `W` `E` `N` `B` `M` | Sort by `STATE`, `AGE`, `TURN`, `HARNESS` (runtime), `HOST`, `WHERE`, `SESSION`, `WINDOW`, `BLOCK` or `MSG`. The same letter again flips the direction. See [Views](#views) |
+| `v` | Next view: `status`, `table`, `harness`, `host`, then `status` again |
+| `:` | Open a view by name. Tab completes a name (`ta` to `table`), Enter opens it (or the one view the text starts), Esc cancels. An unknown name says `no view "nope"` |
+| `S` `A` `T` `R` `O` `W` `E` `N` `B` `M` | Sort by `STATE`, `AGE`, `TURN`, `HARNESS` (runtime), `HOST`, `WHERE`, `SESSION`, `WINDOW`, `BLOCK` or `MSG`. The same letter again flips the direction, and a third time clears the sort. See [Views](#views) |
+| click | In the `table` view, a click on a column header sorts by it, as its letter does |
 | `z` | Fold the selected row's group, or open the folded group the selection is on. `NEEDS YOU` opens by itself when a new row enters it |
 | `<` / `>` | Narrow / widen the detail pane by 5% of the width, from 100 columns. The width is kept per machine (see [Detail width](#detail-width)) |
 | `?` | Show every key in the detail pane; `?` or `esc` hides it |

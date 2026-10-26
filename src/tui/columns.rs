@@ -348,6 +348,18 @@ impl Columns {
             .map_or(0, |(_, w)| *w)
     }
 
+    /// The sortable column whose header cell spans `x`.
+    pub fn at(&self, x: usize) -> Option<&'static Column> {
+        let mut start = 0;
+        for (c, width) in &self.cols {
+            if x < start + width {
+                return c.letter.map(|_| *c);
+            }
+            start += width;
+        }
+        None
+    }
+
     pub fn has(&self, id: Col) -> bool {
         self.cols.iter().any(|(c, _)| c.id == id)
     }
@@ -504,6 +516,48 @@ mod tests {
                 "{width}: the header names exactly the columns drawn"
             );
         }
+    }
+
+    #[test]
+    fn a_click_on_each_header_cell_sorts_by_its_column_in_the_table_view() {
+        use crate::tui::detail::{columns_board, list};
+        for (width, share) in [
+            (100, None),
+            (140, None),
+            (140, Some(38.0 / 140.0)),
+            (200, None),
+        ] {
+            let mut app = app();
+            app.view = crate::tui::views::views().remove(1);
+            (app.width, app.height, app.detail) = (width, 30, share);
+            let header = line(&buffer(&app, width, 30), 2);
+            let list = usize::from(list(width, share, false));
+            let columns = Columns::new(columns_board(width, list, false), list);
+            for (column, _) in columns.cols.iter().filter(|(c, _)| c.letter.is_some()) {
+                let x = header.find(column.header).unwrap();
+                for at in [x, x + column.header.len() - 1] {
+                    app.sort = None;
+                    app.click(at as u16, 2);
+                    assert_eq!(
+                        app.sort,
+                        Some((column.id, column.first)),
+                        "{width}/{share:?}: {} at {at}:\n{header}",
+                        column.header
+                    );
+                }
+            }
+            app.sort = None;
+            app.click(3, 5);
+            app.click(width - 2, 2);
+            assert_eq!(
+                app.sort, None,
+                "{width}: a row, and the detail pane, do nothing"
+            );
+        }
+        let mut status = app();
+        (status.width, status.height) = (140, 30);
+        status.click(10, 2);
+        assert_eq!(status.sort, None, "clicks sort only in the table view");
     }
 
     #[test]

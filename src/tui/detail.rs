@@ -36,6 +36,16 @@ pub fn columns_board(board: u16, list: usize, pick: bool) -> u16 {
     }
 }
 
+/// The list's width on a board `board` wide: beside the pane and its rule from 100 columns, else
+/// the whole board.
+pub fn list(board: u16, share: Option<f64>, pick: bool) -> u16 {
+    if board >= 100 && !pick {
+        board.saturating_sub(width(board, share) + 1)
+    } else {
+        board
+    }
+}
+
 /// The share after one `<` (narrower) or `>` (wider), from the width shown now, so a press at a
 /// bound changes nothing.
 pub fn step(board: u16, share: Option<f64>, wider: bool) -> f64 {
