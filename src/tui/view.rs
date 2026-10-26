@@ -2048,6 +2048,107 @@ mod tests {
             }
         }
     }
+
+    /// Every cell's symbol and style, one line per row, the style written where it changes.
+    fn styled_dump(app: &App, width: u16, height: u16) -> String {
+        let now = DateTime::parse_from_rfc3339("2026-01-01T05:43:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| draw(frame, app, now)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut out = String::new();
+        for y in 0..height {
+            let mut last = None;
+            for x in 0..width {
+                let cell = &buffer[(x, y)];
+                let style = (cell.fg, cell.bg, cell.modifier);
+                if last != Some(style) {
+                    out.push_str(&format!("{{{:?}/{:?}/{:?}}}", style.0, style.1, style.2));
+                    last = Some(style);
+                }
+                out.push_str(cell.symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    /// The board's looks across its screens, compared with the copy taken before the style
+    /// tokens: the refactor must change no cell.
+    #[test]
+    fn every_screen_looks_as_it_did_before_the_style_tokens() {
+        let mut screens: Vec<(&str, App, u16, u16)> = Vec::new();
+        screens.push(("status 80", fuller(), 80, 30));
+        screens.push(("status 140", fuller(), 140, 34));
+        let mut table = fuller();
+        press(&mut table, KeyCode::Char('v'));
+        press(&mut table, KeyCode::Char('A'));
+        screens.push(("table sorted 140", table, 140, 30));
+        let mut keys = fuller();
+        press(&mut keys, KeyCode::Char('?'));
+        screens.push(("keys 120", keys, 120, 34));
+        let mut status = fuller();
+        press(&mut status, KeyCode::Char('f'));
+        screens.push(("f picker 80", status, 80, 20));
+        let mut filter = fuller();
+        press(&mut filter, KeyCode::Char('/'));
+        for c in "seat".chars() {
+            press(&mut filter, KeyCode::Char(c));
+        }
+        screens.push(("filter prompt 80", filter, 80, 20));
+        let mut command = fuller();
+        press(&mut command, KeyCode::Char(':'));
+        screens.push(("command prompt 80", command, 80, 20));
+        let mut hidden = fuller();
+        press(&mut hidden, KeyCode::Char('c'));
+        hidden.toast = None;
+        screens.push(("card hidden 80", hidden, 80, 24));
+        let mut failed = fuller();
+        failed.failed = Some("that pane is gone".into());
+        failed.hosts.insert("studio".into(), "down".into());
+        screens.push(("failed jump and a host down 80", failed, 80, 30));
+        let mut toast = fuller();
+        toast.say("a passing message");
+        screens.push(("toast 80", toast, 80, 20));
+        screens.push(("answer 80", answering(PERMISSION), 80, 30));
+        let mut refused = answering(PERMISSION);
+        refused.answer.as_mut().unwrap().error = Some("the screen changed; nothing sent".into());
+        screens.push(("answer refused 80", refused, 80, 30));
+        let long = format!("\x1b[48;2;0;64;0m+ {}\x1b[0m", "x".repeat(120));
+        screens.push((
+            "full coloured 80",
+            full_of(vec![
+                "\x1b[31m- removed\x1b[0m".into(),
+                long,
+                "plain".into(),
+            ]),
+            80,
+            12,
+        ));
+        let mut failing = full_of(numbered(3));
+        failing.peeked("mini/seat-b", Err("rex timed out".into()));
+        screens.push(("full failing 80", failing, 80, 10));
+        let mut text = String::new();
+        for (name, app, width, height) in &screens {
+            text.push_str(&format!("== {name}\n{}", styled_dump(app, *width, *height)));
+        }
+        let path = format!(
+            "{}/tests/fixtures/style-snapshot.txt",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        if std::env::var_os("UPDATE_STYLE_SNAPSHOT").is_some() {
+            std::fs::write(&path, &text).unwrap();
+        }
+        let want = std::fs::read_to_string(&path).expect("the snapshot");
+        for ((name, ..), (got, want)) in screens
+            .iter()
+            .zip(text.split("== ").skip(1).zip(want.split("== ").skip(1)))
+        {
+            assert_eq!(got, want, "{name} changed");
+        }
+        assert_eq!(text, want);
+    }
 }
 
 #[cfg(test)]
