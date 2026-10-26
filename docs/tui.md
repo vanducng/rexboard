@@ -93,6 +93,9 @@ In the `table` view a click on a column's header sorts by that column, as its le
 | `?` | Show every key in the card, in as many columns as fit; `?` or `esc` hides it |
 | `enter` | Go to the pane in the Rex window you are in, on its host, and mark it seen, as [`rexboard jump`](cli.md#rexboard-jump-next-and-pick) does. The footer says `going to SESSION › PANE…` until the jump ends, then where it went; Enter during a jump says one is already running. A failed jump's reason stays in the footer until the next key, and in full in the turn card. The board stays open |
 | `a` | Answer the selected row from the board: pick a dialog's option or reply with a line. See [Answer mode](#answer-mode) |
+| `-` | Back to the pane before the last jump, as [`rexboard jump -`](cli.md#rexboard-jump-next-and-pick) does; a second `-` comes back. The footer says `going back…`, then `back to SESSION › BLOCK`, or `previous pane is gone` |
+| `y` / `Y` | Copy the selected row's message (`y`), or where its pane is as `SESSION › WINDOW › BLOCK @HOST` (`Y`), to the clipboard of the machine the board runs on: `pbcopy` on macOS, `wl-copy` under Wayland, else `xclip`. The footer says `copied the message`, or why not (`no clipboard to copy to`). A row with no message says so. Rex does not pass OSC 52 from a pane to the Mac's clipboard, so the board does not use it |
+| `ctrl+k` | Close the selected row's pane, after the footer asks `close SESSION › WINDOW › BLOCK on HOST? y/n`; `y` closes it with `rex block close`, any other key says `nothing closed`. A pane whose process is `tmux` adds `(tmux keeps running)`: closing it ends the tmux client, not the session. The board's own pane, and any pane running `rexboard`, are never closed. Not in `pick` |
 | `r` | Reconnect to serve |
 | `esc` | Clear the `/` filter, the status filter and the sort, close the key table, and open every folded group |
 | `q`, `ctrl-c` | Quit (in answer mode, `ctrl-c` only leaves it) |

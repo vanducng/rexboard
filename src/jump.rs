@@ -13,11 +13,17 @@ const SCRIPT: &str = concat!(
     include_str!("lua/jump.lua")
 );
 
-/// `rexboard jump`: TARGET is a key (`HOST/BLOCK_ID`) or N, the nth NEEDS YOU row.
+/// `rexboard jump`: TARGET is a key (`HOST/BLOCK_ID`), N, the nth NEEDS YOU row, or `-`.
 pub fn jump(target: &str, json: bool) -> Result<()> {
-    let rows: Rows = serde_json::from_value(client::call(&json!({ "cmd": "rows" }))?)
-        .map_err(|err| Error::serve(format!("serve sent rows in an unexpected shape: {err}")))?;
-    let row = find(rows.rows, target)?;
+    let row = if target == "-" {
+        previous()?
+    } else {
+        let rows: Rows =
+            serde_json::from_value(client::call(&json!({ "cmd": "rows" }))?).map_err(|err| {
+                Error::serve(format!("serve sent rows in an unexpected shape: {err}"))
+            })?;
+        find(rows.rows, target)?
+    };
     go(&row)?;
     done(&row, json);
     Ok(())
@@ -32,6 +38,14 @@ pub fn next(back: bool, json: bool) -> Result<()> {
     go(&row)?;
     done(&row, json);
     Ok(())
+}
+
+/// The pane the jump before the last went to. Going there makes it the last, so the next `-`
+/// comes back, as `cd -` does.
+pub fn previous() -> Result<Row> {
+    let reply = client::call(&json!({ "cmd": "back" }))?;
+    serde_json::from_value(reply["row"].clone())
+        .map_err(|err| Error::serve(format!("serve sent a row in an unexpected shape: {err}")))
 }
 
 fn find(rows: Vec<Row>, target: &str) -> Result<Row> {

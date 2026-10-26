@@ -225,27 +225,28 @@ fn observer(pid: i32, previous: &Record) -> std::result::Result<(), String> {
     Ok(())
 }
 
-pub fn load(path: &Path) -> BTreeMap<String, Memory> {
-    #[derive(Deserialize)]
-    struct Saved {
-        panes: BTreeMap<String, Memory>,
-    }
+/// state.json: what serve remembers of each pane, and the last two jumps, older first.
+#[derive(Debug, Default, Deserialize)]
+pub struct Saved {
+    pub panes: BTreeMap<String, Memory>,
+    #[serde(default)]
+    pub jumps: Vec<String>,
+}
+
+pub fn load(path: &Path) -> Saved {
     match fs::read_to_string(path) {
-        Ok(text) => match serde_json::from_str::<Saved>(&text) {
-            Ok(saved) => saved.panes,
-            Err(err) => {
-                eprintln!("warning: ignoring {}: {err}", path.display());
-                BTreeMap::new()
-            }
-        },
-        Err(_) => BTreeMap::new(),
+        Ok(text) => serde_json::from_str::<Saved>(&text).unwrap_or_else(|err| {
+            eprintln!("warning: ignoring {}: {err}", path.display());
+            Saved::default()
+        }),
+        Err(_) => Saved::default(),
     }
 }
 
 /// Writes state.json through a temp file and a rename, so a crash never leaves half a file.
-pub fn save(path: &Path, panes: &BTreeMap<String, Memory>) -> Result<()> {
+pub fn save(path: &Path, panes: &BTreeMap<String, Memory>, jumps: &[String]) -> Result<()> {
     let tmp = path.with_extension("json.tmp");
-    let body = json!({ "v": 1, "panes": panes });
+    let body = json!({ "v": 1, "panes": panes, "jumps": jumps });
     fs::write(&tmp, body.to_string())?;
     fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
     fs::rename(&tmp, path)?;

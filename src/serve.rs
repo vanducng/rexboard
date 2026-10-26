@@ -67,6 +67,8 @@ enum Request {
         #[serde(default)]
         back: bool,
     },
+    /// The pane the jump before the last one went to, for `jump -`.
+    Back,
     Stop,
     /// Which rexboard this serve is, so a newer client can replace it.
     Version,
@@ -216,20 +218,21 @@ struct Reducer {
     host_tx: Sender<(HostId, HostEvent)>,
     tx: Sender<Msg>,
     subscribers: Subscribers,
-    waiting: Vec<SyncSender<String>>,
+    /// Requests that need every host's first snapshot, answered once it is in.
+    waiting: Vec<(Request, SyncSender<String>)>,
     started: Instant,
     announced: bool,
     rows_cache: Option<String>,
     suspects: BTreeSet<(String, String)>,
-    /// The key the last jump went to. Memory only: a restart starts `next` from the top.
-    last_jump: Option<String>,
+    /// The keys the last two jumps went to, older first, kept in state.json.
+    jumps: Vec<String>,
     rows_due: Option<Instant>,
     save_due: Option<Instant>,
     extensions: Running,
 }
 
 impl Reducer {
-    fn new(memory: BTreeMap<String, Memory>, tx: Sender<Msg>) -> Self {
+    fn new(saved: state::Saved, tx: Sender<Msg>) -> Self {
         let (host_tx, host_rx) = mpsc::channel::<(HostId, HostEvent)>();
         let forward = tx.clone();
         thread::spawn(move || {
@@ -250,7 +253,7 @@ impl Reducer {
         });
         Self {
             board: Board::default(),
-            memory,
+            memory: saved.panes,
             collectors: BTreeMap::new(),
             hosts: BTreeMap::new(),
             restored: BTreeSet::new(),
@@ -262,7 +265,7 @@ impl Reducer {
             announced: false,
             rows_cache: None,
             suspects: BTreeSet::new(),
-            last_jump: None,
+            jumps: saved.jumps,
             rows_due: None,
             save_due: None,
             extensions: Running::new(ext_tx),
@@ -295,7 +298,7 @@ impl Reducer {
             }
             if self.save_due.is_some_and(|due| now >= due) {
                 self.save_due = None;
-                if let Err(err) = state::save(&paths.state(), &self.memory_to_save()) {
+                if let Err(err) = state::save(&paths.state(), &self.memory_to_save(), &self.jumps) {
                     eprintln!("serve: could not save state: {err}");
                 }
             }
@@ -328,9 +331,8 @@ impl Reducer {
                 // Subscribers that came before every host reported get rows now.
                 self.announced = true;
                 self.subscribers.owe_all();
-                let line = self.rows_line().to_string();
-                for waiter in self.waiting.drain(..) {
-                    offer(&waiter, &line);
+                for (request, reply) in std::mem::take(&mut self.waiting) {
+                    self.request(request, reply);
                 }
             }
             let msg = match rx.recv_timeout(Duration::from_millis(50)) {
@@ -349,7 +351,7 @@ impl Reducer {
                 Msg::Request(request, reply) => self.request(request, reply),
             }
         }
-        state::save(&paths.state(), &self.memory_to_save())
+        state::save(&paths.state(), &self.memory_to_save(), &self.jumps)
     }
 
     /// The board's memory, plus what was loaded for hosts whose first snapshot has not come,
@@ -536,8 +538,8 @@ impl Reducer {
 
     fn request(&mut self, request: Request, reply: SyncSender<String>) {
         let line = match request {
-            Request::Rows if !self.ready() => {
-                self.waiting.push(reply);
+            Request::Rows | Request::Back if !self.ready() => {
+                self.waiting.push((request, reply));
                 return;
             }
             Request::Rows => self.rows_line(),
@@ -547,8 +549,10 @@ impl Reducer {
             }
             Request::Seen { key, jump } => match split(&key) {
                 Some(row) if self.board.mark_seen(&row) => {
-                    if jump {
-                        self.last_jump = Some(key.clone());
+                    if jump && self.jumps.last() != Some(&key) {
+                        self.jumps.push(key.clone());
+                        let extra = self.jumps.len().saturating_sub(2);
+                        self.jumps.drain(..extra);
                     }
                     self.rows_changed();
                     json!({ "v": VERSION, "ok": true, "key": key })
@@ -556,13 +560,31 @@ impl Reducer {
                 _ => error_line("NOT_FOUND", &format!("no pane {key}")),
             },
             Request::Next { after, back } => {
-                let after = after.or_else(|| self.last_jump.clone());
+                let after = after.or_else(|| self.jumps.last().cloned());
                 self.next(after.as_deref(), back)
             }
+            Request::Back => self.back(),
             Request::Stop => unreachable!("handled in run"),
             Request::Version => unreachable!("answered by the connection"),
         };
         offer(&reply, &line.to_string());
+    }
+
+    /// The row of the jump before the last: going there makes it the last, so a second `jump -`
+    /// comes back, as `cd -` does.
+    fn back(&self) -> Value {
+        let Some(key) = self.jumps.len().checked_sub(2).map(|i| &self.jumps[i]) else {
+            return error_line("NOT_FOUND", "no previous jump yet");
+        };
+        match self
+            .board
+            .rows(chrono::Utc::now())
+            .into_iter()
+            .find(|row| row.key == *key)
+        {
+            Some(row) => json!({ "v": VERSION, "row": row }),
+            None => error_line("NOT_FOUND", "previous pane is gone"),
+        }
     }
 
     /// The NEEDS YOU row after `after` (a key, or the block id of the pane asking), unseen

@@ -25,7 +25,7 @@ const LIST_FLOOR: u16 = 3;
 const STOPPED: &str = "serve stopped · r reconnects";
 
 /// The `?` table: every key, in the order an operator reaches for them.
-pub const KEYS: [(&str, &str); 22] = [
+pub const KEYS: [(&str, &str); 25] = [
     ("j/k", "move; g/G first, last"),
     ("1-9", "the nth NEEDS YOU row"),
     ("s", "mark seen"),
@@ -43,7 +43,10 @@ pub const KEYS: [(&str, &str); 22] = [
     ("esc", "clear filters/sort/peek/folds"),
     ("z", "fold or open a group"),
     ("enter", "go to the pane"),
+    ("-", "back to the pane before"),
     ("a", "answer: pick an option, reply"),
+    ("y Y", "copy the message, the place"),
+    ("ctrl+k", "close the pane, after y/n"),
     ("r", "reconnect to serve"),
     ("c", "hide or show the card"),
     ("?", "this table"),
@@ -557,6 +560,13 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         frame.render_widget(Paragraph::new(answer.footer(width)), area);
         return;
     }
+    if let Some(question) = app.close_question() {
+        frame.render_widget(
+            Paragraph::new(Line::styled(fit(&question, width), theme::alert_label())),
+            area,
+        );
+        return;
+    }
     if let Some((text, style)) = note(app) {
         frame.render_widget(Paragraph::new(Line::styled(fit(text, width), style)), area);
         return;
@@ -826,6 +836,21 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_k_puts_its_question_in_the_footer_until_the_next_key() {
+        use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
+        let mut app = fuller();
+        app.handle(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+        let text = render(&app, 80, 30);
+        assert_eq!(
+            text.lines().last().unwrap(),
+            "close api › main › seat-b on mini? y/n"
+        );
+        press(&mut app, KeyCode::Esc);
+        let text = render(&app, 80, 30);
+        assert_eq!(text.lines().last().unwrap(), "nothing closed");
+    }
+
+    #[test]
     fn the_narrow_key_bar_keeps_the_essentials_and_question_mark_shows_all() {
         let mut app = fuller();
         let text = render(&app, 50, 30);
@@ -834,7 +859,8 @@ mod tests {
             assert!(bar.contains(want), "{bar}");
         }
         press(&mut app, KeyCode::Char('?'));
-        let text = render(&app, 50, 30);
+        // One column of 25 keys under the shortest list.
+        let text = render(&app, 50, 33);
         for (key, _) in KEYS {
             assert!(
                 text.lines().any(|l| l.trim_start().starts_with(key)),
@@ -920,7 +946,7 @@ mod tests {
                 .starts_with("going to api › seat-b…"),
             "{text}"
         );
-        app.jumped(Err(
+        app.went(Err(
             "the Rex app on studio did not answer within 5s; it does not answer while the \
              Mac's screen is locked"
                 .into(),

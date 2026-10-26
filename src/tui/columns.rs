@@ -295,8 +295,8 @@ pub fn free_letter(name: &str, taken: &[char]) -> Option<char> {
         .filter(char::is_ascii_alphabetic)
         .map(|c| c.to_ascii_uppercase())
         .find(|c| {
-            // G goes to the last row.
-            *c != 'G' && by_letter(*c).is_none() && !taken.contains(c)
+            // G goes to the last row and Y copies a row's place.
+            !matches!(c, 'G' | 'Y') && by_letter(*c).is_none() && !taken.contains(c)
         })
 }
 
