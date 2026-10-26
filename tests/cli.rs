@@ -682,7 +682,11 @@ fn held(path: &std::path::Path) -> bool {
 
 /// Polls `check` every 20ms for up to 10s.
 fn eventually(what: &str, check: impl Fn() -> bool) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    eventually_within(what, 10, check);
+}
+
+fn eventually_within(what: &str, secs: u64, check: impl Fn() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
     while !check() {
         assert!(
             std::time::Instant::now() < deadline,
@@ -1976,8 +1980,9 @@ fn next_outside_a_pane_starts_after_the_last_jump() {
 }
 
 /// Writes extension `name` into the serve's config dir: a manifest with one field, `rig`, run
-/// every 2s with a 1s timeout unless `top` says otherwise, then `tables`; and an adapter running
-/// the shell `script`.
+/// every 4s with a 3s timeout unless `top` says otherwise, then `tables`; and an adapter running
+/// the shell `script`. The roomy timeout keeps a slow `/bin/sh` on a loaded machine from failing
+/// a run that a test means to succeed.
 fn extension(
     serve: &Serve,
     name: &str,
@@ -1995,7 +2000,7 @@ fn extension(
     let timing = if top.contains("every") {
         ""
     } else {
-        "every = 2\ntimeout = 1\n"
+        "every = 4\ntimeout = 3\n"
     };
     std::fs::write(
         dir.join("extension.toml"),
@@ -2146,17 +2151,19 @@ fn ext_status_fallback_only_reaches_unreported_rows_and_only_when_provided() {
 }
 
 /// An adapter that answers well once, then fails as `failure` says on every later run.
-fn good_then(serve: &Serve, failure: &str) {
+fn good_then(serve: &Serve, failure: &str, timing: &str) {
     let count = serve.dir.path().join("runs");
+    let failed = serve.dir.path().join("failed");
     // The good answer counts only once the run was sent the row: an early run can come before
     // the local host's snapshot.
     const GOOD: &str =
         r#"{"contract": 1, "rows": {"local/block:api-seat-a": {"fields": {"rig": "api"}}}}"#;
     let script = format!(
-        "req=$(cat)\nif [ -e '{c}' ]; then\n{failure}\nfi\ncase \"$req\" in *'{SEAT}'*) touch '{c}' ;; esac\necho '{GOOD}'",
-        c = count.display()
+        "req=$(cat)\nif [ -e '{c}' ]; then\necho run >> '{f}'\n{failure}\nfi\ncase \"$req\" in *'{SEAT}'*) touch '{c}' ;; esac\necho '{GOOD}'",
+        c = count.display(),
+        f = failed.display()
     );
-    extension(serve, "fake", "", "", &script);
+    extension(serve, "fake", timing, "", &script);
     serve.config("[extensions]\nenabled = [\"fake\"]\n");
 }
 
@@ -2167,12 +2174,17 @@ fn kept_three_runs_then_dropped(serve: &Serve, logged: &str) {
         ext_of(&serve.rows(&[]), SEAT)["fake.rig"] == "api"
     });
     eventually("a failed run", || serve_log(serve).contains(logged));
-    assert_eq!(
-        ext_of(&serve.rows(&[]), SEAT)["fake.rig"],
-        "api",
-        "kept after one failure"
-    );
-    eventually("the field to go after three failed runs", || {
+    // Counted by the adapter, not the clock: a slow poll must not let the third failure land
+    // before the check.
+    let failed = || {
+        std::fs::read_to_string(serve.dir.path().join("failed")).map_or(0, |t| t.lines().count())
+    };
+    let rig = ext_of(&serve.rows(&[]), SEAT)["fake.rig"].clone();
+    let runs = failed();
+    if runs < 3 {
+        assert_eq!(rig, "api", "kept after {runs} failed runs");
+    }
+    eventually_within("the field to go after three failed runs", 20, || {
         ext_of(&serve.rows(&[]), SEAT).get("fake.rig").is_none()
     });
 }
@@ -2180,14 +2192,18 @@ fn kept_three_runs_then_dropped(serve: &Serve, logged: &str) {
 #[test]
 fn ext_bad_json_keeps_the_last_good_rows_for_three_runs() {
     let serve = Serve::new();
-    good_then(&serve, "cat > /dev/null; echo 'not json'; exit 0");
+    good_then(&serve, "cat > /dev/null; echo 'not json'; exit 0", "");
     kept_three_runs_then_dropped(&serve, "ext fake: printed bad JSON");
 }
 
 #[test]
 fn ext_contract_mismatch_keeps_the_last_good_rows_for_three_runs() {
     let serve = Serve::new();
-    good_then(&serve, "cat > /dev/null; echo '{\"contract\": 2}'; exit 0");
+    good_then(
+        &serve,
+        "cat > /dev/null; echo '{\"contract\": 2}'; exit 0",
+        "",
+    );
     kept_three_runs_then_dropped(
         &serve,
         "ext fake: answered for contract 2; this rexboard speaks contract 1",
@@ -2197,7 +2213,7 @@ fn ext_contract_mismatch_keeps_the_last_good_rows_for_three_runs() {
 #[test]
 fn ext_timeout_kills_the_adapter_and_keeps_the_last_good_rows() {
     let serve = Serve::new();
-    good_then(&serve, "exec sleep 30");
+    good_then(&serve, "exec sleep 30", "every = 2\ntimeout = 1\n");
     kept_three_runs_then_dropped(&serve, "ext fake: timed out after 1s and was stopped");
 }
 
@@ -2215,8 +2231,8 @@ fn ext_undeclared_field_is_dropped_and_logged_once() {
     eventually("the declared field", || {
         ext_of(&serve.rows(&[]), SEAT) == serde_json::json!({ "fake.rig": "api" })
     });
-    // Every 2s, so at least one more run answers the same.
-    std::thread::sleep(std::time::Duration::from_secs(3));
+    // Every 4s, so at least one more run answers the same.
+    std::thread::sleep(std::time::Duration::from_secs(5));
     assert_eq!(
         serve_log(&serve)
             .matches("ext fake: undeclared field extra")
