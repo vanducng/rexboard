@@ -2108,8 +2108,10 @@ fn good_then(serve: &Serve, failure: &str) {
     let count = serve.dir.path().join("runs");
     // The good answer counts only once the run was sent the row: an early run can come before
     // the local host's snapshot.
+    const GOOD: &str =
+        r#"{"contract": 1, "rows": {"local/block:api-seat-a": {"fields": {"rig": "api"}}}}"#;
     let script = format!(
-        "req=$(cat)\nif [ -e '{c}' ]; then\n{failure}\nfi\ncase \"$req\" in *'{SEAT}'*) touch '{c}' ;; esac\necho '{{\"contract\": 1, \"rows\": {{\"{SEAT}\": {{\"fields\": {{\"rig\": \"api\"}}}}}}}}'",
+        "req=$(cat)\nif [ -e '{c}' ]; then\n{failure}\nfi\ncase \"$req\" in *'{SEAT}'*) touch '{c}' ;; esac\necho '{GOOD}'",
         c = count.display()
     );
     extension(serve, "fake", "", "", &script);
