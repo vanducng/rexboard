@@ -22,6 +22,8 @@ use crate::send::{Action, Expect};
 const TOAST: Duration = Duration::from_secs(3);
 /// Keys this close together are typing or a paste, not a person answering a question.
 pub const GUARD: Duration = Duration::from_millis(300);
+const TOO_FAST_TO_ANSWER: &str = "keys came too fast; nothing sent · a answers";
+const TOO_FAST_TO_CLOSE: &str = "keys came too fast; nothing closed · dd closes";
 
 const HIDDEN: &str = "the card is hidden · c shows it";
 /// A blocked row's tail is read once its card has shown this long, so j/k across rows reads none.
@@ -185,8 +187,15 @@ pub struct App {
     pub failed: Option<String>,
     /// `dd`: the row to close once `y` confirms it, and when it asked.
     pub closing: Option<(Row, Instant)>,
-    /// Answer mode drops keys that come within GUARD of this: the opening, or the last dropped.
+    /// When answer mode opened, until its first key: a key sooner than GUARD is typing, and
+    /// leaves it.
     answer_guard: Option<Instant>,
+    /// When the last key came, and whether this one came a quiet GUARD after it: typing never
+    /// does, so `dd` and `a`/`i` only act on a key pressed on its own.
+    last_key: Option<Instant>,
+    quiet: bool,
+    /// Whether the waiting prefix's key came on its own.
+    pending_quiet: bool,
     needs: BTreeSet<String>,
     /// `a`: answering one row; the board's keys are off.
     pub answer: Option<Answer>,
@@ -834,8 +843,9 @@ impl App {
     /// what closing it ends, in `width` columns. Only the place gives way.
     pub fn close_question(&self, width: usize) -> Option<String> {
         let (row, _) = self.closing.as_ref()?;
-        let state = match row.pane.state.as_str() {
-            state @ ("blocked" | "working") => format!(" ({state})"),
+        let state = match (row.pane.state.as_str(), row.pane.kind.as_deref()) {
+            ("blocked", Some(kind)) if !kind.is_empty() => format!(" (blocked · {kind})"),
+            (state @ ("blocked" | "working"), _) => format!(" ({state})"),
             _ => String::new(),
         };
         let tmux = if row.pane.process.as_deref() == Some("tmux") {
@@ -1009,6 +1019,10 @@ impl App {
     /// view, the `:` and `/` prompts, a pending prefix, then the board's table.
     pub fn handle_at(&mut self, key: KeyEvent, now: Instant) -> Option<Effect> {
         self.failed = None;
+        self.quiet = self
+            .last_key
+            .is_none_or(|at| now.duration_since(at) >= GUARD);
+        self.last_key = Some(now);
         let k = K::of(key);
         if let Some((row, asked)) = self.closing.take() {
             return self.answer_close(row, asked, k?, now);
@@ -1056,6 +1070,7 @@ impl App {
         }
         if keys::starts(keys::BOARD, k) {
             self.pending = k.char();
+            self.pending_quiet = self.quiet;
             return None;
         }
         let act = keys::find(keys::BOARD, &[k])?;
@@ -1124,7 +1139,7 @@ impl App {
                 if act == Act::Middle {
                     self.tell(
                         'M',
-                        "M is the screen's middle now; sort by message is o then m",
+                        "middle of the screen · M used to sort; message is om now",
                     );
                 }
                 self.on_screen(act);
@@ -1139,7 +1154,7 @@ impl App {
             Act::PrevNeeds => {
                 self.tell(
                     'N',
-                    "N is the previous row needing you now; sort by window is o then n",
+                    "previous row needing you · N used to sort; window is on now",
                 );
                 return self.next_waiting(now, true);
             }
@@ -1184,14 +1199,12 @@ impl App {
                     state: row.pane.state.clone(),
                 });
             }
+            Act::Close if !self.pending_quiet => self.say(TOO_FAST_TO_CLOSE),
             Act::Close => self.ask_close(now),
             Act::CopyMsg => return self.copy(false),
             Act::CopyPlace => return self.copy(true),
             Act::Reconnect => {
-                self.tell(
-                    'R',
-                    "reconnecting · R sorted by harness before; that is o then h now",
-                );
+                self.tell('R', "reconnecting · R used to sort; harness is oh now");
                 self.link = Link::Connecting;
                 return Some(Effect::Reconnect);
             }
@@ -1355,7 +1368,12 @@ impl App {
     }
 
     /// `a` or `i`: answer mode on the current row, once a fresh read of its pane comes back.
+    /// Pressed in the middle of typing, it opens nothing.
     fn start_answer(&mut self, now: Instant) -> Option<Effect> {
+        if !self.quiet {
+            self.say(TOO_FAST_TO_ANSWER);
+            return None;
+        }
         let Some(row) = self.current() else {
             self.say("select a row to answer it");
             return None;
@@ -1377,8 +1395,9 @@ impl App {
         Some(effect)
     }
 
-    /// A key in answer mode. Keys that keep coming within GUARD of the opening are typing that
-    /// was meant for somewhere else: dropped, so they neither pick nor fill the reply.
+    /// A key in answer mode. A first key within GUARD of the opening means the opener was
+    /// typing meant for somewhere else: answer mode leaves at once, and stays left, so no later
+    /// pause lets the rest of the typing pick or fill the reply.
     fn answer_key(&mut self, key: KeyEvent, now: Instant) -> Option<Effect> {
         let leaving = key.code == KeyCode::Esc
             || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL));
@@ -1386,8 +1405,8 @@ impl App {
             && !leaving
             && now.duration_since(at) < GUARD
         {
-            self.answer_guard = Some(now);
-            self.say("keys ignored while typing fast");
+            self.answer = None;
+            self.say(TOO_FAST_TO_ANSWER);
             return None;
         }
         let answer = self.answer.as_mut()?;
@@ -1673,21 +1692,146 @@ pub mod tests {
         assert_eq!(app.toast(), Some("nothing closed (keys came too fast)"));
         let mut app = super::tests::app();
         app.selected = Some(Spot::Row("mini/seat-b".into()));
+        let effects = typed_at(&mut app, "added hidden\n", 60, None, IDLE);
+        assert!(!effects.iter().any(acts_on_a_pane), "{effects:?}");
+        assert!(app.answer.is_none(), "the burst left answer mode");
+    }
+
+    /// An idle prompt, as a fast host reads it back.
+    const IDLE: &str = "────\n❯\u{a0}\n";
+
+    /// Types `text` (a newline is enter) a key every `gap` ms, with one 400 ms pause before
+    /// the character at `pause`. Each read answer mode asks for comes back at once as `screen`.
+    fn typed_at(
+        app: &mut App,
+        text: &str,
+        gap: u64,
+        pause: Option<usize>,
+        screen: &str,
+    ) -> Vec<Effect> {
+        let t0 = Instant::now();
+        let mut ms = 0;
         let mut effects = Vec::new();
-        for (i, c) in "added hidden".chars().enumerate() {
-            effects.push(app.handle_at(KeyEvent::from(KeyCode::Char(c)), at(60 * i as u64)));
+        for (i, c) in text.chars().enumerate() {
+            ms += if pause == Some(i) { 400 } else { gap };
+            let code = if c == '\n' {
+                KeyCode::Enter
+            } else {
+                KeyCode::Char(c)
+            };
+            let effect = app.handle_at(KeyEvent::from(code), t0 + Duration::from_millis(ms));
+            if let Some(Effect::Read { key, .. }) = &effect {
+                app.screen(key, Ok(Screen::parse(screen, None)));
+                drawn(app);
+            }
+            effects.extend(effect);
         }
-        effects.push(app.handle_at(KeyEvent::from(KeyCode::Enter), at(60 * 12)));
+        effects
+    }
+
+    /// What typing must never do: answer an agent or close a pane.
+    fn acts_on_a_pane(effect: &Effect) -> bool {
+        matches!(effect, Effect::Send { .. } | Effect::Close(_))
+    }
+
+    /// Typing meant for an agent, with one ordinary pause anywhere in it, sends nothing and
+    /// picks nothing: an opener only opens on its own, and a fast key after it leaves for good.
+    #[test]
+    fn typing_with_one_pause_never_sends_or_picks() {
+        for text in [
+            "please run tests\n",
+            "fix it and run tests\n",
+            "hidden middle ok\n",
+        ] {
+            for pause in 0..text.chars().count() {
+                let mut app = app();
+                let effects = typed_at(&mut app, text, 120, Some(pause), IDLE);
+                assert!(
+                    !effects.iter().any(acts_on_a_pane),
+                    "{text:?} paused at {pause}: {effects:?}"
+                );
+            }
+        }
+        for pause in 0.."please run 1 test".len() {
+            let mut app = app();
+            let effects = typed_at(&mut app, "please run 1 test", 120, Some(pause), DIALOG);
+            assert!(
+                !effects.iter().any(acts_on_a_pane),
+                "paused at {pause}: {effects:?}"
+            );
+        }
+    }
+
+    /// A seeded spread of random typing, 20 to 280 ms a key with one 400 ms pause, at dialogs
+    /// and idle prompts: nothing sends, picks or closes.
+    #[test]
+    fn random_typing_with_a_pause_never_acts_on_a_pane() {
+        let mut seed: u64 = 0x5eed;
+        let mut next = |n: u64| {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 33) % n
+        };
+        let letters: Vec<char> = "abcdefghijklmnopqrstuvwxyz123".chars().collect();
+        for round in 0..20_000 {
+            let mut text = String::new();
+            for _ in 0..=next(12) {
+                for _ in 0..=next(8) {
+                    text.push(letters[next(letters.len() as u64) as usize]);
+                }
+                text.push(if next(6) == 0 { '\n' } else { ' ' });
+            }
+            let pause = next(text.chars().count() as u64) as usize;
+            let screen = if round % 2 == 0 { IDLE } else { DIALOG };
+            let mut app = app();
+            let t0 = Instant::now();
+            let mut ms = 0;
+            for (i, c) in text.chars().enumerate() {
+                ms += if i == pause { 400 } else { 20 + next(261) };
+                let code = if c == '\n' {
+                    KeyCode::Enter
+                } else {
+                    KeyCode::Char(c)
+                };
+                let effect = app.handle_at(KeyEvent::from(code), t0 + Duration::from_millis(ms));
+                if let Some(Effect::Read { key, .. }) = &effect {
+                    app.screen(key, Ok(Screen::parse(screen, None)));
+                    drawn(&app);
+                }
+                // The one way through: the typing starts with `a`, `i` or `dd` and pauses
+                // right after it, which is what a person pressing it does.
+                let opener_then_pause = (text.starts_with(['a', 'i']) && pause == 1)
+                    || (text.starts_with("dd") && pause == 2);
+                assert!(
+                    !effect.as_ref().is_some_and(acts_on_a_pane) || opener_then_pause,
+                    "{text:?} paused at {pause}: {effect:?}"
+                );
+            }
+        }
+    }
+
+    /// `dd` in the middle of a word, as in "buddy", asks nothing, and a cancelled question stays
+    /// cancelled whatever comes after a pause.
+    #[test]
+    fn dd_in_a_word_asks_nothing_and_a_cancel_stays() {
+        for pause in 0.."buddy".len() {
+            let mut app = app();
+            let effects = typed_at(&mut app, "buddy", 120, Some(pause), IDLE);
+            assert!(!effects.iter().any(acts_on_a_pane), "paused at {pause}");
+        }
+        let t0 = Instant::now();
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        let mut app = app();
+        app.handle_at(KeyEvent::from(KeyCode::Char('d')), at(0));
+        app.handle_at(KeyEvent::from(KeyCode::Char('d')), at(100));
+        app.handle_at(KeyEvent::from(KeyCode::Char('x')), at(200));
+        assert!(app.close_question(usize::MAX).is_none());
         assert!(
-            effects
-                .iter()
-                .flatten()
-                .all(|e| matches!(e, Effect::Read { .. })),
-            "only answer mode's read: {effects:?}"
+            app.handle_at(KeyEvent::from(KeyCode::Char('y')), at(900))
+                .is_none(),
+            "y after a pause does not bring the question back"
         );
-        let answer = app.answer.as_ref().expect("a opened answer mode");
-        assert_eq!(answer.input.value(), "", "no keys reached the reply");
-        assert_eq!(app.toast(), Some("keys ignored while typing fast"));
     }
 
     #[test]
@@ -1891,7 +2035,7 @@ pub mod tests {
         assert_eq!(at(&app), Some(2), "the middle of the 6 rows on screen");
         assert_eq!(
             app.toast(),
-            Some("M is the screen's middle now; sort by message is o then m")
+            Some("middle of the screen · M used to sort; message is om now")
         );
         key(&mut app, ctrl('d'));
         assert_eq!(at(&app), Some(6), "half of 8 down");
@@ -1931,22 +2075,37 @@ pub mod tests {
     }
 
     #[test]
-    fn answer_mode_drops_keys_until_they_stop_coming_fast() {
+    fn answer_mode_leaves_on_a_fast_key_and_an_opener_needs_a_quiet_gap() {
         let t0 = Instant::now();
         let at = |ms: u64| t0 + Duration::from_millis(ms);
         let mut app = app();
         app.handle_at(KeyEvent::from(KeyCode::Char('i')), at(0));
         assert!(app.answer.is_some(), "i opens answer mode too");
         app.handle_at(KeyEvent::from(KeyCode::Char('x')), at(200));
-        app.handle_at(KeyEvent::from(KeyCode::Char('y')), at(450));
-        assert_eq!(app.toast(), Some("keys ignored while typing fast"));
-        app.handle_at(KeyEvent::from(KeyCode::Esc), at(500));
-        assert!(app.answer.is_none(), "esc always leaves");
-        app.handle_at(KeyEvent::from(KeyCode::Char('a')), at(1_000));
-        app.handle_at(KeyEvent::from(KeyCode::Char('z')), at(1_400));
+        assert!(app.answer.is_none(), "a fast first key leaves");
+        assert_eq!(
+            app.toast(),
+            Some("keys came too fast; nothing sent · a answers")
+        );
+        app.handle_at(KeyEvent::from(KeyCode::Char('a')), at(400));
         assert!(
-            app.answer_guard.is_none(),
-            "a key after a quiet GUARD passes"
+            app.answer.is_none(),
+            "an opener right after a key opens nothing"
+        );
+        app.handle_at(KeyEvent::from(KeyCode::Char('a')), at(1_000));
+        assert!(app.answer.is_some(), "on its own it opens");
+        app.handle_at(KeyEvent::from(KeyCode::Esc), at(1_100));
+        assert!(app.answer.is_none(), "esc always leaves");
+        app.handle_at(KeyEvent::from(KeyCode::Char('a')), at(2_000));
+        app.handle_at(KeyEvent::from(KeyCode::Char('z')), at(2_400));
+        assert!(
+            app.answer.is_some(),
+            "a first key after GUARD is the answer"
+        );
+        assert_eq!(
+            app.answer.as_ref().unwrap().input.value(),
+            "",
+            "before the read, it waits"
         );
     }
 
@@ -1958,7 +2117,7 @@ pub mod tests {
         app.selected = Some(Spot::Row("local/claude".into()));
         for (code, said) in [
             (KeyCode::Char('s'), "mark seen is m now"),
-            (KeyCode::Char('S'), "sort by state is o then s now"),
+            (KeyCode::Char('S'), "sort by state is os now"),
             (KeyCode::Char('r'), "reconnect is R now"),
             (KeyCode::Char('Y'), "copy the place is yp now"),
         ] {
@@ -1979,7 +2138,7 @@ pub mod tests {
         ));
         assert_eq!(
             app.toast(),
-            Some("reconnecting · R sorted by harness before; that is o then h now")
+            Some("reconnecting · R used to sort; harness is oh now")
         );
         app.toast = None;
         press(&mut app, KeyCode::Char('R'));

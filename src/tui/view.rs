@@ -1188,7 +1188,7 @@ mod tests {
             "v V      next, previous view (gt gT)",
             "/        filter: text or key:value",
             ":        a view, :seen or :q",
-            "o        sort: o and a column letter",
+            "o        sort by a column's letter",
             "esc      cancel a key, clear filters",
             "f        one status; ff clears",
             "dd       close the pane; y confirms",
@@ -1299,14 +1299,14 @@ mod tests {
             let bar = text.lines().last().unwrap();
             assert!(bar.contains("? keys"), "{width}: {bar}");
             assert!(
-                !bar.contains("v next view") || bar.contains("n next"),
+                !bar.contains("v next view") || bar.contains("n needs you"),
                 "{width}: n next outranks v next view: {bar}"
             );
         }
         let at_80 = render(&app, 80, 30);
         let bar = at_80.lines().last().unwrap();
         assert!(
-            bar.starts_with("j/k move · m seen · / filter · ? keys · n next · enter jump ")
+            bar.starts_with("j/k move · m seen · / filter · ? keys · n needs you · enter jump ")
                 && bar.trim_end().ends_with(" q quit"),
             "{bar}"
         );

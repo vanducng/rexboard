@@ -28,7 +28,7 @@
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
-{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} next · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer{Reset/Reset/NONE}    {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
+{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump{Reset/Reset/NONE}          {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == status 140
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                                                                                 {Reset/Reset/DIM}hh:mm · local + mini
 {Reset/Reset/NONE}                                                                                                                                            
@@ -63,7 +63,7 @@
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} next · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                        {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
+{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                   {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == every state 80
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 3 hosts · 11 panes · 11 agents · {Red/Reset/NONE}studio down{Reset/Reset/NONE}                    {Reset/Reset/DIM}hh:mm
 {Reset/Reset/NONE}                                                                                
@@ -96,7 +96,7 @@
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
-{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} next · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer{Reset/Reset/NONE}    {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
+{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump{Reset/Reset/NONE}          {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == every state 140
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 3 hosts · 11 panes · 11 agents · {Red/Reset/NONE}studio down{Reset/Reset/NONE}                                                                                {Reset/Reset/DIM}hh:mm
 {Reset/Reset/NONE}                                                                                                                                            
@@ -129,7 +129,7 @@
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} next · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                        {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
+{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                   {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == every state 200
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 3 hosts · 11 panes · 11 agents · {Red/Reset/NONE}studio down{Reset/Reset/NONE}                                                                                                                                            {Reset/Reset/DIM}hh:mm
 {Reset/Reset/NONE}                                                                                                                                                                                                        
@@ -162,7 +162,7 @@
 {Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} next · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                                                                                    {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
+{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                                                                               {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == table sorted 140
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · {Reset/Reset/BOLD}view: table ↓age{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                                                              {Reset/Reset/DIM}hh:mm · local + mini
 {Reset/Reset/NONE}                                                                                                                                            
@@ -222,13 +222,13 @@
 {Reset/Reset/BOLD} H M L    {Reset/Reset/DIM}screen top, middle, bottom    {Reset/Reset/BOLD} f        {Reset/Reset/DIM}one status; ff clears         {Reset/Reset/BOLD} m        {Reset/Reset/DIM}mark seen                     
 {Reset/Reset/BOLD} ctrl-d/u {Reset/Reset/DIM}half a page down, up          {Reset/Reset/BOLD} :        {Reset/Reset/DIM}a view, :seen or :q           {Reset/Reset/BOLD} dd       {Reset/Reset/DIM}close the pane; y confirms    
 {Reset/Reset/BOLD} ctrl-f/b {Reset/Reset/DIM}a page down, up               {Reset/Reset/BOLD} v V      {Reset/Reset/DIM}next, previous view (gt gT)   {Reset/Reset/BOLD} yy yp    {Reset/Reset/DIM}copy the message, the place   
-{Reset/Reset/BOLD} ] [      {Reset/Reset/DIM}next, previous group          {Reset/Reset/BOLD} o        {Reset/Reset/DIM}sort: o and a column letter   {Reset/Reset/BOLD} R        {Reset/Reset/DIM}reconnect to serve            
+{Reset/Reset/BOLD} ] [      {Reset/Reset/DIM}next, previous group          {Reset/Reset/BOLD} o        {Reset/Reset/DIM}sort by a column's letter     {Reset/Reset/BOLD} R        {Reset/Reset/DIM}reconnect to serve            
 {Reset/Reset/BOLD} n N tab  {Reset/Reset/DIM}next, previous needing you    {Reset/Reset/BOLD} za zo zc {Reset/Reset/DIM}fold: toggle, open, close     {Reset/Reset/BOLD} ?        {Reset/Reset/DIM}this table; q or esc closes it
 {Reset/Reset/BOLD} 1-9      {Reset/Reset/DIM}the nth NEEDS YOU row         {Reset/Reset/BOLD} zR zM    {Reset/Reset/DIM}open all, fold all            {Reset/Reset/BOLD} esc      {Reset/Reset/DIM}cancel a key, clear filters   
 {Reset/Reset/BOLD} enter    {Reset/Reset/DIM}go to the pane                {Reset/Reset/BOLD} c        {Reset/Reset/DIM}hide or show the card         {Reset/Reset/BOLD} q        {Reset/Reset/DIM}close a layer, else quit      
 {Reset/Reset/NONE}                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                        
-{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} next · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}    {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
+{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full{Reset/Reset/NONE}            {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == f picker 80
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                     {Reset/Reset/DIM}hh:mm · local + mini
 {Reset/Reset/NONE}                                                                                
@@ -316,7 +316,7 @@
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/DIM}────────────────────────────────────────────────────────────────────────────────
-{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}c{Reset/Reset/DIM} card · {Reset/Reset/BOLD}n{Reset/Reset/DIM} next · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump{Reset/Reset/NONE}      {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
+{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}c{Reset/Reset/DIM} card · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you{Reset/Reset/NONE}              {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == failed jump and a host down 80
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 3 hosts · 6 panes · 6 agents · {Red/Reset/NONE}studio down{Reset/Reset/NONE}                      {Reset/Reset/DIM}hh:mm
 {Reset/Reset/NONE}                                                                                
