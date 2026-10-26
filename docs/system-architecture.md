@@ -44,7 +44,9 @@ rexboard reaches Rex only through the `rex` command: `rex do` for these scripts 
 | `src/board.rs` | The reducer: rows with `since`, turns, `seen` and groups, from host events and an injected clock |
 | `src/serve.rs` | The daemon: collectors, the reducer thread, the socket |
 | `src/state.rs` | Paths, the `flock`, `state.json`, `transitions.jsonl`, and the startup sweep |
-| `src/tui/card.rs` | The turn card: the selected row's bar, headline, ask or body, and tail |
+| `src/tui/card.rs` | The turn card: the selected row's bar, headline, ask or body, tail, and its facts at the foot |
+| `src/tui/meta.rs` | The card's facts: host, harness, turn, where, extension fields, title and source, each once under a label, in aligned columns |
+| `src/tui/icons.rs` | The Nerd Font glyphs the facts take with `"icons": "nerd"`, pinned by name and code point; nothing else in `src/tui/` writes a private-use glyph, and a test checks it |
 | `src/tui/answer.rs`, `src/tui/screen.rs` | Answer mode: its keys and card, and what it reads off a pane (options, the input line, a draft) |
 | `src/tui/prefs.rs` | `tui.json` |
 | `src/tui/theme.rs` | The board's one style system: the roles every piece of text takes (`quiet`, `strong`, `accent`, `alert`, `note`, `header`, `selected`, `cut_mark` and the rest), the marks it draws, and `face`, the table of how each row state looks: its glyph or animation frames and their interval, the glyph it holds under reduced motion, colour and modifiers. Nothing else in `src/tui/` picks a colour or a glyph, and a test checks it. The board redraws at the shortest interval of an animated glyph on screen (the working spinner's 160 ms), otherwise once a second; reduced motion (`tui.json` or `REXBOARD_REDUCED_MOTION=1`) is a process-wide switch set at start |

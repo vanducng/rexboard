@@ -5,12 +5,13 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use super::app::App;
+use super::icons;
 use super::theme;
 use crate::board::Row;
 use crate::output::{SEP, clean, fit, harness, labels, path, span};
 use crate::pane::bare_title;
 
-/// A fact the card states. Its label is one token, so another set of labels swaps in here.
+/// A fact the card states. Its label is one token: a word, or with `"icons": "nerd"` a glyph.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Fact {
     Host,
@@ -22,7 +23,18 @@ pub enum Fact {
 }
 
 impl Fact {
-    pub fn label(self) -> &'static str {
+    pub fn label(self, row: &Row, nerd: bool) -> &'static str {
+        if nerd {
+            return match self {
+                Fact::Host => icons::HOST.glyph,
+                Fact::Harness => icons::harness(row.pane.harness.as_deref()).glyph,
+                Fact::Turn => icons::TURN.glyph,
+                Fact::Title => icons::TITLE.glyph,
+                Fact::Source => icons::source(&row.pane.source).map_or("source", |i| i.glyph),
+                // The session's mark leads `where`, whose window and block carry their own.
+                Fact::Where => icons::SESSION.glyph,
+            };
+        }
         match self {
             Fact::Host => "host",
             Fact::Harness => "harness",
@@ -46,20 +58,28 @@ const LABEL: usize = 16;
 pub fn lines(app: &App, row: &Row, width: usize) -> Vec<Line<'static>> {
     let title = bare_title(&row.pane.title);
     // How the agent runs, then what the pane calls itself: each set starts its own row.
-    let runs = labelled([
+    let labelled = |facts: Vec<Option<(Fact, String)>>| -> Vec<(&'static str, String)> {
+        facts
+            .into_iter()
+            .flatten()
+            .map(|(fact, value)| (fact.label(row, app.nerd), value))
+            .collect()
+    };
+    let runs = labelled(vec![
         Some((Fact::Host, row.pane.host.clone())),
         Some((Fact::Harness, harness(row))),
         row.last_turn.map(|secs| (Fact::Turn, span(secs))),
     ]);
-    let names = labelled([
+    let names = labelled(vec![
         (!title.is_empty()).then(|| (Fact::Title, clean(title))),
         Some((Fact::Source, row.pane.source.clone())),
     ]);
     let groups = extension_groups(app, row);
+    let place_label = Fact::Where.label(row, app.nerd);
     let short = || runs.iter().chain(&names);
     let label = short()
         .map(|(l, _)| l.width())
-        .chain([Fact::Where.label().width()])
+        .chain([place_label.width()])
         .chain(groups.iter().map(|(l, _)| l.width()))
         .max()
         .unwrap_or(0)
@@ -91,25 +111,11 @@ pub fn lines(app: &App, row: &Row, width: usize) -> Vec<Line<'static>> {
     };
     let long = room.saturating_sub(label + 1);
     let mut lines = grid(&runs);
-    lines.push(long_line(
-        Fact::Where.label(),
-        &place(row, long),
-        label,
-        room,
-    ));
+    let place = place(row, long, app.nerd);
+    lines.push(long_line(place_label, &place, label, room));
     lines.extend(groups.iter().map(|(l, v)| long_line(l, v, label, room)));
     lines.extend(grid(&names));
     lines
-}
-
-fn labelled(
-    facts: impl IntoIterator<Item = Option<(Fact, String)>>,
-) -> Vec<(&'static str, String)> {
-    facts
-        .into_iter()
-        .flatten()
-        .map(|(fact, value)| (fact.label(), value))
-        .collect()
 }
 
 /// `label value` in `cell` columns, the label padded to the label column; the last on a row
@@ -133,9 +139,33 @@ fn long_line(label: &str, value: &str, column: usize, room: usize) -> Line<'stat
     Line::from(spans)
 }
 
+/// `session › window › block` in `max` columns; with glyphs the window and the block each lead
+/// with their own, unless the place is cut down past its labels.
+fn place(row: &Row, max: usize, nerd: bool) -> String {
+    if !nerd {
+        return plain_place(row, max);
+    }
+    let marks = [icons::WINDOW.glyph, icons::BLOCK.glyph];
+    let count = labels(row, false).len();
+    let plain = plain_place(row, max.saturating_sub(2 * (count - 1)));
+    let parts: Vec<&str> = plain.split(SEP).collect();
+    if parts.len() != count {
+        return plain;
+    }
+    let marked: Vec<String> = parts
+        .iter()
+        .enumerate()
+        .map(|(i, part)| match i {
+            0 => (*part).to_owned(),
+            _ => format!("{} {part}", marks[i - 1]),
+        })
+        .collect();
+    marked.join(SEP)
+}
+
 /// `session › window › block` in `max` columns. The session and window give way, from the
 /// middle; the block's own label is never cut while it fits at all.
-fn place(row: &Row, max: usize) -> String {
+fn plain_place(row: &Row, max: usize) -> String {
     let all = labels(row, false);
     let [session, window, block] = all[..] else {
         return path(&all, max);
@@ -168,16 +198,24 @@ fn extension_groups(app: &App, row: &Row) -> Vec<(String, String)> {
     }
     groups
         .into_iter()
-        .map(|(ext, parts)| match &parts[..] {
-            [(name, value)] if *name == ext => (ext.to_owned(), value.clone()),
-            _ => (
-                ext.to_owned(),
-                parts
+        .map(|(ext, parts)| {
+            let value = match &parts[..] {
+                [(name, value)] if *name == ext => value.clone(),
+                _ => parts
                     .iter()
                     .map(|(n, v)| format!("{n} {v}"))
                     .collect::<Vec<_>>()
                     .join(" · "),
-            ),
+            };
+            // A glyph cannot say which extension it is, so its name moves into the value.
+            if app.nerd {
+                (
+                    icons::EXTENSION.glyph.to_owned(),
+                    format!("{ext} · {value}"),
+                )
+            } else {
+                (ext.to_owned(), value)
+            }
         })
         .collect()
 }

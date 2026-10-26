@@ -1543,6 +1543,44 @@ mod tests {
     }
 
     #[test]
+    fn nerd_icons_label_each_fact_with_one_cell_at_60_100_and_140() {
+        let mut app = asking("Bash: ls");
+        let private = |c: char| ('\u{e000}'..='\u{f8ff}').contains(&c);
+        for nerd in [false, true] {
+            app.nerd = nerd;
+            for width in [60u16, 100, 140] {
+                let text = render(&app, width, 30);
+                assert!(
+                    text.lines().all(|l| l.width() <= usize::from(width)),
+                    "{width}:\n{text}"
+                );
+                let card = card_of(&text);
+                let blank = card.iter().position(|l| l.trim().is_empty()).unwrap();
+                let facts = &card[blank + 1..];
+                if !nerd {
+                    assert!(facts[0].starts_with(" host "), "{width}:\n{text}");
+                    assert!(!text.chars().any(private), "{width}: words only");
+                    continue;
+                }
+                for line in facts {
+                    let mut chars = line.chars();
+                    assert_eq!(chars.next(), Some(' '), "{line}");
+                    assert!(chars.next().is_some_and(private), "a glyph leads: {line}");
+                    assert_eq!(chars.next(), Some(' '), "one cell, then the value: {line}");
+                }
+                let place = facts.iter().find(|l| l.contains(" › ")).unwrap();
+                assert_eq!(
+                    place.chars().filter(|c| private(*c)).count(),
+                    3,
+                    "the session, window and block each lead: {place}"
+                );
+                assert!(place.ends_with("seat-b"), "{place}");
+                assert!(!text.contains(" host "), "{width}: no word labels:\n{text}");
+            }
+        }
+    }
+
+    #[test]
     fn a_blocked_ask_is_never_cut_and_the_list_keeps_3_rows() {
         let ask = (1..=6)
             .map(|n| format!("line {n} of the question"))
@@ -2384,7 +2422,11 @@ mod tests {
             press(&mut keys, KeyCode::Char('?'));
             screens.push((name, keys, width, height));
         }
-        for (name, width, height) in [("done card 80", 80, 30), ("done card 200 tall", 200, 60)] {
+        for (name, width, height) in [
+            ("done card 80", 80, 30),
+            ("done card 200 tall", 200, 60),
+            ("done card nerd 140", 140, 30),
+        ] {
             let mut done = fuller();
             let mut rows = done.rows.clone();
             let row = rows.iter_mut().find(|r| r.key == "local/claude").unwrap();
@@ -2392,6 +2434,7 @@ mod tests {
             row.pane.msg = Some("Opened PR #31; CI is green. ⏎ Next step is yours.".into());
             done.set_rows(rows, hosts());
             done.selected = Some(Spot::Row("local/claude".into()));
+            done.nerd = name.contains("nerd");
             screens.push((name, done, width, height));
         }
         let mut status = fuller();
@@ -2755,6 +2798,15 @@ mod extension_tests {
             text.lines()
                 .any(|l| l.starts_with(" lane ") && l.ends_with(" desk")),
             "a lone field named like its extension: {text}"
+        );
+        app.nerd = true;
+        let text = render(&app, 80, 30);
+        let lines: Vec<&str> = text.lines().collect();
+        let place = lines.iter().rposition(|l| l.contains(" › ")).expect(&text);
+        assert!(
+            lines[place + 1].ends_with(" fake · rig api")
+                && lines[place + 2].ends_with(" session-prefix · project api"),
+            "a glyph cannot name its extension, so the value does:\n{text}"
         );
     }
 

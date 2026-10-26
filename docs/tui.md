@@ -176,7 +176,13 @@ The card is 8 rows, or 40% of the body when that is more, and always leaves the 
 
 Reading a card does not mark a row seen. `m` does, and so does `n` or `tab` off a `done` row whose card has shown for at least a second. The tail of a blocked row is read by itself once its card has shown for 300 ms, once per report, so the ask can be checked against the screen; moving through rows reads none.
 
-`c`'s choice lives in `tui.json` beside serve's `state.json` (`~/.local/state/rexboard/tui.json`, or under `XDG_STATE_HOME`), as `detail_hidden` (missing means shown), next to `motion` (see [Style](#style)), which `c` keeps as it was. The file is read when the board starts and written on each `c`. The side pane's old width key is ignored.
+`c`'s choice lives in `tui.json` beside serve's `state.json` (`~/.local/state/rexboard/tui.json`, or under `XDG_STATE_HOME`), as `detail_hidden` (missing means shown), next to `motion` (see [Style](#style)) and `icons` (see [Icons](#icons)), which `c` keeps as they were. The file is read when the board starts and written on each `c`. The side pane's old width key is ignored.
+
+### Icons
+
+With `"icons": "nerd"` in `tui.json`, or `REXBOARD_ICONS=nerd` for one run, the card's facts take a Nerd Font glyph in place of each word label: the host, the harness's own mark (Claude, Codex, OpenCode, Gemini and pi each have one, any other harness a robot), the turn, the title, and how the status arrived (native, bridge or inferred). `where` leads with the session's mark and gives the window and the block their own: `<session> api › <window> main › <block> seat-a`. An extension's group takes a package mark, and its name moves into the value: `<package> session-prefix · project api`. `REXBOARD_ICONS=text` turns them off for a run; the environment wins, then `tui.json`, then words. Any other value is words.
+
+Nerd mode needs a Nerd Font **Mono** variant from Nerd Fonts **3.5.0** or later: the Claude, OpenAI, robot and inferred marks are new in 3.5.0, and a non-Mono font draws glyphs wider than the one cell the board gives them. To check, print the host mark and see that it takes one cell between the bars: `printf '|\xee\xad\x90|\n'`. The board never guesses the font. Column headers, the bar, the list and every other screen keep their words in both modes, and the state glyphs are the same. Every glyph is pinned by its Nerd Fonts name and code point in `src/tui/icons.rs`, each a single code point in the Basic Multilingual Plane, one cell wide.
 
 ## Full view
 

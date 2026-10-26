@@ -4,6 +4,7 @@ mod card;
 mod clipboard;
 mod columns;
 mod full;
+mod icons;
 mod keys;
 mod meta;
 mod prefs;
@@ -98,6 +99,12 @@ fn board(pick: bool) -> Result<Option<Row>> {
         .unwrap_or_default();
     app.hidden = prefs.detail_hidden;
     app.motion = prefs.motion;
+    app.icons = prefs.icons;
+    app.nerd = match std::env::var("REXBOARD_ICONS").as_deref() {
+        Ok("nerd") => true,
+        Ok("text") => false,
+        _ => prefs.icons == prefs::Icons::Nerd,
+    };
     theme::set_motion(
         prefs.motion == prefs::Motion::Full
             && std::env::var("REXBOARD_REDUCED_MOTION").as_deref() != Ok("1"),

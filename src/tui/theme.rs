@@ -301,7 +301,8 @@ mod tests {
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
-            if !name.ends_with(".rs") || name == "theme.rs" || name == "vt.rs" {
+            if !name.ends_with(".rs") || ["theme.rs", "icons.rs", "vt.rs"].contains(&name.as_str())
+            {
                 continue;
             }
             let text = std::fs::read_to_string(&path).unwrap();
@@ -313,6 +314,11 @@ mod tests {
                 }
                 for pick in picks.iter().filter(|p| line.contains(**p)) {
                     seen.push(format!("{name}:{}: {pick}", n + 1));
+                }
+                // A Nerd Font glyph, written out or escaped, belongs in icons.rs.
+                let private = |c: char| ('\u{e000}'..='\u{f8ff}').contains(&c) || c >= '\u{f0000}';
+                if line.chars().any(private) || line.contains("\\u{e") || line.contains("\\u{f") {
+                    seen.push(format!("{name}:{}: a private-use glyph", n + 1));
                 }
             }
         }
