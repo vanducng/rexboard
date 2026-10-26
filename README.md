@@ -2,7 +2,7 @@
 
 An attention board for coding-agent panes across [Rex](https://www.superlogical.com/rex/docs) hosts: which agent is working, blocked or done, for how long, and a jump to its pane.
 
-<img alt="The rexboard board in a terminal: agent panes on demo sessions, in SESSION, WINDOW and BLOCK columns, move between NEEDS YOU, WORKING and QUIET while their times in state tick; a peek fills the detail pane, the pane widens and narrows, a status filter shows only permission prompts, the table view sorts by age and then session, and the key table is shown" src="docs/assets/demo.gif" width="100%">
+<img alt="The rexboard board in a terminal: agent panes on demo sessions in NEEDS YOU, WORKING and QUIET, with the turn card at the bottom. A done row's card shows its two-line message; a permission row's card shows the full command, a opens answer mode with a red bar over the dialog, 1 picks Yes and the card says sent 1 (Yes); a question row is zoomed with space, c hides and shows the card, and tab walks the rows that need you" src="docs/assets/demo.gif" width="100%">
 
 ## Install
 
