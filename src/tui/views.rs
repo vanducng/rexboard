@@ -11,6 +11,8 @@ pub enum Key {
     Status,
     Harness,
     Host,
+    /// An extension field, by its id.
+    Field(&'static str),
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -69,8 +71,14 @@ fn value(key: Key, row: &Row) -> Bucket {
             _ => "?".to_owned(),
         }),
         Key::Host => Bucket::Value(row.pane.host.clone()),
+        Key::Field(id) => {
+            Bucket::Value(row.ext.get(id).cloned().unwrap_or_else(|| NONE.to_owned()))
+        }
     }
 }
+
+/// The group of rows a field view finds no value for.
+pub const NONE: &str = "-";
 
 /// The bucket `row` falls in under `view`, if the view has groups.
 pub fn bucket(view: &View, row: &Row) -> Option<Bucket> {
@@ -78,7 +86,7 @@ pub fn bucket(view: &View, row: &Row) -> Option<Bucket> {
 }
 
 /// `rows` (in serve's order) as `view` shows them: each group with its row indices, in order.
-/// Status groups keep serve's order; other values run a to z with `?` last. Inside a group the
+/// Status groups keep serve's order; other values run a to z with `?` and `-` last. Inside a group the
 /// sort applies, else serve's order stays; in NEEDS YOU blocked rows stay first.
 pub fn arrange(rows: &[Row], view: &View, sort: Option<Sort>) -> Vec<(Option<Bucket>, Vec<usize>)> {
     let mut groups: Vec<(Option<Bucket>, Vec<usize>)> = Vec::new();
@@ -91,7 +99,8 @@ pub fn arrange(rows: &[Row], view: &View, sort: Option<Sort>) -> Vec<(Option<Buc
     }
     if view.group_by.is_some_and(|key| key != Key::Status) {
         groups.sort_by(|(a, _), (b, _)| {
-            let last = |b: &Option<Bucket>| *b == Some(Bucket::Value("?".to_owned()));
+            let last =
+                |b: &Option<Bucket>| matches!(b, Some(Bucket::Value(v)) if v == "?" || v == NONE);
             last(a).cmp(&last(b)).then_with(|| a.cmp(b))
         });
     }

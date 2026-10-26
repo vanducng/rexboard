@@ -2,12 +2,15 @@
 //! what goes in it, for the rows and their header alike.
 
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
+use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
 
 use super::theme;
 use crate::board::Row;
+use crate::client::Field;
 use crate::output::{
     clean, fit, harness, in_state, labels, name, path, span, squeeze, state_word, turn_msg,
 };
@@ -44,6 +47,8 @@ pub enum Col {
     Window,
     Block,
     Msg,
+    /// An extension field, by its id (`<extension>.<field>`).
+    Field(&'static str),
 }
 
 /// How a cell is coloured; the view turns it into a style.
@@ -66,6 +71,12 @@ enum Width {
 
 /// The board width from which WHERE splits into SESSION, WINDOW and BLOCK.
 pub const SPLIT: u16 = 132;
+/// Extension field columns show from this width, and all of them from FIELDS_ALL; below it only
+/// the first two.
+pub const FIELDS_FROM: u16 = 120;
+const FIELDS_ALL: u16 = 160;
+/// A field column's width, the gap after it included.
+const FIELD_WIDTH: usize = 12;
 const ALWAYS: RangeInclusive<u16> = 0..=u16::MAX;
 
 /// A sort's direction: `Up` is a to z, newest or shortest first, and for STATE most urgent first.
@@ -234,11 +245,59 @@ pub fn column_of(id: Col) -> &'static Column {
     COLUMNS
         .iter()
         .find(|c| c.id == id)
+        .or_else(|| field_columns().into_iter().find(|c| c.id == id))
         .expect("every Col has a column")
 }
 
+/// The built-in column a sort letter names; `App::column_by_letter` adds the field columns.
 pub fn by_letter(letter: char) -> Option<&'static Column> {
     COLUMNS.iter().find(|c| c.letter == Some(letter))
+}
+
+// ponytail: field columns are leaked once per distinct (id, title, letter), a handful per run,
+// so they share the built-ins' `&'static Column`; a registry with lifetimes if that ever grows.
+type FieldKey = (String, String, Option<char>);
+static FIELDS: Mutex<BTreeMap<FieldKey, &'static Column>> = Mutex::new(BTreeMap::new());
+
+/// The column for an extension field, titled from its manifest.
+pub fn field_column(field: &Field, letter: Option<char>) -> &'static Column {
+    let (id, title) = (&field.id, &field.title);
+    let mut fields = FIELDS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    fields
+        .entry((id.clone(), title.clone(), letter))
+        .or_insert_with(|| {
+            let id: &'static str = Box::leak(id.to_owned().into_boxed_str());
+            let header: &'static str = Box::leak(title.to_owned().into_boxed_str());
+            Box::leak(Box::new(column(
+                Col::Field(id),
+                header,
+                letter,
+                Dir::Up,
+                FIELDS_FROM..=u16::MAX,
+                Width::Fixed(FIELD_WIDTH),
+                Tone::Soft,
+            )))
+        })
+}
+
+fn field_columns() -> Vec<&'static Column> {
+    let fields = FIELDS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    fields.values().copied().collect()
+}
+
+/// The sort letter for a field named `name`: its first letter no other column or key has.
+pub fn free_letter(name: &str, taken: &[char]) -> Option<char> {
+    name.chars()
+        .filter(char::is_ascii_alphabetic)
+        .map(|c| c.to_ascii_uppercase())
+        .find(|c| {
+            // G goes to the last row.
+            *c != 'G' && by_letter(*c).is_none() && !taken.contains(c)
+        })
 }
 
 /// A header cell: its text, and which of its characters to underline (the sort letter).
@@ -279,6 +338,7 @@ fn sort_key(id: Col, row: &Row) -> Option<SortKey> {
         Col::Window => text(&row.pane.tab),
         Col::Block => text(&name(row)),
         Col::Msg => text(turn_msg(row)),
+        Col::Field(id) => row.ext.get(id).and_then(|value| text(value)),
     }
 }
 
@@ -301,12 +361,22 @@ pub struct Columns {
 }
 
 impl Columns {
-    pub fn new(board: u16, list: usize) -> Columns {
+    /// `fields` are the extension field columns to show after HOST, in order; from FIELDS_FROM
+    /// columns, and only the first two below FIELDS_ALL.
+    pub fn new(board: u16, list: usize, fields: &[&'static Column]) -> Columns {
         let tier = tier(board);
-        let shown: Vec<&Column> = COLUMNS
+        let fields = match board {
+            ..FIELDS_FROM => &[][..],
+            FIELDS_FROM..FIELDS_ALL => &fields[..fields.len().min(2)],
+            _ => fields,
+        };
+        let mut shown: Vec<&'static Column> = COLUMNS
             .iter()
             .filter(|c| c.boards.contains(&board))
             .collect();
+        if let Some(host) = shown.iter().position(|c| c.id == Col::Host) {
+            shown.splice(host + 1..host + 1, fields.iter().copied());
+        }
         let lead: usize = shown
             .iter()
             .map(|c| match c.width {
@@ -386,6 +456,7 @@ impl Columns {
                     Col::Window => squeeze(&clean(&row.pane.tab), width.saturating_sub(1)),
                     Col::Block => squeeze(place, width.saturating_sub(1)),
                     Col::Msg => return (fit(turn_msg(row), *width), c.tone),
+                    Col::Field(id) => row.ext.get(id).cloned().unwrap_or_else(|| "-".to_owned()),
                 };
                 (fit(&text, width.saturating_sub(1)) + " ", c.tone)
             })
@@ -502,7 +573,7 @@ mod tests {
             let buf = buffer(&app, width, 30);
             let list = usize::from(width);
             let header: String = line(&buf, 2).chars().take(list).collect();
-            let columns = Columns::new(width, list);
+            let columns = Columns::new(width, list, &[]);
             let row_y = (3..buf.area.height)
                 .find(|&y| line(&buf, y).contains("seat-b msg"))
                 .unwrap();
@@ -544,7 +615,7 @@ mod tests {
             app.view = crate::tui::views::views().remove(1);
             (app.width, app.height) = (width, 30);
             let header = line(&buffer(&app, width, 30), 2);
-            let columns = Columns::new(width, usize::from(width));
+            let columns = Columns::new(width, usize::from(width), &[]);
             for (column, _) in columns.cols.iter().filter(|(c, _)| c.letter.is_some()) {
                 let x = header.find(column.header).unwrap();
                 for at in [x, x + column.header.len() - 1] {
@@ -676,7 +747,7 @@ mod tests {
     #[test]
     fn a_narrow_header_sorted_by_where_never_underflows() {
         for width in 0..=20u16 {
-            let columns = Columns::new(width, usize::from(width));
+            let columns = Columns::new(width, usize::from(width), &[]);
             for dir in [Dir::Up, Dir::Down] {
                 columns.header(Some((Col::Where, dir)));
             }
@@ -817,7 +888,7 @@ mod tests {
     #[test]
     fn where_keeps_v0_1_width_from_100_and_its_three_parts_take_two_thirds_once_split() {
         let at = |board: u16| {
-            let columns = Columns::new(board, usize::from(board) - 39);
+            let columns = Columns::new(board, usize::from(board) - 39, &[]);
             [Col::Where, Col::Session, Col::Window, Col::Block, Col::Msg].map(|c| columns.width(c))
         };
         assert_eq!(at(100), [15, 0, 0, 0, 10], "v0.1's WHERE at 100");
@@ -1013,7 +1084,7 @@ mod tests {
             .filter(|l| l.contains("seat") && !l.starts_with("━━"))
             .collect();
         assert_eq!(rows.len(), 2, "{rows:#?}");
-        let columns = Columns::new(161, 161);
+        let columns = Columns::new(161, 161, &[]);
         let session = columns.width(Col::Session) - 1;
         assert!(
             rows[0].contains(&squeeze("web-frontend-service", session)),
@@ -1045,7 +1116,7 @@ mod tests {
 
     #[test]
     fn the_sorted_column_gets_an_arrow_in_the_gap_and_each_letter_is_underlined() {
-        let columns = Columns::new(120, 81);
+        let columns = Columns::new(120, 81, &[]);
         let plain: Vec<String> = columns.header(None).into_iter().map(|c| c.text).collect();
         let cells = columns.header(Some((Col::Age, Dir::Down)));
         let text: Vec<&str> = cells.iter().map(|c| c.text.as_str()).collect();

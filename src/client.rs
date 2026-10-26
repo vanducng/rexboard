@@ -35,6 +35,28 @@ pub static QUIET: AtomicBool = AtomicBool::new(false);
 pub struct Rows {
     pub rows: Vec<Row>,
     pub hosts: BTreeMap<String, String>,
+    /// The enabled extensions' declared fields, in `enabled` order.
+    #[serde(default)]
+    pub fields: Vec<Field>,
+    /// How each enabled extension's last run went.
+    #[serde(default)]
+    pub extensions: BTreeMap<String, ExtRun>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct Field {
+    /// `<extension>.<field>`, the key in a row's `ext`.
+    pub id: String,
+    /// Its short name, or its id when two extensions declare the same name.
+    pub name: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct ExtRun {
+    pub ok: bool,
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 /// None when nothing answers. A socket served by another user is an error, since `/tmp` is shared.

@@ -6,7 +6,7 @@ The board is built to live in a narrow column, so the narrow layout is the main 
 
 ## Layout
 
-- **Top bar:** `rexboard`, the number of hosts, panes and agents, the clock and the hosts. A host that is not `up` shows in red with its state (`mini down`), and a stopped serve shows `serve stopped · r reconnects` (while the board first connects, a dim `connecting to serve`). When serve cannot be started, the list says why. When the line is short, the host list goes first, then the counts, then the clock; the red alerts always stay.
+- **Top bar:** `rexboard`, the number of hosts, panes and agents, the clock and the hosts. A host that is not `up` shows in red with its state (`mini down`), and so does an extension whose last run failed (`ext fake failed`, or `ext fake, other failed`; when they would not fit, `2 ext failed`). A stopped serve shows `serve stopped · r reconnects` (while the board first connects, a dim `connecting to serve`). When serve cannot be started, the list says why. When the line is short, the host list goes first, then the counts, then the clock; the red alerts always stay.
 - **Groups**, in order, each with its count and a dashed rule: `NEEDS YOU` (blocked, error, unseen done), `WORKING`, `QUIET` (idle, seen done) and `UNREPORTED` (no status record, unknown state, a host that is down, or a suspect `working` report). Empty groups are not drawn. Inside `NEEDS YOU`, blocked comes first, then error, then unseen done, each oldest first. A folded group shows `▸` before its name.
 - **Column header:** one dim line over the list names each column, at the same widths as the rows (the glyph column has no name). A blank row separates it from the top bar. `pick` has both too. On a screen under 12 rows the header and the blank row are left out, so a short screen keeps every line for rows.
 - **Rows:** a glyph, then the columns the width allows:
@@ -52,8 +52,20 @@ A view is a way of grouping the rows plus a sort. The view and sort last for the
 | `table` | None: one list with no group headers, sortable by any column with a key or a click | The `status` view's order |
 | `harness` | One per harness (`CLAUDE`, `CODEX`), a to z, with `?` (no harness) last | The `status` view's order |
 | `host` | One per host (`LOCAL`, `MINI`), a to z | The `status` view's order |
+| One per extension field (`rig`, `project`) | One per value (`API`, `WEB`), a to z, with `-` (no value) last | The `status` view's order |
 
-Shift and a column's letter sorts by that column inside each group: `S` state, `A` age, `T` turn, `R` harness (runtime), `O` host, `W` where, `E` session, `N` window, `B` block, `M` msg. `W` sorts by the whole `session › window › block`, and `E`, `N` and `B` by one part, whether or not `WHERE` is split. Sorting works like a table header: Shift and the letter sorts, again flips, a third time clears. The first press sorts `AGE` and `TURN` longest first (`↓`), `STATE` most urgent first (blocked, error, done, working, idle; `↑`) and the text columns a to z (`↑`). The same letter again flips it; a third press, or `esc`, clears it. A row with no value (no status record to date it, no finished turn) sorts last either way. In the `status` view, `NEEDS YOU` keeps its blocked rows first under any sort. `T` sorts by turn even when the `TURN` column is not drawn. In the `host` view rows leave out `@HOST`, since their group names the host.
+Shift and a column's letter sorts by that column inside each group: `S` state, `A` age, `T` turn, `R` harness (runtime), `O` host, `W` where, `E` session, `N` window, `B` block, `M` msg, and for an extension field the first letter of its name that no other column, nor `G`, has (`rig` sorts with `I`, `project` with `P`). `W` sorts by the whole `session › window › block`, and `E`, `N` and `B` by one part, whether or not `WHERE` is split. Sorting works like a table header: Shift and the letter sorts, again flips, a third time clears. The first press sorts `AGE` and `TURN` longest first (`↓`), `STATE` most urgent first (blocked, error, done, working, idle; `↑`) and the text columns a to z (`↑`). The same letter again flips it; a third press, or `esc`, clears it. A row with no value (no status record to date it, no finished turn) sorts last either way. In the `status` view, `NEEDS YOU` keeps its blocked rows first under any sort. `T` sorts by turn even when the `TURN` column is not drawn. In the `host` view rows leave out `@HOST`, since their group names the host.
+
+## Extension fields
+
+Each field an enabled [extension](extensions.md) declares gets a view, a column and a filter key. The board learns them from serve, which sends them with the rows from the moment the extension is enabled, before its first run. With no extension enabled, the board is as it was.
+
+- **View:** one per field, after `host` in the `v` cycle and open from `:` by the field's name. A field named like a built-in view (`host`) is opened by its id (`fake.host`). Its column is hidden there, since the group header shows the value.
+- **Column:** after `HOST`, titled from the manifest (`RIG`), in `enabled` order and then each manifest's, from 120 columns; below 160 columns only the first two fields get one. A row with no value shows `-`, and sorts last.
+- **Name:** the view, the filter key and the card use the field's `name`, and the column its `title`, so a manifest that keeps the title the name in capitals has a column that says what to type. A field goes by its short name (`rig`), unless two enabled extensions declare the same name; then both go by their id (`fake.rig`, `other.rig`), in views, filters and the card alike.
+- **Keys:** while there are fields, `?` adds a row after `E N B` with their sort letters and names, and each extension when it fits: `I P  by rig, project`, or `I  by rig (fake)`.
+- **Card:** every field of the selected row, one line per extension under the title and `source` line: `fake · rig api · owner ana`, or `lane desk` for an extension whose one field has its name. Fields without a column show here too.
+- **Alert:** an extension whose last run failed shows in red in the top bar, as a host that is down does. `rexboard ext ls` says why.
 
 The column header underlines each column's sort letter and puts `↑` or `↓` just left of the sorted column's name, or just after it when only one space separates it from the column before (`HARNESS HOST↑` at 100 columns). When the view is not `status`, or a sort is set, the top bar says so after `rexboard`: `view: table ↓age`. The selection stays on its row when the view or the sort changes.
 
@@ -66,13 +78,13 @@ In the `table` view a click on a column's header sorts by that column, as its le
 | `j` / `k`, arrows | Move between rows and folded groups; the ends wrap |
 | `g` / `G` | First / last |
 | `1`-`9` | Select the nth `NEEDS YOU` row, counted in the order shown (so a sort changes which row a digit picks), opening its group if it is folded |
-| `/` | Filter rows by host, session, window, block, title, state, message or harness; `enter` keeps it, `esc` clears it |
+| `/` | Filter rows by host, session, window, block, title, state, message or harness; `enter` keeps it, `esc` clears it. A `key:value` term matches one key: `host`, `state`, `harness`, `session`, `window` (or `tab`), `block` (or `pane`), or an extension field by its name or id. Terms and the rest of the text must all match, ignoring case, so `rig:api state:blocked` keeps the blocked rows whose `rig` contains `api`, and `fake.rig:api` works too. A row with no value never matches its key. A word with `:` whose key is none of these is plain text, and when nothing matches the list says `no key projct · esc clears` |
 | `f`, then a letter | Show one status only (see [Status filter](#status-filter)). `f f` or `esc` clears it |
 | `space` | Open the [full view](#full-view) of the selected row's pane, read again every 2 seconds while it is open. `space` again or `esc` returns |
 | `tab` | The next row that needs you, after the selected one, round to the first. Leaving a `done` row whose card showed for at least a second marks it seen; a blocked or erroring row is never marked |
 | `s` | Mark the selected pane seen, through serve. The message names it `session › block` (`session › window` for a generic block label). A blocked or erroring pane stays in `NEEDS YOU`, and the message says so |
 | `ctrl+s` | Mark every unseen `done` row the list shows seen (a kept filter narrows it), through serve, and say how many (`9 done rows marked seen`). Blocked and erroring rows are left alone. Before v0.2 this was `S`, which now sorts by state; the `?` table says `(was S)`, and the first `S` of a run says `sorted by state · bulk seen is ctrl+s now` |
-| `v` | Next view: `status`, `table`, `harness`, `host`, then `status` again |
+| `v` | Next view: `status`, `table`, `harness`, `host`, one per extension field, then `status` again. `?` says `status → host, then fields` |
 | `:` | Open a view by name. Tab completes a name (`ta` to `table`), Enter opens it (or the one view the text starts), Esc cancels. An unknown name says `no view "nope"` |
 | `S` `A` `T` `R` `O` `W` `E` `N` `B` `M` | Sort by `STATE`, `AGE`, `TURN`, `HARNESS` (runtime), `HOST`, `WHERE`, `SESSION`, `WINDOW`, `BLOCK` or `MSG`. The same letter again flips the direction, and a third time clears the sort. See [Views](#views) |
 | click, wheel | In the `table` view: a click on a column header sorts by it, as its letter does; a click on a row selects it; the wheel moves the selection |
@@ -102,7 +114,7 @@ The card is the selected row in full, under the list, as wide as the board:
 1. **The bar:** the glyph, the state (with its kind, as in `blocked · permission`), the block, `session › window`, the host and the harness, then how the turn stands: `ended 4m ago · turn 6m12s` for a done row, `waiting 12s` for a blocked one, `failed 2m ago`, or `for 2m` in any other state. When the bar is short of room, the window, then the harness, the host and the place give way, never the outcome. On the right, how fresh the pane's tail is: `captured 11:21:14 · 8s`, or `newer report · space refreshes` once the row has reported since.
 2. **The headline**, in bold: the message's first line (see [Agent status](agent-status.md)), else the title.
 3. **The ask or the body:** the message's other lines, wrapped. A blocked row's ask is never cut: its card grows as far as the list's last 3 rows.
-4. A failed jump's reason, `may be stale:` for a suspect row, and the title and `source`.
+4. A failed jump's reason, `may be stale:` for a suspect row, the title and `source`, and each extension's fields on the row (`fake · rig api`).
 5. The pane's tail, when it has been read, newest line at the bottom.
 
 A row with no status record says `no status from this pane` and `space captures the screen`.

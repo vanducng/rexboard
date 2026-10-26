@@ -8,7 +8,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, Peek, Spot};
 use super::theme;
-use super::view::KEYS;
+use super::view::key_rows;
 use crate::board::Row;
 use crate::output::{
     BREAK, age, chop, clean, fit, harness, in_state, name, path, span, state_word,
@@ -27,7 +27,7 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
         return answer.lines(now, width, room);
     }
     if app.keys {
-        return keys(width);
+        return keys(app, width);
     }
     let Some(row) = app.current() else {
         return match &app.selected {
@@ -85,11 +85,46 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
         fit(&format!(" {}", meta.join(" · ")), text),
         theme::dim(),
     ));
+    lines.extend(
+        extension_lines(app, row)
+            .into_iter()
+            .map(|line| Line::styled(fit(&line, text), theme::dim())),
+    );
     if let Some(peek) = peek {
         let room = room.saturating_sub(lines.len());
         lines.extend(tail(peek, text, room));
     }
     lines
+}
+
+/// Each extension's fields on the row, one line per extension in `enabled` order:
+/// ` session-prefix · project api`, or ` lane desk` for a lone field named like its extension.
+fn extension_lines(app: &App, row: &Row) -> Vec<String> {
+    let mut lines: Vec<(&str, Vec<(&str, String)>)> = Vec::new();
+    for (field, _) in &app.fields {
+        let Some(value) = row.ext.get(&field.id) else {
+            continue;
+        };
+        let ext = field
+            .id
+            .split_once('.')
+            .map_or(field.id.as_str(), |(e, _)| e);
+        let shown = (field.name.as_str(), clean(value));
+        match lines.iter_mut().find(|(e, _)| *e == ext) {
+            Some((_, parts)) => parts.push(shown),
+            None => lines.push((ext, vec![shown])),
+        }
+    }
+    lines
+        .into_iter()
+        .map(|(ext, parts)| {
+            let parts: Vec<String> = parts.iter().map(|(n, v)| format!("{n} {v}")).collect();
+            match &parts[..] {
+                [one] if one.starts_with(&format!("{ext} ")) => format!(" {one}"),
+                _ => format!(" {ext} · {}", parts.join(" · ")),
+            }
+        })
+        .collect()
 }
 
 /// The first line: the row's state and place, how the turn went, and how fresh the tail is, or
@@ -219,14 +254,15 @@ pub fn tail(peek: &Peek, width: usize, room: usize) -> Vec<Line<'static>> {
 }
 
 /// The `?` table, in as many columns as fit, filled down each column.
-fn keys(width: usize) -> Vec<Line<'static>> {
+fn keys(app: &App, width: usize) -> Vec<Line<'static>> {
+    let all = key_rows(app);
     let columns = (width / KEY_COLUMN).max(1);
-    let rows = KEYS.len().div_ceil(columns);
+    let rows = all.len().div_ceil(columns);
     let mut lines = vec![Line::styled(fit(" keys", width), theme::accent())];
     for r in 0..rows {
         let mut spans = Vec::new();
         for c in 0..columns {
-            let Some((key, what)) = KEYS.get(c * rows + r) else {
+            let Some((key, what)) = all.get(c * rows + r) else {
                 break;
             };
             spans.push(Span::styled(format!(" {key:<7} "), theme::bright()));
