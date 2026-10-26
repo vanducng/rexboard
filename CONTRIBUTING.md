@@ -27,7 +27,7 @@ cargo test
 
 ## How to add…
 
-**A key.** Add one entry to the right table in `src/tui/keys.rs` (`BOARD` or `FULL`): its key sequences, how `?` lists it and its footer word. A new action also needs its `Act` variant handled in `src/tui/app.rs`. The tests in `keys.rs` fail if a sequence is bound twice or a key does nothing. Use a plain key, or one of vim's ctrl chords, as [decision 6](docs/decisions/0006-vim-keymap-from-one-table.md) says. Update the Keys table in [docs/tui.md](docs/tui.md#keys).
+**A key.** Add one entry to the right table in `src/tui/keys.rs` (`BOARD` or `FULL`): its key sequences, how `?` lists it and its footer word. A new action also needs its `Act` variant handled in `src/tui/app.rs`. `every_key_is_bound_once_and_no_chord_is_off_the_list` and `every_key_in_the_table_does_something` fail if a sequence is bound twice or a key does nothing. Use a plain key, or one of vim's ctrl chords, as [decision 6](docs/decisions/0006-vim-keymap-from-one-table.md) says. Update the Keys table in [docs/tui.md](docs/tui.md#keys).
 
 **A CLI command or flag.** Add it to `src/cli.rs` (help text is interface) and dispatch it in `src/lib.rs`. It takes `--json`. A failure is an `Error` from `src/error.rs` with a code, a message that names the bad value, and `next_steps` a caller can run; exit 1 for a failure, 2 for bad usage (or every host unreachable). Test it in `tests/cli.rs` against the fake rex. Document it in [docs/cli.md](docs/cli.md) with a sample, its JSON output and its exit codes.
 
