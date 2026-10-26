@@ -46,7 +46,8 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
         .as_ref()
         .filter(|sent| sent.key == row.key)
         .map(|sent| sent.text.as_str());
-    let mut lines = vec![bar(row, peek, sent, now, width)];
+    let right = sent.map(str::to_owned).or_else(|| fresh(row, peek, now));
+    let mut lines = vec![bar(row, right, now, width)];
     let msg = clean(row.pane.msg.as_deref().unwrap_or_default());
     let mut segments = msg.split(BREAK).map(str::trim).filter(|s| !s.is_empty());
     match segments.next() {
@@ -94,10 +95,9 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
 /// The first line: the row's state and place, how the turn went, and how fresh the tail is, or
 /// the answer the board last sent it.
 /// `━━ ● done · seat-a · api › main · mini · claude · ended 4m ago · turn 6m12s ━━ captured …`
-fn bar(
+pub(super) fn bar(
     row: &Row,
-    peek: Option<&Peek>,
-    sent: Option<&str>,
+    right: Option<String>,
     now: DateTime<Utc>,
     width: usize,
 ) -> Line<'static> {
@@ -105,10 +105,7 @@ fn bar(
     if let Some(kind) = &row.pane.kind {
         state = format!("{state} · {kind}");
     }
-    let right = sent
-        .map(str::to_owned)
-        .or_else(|| fresh(row, peek, now))
-        .map_or_else(|| "━━".to_owned(), |text| format!(" {text} ━━"));
+    let right = right.map_or_else(|| "━━".to_owned(), |text| format!(" {text} ━━"));
     let room = width.saturating_sub("━━".width() + right.width() + 1);
     let line = |place: Option<&str>, extra: &[String]| {
         let mut parts = vec![name(row)];

@@ -7,6 +7,7 @@ use tui_input::backend::crossterm::EventHandler;
 
 use super::answer::{Answer, Step};
 use super::columns::{Columns, Sort, by_letter};
+use super::full::Full;
 use super::screen::Screen;
 use super::status::Status;
 use super::views::{Bucket, View, arrange, bucket, views};
@@ -138,8 +139,8 @@ pub struct App {
     pub peek: Option<Peek>,
     /// The `?` key table is open in the card.
     pub keys: bool,
-    /// `space`: the card takes the whole body.
-    pub zoom: bool,
+    /// `space`: one row's pane across the whole terminal, read again while it is open.
+    pub full: Option<Full>,
     /// The row whose card shows, and since when: `tab` reads it, and a blocked row's tail waits
     /// for it to settle.
     pub shown: Option<(String, Instant)>,
@@ -173,6 +174,11 @@ impl App {
     /// New rows from serve. The selection follows its key; a row that newly needs you opens
     /// NEEDS YOU if it was folded.
     pub fn set_rows(&mut self, all: Vec<Row>, hosts: BTreeMap<String, String>) {
+        let viewed = self
+            .full
+            .as_ref()
+            .and_then(|full| self.rows.iter().find(|row| row.key == full.key))
+            .map(crate::output::name);
         self.panes = all.len();
         self.rows = all.into_iter().filter(|row| row.pane.is_agent()).collect();
         self.hosts = hosts;
@@ -202,6 +208,15 @@ impl App {
             if !stands {
                 self.sent = None;
             }
+        }
+        if let Some(full) = &self.full
+            && !self.rows.iter().any(|row| row.key == full.key)
+        {
+            self.full = None;
+            self.say(format!(
+                "{} left the board",
+                viewed.unwrap_or_else(|| "the pane".to_owned())
+            ));
         }
         self.keep_selection_visible();
     }
@@ -422,15 +437,10 @@ impl App {
         self.view.group_by.is_none() && !self.pick
     }
 
-    /// Whether the card shows under the list: unless `c` hid it, and always while it is zoomed or
-    /// holds the key table or a failed jump's reason, which only it shows whole. `pick` has none.
+    /// Whether the card shows under the list: unless `c` hid it, and always while it holds the
+    /// key table or a failed jump's reason, which only it shows whole. `pick` has none.
     pub fn card_shown(&self) -> bool {
-        !self.pick
-            && (!self.hidden
-                || self.keys
-                || self.zoom
-                || self.failed.is_some()
-                || self.answer.is_some())
+        !self.pick && (!self.hidden || self.keys || self.failed.is_some() || self.answer.is_some())
     }
 
     fn prefs(&self) -> super::prefs::Prefs {
@@ -454,7 +464,10 @@ impl App {
 
     /// A tail for a blocked row whose card has shown for SETTLE, once per report.
     pub fn auto_tail(&mut self, now: Instant) -> Option<Effect> {
-        let (key, since) = self.shown.as_ref().filter(|_| self.answer.is_none())?;
+        let (key, since) = self
+            .shown
+            .as_ref()
+            .filter(|_| self.answer.is_none() && self.full.is_none())?;
         let row = self.current().filter(|row| row.key == *key)?;
         if now.duration_since(*since) < SETTLE || row.pane.state != "blocked" {
             return None;
@@ -470,12 +483,7 @@ impl App {
     /// Asks for the current row's tail; the card shows it when it comes.
     fn tail(&mut self) -> Option<Effect> {
         let row = self.current()?;
-        let effect = Effect::Peek {
-            key: row.key.clone(),
-            host: row.pane.host.clone(),
-            session: row.pane.session_id.clone(),
-            block: row.pane.block_id.clone(),
-        };
+        let effect = peek(row);
         self.peek = Some(Peek {
             key: row.key.clone(),
             lines: None,
@@ -483,6 +491,102 @@ impl App {
             updated_at: row.pane.updated_at.clone(),
         });
         Some(effect)
+    }
+
+    /// `space`: the full view of the current row, with its first read.
+    fn open_full(&mut self, now: Instant) -> Option<Effect> {
+        let key = self.current()?.key.clone();
+        self.keys = false;
+        self.full = Some(Full::new(key, now));
+        self.tail()
+    }
+
+    /// The open view's next read, once the last is back and EVERY has passed. The lines it has
+    /// stay up meanwhile, so the screen never blanks between reads.
+    pub fn live(&mut self, now: Instant) -> Option<Effect> {
+        let full = self.full.as_mut().filter(|full| full.due(now))?;
+        let row = self.rows.iter().find(|row| row.key == full.key)?;
+        full.asked = now;
+        full.reading = true;
+        Some(peek(row))
+    }
+
+    /// A read came back. While the view is open a failed read keeps the lines it had and says
+    /// why in the bar.
+    pub fn peeked(&mut self, key: &str, lines: Result<Vec<String>, String>) {
+        let Some(peek) = self.peek.as_mut().filter(|peek| peek.key == key) else {
+            return;
+        };
+        if let Some(full) = self.full.as_mut().filter(|full| full.key == key) {
+            full.reading = false;
+            full.error = lines.as_ref().err().cloned();
+            if full.error.is_some() && matches!(peek.lines, Some(Ok(_))) {
+                return;
+            }
+        }
+        peek.lines = Some(lines);
+        peek.at = Some(chrono::Utc::now());
+    }
+
+    /// The lines the open view shows, and how many fit between its bar and footer.
+    fn full_page(&self) -> (Vec<String>, usize) {
+        let lines = self
+            .full
+            .as_ref()
+            .map(|full| super::full::lines(full, self.peek.as_ref()).to_vec())
+            .unwrap_or_default();
+        (lines, usize::from(self.height.saturating_sub(2)).max(1))
+    }
+
+    fn full_scroll(&mut self, by: isize) {
+        let (lines, page) = self.full_page();
+        if let Some(full) = self.full.as_mut() {
+            full.scroll(by, &lines, page);
+        }
+    }
+
+    /// Keys while the full view is open: it scrolls, answers, jumps or closes; the board's own
+    /// keys wait.
+    fn full_key(&mut self, key: KeyEvent) -> Option<Effect> {
+        let page = self.full_page().1 as isize;
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            return (key.code == KeyCode::Char('c')).then_some(Effect::Quit);
+        }
+        match key.code {
+            KeyCode::Char(' ') | KeyCode::Esc => self.full = None,
+            KeyCode::Char('q') => return Some(Effect::Quit),
+            KeyCode::Char('j') | KeyCode::Down => self.full_scroll(-1),
+            KeyCode::Char('k') | KeyCode::Up => self.full_scroll(1),
+            KeyCode::PageDown => self.full_scroll(-page),
+            KeyCode::PageUp => self.full_scroll(page),
+            KeyCode::Char('g') | KeyCode::Home => self.full_scroll(isize::MAX),
+            KeyCode::Char('G') | KeyCode::End => self.full_scroll(isize::MIN),
+            // The filter or a fold may have moved the board's selection off the viewed row.
+            KeyCode::Char('a') | KeyCode::Enter => {
+                self.selected = self.full.as_ref().map(|full| Spot::Row(full.key.clone()));
+                return if key.code == KeyCode::Enter {
+                    self.jump()
+                } else {
+                    self.start_answer()
+                };
+            }
+            _ => {}
+        }
+        None
+    }
+
+    /// `enter`: go to the current row's pane, one jump at a time.
+    fn jump(&mut self) -> Option<Effect> {
+        if self.going.is_some() {
+            self.say("a jump is already running");
+            return None;
+        }
+        let row = self.current()?.clone();
+        self.going = Some(format!(
+            "going to {}…",
+            path(&labels(&row, true), usize::MAX)
+        ));
+        Some(Effect::Jump(Box::new(row)))
     }
 
     /// `tab`: a done row read for READ is seen; then on to the next NEEDS YOU row, wrapping.
@@ -530,7 +634,7 @@ impl App {
         use super::view::{HEADED, HEADER_ROW};
         let items = self.items();
         let list = usize::from(self.width);
-        if !self.clicks() || self.prompting() || items.is_empty() || self.zoom {
+        if !self.clicks() || self.prompting() || items.is_empty() || self.full.is_some() {
             return;
         }
         if self.height >= HEADED && y == HEADER_ROW {
@@ -557,6 +661,9 @@ impl App {
     /// The wheel moves the selection, as `k` and `j` do, but stops at the ends; with the mouse
     /// captured the terminal no longer turns it into arrow keys.
     pub fn scroll(&mut self, up: bool) {
+        if self.full.is_some() {
+            return self.full_scroll(if up { 3 } else { -3 });
+        }
         if self.prompting() {
             return;
         }
@@ -580,6 +687,9 @@ impl App {
         self.failed = None;
         if self.answer.is_some() {
             return self.answer_key(key, Instant::now());
+        }
+        if self.full.is_some() {
+            return self.full_key(key);
         }
         if self.commanding {
             match key.code {
@@ -655,17 +765,13 @@ impl App {
                 self.show(all[(at + 1) % all.len()].clone());
             }
             KeyCode::Char(c) if by_letter(c).is_some() => self.sort_by(c),
-            KeyCode::Char('?') => {
-                self.keys = !self.keys;
-                self.zoom = false;
-            }
+            KeyCode::Char('?') => self.keys = !self.keys,
             KeyCode::Esc if self.pick => return Some(Effect::Quit),
             KeyCode::Esc => {
                 self.filter.reset();
                 self.status = None;
                 self.peek = None;
                 self.keys = false;
-                self.zoom = false;
                 self.sort = None;
                 self.unfold_all();
                 self.keep_selection_visible();
@@ -711,24 +817,10 @@ impl App {
                     state: row.pane.state.clone(),
                 });
             }
-            KeyCode::Char(' ') if self.zoom => self.zoom = false,
-            KeyCode::Char(' ') if !self.pick => {
-                self.current()?;
-                self.keys = false;
-                self.zoom = true;
-                return self.tail();
-            }
+            KeyCode::Char(' ') if !self.pick => return self.open_full(Instant::now()),
             KeyCode::Tab if !self.pick => return self.next_waiting(Instant::now()),
             KeyCode::Char('a') if !self.pick => return self.start_answer(),
-            KeyCode::Enter if self.going.is_some() => self.say("a jump is already running"),
-            KeyCode::Enter => {
-                let row = self.current()?.clone();
-                self.going = Some(format!(
-                    "going to {}…",
-                    path(&labels(&row, true), usize::MAX)
-                ));
-                return Some(Effect::Jump(Box::new(row)));
-            }
+            KeyCode::Enter => return self.jump(),
             KeyCode::Char('r') => {
                 self.link = Link::Connecting;
                 return Some(Effect::Reconnect);
@@ -767,7 +859,7 @@ impl App {
             return None;
         };
         let row = row.clone();
-        self.zoom = false;
+        self.full = None;
         self.keys = false;
         let effect = read(&row);
         self.answer = Some(Answer::new(row, updated_at));
@@ -907,6 +999,15 @@ fn newer(a: Option<&str>, b: Option<&str>) -> bool {
     }
 }
 
+fn peek(row: &Row) -> Effect {
+    Effect::Peek {
+        key: row.key.clone(),
+        host: row.pane.host.clone(),
+        session: row.pane.session_id.clone(),
+        block: row.pane.block_id.clone(),
+    }
+}
+
 fn read(row: &Row) -> Effect {
     Effect::Read {
         key: row.key.clone(),
@@ -920,6 +1021,79 @@ fn read(row: &Row) -> Effect {
 pub mod tests {
     use super::*;
     use crate::tui::columns::{Col, Dir};
+
+    /// seat-b blocked and two working rows, with the status filter on working and the full
+    /// view open on pi, which then finishes and leaves the filter.
+    fn viewing_pi_as_it_leaves_the_filter() -> App {
+        let mut app = App::default();
+        let mut rows = rows();
+        rows.push(row("mini/pi", "working", "working", true));
+        app.set_rows(rows.clone(), hosts());
+        press(&mut app, KeyCode::Char('f'));
+        press(&mut app, KeyCode::Char('w'));
+        app.selected = Some(Spot::Row("mini/pi".into()));
+        press(&mut app, KeyCode::Char(' '));
+        rows.retain(|row| row.key != "mini/pi");
+        rows.push(row("mini/pi", "done", "needs_you", false));
+        app.set_rows(rows, hosts());
+        assert_eq!(
+            app.full.as_ref().map(|full| full.key.as_str()),
+            Some("mini/pi")
+        );
+        assert_ne!(
+            app.selected,
+            Some(Spot::Row("mini/pi".into())),
+            "the board moved on"
+        );
+        app
+    }
+
+    #[test]
+    fn full_view_a_and_enter_act_on_the_viewed_row_not_the_boards_selection() {
+        let mut app = viewing_pi_as_it_leaves_the_filter();
+        let effect = press(&mut app, KeyCode::Char('a'));
+        assert!(
+            matches!(effect, Some(Effect::Read { ref key, .. }) if key == "mini/pi"),
+            "{effect:?}"
+        );
+        assert_eq!(
+            app.answer.as_ref().map(|a| a.row.key.as_str()),
+            Some("mini/pi")
+        );
+        let mut app = viewing_pi_as_it_leaves_the_filter();
+        let effect = press(&mut app, KeyCode::Enter);
+        assert!(
+            matches!(effect, Some(Effect::Jump(ref row)) if row.key == "mini/pi"),
+            "{effect:?}"
+        );
+    }
+
+    #[test]
+    fn full_view_a_answers_the_viewed_row_when_its_group_is_folded() {
+        let mut app = app();
+        app.selected = Some(Spot::Row("mini/seat-b".into()));
+        press(&mut app, KeyCode::Char(' '));
+        app.folded.insert(Bucket::Status(Group::Working));
+        let mut rows = rows();
+        rows[0] = row("mini/seat-b", "working", "working", false);
+        app.set_rows(rows, hosts());
+        assert!(!matches!(&app.selected, Some(Spot::Row(key)) if key == "mini/seat-b"));
+        let effect = press(&mut app, KeyCode::Char('a'));
+        assert!(
+            matches!(effect, Some(Effect::Read { ref key, .. }) if key == "mini/seat-b"),
+            "{effect:?}"
+        );
+    }
+
+    #[test]
+    fn full_view_says_when_its_row_leaves_the_board() {
+        let mut app = app();
+        app.selected = Some(Spot::Row("mini/seat-b".into()));
+        press(&mut app, KeyCode::Char(' '));
+        app.set_rows(rows().split_off(1), hosts());
+        assert!(app.full.is_none());
+        assert_eq!(app.toast(), Some("seat-b left the board"));
+    }
 
     pub fn row(key: &str, state: &str, group: &str, seen: bool) -> Row {
         let (host, block) = key.split_once('/').unwrap();
