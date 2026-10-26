@@ -6,13 +6,13 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::app::{App, Peek};
-use super::{card, theme};
+use super::{card, theme, vt};
 use crate::board::Row;
 use crate::output::{age, chop, fit};
 
@@ -137,14 +137,65 @@ pub fn draw(frame: &mut Frame, app: &App, full: &Full, row: &Row, now: DateTime<
     frame.render_widget(Paragraph::new(footer), bottom);
 }
 
-/// A line in `width` columns: cut, not wrapped, so the pane's own layout holds, and a cut one
-/// ends in the board's dim `…`.
+/// A line in `width` columns with the pane's colours: cut, not wrapped, so the pane's own layout
+/// holds, and a cut one ends in the board's dim `…`. Cutting works on the styled text, so no
+/// escape sequence is ever split.
 fn cut(line: &str, width: usize) -> Line<'static> {
-    if line.width() <= width {
-        return Line::raw(line.to_owned());
+    let mut spans = vt::spans(line);
+    // Padding a program printed after its text, which shows nothing, must not count as cut.
+    while let Some(last) = spans.last_mut()
+        && last.style.bg.is_none()
+        && !last.style.add_modifier.contains(Modifier::REVERSED)
+        && last.content.ends_with(' ')
+    {
+        let trimmed = last.content.trim_end().to_owned();
+        if !trimmed.is_empty() {
+            last.content = trimmed.into();
+            break;
+        }
+        spans.pop();
     }
-    let kept = chop(line, width.saturating_sub(1).max(1)).swap_remove(0);
-    Line::from(vec![Span::raw(kept), Span::styled("…", theme::dim())])
+    if spans.iter().map(|s| s.content.width()).sum::<usize>() <= width {
+        return Line::from(spans);
+    }
+    // Only coloured padding past the edge, as a diff row's background: nothing to mark.
+    let marked = !hidden_is_blank(&spans, width);
+    let mut room = if marked {
+        width.saturating_sub(1).max(1)
+    } else {
+        width
+    };
+    let mut kept = Vec::new();
+    for span in spans {
+        let w = span.content.width();
+        if w <= room {
+            room -= w;
+            kept.push(span);
+            continue;
+        }
+        let part = chop(&span.content, room.max(1)).swap_remove(0);
+        if room > 0 && part.width() <= room {
+            kept.push(Span::styled(part, span.style));
+        }
+        break;
+    }
+    if marked {
+        kept.push(Span::styled("…", theme::dim()));
+    }
+    Line::from(kept)
+}
+
+/// Whether everything past `width` columns is spaces.
+fn hidden_is_blank(spans: &[Span], width: usize) -> bool {
+    let mut used = 0;
+    spans
+        .iter()
+        .flat_map(|span| span.content.chars())
+        .skip_while(|c| {
+            used += c.width().unwrap_or(0);
+            used <= width
+        })
+        .all(|c| c == ' ')
 }
 
 fn keys(width: usize) -> Line<'static> {
