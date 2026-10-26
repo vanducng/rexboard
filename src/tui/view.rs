@@ -43,10 +43,10 @@ pub const KEYS: [(&str, &str); 25] = [
     ("esc", "clear filters/sort/peek/folds"),
     ("z", "fold or open a group"),
     ("enter", "go to the pane"),
-    ("-", "back to the pane before"),
+    ("-", "back to the pane jumped from"),
     ("a", "answer: pick an option, reply"),
     ("y Y", "copy the message, the place"),
-    ("ctrl+k", "close the pane, after y/n"),
+    ("ctrl+k", "close the pane: ctrl+k twice"),
     ("r", "reconnect to serve"),
     ("c", "hide or show the card"),
     ("?", "this table"),
@@ -560,7 +560,7 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         frame.render_widget(Paragraph::new(answer.footer(width)), area);
         return;
     }
-    if let Some(question) = app.close_question() {
+    if let Some(question) = app.close_question(width) {
         frame.render_widget(
             Paragraph::new(Line::styled(fit(&question, width), theme::alert_label())),
             area,
@@ -879,7 +879,13 @@ mod tests {
         let text = render(&app, 80, 30);
         assert_eq!(
             text.lines().last().unwrap(),
-            "close api › main › seat-b on mini? y/n"
+            "close api › … › seat-b on mini, ending claude (blocked)? ctrl+k again closes it",
+            "at 80 columns the place gives way, never the key"
+        );
+        let text = render(&app, 120, 30);
+        assert_eq!(
+            text.lines().last().unwrap(),
+            "close api › main › seat-b on mini, ending claude (blocked)? ctrl+k again closes it"
         );
         press(&mut app, KeyCode::Esc);
         let text = render(&app, 80, 30);

@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
+use unicode_width::UnicodeWidthStr;
 
 use super::answer::{Answer, Step};
 use super::columns::{Col, Column, Columns, Sort, by_letter, field_column, free_letter};
@@ -13,7 +14,7 @@ use super::status::Status;
 use super::views::{Bucket, Key, View, arrange, bucket, views};
 use crate::board::{Group, Row};
 use crate::client::{ExtRun, Field};
-use crate::output::{labels, name, path};
+use crate::output::{clean, harness, labels, name, path, wheres};
 use crate::pane::Pane;
 use crate::send::{Action, Expect};
 
@@ -64,10 +65,10 @@ pub enum Effect {
     Back,
     /// Close this row's pane, which the operator confirmed.
     Close(Box<Row>),
-    /// Put `text` on the clipboard; `what` names it.
+    /// Put `text` on the clipboard; `shown` is how the footer names it.
     Copy {
         text: String,
-        what: String,
+        shown: String,
     },
     /// Keep whether the card is hidden in tui.json.
     SavePrefs(super::prefs::Prefs),
@@ -179,7 +180,7 @@ pub struct App {
     pub going: Option<String>,
     /// Why the last jump or close failed, until the next key.
     pub failed: Option<String>,
-    /// `ctrl+k`: the row to close once `y` confirms it.
+    /// `ctrl+k`: the row to close once a second `ctrl+k` confirms it.
     pub closing: Option<Row>,
     needs: BTreeSet<String>,
     /// `a`: answering one row; the board's keys are off.
@@ -228,6 +229,15 @@ impl App {
             if !stands {
                 self.sent = None;
             }
+        }
+        if let Some(row) = &self.closing
+            && !self.rows.iter().any(|r| r.key == row.key)
+        {
+            self.say(format!(
+                "{} left the board; nothing to close",
+                path(&labels(row, false), usize::MAX)
+            ));
+            self.closing = None;
         }
         if let Some(full) = &self.full
             && !self.rows.iter().any(|row| row.key == full.key)
@@ -777,67 +787,78 @@ impl App {
             return;
         };
         if self.is_own(row) || row.pane.process.as_deref() == Some("rexboard") {
-            self.say("that pane runs the board; it stays open");
+            self.failed = Some("that pane runs the board; it stays open".into());
             return;
         }
         self.closing = Some(row.clone());
     }
 
-    /// The footer while `ctrl+k` waits for `y`.
-    pub fn close_question(&self) -> Option<String> {
+    /// Where `row` is, as the list tells it apart from the rows that read the same (`#N`), in
+    /// `max` columns.
+    fn place(&self, row: &Row, max: usize) -> String {
+        let at = self.rows.iter().position(|r| r.key == row.key);
+        at.map_or_else(
+            || path(&labels(row, false), max),
+            |at| wheres(&self.rows, max, false, true).swap_remove(at),
+        )
+    }
+
+    /// The footer while `ctrl+k` waits for a second `ctrl+k`: the place as the list shows it,
+    /// with its `#N`, and what closing it ends, in `width` columns. Only the place gives way.
+    pub fn close_question(&self, width: usize) -> Option<String> {
         let row = self.closing.as_ref()?;
+        let state = match row.pane.state.as_str() {
+            state @ ("blocked" | "working") => format!(" ({state})"),
+            _ => String::new(),
+        };
         let tmux = if row.pane.process.as_deref() == Some("tmux") {
             " (tmux keeps running)"
         } else {
             ""
         };
-        Some(format!(
-            "close {} on {}?{tmux} y/n",
-            path(&labels(row, false), usize::MAX),
-            row.pane.host
-        ))
+        let rest = format!(
+            " on {}, ending {}{state}?{tmux} ctrl+k again closes it",
+            row.pane.host,
+            harness(row)
+        );
+        let room = width.saturating_sub("close ".width() + rest.width());
+        Some(format!("close {}{rest}", self.place(row, room)))
     }
 
-    /// The key after `ctrl+k`: `y` closes, anything else keeps the pane.
-    fn answer_close(&mut self, row: Row, key: KeyEvent) -> Option<Effect> {
-        if key.code != KeyCode::Char('y') || !key.modifiers.is_empty() {
-            self.say("nothing closed");
-            return None;
-        }
+    /// The second `ctrl+k`: close the row the first one asked about.
+    fn close(&mut self, row: Row) -> Option<Effect> {
         if self.busy() {
             return None;
         }
-        self.going = Some(format!(
-            "closing {}…",
-            path(&labels(&row, false), usize::MAX)
-        ));
+        self.going = Some(format!("closing {}…", self.place(&row, usize::MAX)));
         Some(Effect::Close(Box::new(row)))
     }
 
-    /// `y` copies the row's message and `Y` where it is, as `session › window › block @host`.
+    /// `y` copies the row's message and `Y` where it is, as `session › window › block @host`,
+    /// both without terminal control, so a paste cannot end early and run what follows.
     fn copy(&mut self, location: bool) -> Option<Effect> {
         let row = self.current()?;
-        if location {
-            let text = format!(
+        let text = if location {
+            clean(&format!(
                 "{} @{}",
                 path(&labels(row, false), usize::MAX),
                 row.pane.host
-            );
-            return Some(Effect::Copy {
-                text,
-                what: "the location".into(),
-            });
+            ))
+        } else {
+            clean(row.pane.msg.as_deref().unwrap_or_default())
+                .trim()
+                .to_owned()
+        };
+        if text.is_empty() {
+            self.failed = Some("this row has no message to copy · Y copies where it is".into());
+            return None;
         }
-        match row.pane.msg.clone().filter(|msg| !msg.trim().is_empty()) {
-            Some(text) => Some(Effect::Copy {
-                text,
-                what: "the message".into(),
-            }),
-            None => {
-                self.say("this row has no message to copy · Y copies where it is");
-                None
-            }
-        }
+        let shown = if location {
+            text.clone()
+        } else {
+            format!("\"{text}\"")
+        };
+        Some(Effect::Copy { text, shown })
     }
 
     /// `tab`: a done row read for READ is seen; then on to the next NEEDS YOU row, wrapping.
@@ -936,8 +957,16 @@ impl App {
 
     pub fn handle(&mut self, key: KeyEvent) -> Option<Effect> {
         self.failed = None;
+        // After `ctrl+k`, a second one closes and `esc` only cancels; any other key cancels and
+        // then does what it does.
         if let Some(row) = self.closing.take() {
-            return self.answer_close(row, key);
+            if key.code == KeyCode::Char('k') && key.modifiers == KeyModifiers::CONTROL {
+                return self.close(row);
+            }
+            self.say("nothing closed");
+            if key.code == KeyCode::Esc {
+                return None;
+            }
         }
         if self.answer.is_some() {
             return self.answer_key(key, Instant::now());
@@ -1360,29 +1389,31 @@ pub mod tests {
     }
 
     #[test]
-    fn close_asks_first_and_only_y_closes() {
+    fn close_asks_first_and_only_a_second_ctrl_k_closes() {
         let mut app = app();
         app.selected = Some(Spot::Row("mini/seat-b".into()));
         assert!(app.handle(ctrl('k')).is_none());
         assert_eq!(
-            app.close_question().as_deref(),
-            Some("close api › main › seat-b on mini? y/n")
+            app.close_question(usize::MAX).as_deref(),
+            Some(
+                "close api › main › seat-b on mini, ending claude (blocked)? ctrl+k again closes it"
+            )
         );
-        assert!(
-            press(&mut app, KeyCode::Char('n')).is_none(),
-            "n sends nothing"
-        );
-        assert_eq!(app.close_question(), None);
+        assert!(press(&mut app, KeyCode::Esc).is_none(), "esc only cancels");
+        assert!(app.close_question(usize::MAX).is_none());
         assert_eq!(app.toast(), Some("nothing closed"));
         app.handle(ctrl('k'));
         assert!(
-            app.handle(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL))
-                .is_none(),
-            "ctrl+y is not y"
+            matches!(
+                press(&mut app, KeyCode::Char('y')),
+                Some(Effect::Copy { .. })
+            ),
+            "y after ctrl+k copies, as y does, and closes nothing"
         );
+        assert!(app.close_question(usize::MAX).is_none());
         app.handle(ctrl('k'));
         assert!(matches!(
-            press(&mut app, KeyCode::Char('y')),
+            app.handle(ctrl('k')),
             Some(Effect::Close(row)) if row.key == "mini/seat-b"
         ));
         assert_eq!(app.going.as_deref(), Some("closing api › main › seat-b…"));
@@ -1391,52 +1422,108 @@ pub mod tests {
     }
 
     #[test]
-    fn close_never_takes_the_boards_own_pane_and_warns_about_tmux() {
+    fn close_names_a_default_labelled_twin_as_the_list_does() {
+        let mut app = app();
+        let twin = |block: &str| {
+            let mut row = row(&format!("local/{block}"), "working", "working", true);
+            row.pane.pane = "claude".into();
+            row.pane.process = Some("claude".into());
+            row
+        };
+        app.set_rows(vec![twin("one"), twin("two")], hosts());
+        let mut asked = Vec::new();
+        for key in ["local/one", "local/two"] {
+            app.selected = Some(Spot::Row(key.into()));
+            app.handle(ctrl('k'));
+            asked.push(app.close_question(usize::MAX).unwrap());
+            app.handle(KeyEvent::from(KeyCode::Esc));
+        }
+        assert_ne!(asked[0], asked[1], "{asked:?}");
+        assert!(asked[0].starts_with("close api › main #"), "{asked:?}");
+    }
+
+    #[test]
+    fn close_never_takes_the_boards_own_pane_and_forgets_a_row_that_left() {
         let mut app = app();
         app.own = Some("seat-a".into());
         app.selected = Some(Spot::Row("local/seat-a".into()));
         app.handle(ctrl('k'));
-        assert_eq!(app.close_question(), None, "the board's own pane");
-        assert_eq!(app.toast(), Some("that pane runs the board; it stays open"));
+        assert!(
+            app.close_question(usize::MAX).is_none(),
+            "the board's own pane"
+        );
+        assert_eq!(
+            app.failed.as_deref(),
+            Some("that pane runs the board; it stays open")
+        );
         let mut rows = rows();
         rows[2].pane.process = Some("rexboard".into());
         rows[1].pane.process = Some("tmux".into());
-        app.set_rows(rows, hosts());
+        app.set_rows(rows.clone(), hosts());
         app.own = None;
         app.selected = Some(Spot::Row("mini/codex".into()));
         app.handle(ctrl('k'));
-        assert_eq!(app.close_question(), None, "a pane running rexboard");
+        assert!(
+            app.close_question(usize::MAX).is_none(),
+            "a pane running rexboard"
+        );
         app.selected = Some(Spot::Row("local/claude".into()));
         app.handle(ctrl('k'));
         assert_eq!(
-            app.close_question().as_deref(),
-            Some("close api › main › claude on local? (tmux keeps running) y/n")
+            app.close_question(usize::MAX).as_deref(),
+            Some(
+                "close api › main › claude on local, ending claude? (tmux keeps running) ctrl+k again closes it"
+            )
+        );
+        rows.remove(1);
+        app.set_rows(rows, hosts());
+        assert!(
+            app.close_question(usize::MAX).is_none(),
+            "its row left the board"
+        );
+        assert_eq!(
+            app.toast(),
+            Some("api › main › claude left the board; nothing to close")
         );
         let mut pick = super::tests::app();
         pick.pick = true;
         pick.handle(ctrl('k'));
-        assert_eq!(pick.close_question(), None, "pick only picks");
+        assert!(pick.close_question(usize::MAX).is_none(), "pick only picks");
     }
 
     #[test]
-    fn y_copies_the_message_and_capital_y_where_the_pane_is() {
+    fn y_copies_the_message_and_capital_y_where_the_pane_is_without_control() {
         let mut app = app();
         app.selected = Some(Spot::Row("mini/seat-b".into()));
         assert!(matches!(
             press(&mut app, KeyCode::Char('y')),
-            Some(Effect::Copy { text, what }) if text == "seat-b msg" && what == "the message"
+            Some(Effect::Copy { text, shown }) if text == "seat-b msg" && shown == "\"seat-b msg\""
         ));
         assert!(matches!(
             press(&mut app, KeyCode::Char('Y')),
-            Some(Effect::Copy { text, what })
-                if text == "api › main › seat-b @mini" && what == "the location"
+            Some(Effect::Copy { text, shown })
+                if text == "api › main › seat-b @mini" && shown == text
         ));
         let mut rows = rows();
+        rows[0].pane.msg = Some("done\x1b[201~echo hi\n".into());
+        rows[0].pane.tab = "ma\x1b[31min".into();
+        app.set_rows(rows.clone(), hosts());
+        assert!(
+            matches!(
+                press(&mut app, KeyCode::Char('y')),
+                Some(Effect::Copy { text, .. }) if text == "doneecho hi"
+            ),
+            "a paste cannot end early"
+        );
+        assert!(matches!(
+            press(&mut app, KeyCode::Char('Y')),
+            Some(Effect::Copy { text, .. }) if text == "api › main › seat-b @mini"
+        ));
         rows[0].pane.msg = None;
         app.set_rows(rows, hosts());
         assert!(press(&mut app, KeyCode::Char('y')).is_none());
         assert_eq!(
-            app.toast(),
+            app.failed.as_deref(),
             Some("this row has no message to copy · Y copies where it is")
         );
     }

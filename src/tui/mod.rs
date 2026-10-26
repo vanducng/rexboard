@@ -50,6 +50,8 @@ enum Msg {
     Gone(String),
     Peek(String, std::result::Result<Vec<String>, String>),
     Say(String),
+    /// A failure the footer shows in the alert role until the next key.
+    Failed(String),
     Went(std::result::Result<String, String>),
     Screen(String, std::result::Result<Screen, String>),
     Sent {
@@ -211,6 +213,7 @@ fn apply(app: &mut App, msg: Msg) -> Option<Effect> {
         }
         Msg::Peek(key, lines) => app.peeked(&key, lines),
         Msg::Say(text) => app.say(text),
+        Msg::Failed(why) => app.failed = Some(why),
         Msg::Went(result) => app.went(result),
         Msg::Screen(key, screen) => app.screen(&key, screen),
         Msg::Sent { key, what, result } => return app.sent(&key, &what, result),
@@ -275,13 +278,12 @@ fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
                 let _ = tx.send(Msg::Went(result));
             });
         }
-        Effect::Copy { text, what } => {
+        Effect::Copy { text, shown } => {
             thread::spawn(move || {
-                let said = match clipboard::copy(&text) {
-                    Ok(()) => format!("copied {what}"),
-                    Err(why) => format!("could not copy {what}: {why}"),
-                };
-                let _ = tx.send(Msg::Say(said));
+                let _ = tx.send(match clipboard::copy(&text) {
+                    Ok(()) => Msg::Say(format!("copied {shown}")),
+                    Err(why) => Msg::Failed(format!("could not copy: {why}")),
+                });
             });
         }
         Effect::Peek {
