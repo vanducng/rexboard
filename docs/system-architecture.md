@@ -51,6 +51,7 @@ rexboard reaches Rex only through the `rex` command: `rex do` for the scripts, `
 | `src/output.rs` | Text for the `ls` table and the board: labels and paths cut to fit, `#N` for twins, widths, ages |
 | `src/rex.rs` | Finds `rex`, runs one-shot scripts, and holds the one lock around every spawn, bind, accept and connect |
 | `src/jump.rs` | `jump`, `next` and `pick`'s jump: runs `jump.lua`, then marks the row seen through serve; turns Rex's failures into plain errors |
+| `src/show.rs` | `show`, `views` and `hosts`: what the board's card, `v` and top bar show, for the CLI; `show --tail` reads the pane through the board's own tail, and `hosts` reads serve's host states and their last errors |
 | `src/send.rs` | Runs `send.lua` for an answer, within 5s, and turns its refusals into plain reasons; runs `rex block close` for a close |
 | `src/upgrade.rs` | `rexboard upgrade`: finds how this binary was installed and upgrades it the same way |
 | `src/config.rs` | `config.toml` |
@@ -60,6 +61,7 @@ rexboard reaches Rex only through the `rex` command: `rex do` for the scripts, `
 | `src/lua/send.lua` | After `tail.lua`: re-checks that the pane still shows the report, the agent and the dialog or input line the board read, then sends; a refusal sends nothing |
 | `src/tui/` | The board and `pick`, a client of serve's rows |
 | `src/tui/keys.rs` | The keymap: one table per layer (the board, the full view) of key sequences, what they do, and how `?` and the footers name them. Dispatch, `?` and every footer read it, and tests check that no key is bound twice and every key does something |
+| `src/tui/query.rs` | The board's views, `/` filter, `f` status and `o` sort run headless for `ls --view/--filter/--status/--sort` and `seen --all-done`, so the CLI lists what the board would |
 | `src/tui/columns.rs`, `views.rs`, `status.rs` | Which columns a width shows; views (a grouping plus a sort); the `f` status filter |
 | `src/tui/card.rs` | The turn card: the selected row's bar, headline, ask or body, tail, and its facts at the foot |
 | `src/tui/meta.rs` | The card's facts: host, harness, turn, where, extension fields, title and source, each once under a label, in aligned columns |
@@ -93,7 +95,7 @@ One JSON request per line on the socket; every reply line carries `"v": 1`.
 
 | Request | Reply |
 | --- | --- |
-| `{"cmd":"rows"}` | `{"v":1,"rows":[ROW...],"hosts":{HOST:STATE},"extensions":{...},"fields":[...]}`. `STATE` is `starting`, `up`, `down` or `stopped`. `extensions` is each extension's last run, and `fields` the declared fields (`{id, name, title}`) in `enabled` order, sent before any run so the board can show them. Right after serve starts, the reply waits up to 5s for every host's first snapshot |
+| `{"cmd":"rows"}` | `{"v":1,"rows":[ROW...],"hosts":{HOST:STATE},"host_errors":{HOST:WHY},"extensions":{...},"fields":[...]}`. `STATE` is `starting`, `up`, `down` or `stopped`; `host_errors` says why for a host that is down or stopped, until it is up again. `extensions` is each extension's last run, and `fields` the declared fields (`{id, name, title}`) in `enabled` order, sent before any run so the board can show them. Right after serve starts, the reply waits up to 5s for every host's first snapshot |
 | `{"cmd":"subscribe"}` | The same `rows` line now and on every change (at most every 100ms), plus `{"v":1,"heartbeat":true}` every second. Each subscriber has room for 4 lines; a reader that falls behind misses lines rather than growing serve, and the next `rows` line is a full snapshot again |
 | `{"cmd":"seen","key":"HOST/BLOCK_ID","jump":false}` | `{"v":1,"ok":true,"key":KEY}`. `jump: true` (from a jump) also makes it where `next` without `after` starts |
 | `{"cmd":"next","after":KEY,"back":false}` | `{"v":1,"row":ROW}`: the next `needs_you` row after `after` (a key or a block id; else the last jump's pane; else the first), unseen rows first and all of them once every row is seen, wrapping; `back` goes the other way |

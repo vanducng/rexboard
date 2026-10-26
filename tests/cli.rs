@@ -682,7 +682,11 @@ fn held(path: &std::path::Path) -> bool {
 
 /// Polls `check` every 20ms for up to 10s.
 fn eventually(what: &str, check: impl Fn() -> bool) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    eventually_within(what, 10, check);
+}
+
+fn eventually_within(what: &str, secs: u64, check: impl Fn() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
     while !check() {
         assert!(
             std::time::Instant::now() < deadline,
@@ -1976,8 +1980,9 @@ fn next_outside_a_pane_starts_after_the_last_jump() {
 }
 
 /// Writes extension `name` into the serve's config dir: a manifest with one field, `rig`, run
-/// every 2s with a 1s timeout unless `top` says otherwise, then `tables`; and an adapter running
-/// the shell `script`.
+/// every 4s with a 3s timeout unless `top` says otherwise, then `tables`; and an adapter running
+/// the shell `script`. The roomy timeout keeps a slow `/bin/sh` on a loaded machine from failing
+/// a run that a test means to succeed.
 fn extension(
     serve: &Serve,
     name: &str,
@@ -1995,7 +2000,7 @@ fn extension(
     let timing = if top.contains("every") {
         ""
     } else {
-        "every = 2\ntimeout = 1\n"
+        "every = 4\ntimeout = 3\n"
     };
     std::fs::write(
         dir.join("extension.toml"),
@@ -2146,17 +2151,19 @@ fn ext_status_fallback_only_reaches_unreported_rows_and_only_when_provided() {
 }
 
 /// An adapter that answers well once, then fails as `failure` says on every later run.
-fn good_then(serve: &Serve, failure: &str) {
+fn good_then(serve: &Serve, failure: &str, timing: &str) {
     let count = serve.dir.path().join("runs");
+    let failed = serve.dir.path().join("failed");
     // The good answer counts only once the run was sent the row: an early run can come before
     // the local host's snapshot.
     const GOOD: &str =
         r#"{"contract": 1, "rows": {"local/block:api-seat-a": {"fields": {"rig": "api"}}}}"#;
     let script = format!(
-        "req=$(cat)\nif [ -e '{c}' ]; then\n{failure}\nfi\ncase \"$req\" in *'{SEAT}'*) touch '{c}' ;; esac\necho '{GOOD}'",
-        c = count.display()
+        "req=$(cat)\nif [ -e '{c}' ]; then\necho run >> '{f}'\n{failure}\nfi\ncase \"$req\" in *'{SEAT}'*) touch '{c}' ;; esac\necho '{GOOD}'",
+        c = count.display(),
+        f = failed.display()
     );
-    extension(serve, "fake", "", "", &script);
+    extension(serve, "fake", timing, "", &script);
     serve.config("[extensions]\nenabled = [\"fake\"]\n");
 }
 
@@ -2167,12 +2174,17 @@ fn kept_three_runs_then_dropped(serve: &Serve, logged: &str) {
         ext_of(&serve.rows(&[]), SEAT)["fake.rig"] == "api"
     });
     eventually("a failed run", || serve_log(serve).contains(logged));
-    assert_eq!(
-        ext_of(&serve.rows(&[]), SEAT)["fake.rig"],
-        "api",
-        "kept after one failure"
-    );
-    eventually("the field to go after three failed runs", || {
+    // Counted by the adapter, not the clock: a slow poll must not let the third failure land
+    // before the check.
+    let failed = || {
+        std::fs::read_to_string(serve.dir.path().join("failed")).map_or(0, |t| t.lines().count())
+    };
+    let rig = ext_of(&serve.rows(&[]), SEAT)["fake.rig"].clone();
+    let runs = failed();
+    if runs < 3 {
+        assert_eq!(rig, "api", "kept after {runs} failed runs");
+    }
+    eventually_within("the field to go after three failed runs", 20, || {
         ext_of(&serve.rows(&[]), SEAT).get("fake.rig").is_none()
     });
 }
@@ -2180,14 +2192,18 @@ fn kept_three_runs_then_dropped(serve: &Serve, logged: &str) {
 #[test]
 fn ext_bad_json_keeps_the_last_good_rows_for_three_runs() {
     let serve = Serve::new();
-    good_then(&serve, "cat > /dev/null; echo 'not json'; exit 0");
+    good_then(&serve, "cat > /dev/null; echo 'not json'; exit 0", "");
     kept_three_runs_then_dropped(&serve, "ext fake: printed bad JSON");
 }
 
 #[test]
 fn ext_contract_mismatch_keeps_the_last_good_rows_for_three_runs() {
     let serve = Serve::new();
-    good_then(&serve, "cat > /dev/null; echo '{\"contract\": 2}'; exit 0");
+    good_then(
+        &serve,
+        "cat > /dev/null; echo '{\"contract\": 2}'; exit 0",
+        "",
+    );
     kept_three_runs_then_dropped(
         &serve,
         "ext fake: answered for contract 2; this rexboard speaks contract 1",
@@ -2197,7 +2213,7 @@ fn ext_contract_mismatch_keeps_the_last_good_rows_for_three_runs() {
 #[test]
 fn ext_timeout_kills_the_adapter_and_keeps_the_last_good_rows() {
     let serve = Serve::new();
-    good_then(&serve, "exec sleep 30");
+    good_then(&serve, "exec sleep 30", "every = 2\ntimeout = 1\n");
     kept_three_runs_then_dropped(&serve, "ext fake: timed out after 1s and was stopped");
 }
 
@@ -2215,8 +2231,8 @@ fn ext_undeclared_field_is_dropped_and_logged_once() {
     eventually("the declared field", || {
         ext_of(&serve.rows(&[]), SEAT) == serde_json::json!({ "fake.rig": "api" })
     });
-    // Every 2s, so at least one more run answers the same.
-    std::thread::sleep(std::time::Duration::from_secs(3));
+    // Every 4s, so at least one more run answers the same.
+    std::thread::sleep(std::time::Duration::from_secs(5));
     assert_eq!(
         serve_log(&serve)
             .matches("ext fake: undeclared field extra")
@@ -2472,4 +2488,344 @@ fn ext_fields_reach_the_board_in_enabled_order_before_any_run() {
         ]),
         "both declare rig, so both go by id; zeta first, as enabled; only declared icons go"
     );
+}
+
+/// mini with a done row, a working row and a question, each with a status record.
+fn mini_mixed(serve: &Serve) -> String {
+    let block = |id: &str, label: &str, state: &str, kind: Option<&str>, msg: &str| {
+        let mut record = serde_json::json!({ "state": state, "app": "claude-code", "msg": msg,
+            "updated_at": "2026-01-01T00:00:00Z" });
+        if let Some(kind) = kind {
+            record["kind"] = serde_json::json!(kind);
+        }
+        serde_json::json!({ "block_id": id, "label": label, "title": "", "process": {},
+            "records": [record] })
+    };
+    let snapshot = serde_json::json!({ "v": 1, "type": "snapshot", "rex_version": "0.0.1-test",
+        "sessions": [{ "session_id": "session:web", "label": "web", "windows": [{
+            "window_id": "window:web", "label": "main", "blocks": [
+                block("block:web-done", "seat-d", "done", None, "Tests pass ⏎ All 12 green"),
+                block("block:web-busy", "seat-w", "working", None, "Writing"),
+                block("block:web-ask", "seat-q", "blocked", Some("question"), "Which runner?"),
+            ] }] }] });
+    let path = serve.dir.path().join("observer-mini.ndjson");
+    std::fs::write(&path, format!("{snapshot}\n")).unwrap();
+    path.to_str().unwrap().to_owned()
+}
+
+/// A serve whose mini has `mini_mixed`'s three rows, once they are in.
+fn mixed_serve() -> Serve {
+    let serve = Serve::new();
+    let observer = mini_mixed(&serve);
+    serve
+        .cmd()
+        .env("FAKE_REX_OBSERVER_mini", observer)
+        .args(["serve"])
+        .assert()
+        .success();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while serve.rows(&["--host", "mini"]).len() < 3 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "mini's rows never came"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    serve
+}
+
+fn keys(rows: &[serde_json::Value]) -> Vec<&str> {
+    rows.iter()
+        .map(|row| row["key"].as_str().unwrap())
+        .collect()
+}
+
+#[test]
+fn ls_takes_the_boards_view_filter_status_and_sort() {
+    let serve = mixed_serve();
+    assert_eq!(
+        keys(&serve.rows(&["--status", "q"])),
+        ["mini/block:web-ask"]
+    );
+    assert_eq!(
+        keys(&serve.rows(&["--status", "working"])),
+        ["mini/block:web-busy"]
+    );
+    assert_eq!(
+        keys(&serve.rows(&["--filter", "host:mini", "--filter", "tests pass"])),
+        ["mini/block:web-done"],
+        "each filter narrows, and words match the message"
+    );
+    let hosts = |rows: Vec<serde_json::Value>| -> Vec<String> {
+        rows.iter()
+            .map(|row| row["host"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let by_host = hosts(serve.rows(&["--view", "table", "--sort", "host:desc"]));
+    assert!(
+        by_host.windows(2).all(|pair| pair[0] >= pair[1]),
+        "{by_host:?}"
+    );
+    let grouped = hosts(serve.rows(&["--view", "host"]));
+    let mut seen: Vec<&String> = Vec::new();
+    for host in &grouped {
+        if seen.last() != Some(&host) {
+            assert!(!seen.contains(&host), "each host is one group: {grouped:?}");
+            seen.push(host);
+        }
+    }
+    for (args, said) in [
+        (
+            &["--view", "nope"][..],
+            "no view named nope; views: status, table, harness, host",
+        ),
+        (&["--status", "x"][..], "no status named x"),
+        (&["--sort", "nope"][..], "no column named nope to sort by"),
+        (&["--sort", "age:up"][..], "the direction is asc or desc"),
+    ] {
+        serve
+            .cmd()
+            .args(["ls", "--json"])
+            .args(args)
+            .assert()
+            .code(2)
+            .stderr(
+                predicate::str::contains("\"code\":\"USAGE\"").and(predicate::str::contains(said)),
+            );
+    }
+    serve
+        .cmd()
+        .args(["ls", "--direct", "--view", "table"])
+        .assert()
+        .code(2);
+    serve
+        .cmd()
+        .args(["ls", "--json", "--filter", "runner?"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("mini/block:web-ask"));
+    serve
+        .cmd()
+        .args(["ls", "--json", "--filter", "which: runner"])
+        .assert()
+        .success()
+        .stdout("[]\n")
+        .stderr(predicate::str::contains(
+            "note: --filter which: runner: no key named which, so it matches as text",
+        ));
+}
+
+#[test]
+fn views_lists_each_view_and_what_it_groups_by() {
+    let serve = Serve::new();
+    let out = serve
+        .cmd()
+        .args(["views", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let views: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        views,
+        serde_json::json!([
+            { "name": "status", "group_by": "status" },
+            { "name": "table", "group_by": null },
+            { "name": "harness", "group_by": "harness" },
+            { "name": "host", "group_by": "host" },
+        ])
+    );
+}
+
+#[test]
+fn show_says_what_the_card_does_and_reads_the_tail() {
+    let serve = mixed_serve();
+    let out = serve
+        .cmd()
+        .args(["show", "mini/block:web-done", "--tail", "2", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let shown: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(shown["where"], "web › main › seat-d");
+    assert_eq!(
+        shown["msg"], "Tests pass ⏎ All 12 green",
+        "the message in full"
+    );
+    assert_eq!(
+        shown["tail"],
+        serde_json::json!(["", "Allow Bash: cargo test? (y/n)"]),
+        "the pane's last 2 lines"
+    );
+    let listed = serve.rows(&[]);
+    let row = listed
+        .iter()
+        .find(|r| r["key"] == "mini/block:web-done")
+        .unwrap();
+    for (key, value) in row.as_object().unwrap() {
+        assert_eq!(&shown[key], value, "{key} as ls --json has it");
+    }
+    serve
+        .cmd()
+        .args(["show", "mini/block:web-done"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::starts_with("done · seat-d · ended")
+                .and(predicate::str::contains(
+                    "\nTests pass\nAll 12 green\n\nwhere    web › main › seat-d\nhost     mini\n",
+                ))
+                .and(predicate::str::contains("\nkey      mini/block:web-done\n")),
+        );
+    serve
+        .cmd()
+        .args(["show", "mini/block:web-ask", "--tail", "2"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::starts_with("blocked · question · seat-q · waiting").and(
+                predicate::str::contains("\n │ Allow Bash: cargo test? (y/n)\n\nwhere "),
+            ),
+        );
+    serve
+        .cmd()
+        .args(["show", "mini/block:nope", "--json"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("\"code\":\"NOT_FOUND\""));
+    serve.cmd().args(["show", "nope"]).assert().code(2);
+}
+
+#[test]
+fn seen_all_done_marks_the_unseen_done_rows_its_filters_keep() {
+    let serve = mixed_serve();
+    let marked = |args: &[&str]| -> serde_json::Value {
+        let out = serve
+            .cmd()
+            .args(["seen", "--all-done", "--json"])
+            .args(args)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        serde_json::from_slice::<serde_json::Value>(&out).unwrap()["keys"].clone()
+    };
+    assert_eq!(marked(&["--host", "local"]), serde_json::json!([]));
+    assert_eq!(
+        marked(&["--filter", "seat-w"]),
+        serde_json::json!([]),
+        "not done"
+    );
+    assert_eq!(
+        marked(&["--filter", "host:mini"]),
+        serde_json::json!(["mini/block:web-done"])
+    );
+    let rows = serve.rows(&[]);
+    let done = rows
+        .iter()
+        .find(|r| r["key"] == "mini/block:web-done")
+        .unwrap();
+    assert_eq!(done["seen"], true);
+    assert_eq!(marked(&[]), serde_json::json!([]), "nothing left");
+    serve.cmd().args(["seen"]).assert().code(2);
+    serve
+        .cmd()
+        .args(["seen", "--host", "mini", "mini/block:web-done"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("cannot be used with"));
+    serve
+        .cmd()
+        .args(["seen", "--filter", "x"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("<KEY>"));
+}
+
+#[test]
+fn every_json_sample_in_the_cli_doc_parses() {
+    let doc = include_str!("../docs/cli.md");
+    let samples: Vec<&str> = doc
+        .split("```json\n")
+        .skip(1)
+        .map(|rest| rest.split("```").next().unwrap())
+        .collect();
+    assert!(samples.len() >= 5, "{}", samples.len());
+    for sample in samples {
+        serde_json::from_str::<serde_json::Value>(sample)
+            .unwrap_or_else(|err| panic!("{err}: {sample}"));
+    }
+}
+
+#[test]
+fn hosts_says_each_hosts_state_rows_and_why_it_is_down() {
+    let up = mixed_serve();
+    let out = up
+        .cmd()
+        .args(["hosts", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let hosts: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        hosts,
+        serde_json::json!([
+            { "host": "local", "state": "up", "rows": 1, "error": null },
+            { "host": "mini", "state": "up", "rows": 3, "error": null },
+        ])
+    );
+    up.cmd()
+        .args(["hosts"])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with(
+            "HOST   STATE     ROWS  ERROR\nlocal  up           1  -\n",
+        ));
+    let down = Serve::new();
+    down.cmd()
+        .envs([
+            ("FAKE_REX_EXIT_AFTER", "0"),
+            (
+                "FAKE_REX_STDERR",
+                &format!("observer.lua:3: boom {}", "x".repeat(2000)),
+            ),
+        ])
+        .args(["serve"])
+        .assert()
+        .success();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let out = down
+            .cmd()
+            .args(["hosts", "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let hosts: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        let local = hosts
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|h| h["host"] == "local")
+            .unwrap();
+        if local["state"] == "down" {
+            let error = local["error"].as_str().unwrap();
+            assert!(
+                error.starts_with("observer exited (exit status: 1): observer.lua:3: boom x"),
+                "{error}"
+            );
+            assert_eq!(error.chars().count(), 500, "a long stderr line is cut");
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "{hosts}");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }

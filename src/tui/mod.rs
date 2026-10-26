@@ -1,6 +1,6 @@
 mod answer;
 mod app;
-mod card;
+pub(crate) mod card;
 mod clipboard;
 mod columns;
 mod effects;
@@ -9,6 +9,7 @@ mod icons;
 mod keys;
 mod meta;
 mod prefs;
+pub(crate) mod query;
 mod screen;
 mod status;
 mod theme;
@@ -35,6 +36,7 @@ use crate::state::Paths;
 use crate::{interrupted, jump, rex, send, stop_on_signals};
 
 use app::{App, Effect, Link};
+pub(crate) use effects::tail;
 use effects::{Msg, act, apply, listen, tui_json};
 use screen::Screen;
 

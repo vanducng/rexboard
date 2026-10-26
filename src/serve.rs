@@ -209,11 +209,19 @@ fn error_line(code: &str, message: &str) -> Value {
     json!({ "v": VERSION, "error": { "code": code, "message": message } })
 }
 
+/// Why a host is down, as kept and sent with every rows line: cut as the log cuts a bad line,
+/// since a dying observer's last stderr line can be any length.
+fn capped(reason: &str) -> String {
+    reason.chars().take(500).collect()
+}
+
 struct Reducer {
     board: Board,
     memory: BTreeMap<String, Memory>,
     collectors: BTreeMap<HostId, Collector>,
     hosts: BTreeMap<HostId, &'static str>,
+    /// Why a host is down or stopped, until it is up again.
+    host_errors: BTreeMap<HostId, String>,
     restored: BTreeSet<HostId>,
     host_tx: Sender<(HostId, HostEvent)>,
     tx: Sender<Msg>,
@@ -256,6 +264,7 @@ impl Reducer {
             memory: saved.panes,
             collectors: BTreeMap::new(),
             hosts: BTreeMap::new(),
+            host_errors: BTreeMap::new(),
             restored: BTreeSet::new(),
             host_tx,
             tx,
@@ -406,6 +415,7 @@ impl Reducer {
         for host in gone {
             self.collectors.remove(&host);
             self.hosts.remove(&host);
+            self.host_errors.remove(&host);
             if !self.board.forget(&host).is_empty() {
                 self.rows_changed();
             }
@@ -455,14 +465,16 @@ impl Reducer {
     /// remembered rows on the first one.
     fn note_host(&mut self, host: &str, event: &HostEvent, changed: &mut Vec<(String, String)>) {
         match event {
-            HostEvent::Down { .. } => {
+            HostEvent::Down { reason, .. } => {
                 self.hosts.insert(host.to_owned(), "down");
+                self.host_errors.insert(host.to_owned(), capped(reason));
             }
             HostEvent::Event(Event::Snapshot { .. }, _) => {
                 if self.restored.insert(host.to_owned()) {
                     changed.extend(self.board.restore(host, &self.memory));
                 }
                 self.hosts.insert(host.to_owned(), "up");
+                self.host_errors.remove(host);
             }
             _ => {}
         }
@@ -471,6 +483,8 @@ impl Reducer {
     fn stop_host(&mut self, host: &str, err: &Error) -> Vec<(String, String)> {
         eprintln!("warning: {host} stopped and will not restart: {err}");
         self.hosts.insert(host.to_owned(), "stopped");
+        self.host_errors
+            .insert(host.to_owned(), capped(&err.to_string()));
         self.board.mark_stale(host)
     }
 
@@ -537,6 +551,7 @@ impl Reducer {
             "v": VERSION,
             "rows": self.board.rows(chrono::Utc::now()),
             "hosts": self.hosts,
+            "host_errors": self.host_errors,
             "extensions": self.extensions.states,
             "fields": self.extensions.fields(),
         })
