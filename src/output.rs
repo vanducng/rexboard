@@ -149,8 +149,8 @@ pub fn labels(row: &Row, short: bool) -> Vec<&str> {
 
 /// WHERE for each row in `max` columns. Rows that would still read the same get told apart:
 /// `@HOST` for a host other than `local` when they are on different hosts and the host has no
-/// column of its own, and `#N`, the pane's place among its tab's agent panes, when another of
-/// them is on the same host. The suffix is never cut; the path gives way, down to `…`.
+/// column of its own, and `#N`, its place among the rows on its host that read the same, when
+/// there are any. The suffix is never cut; the path gives way, down to `…`.
 pub fn wheres(rows: &[Row], max: usize, short: bool, host_column: bool) -> Vec<String> {
     let first: Vec<String> = rows
         .iter()
@@ -173,13 +173,12 @@ pub fn wheres(rows: &[Row], max: usize, short: bool, host_column: bool) -> Vec<S
             {
                 suffix.push_str(&format!(" @{}", clean(&row.pane.host)));
             }
-            if twins
-                .iter()
+            let here: Vec<&Row> = twins
+                .into_iter()
                 .filter(|other| other.pane.host == row.pane.host)
-                .count()
-                > 1
-            {
-                suffix.push_str(&format!(" #{}", position(row, rows)));
+                .collect();
+            if here.len() > 1 {
+                suffix.push_str(&format!(" #{}", place_among(row, &here)));
             }
             if suffix.is_empty() {
                 return place.clone();
@@ -195,43 +194,44 @@ pub fn wheres(rows: &[Row], max: usize, short: bool, host_column: bool) -> Vec<S
         .collect()
 }
 
-/// BLOCK for each row once WHERE splits: its name, and `#N`, its place among its tab's agent
-/// panes, when another row on its host has the same session, tab and name.
-pub fn blocks(rows: &[Row]) -> Vec<String> {
-    let names: Vec<String> = rows.iter().map(name).collect();
+/// BLOCK for each row once WHERE splits: its name, and `#N` when another row on its host reads
+/// the same in SESSION, WINDOW and BLOCK, as shown `session` and `window` columns wide.
+pub fn blocks(rows: &[Row], session: usize, window: usize) -> Vec<String> {
+    let shown: Vec<(String, String, String)> = rows
+        .iter()
+        .map(|row| {
+            (
+                squeeze(&clean(&row.pane.session), session),
+                squeeze(&clean(&row.pane.tab), window),
+                name(row),
+            )
+        })
+        .collect();
     rows.iter()
-        .zip(&names)
+        .zip(&shown)
         .map(|(row, own)| {
-            let p = &row.pane;
-            let twins = rows
+            let twins: Vec<&Row> = rows
                 .iter()
-                .zip(&names)
-                .filter(|(o, other)| {
-                    other == &own
-                        && o.pane.host == p.host
-                        && o.pane.session == p.session
-                        && o.pane.tab == p.tab
-                })
-                .count();
-            if twins > 1 {
-                format!("{own} #{}", position(row, rows))
+                .zip(&shown)
+                .filter(|(other, text)| *text == own && other.pane.host == row.pane.host)
+                .map(|(other, _)| other)
+                .collect();
+            if twins.len() > 1 {
+                format!("{} #{}", own.2, place_among(row, &twins))
             } else {
-                own.clone()
+                own.2.clone()
             }
         })
         .collect()
 }
 
-/// The pane's place among the agent panes of its tab, oldest first: Rex block ids sort by
-/// creation time.
-fn position(row: &Row, rows: &[Row]) -> usize {
-    let p = &row.pane;
-    1 + rows
+/// `row`'s place, from 1, among rows that read the same, by window and then block: Rex block ids
+/// sort by creation time.
+fn place_among(row: &Row, twins: &[&Row]) -> usize {
+    let at = (&row.pane.window_id, &row.pane.block_id);
+    1 + twins
         .iter()
-        .filter(|other| {
-            let o = &other.pane;
-            o.host == p.host && o.window_id == p.window_id && o.block_id < p.block_id
-        })
+        .filter(|o| (&o.pane.window_id, &o.pane.block_id) < at)
         .count()
 }
 

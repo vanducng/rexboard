@@ -2,7 +2,7 @@
 //! what goes in it, for the rows and their header alike.
 
 use std::cmp::Ordering;
-use std::ops::Range;
+use std::ops::RangeInclusive;
 
 use chrono::{DateTime, Utc};
 
@@ -19,7 +19,8 @@ pub enum Tier {
     /// 60-99: adds harness and host.
     Mid,
     /// 100 and up: adds the state (or its kind) and the tab, with the detail pane on the right.
-    /// From 140 TURN joins and WHERE splits into SESSION, WINDOW and BLOCK.
+    /// From 132 (a 93-column list beside the default pane at 140) WHERE splits into SESSION,
+    /// WINDOW and BLOCK; TURN joins at 140.
     Wide,
 }
 
@@ -64,9 +65,10 @@ enum Width {
     Msg,
 }
 
-/// The board width from which WHERE splits into SESSION, WINDOW and BLOCK.
-pub const SPLIT: u16 = 140;
-const ALWAYS: Range<u16> = 0..u16::MAX;
+/// The board width from which WHERE splits into SESSION, WINDOW and BLOCK: 140 with the default
+/// third leaves a 93-column list, which `columns_board` counts as 132.
+pub const SPLIT: u16 = 132;
+const ALWAYS: RangeInclusive<u16> = 0..=u16::MAX;
 
 /// A sort's direction: `Up` is a to z, newest or shortest first, and for STATE most urgent first.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -101,7 +103,7 @@ pub struct Column {
     /// The direction its first press sorts in: the longest wait first for AGE and TURN.
     pub first: Dir,
     /// The boards that show it.
-    boards: Range<u16>,
+    boards: RangeInclusive<u16>,
     width: Width,
     pub tone: Tone,
 }
@@ -111,7 +113,7 @@ const fn column(
     header: &'static str,
     letter: Option<char>,
     first: Dir,
-    boards: Range<u16>,
+    boards: RangeInclusive<u16>,
     width: Width,
     tone: Tone,
 ) -> Column {
@@ -143,7 +145,7 @@ pub const COLUMNS: [Column; 11] = [
         "STATE",
         Some('S'),
         Dir::Up,
-        100..u16::MAX,
+        100..=u16::MAX,
         Width::Fixed(11),
         Tone::State,
     ),
@@ -161,7 +163,7 @@ pub const COLUMNS: [Column; 11] = [
         "TURN",
         Some('T'),
         Dir::Down,
-        SPLIT..u16::MAX,
+        140..=u16::MAX,
         Width::Fixed(7),
         Tone::Soft,
     ),
@@ -170,7 +172,7 @@ pub const COLUMNS: [Column; 11] = [
         "HARNESS",
         Some('R'),
         Dir::Up,
-        60..u16::MAX,
+        60..=u16::MAX,
         Width::Fixed(8),
         Tone::Soft,
     ),
@@ -179,7 +181,7 @@ pub const COLUMNS: [Column; 11] = [
         "HOST",
         Some('O'),
         Dir::Up,
-        60..u16::MAX,
+        60..=u16::MAX,
         Width::Fixed(8),
         Tone::Dim,
     ),
@@ -188,7 +190,7 @@ pub const COLUMNS: [Column; 11] = [
         "WHERE",
         Some('W'),
         Dir::Up,
-        0..SPLIT,
+        0..=SPLIT - 1,
         Width::Where,
         Tone::Soft,
     ),
@@ -197,7 +199,7 @@ pub const COLUMNS: [Column; 11] = [
         "SESSION",
         Some('E'),
         Dir::Up,
-        SPLIT..u16::MAX,
+        SPLIT..=u16::MAX,
         Width::Part(0),
         Tone::Soft,
     ),
@@ -206,7 +208,7 @@ pub const COLUMNS: [Column; 11] = [
         "WINDOW",
         Some('N'),
         Dir::Up,
-        SPLIT..u16::MAX,
+        SPLIT..=u16::MAX,
         Width::Part(1),
         Tone::Soft,
     ),
@@ -215,7 +217,7 @@ pub const COLUMNS: [Column; 11] = [
         "BLOCK",
         Some('B'),
         Dir::Up,
-        SPLIT..u16::MAX,
+        SPLIT..=u16::MAX,
         Width::Part(2),
         Tone::Soft,
     ),
@@ -316,7 +318,8 @@ impl Columns {
             .sum();
         let rest = list.saturating_sub(lead);
         // WHERE names the row, so from 100 it keeps v0.1's width (5/9 of what v0.1 left, which
-        // was 2 more before STATE widened) and from 140 TURN's room comes out of MSG.
+        // was 2 more before STATE widened); once split its parts take two thirds, and from 140
+        // TURN's room comes out of MSG.
         let place = match (tier, board) {
             (_, SPLIT..) => rest * 2 / 3,
             (Tier::Wide, _) => ((rest + 2) * 5 / 9).min(rest),
@@ -519,6 +522,13 @@ mod tests {
                     at("MSG") - place >= 15 && header.len() - at("MSG") >= 10,
                     "{width} at {share:?}: WHERE, or SESSION to BLOCK, and MSG:\n{header}"
                 );
+                if header.contains("SESSION") {
+                    let parts = [at("SESSION"), at("WINDOW"), at("BLOCK"), at("MSG")];
+                    assert!(
+                        parts.windows(2).all(|w| w[1] - w[0] >= 10),
+                        "{width} at {share:?}: each part at least 10:\n{header}"
+                    );
+                }
             }
         }
     }
@@ -579,23 +589,24 @@ mod tests {
     }
 
     #[test]
-    fn where_keeps_v0_1_width_from_100_and_its_three_parts_take_two_thirds_from_140() {
+    fn where_keeps_v0_1_width_from_100_and_its_three_parts_take_two_thirds_once_split() {
         let at = |board: u16| {
             let columns = Columns::new(board, usize::from(board) - 39);
-            (columns.width(Col::Where), columns.width(Col::Msg))
+            [Col::Where, Col::Session, Col::Window, Col::Block, Col::Msg].map(|c| columns.width(c))
         };
-        assert_eq!(at(100), (15, 10), "v0.1's WHERE at 100");
-        assert_eq!(at(120), (26, 19), "v0.1's WHERE at 120");
-        let split = Columns::new(140, 101);
+        assert_eq!(at(100), [15, 0, 0, 0, 10], "v0.1's WHERE at 100");
+        assert_eq!(at(120), [26, 0, 0, 0, 19], "v0.1's WHERE at 120");
+        assert_eq!(at(131), [32, 0, 0, 0, 24], "a 92-column list keeps WHERE");
         assert_eq!(
-            [Col::Where, Col::Session, Col::Window, Col::Block, Col::Msg].map(|c| split.width(c)),
-            [0, 12, 12, 14, 20],
-            "from 140 SESSION, WINDOW and BLOCK share WHERE's two thirds"
+            at(132),
+            [0, 12, 12, 14, 19],
+            "a 93-column list splits, no TURN yet"
         );
+        assert_eq!(at(140), [0, 12, 12, 14, 20], "a 101-column list adds TURN");
     }
 
     #[test]
-    fn where_splits_once_the_list_has_101_columns() {
+    fn where_splits_from_a_93_column_list_and_turn_joins_at_101() {
         let header = |app: &App, width: u16| line(&buffer(app, width, 30), 2);
         let split = |text: &str| {
             ["SESSION", "WINDOW", "BLOCK"]
@@ -603,22 +614,30 @@ mod tests {
                 .all(|h| text.contains(h))
                 && !text.contains("WHERE")
         };
-        let mut narrow = app();
-        narrow.detail = Some(38.0 / 139.0);
-        assert!(!split(&header(&narrow, 139)), "a 100-column list");
-        narrow.detail = Some(38.0 / 140.0);
-        assert!(split(&header(&narrow, 140)), "a 101-column list");
-        assert!(
-            !split(&header(&app(), 140)),
-            "beside the default 46 pane the list is 93"
+        let mut board = app();
+        let at = |board: &App, width| {
+            let text = header(board, width);
+            (split(&text), text.contains("TURN"))
+        };
+        assert_eq!(
+            at(&board, 139),
+            (false, false),
+            "the default 46 pane: a 92-column list"
         );
+        assert_eq!(at(&board, 140), (true, false), "the default 46 pane: 93");
+        assert_eq!(at(&board, 151), (true, false), "the default 50 pane: 100");
+        assert_eq!(at(&board, 152), (true, true), "the default 50 pane: 101");
+        board.detail = Some(38.0 / 140.0);
+        assert_eq!(at(&board, 140), (true, true), "a 38 pane: 101");
         let mut picking = app();
         picking.pick = true;
-        assert!(!split(&header(&picking, 139)));
-        assert!(
-            split(&header(&picking, 140)),
+        assert_eq!(at(&picking, 131), (false, false));
+        assert_eq!(
+            at(&picking, 132),
+            (true, false),
             "pick splits at its own width"
         );
+        assert_eq!(at(&picking, 140), (true, true));
     }
 
     fn placed(key: &str, session: &str, tab: &str) -> Row {
@@ -687,6 +706,59 @@ mod tests {
             press(&mut app, KeyCode::Enter);
             assert_eq!(order(&app), ["blk-a"], "/{query}");
         }
+    }
+
+    /// The rendered lines of the rows whose BLOCK or WHERE ends in `seat`, top to bottom.
+    fn seats(rows: Vec<Row>, width: u16, detail: Option<f64>) -> Vec<String> {
+        let mut app = App::default();
+        app.set_rows(rows, hosts());
+        app.detail = detail;
+        let buf = buffer(&app, width, 30);
+        (3..30)
+            .map(|y| line(&buf, y))
+            .filter(|l| l.contains("seat"))
+            .collect()
+    }
+
+    fn seat(key: &str, session: &str, window_id: &str) -> Row {
+        let mut r = placed(key, session, "main");
+        r.pane.pane = "seat".into();
+        r.pane.window_id = window_id.into();
+        r
+    }
+
+    #[test]
+    fn same_named_windows_in_one_session_still_number_their_twins() {
+        let rows = || {
+            vec![
+                seat("local/blk-1", "api", "window:a"),
+                seat("local/blk-2", "api", "window:b"),
+            ]
+        };
+        for (width, label) in [(200, "SESSION .. BLOCK"), (120, "WHERE")] {
+            let lines = seats(rows(), width, None);
+            assert!(
+                lines[0].contains("seat #1") && lines[1].contains("seat #2"),
+                "{label} at {width}: {lines:#?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rows_that_only_read_the_same_once_squeezed_are_numbered() {
+        let lines = seats(
+            vec![
+                seat("local/blk-1", "api-gateway-one-prod", "window:a"),
+                seat("local/blk-2", "api-gateway-two-prod", "window:b"),
+            ],
+            140,
+            None,
+        );
+        assert!(lines[0].contains("api-g…-prod"), "{lines:#?}");
+        assert!(
+            lines[0].contains("seat #1") && lines[1].contains("seat #2"),
+            "{lines:#?}"
+        );
     }
 
     #[test]

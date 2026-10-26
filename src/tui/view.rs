@@ -328,7 +328,11 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
             columns.has(Col::Host) || app.view.group_by == Some(Key::Host),
         )
     } else {
-        blocks(&app.rows)
+        blocks(
+            &app.rows,
+            columns.width(Col::Session).saturating_sub(1),
+            columns.width(Col::Window).saturating_sub(1),
+        )
     };
     let mut lines: Vec<Line> = items
         .iter()
@@ -830,12 +834,18 @@ mod tests {
         assert!(seat_line(&mid).contains("claude"), "{mid}");
         assert!(seat_line(&mid).contains("mini"), "{mid}");
         assert!(seat_line(&wide).contains("blocked"), "{wide}");
-        assert!(seat_line(&wide).contains("api › main › seat-b"), "{wide}");
+        assert!(
+            seat_line(&wide).contains(" api ")
+                && seat_line(&wide).contains(" main ")
+                && seat_line(&wide).contains(" seat-b "),
+            "SESSION, WINDOW and BLOCK at 140:\n{wide}"
+        );
         assert!(wide.contains("│"), "the detail pane is on the right at 140");
         assert!(narrow.contains("─────"), "and underneath below 100");
         assert!(
-            wide.contains("2-openrig…abcdef#l2 › rig"),
-            "the pane stays whole:\n{wide}"
+            wide.lines()
+                .any(|l| l.contains("#l2 ") && l.contains(" rig ")),
+            "a long window keeps its tail beside its block:\n{wide}"
         );
     }
 
