@@ -11,6 +11,12 @@ cargo build
 cargo run -- --help
 ```
 
+To install from source instead of a release:
+
+```bash
+cargo install --locked --git https://github.com/vanducng/rexboard
+```
+
 ## Checks
 
 CI runs these, and a change is not done until they pass:
