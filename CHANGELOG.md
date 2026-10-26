@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/vanducng/rexboard/compare/v0.10.0...v0.11.0) (2026-10-26)
+
+
+### Features
+
+* **cli:** show, views, hosts, and ls view, filter, status and sort, as on the board ([5c2658a](https://github.com/vanducng/rexboard/commit/5c2658a9f0d1d27a0f25afeed05a9f9365589060))
+
 ## [0.10.0](https://github.com/vanducng/rexboard/compare/v0.9.0...v0.10.0) (2026-10-26)
 
 
