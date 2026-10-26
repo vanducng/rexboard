@@ -64,6 +64,8 @@ pub fn pick(json: bool) -> Result<()> {
 fn board(pick: bool) -> Result<Option<Row>> {
     let (tx, rx) = mpsc::channel();
     let generation = Arc::new(AtomicU64::new(0));
+    // Before the subscriber thread, which may restart serve and say so.
+    client::QUIET.store(true, Ordering::Relaxed);
     listen(&tx, &generation);
     let mut app = App::default();
     app.pick = pick;

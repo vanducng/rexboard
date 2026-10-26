@@ -17,6 +17,17 @@ use crate::state::{self, Lock, Paths, Record};
 use crate::{interrupted, rex, stop_on_signals};
 
 pub const VERSION: u64 = 1;
+
+/// This build's version. Debug builds take REXBOARD_TEST_VERSION, so tests can stand up an
+/// older or newer serve without a second build.
+pub fn version() -> String {
+    if cfg!(debug_assertions)
+        && let Ok(version) = std::env::var("REXBOARD_TEST_VERSION")
+    {
+        return version;
+    }
+    env!("CARGO_PKG_VERSION").to_owned()
+}
 const DEBOUNCE: Duration = Duration::from_millis(100);
 const SAVE_EVERY: Duration = Duration::from_secs(1);
 const HEARTBEAT: Duration = Duration::from_secs(1);
@@ -42,6 +53,8 @@ enum Request {
         back: bool,
     },
     Stop,
+    /// Which rexboard this serve is, so a newer client can replace it.
+    Version,
 }
 
 enum Msg {
@@ -145,6 +158,13 @@ fn connection(stream: UnixStream, tx: &Sender<Msg>) {
                 continue;
             }
         };
+        if matches!(request, Request::Version) {
+            let reply = json!({ "v": VERSION, "rexboard": version() });
+            if out.write_all(format!("{reply}\n").as_bytes()).is_err() {
+                return;
+            }
+            continue;
+        }
         let streaming = matches!(request, Request::Subscribe);
         // Bounded: a subscriber that stops reading loses lines instead of growing serve.
         let (reply_tx, reply_rx) = mpsc::sync_channel(SUBSCRIBER_BUFFER);
@@ -459,6 +479,7 @@ impl Reducer {
                 self.next(after.as_deref(), back)
             }
             Request::Stop => unreachable!("handled in run"),
+            Request::Version => unreachable!("answered by the connection"),
         };
         offer(&reply, &line.to_string());
     }
