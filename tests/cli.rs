@@ -2464,3 +2464,249 @@ fn ext_fields_reach_the_board_in_enabled_order_before_any_run() {
         "both declare rig, so both go by id; zeta first, as enabled"
     );
 }
+
+/// mini with a done row, a working row and a question, each with a status record.
+fn mini_mixed(serve: &Serve) -> String {
+    let block = |id: &str, label: &str, state: &str, kind: Option<&str>, msg: &str| {
+        let mut record = serde_json::json!({ "state": state, "app": "claude-code", "msg": msg,
+            "updated_at": "2026-01-01T00:00:00Z" });
+        if let Some(kind) = kind {
+            record["kind"] = serde_json::json!(kind);
+        }
+        serde_json::json!({ "block_id": id, "label": label, "title": "", "process": {},
+            "records": [record] })
+    };
+    let snapshot = serde_json::json!({ "v": 1, "type": "snapshot", "rex_version": "0.0.1-test",
+        "sessions": [{ "session_id": "session:web", "label": "web", "windows": [{
+            "window_id": "window:web", "label": "main", "blocks": [
+                block("block:web-done", "seat-d", "done", None, "Tests pass ⏎ All 12 green"),
+                block("block:web-busy", "seat-w", "working", None, "Writing"),
+                block("block:web-ask", "seat-q", "blocked", Some("question"), "Which runner?"),
+            ] }] }] });
+    let path = serve.dir.path().join("observer-mini.ndjson");
+    std::fs::write(&path, format!("{snapshot}\n")).unwrap();
+    path.to_str().unwrap().to_owned()
+}
+
+/// A serve whose mini has `mini_mixed`'s three rows, once they are in.
+fn mixed_serve() -> Serve {
+    let serve = Serve::new();
+    let observer = mini_mixed(&serve);
+    serve
+        .cmd()
+        .env("FAKE_REX_OBSERVER_mini", observer)
+        .args(["serve"])
+        .assert()
+        .success();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while serve.rows(&["--host", "mini"]).len() < 3 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "mini's rows never came"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    serve
+}
+
+fn keys(rows: &[serde_json::Value]) -> Vec<&str> {
+    rows.iter()
+        .map(|row| row["key"].as_str().unwrap())
+        .collect()
+}
+
+#[test]
+fn ls_takes_the_boards_view_filter_status_and_sort() {
+    let serve = mixed_serve();
+    assert_eq!(
+        keys(&serve.rows(&["--status", "q"])),
+        ["mini/block:web-ask"]
+    );
+    assert_eq!(
+        keys(&serve.rows(&["--status", "working"])),
+        ["mini/block:web-busy"]
+    );
+    assert_eq!(
+        keys(&serve.rows(&["--filter", "host:mini", "--filter", "tests pass"])),
+        ["mini/block:web-done"],
+        "each filter narrows, and words match the message"
+    );
+    let hosts = |rows: Vec<serde_json::Value>| -> Vec<String> {
+        rows.iter()
+            .map(|row| row["host"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let by_host = hosts(serve.rows(&["--view", "table", "--sort", "host:desc"]));
+    assert!(
+        by_host.windows(2).all(|pair| pair[0] >= pair[1]),
+        "{by_host:?}"
+    );
+    let grouped = hosts(serve.rows(&["--view", "host"]));
+    let mut seen: Vec<&String> = Vec::new();
+    for host in &grouped {
+        if seen.last() != Some(&host) {
+            assert!(!seen.contains(&host), "each host is one group: {grouped:?}");
+            seen.push(host);
+        }
+    }
+    for (args, said) in [
+        (
+            &["--view", "nope"][..],
+            "no view named nope; views: status, table, harness, host",
+        ),
+        (&["--status", "x"][..], "no status named x"),
+        (&["--sort", "nope"][..], "no column named nope to sort by"),
+        (&["--sort", "age:up"][..], "the direction is asc or desc"),
+        (&["--filter", "nope:1"][..], "no key named nope"),
+    ] {
+        serve
+            .cmd()
+            .args(["ls", "--json"])
+            .args(args)
+            .assert()
+            .code(2)
+            .stderr(
+                predicate::str::contains("\"code\":\"USAGE\"").and(predicate::str::contains(said)),
+            );
+    }
+    serve
+        .cmd()
+        .args(["ls", "--direct", "--view", "table"])
+        .assert()
+        .code(2);
+}
+
+#[test]
+fn views_lists_each_view_and_what_it_groups_by() {
+    let serve = Serve::new();
+    let out = serve
+        .cmd()
+        .args(["views", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let views: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        views,
+        serde_json::json!([
+            { "name": "status", "group_by": "status" },
+            { "name": "table", "group_by": null },
+            { "name": "harness", "group_by": "harness" },
+            { "name": "host", "group_by": "host" },
+        ])
+    );
+}
+
+#[test]
+fn show_says_what_the_card_does_and_reads_the_tail() {
+    let serve = mixed_serve();
+    let out = serve
+        .cmd()
+        .args(["show", "mini/block:web-done", "--tail", "2", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let shown: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(shown["where"], "web › main › seat-d");
+    assert_eq!(
+        shown["msg"], "Tests pass ⏎ All 12 green",
+        "the message in full"
+    );
+    assert_eq!(
+        shown["tail"],
+        serde_json::json!(["", "Allow Bash: cargo test? (y/n)"]),
+        "the pane's last 2 lines"
+    );
+    let listed = serve.rows(&[]);
+    let row = listed
+        .iter()
+        .find(|r| r["key"] == "mini/block:web-done")
+        .unwrap();
+    for (key, value) in row.as_object().unwrap() {
+        assert_eq!(&shown[key], value, "{key} as ls --json has it");
+    }
+    serve
+        .cmd()
+        .args(["show", "mini/block:web-done"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::starts_with("seat-d · done · ended")
+                .and(predicate::str::contains("\nTests pass\nAll 12 green\n"))
+                .and(predicate::str::contains("\nwhere    web › main › seat-d\n"))
+                .and(predicate::str::contains("\nkey      mini/block:web-done\n")),
+        );
+    serve
+        .cmd()
+        .args(["show", "mini/block:nope", "--json"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("\"code\":\"NOT_FOUND\""));
+    serve.cmd().args(["show", "nope"]).assert().code(2);
+}
+
+#[test]
+fn seen_all_done_marks_the_unseen_done_rows_its_filters_keep() {
+    let serve = mixed_serve();
+    let marked = |args: &[&str]| -> serde_json::Value {
+        let out = serve
+            .cmd()
+            .args(["seen", "--all-done", "--json"])
+            .args(args)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        serde_json::from_slice::<serde_json::Value>(&out).unwrap()["keys"].clone()
+    };
+    assert_eq!(marked(&["--host", "local"]), serde_json::json!([]));
+    assert_eq!(
+        marked(&["--filter", "seat-w"]),
+        serde_json::json!([]),
+        "not done"
+    );
+    assert_eq!(
+        marked(&["--filter", "host:mini"]),
+        serde_json::json!(["mini/block:web-done"])
+    );
+    let rows = serve.rows(&[]);
+    let done = rows
+        .iter()
+        .find(|r| r["key"] == "mini/block:web-done")
+        .unwrap();
+    assert_eq!(done["seen"], true);
+    assert_eq!(marked(&[]), serde_json::json!([]), "nothing left");
+    serve.cmd().args(["seen"]).assert().code(2);
+    serve
+        .cmd()
+        .args(["seen", "--host", "mini", "mini/block:web-done"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("cannot be used with"));
+    serve
+        .cmd()
+        .args(["seen", "--filter", "x"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("<KEY>"));
+}
+
+#[test]
+fn every_json_sample_in_the_cli_doc_parses() {
+    let doc = include_str!("../docs/cli.md");
+    let samples: Vec<&str> = doc
+        .split("```json\n")
+        .skip(1)
+        .map(|rest| rest.split("```").next().unwrap())
+        .collect();
+    assert!(samples.len() >= 5, "{}", samples.len());
+    for sample in samples {
+        serde_json::from_str::<serde_json::Value>(sample)
+            .unwrap_or_else(|err| panic!("{err}: {sample}"));
+    }
+}

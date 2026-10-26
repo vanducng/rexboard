@@ -28,11 +28,18 @@ pub enum Command {
     /// Open the board: agent panes grouped by what they need. `rexboard` with no command opens it
     /// in a terminal.
     Board,
-    /// Mark a pane seen, by the `key` from `ls --json` (HOST/BLOCK_ID).
-    Seen {
+    /// Mark a pane seen by the `key` from `ls --json`, or every unseen done row with `--all-done`.
+    Seen(SeenArgs),
+    /// What the board's card says about a pane, by its `key`; `--tail N` adds its last lines.
+    Show {
         #[arg(value_name = "KEY")]
         key: String,
+        /// Also read the pane's last N lines, as the card does (at most 200).
+        #[arg(long, value_name = "N")]
+        tail: Option<usize>,
     },
+    /// List the views `ls --view` and the board's `v` take, and what each groups by.
+    Views,
     /// Go to a pane in the Rex window you are in, on its host, and mark it seen.
     Jump {
         /// HOST/BLOCK_ID (the `key` from `ls --json`), N for the nth NEEDS YOU row, or `-` for the
@@ -109,6 +116,21 @@ pub struct WatchArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct SeenArgs {
+    #[arg(value_name = "KEY", required_unless_present = "all_done")]
+    pub key: Option<String>,
+    /// Every unseen done row, or those --host and --filter keep.
+    #[arg(long, conflicts_with = "key")]
+    pub all_done: bool,
+    /// With --all-done, only this host.
+    #[arg(long, value_name = "HOST", conflicts_with = "key")]
+    pub host: Option<String>,
+    /// With --all-done, only rows this filter keeps, as with `ls --filter`.
+    #[arg(long, value_name = "TEXT", conflicts_with = "key")]
+    pub filter: Vec<String>,
+}
+
+#[derive(Debug, Args)]
 pub struct LsArgs {
     /// Include plain shells, not just panes with a status record or a known harness.
     #[arg(long)]
@@ -117,6 +139,33 @@ pub struct LsArgs {
     #[arg(long, value_name = "HOST")]
     pub host: Option<String>,
     /// Take one snapshot here instead of asking serve.
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["view", "filter", "status", "sort"])]
     pub direct: bool,
+    /// Group and order the rows as this board view does (`rexboard views` lists them).
+    #[arg(long, value_name = "NAME")]
+    pub view: Option<String>,
+    /// Keep only rows this text matches, as the board's `/` does: words match any label, and
+    /// `key:value` one key (host, state, harness, session, window, block, a field). Repeat to
+    /// narrow further.
+    #[arg(long, value_name = "TEXT")]
+    pub filter: Vec<String>,
+    /// Keep only one status, by name or first letter: working, done, question, permission,
+    /// error, unreported, idle.
+    #[arg(long, value_name = "STATUS")]
+    pub status: Option<String>,
+    /// Sort within each group by a column (age, turn, harness, host, ...) or a field, with
+    /// `:asc` or `:desc`.
+    #[arg(long, value_name = "COLUMN[:asc|:desc]")]
+    pub sort: Option<String>,
+}
+
+impl LsArgs {
+    pub fn query(&self) -> crate::tui::query::Query<'_> {
+        crate::tui::query::Query {
+            view: self.view.as_deref(),
+            filters: &self.filter,
+            status: self.status.as_deref(),
+            sort: self.sort.as_deref(),
+        }
+    }
 }

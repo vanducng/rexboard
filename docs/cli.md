@@ -21,6 +21,10 @@ rexboard ls --all           # plain shells too
 rexboard ls --host mini     # one host: local, or a label from `rex hosts`
 rexboard ls --json          # an array of panes
 rexboard ls --direct        # one snapshot here, without serve
+rexboard ls --view host     # grouped and ordered as a board view (`rexboard views`)
+rexboard ls --filter host:mini --filter tests   # as the board's `/`; each one narrows
+rexboard ls --status q      # one status, by name or first letter, as the board's `f`
+rexboard ls --sort age:desc # within each group, as the board's `o`
 ```
 
 `ls` asks [`rexboard serve`](#rexboard-serve) for its rows, starting it when nothing answers, so the rows carry what serve remembers: `since`, `seen` and the turn fields. `--direct` skips serve: one embedded Lua script runs through `rex do -` and reads this host plus every `rex hosts` entry in one call. A call that takes more than 10 seconds fails with `REX`. `ls --direct` sees one snapshot, so every `done` is unseen and `last_turn` is `null`.
@@ -37,6 +41,8 @@ The text table has these columns:
 - `WHAT`: the record's message, else the pane title without its leading state glyph.
 
 In a terminal each line fits its width: `WHAT` is cut first, then `WHERE` (a long tab first, down to `…` alone below 6 columns, then the session down to an 8-column stem such as `api-…way`, then the last label down to 6 columns, and only then a short tab and the stems). The ` › ` separators always stay. Rows that would still read the same end in `#N`, the pane's place among its tab's agent panes, oldest first. Piped output keeps every column whole. Cells are printed without escape sequences or control characters, since titles and messages come from the programs in each pane. Wide characters such as CJK and emoji count as two columns. `--json` keeps every label and title whole, and the full harness name (`claude-code`).
+
+`--view`, `--filter`, `--status` and `--sort` run the board's own code, so `ls` lists what the board would. `--view NAME` groups and orders as that view does: `status`, `table`, `harness`, `host`, or one per extension field (`rexboard views` lists them). `--filter TEXT` keeps the rows the board's `/` would: words match any label, the message or the harness as one phrase, and `key:value` matches one key (`host`, `state`, `harness`, `session`, `window`, `block`, or a field's name); every term must match, ignoring case. Each `--filter` narrows further. `--status` takes `working`, `done`, `question`, `permission`, `error`, `unreported` or `idle`, or its first letter. `--sort COLUMN` sorts within each group by a column the board can sort by (`state`, `age`, `turn`, `harness`, `host`, `where`, `session`, `window`, `block`, `msg`) or a field, in the direction its first `o` press takes; `:asc` or `:desc` picks one. An unknown view, status, column, direction or filter key fails with `USAGE` and lists the ones there are. None of them work with `--direct`. Without them the order is serve's, as above.
 
 ### JSON fields
 
@@ -82,7 +88,7 @@ Fields are a contract. New fields may appear. Renaming or removing one is a brea
 | --- | --- |
 | 0 | Listed. A host that cannot be reached prints `warning: HOST is unreachable: ...` on stderr (through serve: one line per host that is `starting`, `down` or `stopped`), and the rest are listed. When a host is `down` or `stopped`, the warning and the `HOSTS_UNREACHABLE` error end with `; see STATE_DIR/serve.log` |
 | 1 | `REX_NOT_FOUND`: no `rex` CLI. `REX`: `rex do` failed, timed out, or returned a snapshot rexboard does not understand; the message names the Rex version. `SERVE`: serve did not start or answer; the message names `serve.log`. `CONFIG`, with `--direct`: config.toml cannot be read or has an unknown key |
-| 2 | `HOSTS_UNREACHABLE`: every host failed; next steps `rex hosts` and `rexboard ls`. `USAGE`: a bad flag, or `--host` names no host |
+| 2 | `HOSTS_UNREACHABLE`: every host failed; next steps `rex hosts` and `rexboard ls`. `USAGE`: a bad flag, `--host` names no host, or `--view`, `--status`, `--sort` or a `--filter` key names nothing |
 
 ## `rexboard watch`
 
@@ -178,7 +184,7 @@ rexboard serve --foreground   # run it in this terminal
 rexboard serve --stop         # stop it and its observers
 ```
 
-`serve` owns one observer per host and the board, and answers `ls`, `watch --json`, `seen`, `jump`, `next`, `pick`, the board and `ext test` over a unix socket. Any of those starts it when nothing answers, as `rexboard serve --foreground` in its own session with its output in `serve.log`, and waits up to 2 seconds for it. Only one runs at a time: a second `serve --foreground` fails with `SERVE_RUNNING` (exit 1). It rescans `rex hosts` every 5 minutes.
+`serve` owns one observer per host and the board, and answers `ls`, `watch --json`, `seen`, `show`, `views`, `jump`, `next`, `pick`, the board and `ext test` over a unix socket. Any of those starts it when nothing answers, as `rexboard serve --foreground` in its own session with its output in `serve.log`, and waits up to 2 seconds for it. Only one runs at a time: a second `serve --foreground` fails with `SERVE_RUNNING` (exit 1). It rescans `rex hosts` every 5 minutes.
 
 The socket, `serve.sock`, sits beside `serve.lock` in the state dir, so every caller finds the running serve whatever its `TMPDIR` or `XDG_RUNTIME_DIR`. If that path is longer than 103 bytes, commands fail with `SERVE`: set a shorter `XDG_STATE_HOME` everywhere rexboard runs (it also holds `state.json`). serve keeps the environment of the command that started it, so after changing `REXBOARD_REX` or `REX_BIN_DIR`, run `rexboard serve --stop`.
 
@@ -202,9 +208,46 @@ It exits 0 whether or not serve was running. A serve that holds the lock but doe
 
 ```bash
 rexboard seen mini/block:web-seat-b
+rexboard seen --all-done                    # every unseen done row, as the board's :seen
+rexboard seen --all-done --host mini --filter api
 ```
 
 Marks a pane seen, by the `key` from `ls --json`: an unseen `done` leaves `needs_you`. serve keeps it across restarts until the pane changes state again. It prints `seen KEY`; with `--json`, `{"ok":true,"key":KEY}`. An unknown key fails with `NOT_FOUND` (exit 1), and a key without `/` with `USAGE` (exit 2).
+
+`--all-done` marks every unseen `done` agent row seen, as the board's `:seen` does; `--host` and `--filter` (the same as `ls --filter`, and repeatable) narrow which. It prints `2 done rows marked seen`, or `no unseen done rows`; with `--json`, the keys it marked:
+
+```json
+{"keys":["mini/block:web-seat-b","local/block:api-claude"],"ok":true}
+```
+
+`--host` and `--filter` without `--all-done`, or `--all-done` with a key, fail with `USAGE`.
+
+## `rexboard show`
+
+```bash
+rexboard show mini/block:web-seat-b            # what the board's card says
+rexboard show mini/block:web-seat-b --tail 20  # and the pane's last 20 lines
+```
+
+Everything the board's card says about a pane, by the `key` from `ls --json`, plain shells included: its name, state and how long, the message in full, then its host, harness, last turn, where, extension fields, title, source and key. `--tail N` reads the pane's last N lines (at most 200) the way the card does: the end of its scrollback through `tail.lua`, plain text, within 3 seconds. With `--json`, the pane as `ls --json` has it, plus `where` (`session › window › block`) and, with `--tail`, `tail`, an array of lines:
+
+```json
+{"key":"mini/block:web-seat-b","host":"mini","session":"web","tab":"main","pane":"seat-b","state":"done","kind":null,"msg":"Tests pass ⏎ All 12 green","source":"native","seen":false,"group":"needs_you","last_turn":372,"ext":{},"where":"web › main › seat-b","tail":["test result: ok. 12 passed","Allow Bash: cargo test? (y/n)"]}
+```
+
+(The sample leaves out some of the fields `ls --json` lists.) An unknown key fails with `NOT_FOUND` (exit 1), a key without `/` with `USAGE` (exit 2), and a tail that cannot be read with `REX` (exit 1).
+
+## `rexboard views`
+
+```bash
+rexboard views
+```
+
+The views `ls --view` and the board's `v` take, in the board's order: the built-in ones, then one per extension field. Each says what it groups by, or `one list`. With `--json`:
+
+```json
+[{"group_by":"status","name":"status"},{"group_by":null,"name":"table"},{"group_by":"harness","name":"harness"},{"group_by":"host","name":"host"}]
+```
 
 ## `rexboard jump`, `next` and `pick`
 

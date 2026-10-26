@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::board::Row;
-use crate::cli::{LsArgs, WatchArgs};
+use crate::cli::{LsArgs, SeenArgs, WatchArgs};
 use crate::error::{Error, Result};
 use crate::state::{Lock, Paths};
 use crate::{interrupted, output, rex, serve, stop_on_signals};
@@ -435,6 +435,11 @@ pub fn all_rows() -> Result<Vec<Row>> {
     Ok(rows(call(&json!({ "cmd": "rows" }))?)?.rows)
 }
 
+/// serve's rows, hosts and extension fields as they stand.
+pub fn current() -> Result<Rows> {
+    rows(call(&json!({ "cmd": "rows" }))?)
+}
+
 fn rows(value: Value) -> Result<Rows> {
     serde_json::from_value(value)
         .map_err(|err| Error::serve(format!("serve sent rows in an unexpected shape: {err}")))
@@ -460,14 +465,19 @@ fn pick(mut rows: Rows, host: Option<&str>, all: bool) -> Result<Vec<Row>> {
 }
 
 pub fn ls(args: &LsArgs, json: bool) -> Result<()> {
-    let rows = rows(call(&json!({ "cmd": "rows" }))?)?;
+    let rows = current()?;
+    let fields = rows.fields.clone();
     let considered: Vec<_> = rows
         .hosts
         .iter()
         .filter(|(h, _)| args.host.as_deref().is_none_or(|want| want == h.as_str()))
         .map(|(h, s)| (h.clone(), s.clone()))
         .collect();
-    let list = pick(rows, args.host.as_deref(), args.all)?;
+    let mut list = pick(rows, args.host.as_deref(), args.all)?;
+    let query = args.query();
+    if !query.is_empty() {
+        list = crate::tui::query::arrange(list, fields, &query)?;
+    }
     let down: Vec<_> = considered.iter().filter(|(_, s)| s != "up").collect();
     let log = Paths::find()?.log();
     let see = if down.iter().any(|(_, s)| s == "down" || s == "stopped") {
@@ -565,7 +575,10 @@ pub fn watch(args: &WatchArgs) -> Result<()> {
     Ok(())
 }
 
-pub fn seen(key: &str, json: bool) -> Result<()> {
+pub fn seen(args: &SeenArgs, json: bool) -> Result<()> {
+    let Some(key) = &args.key else {
+        return seen_all_done(args, json);
+    };
     if !key.contains('/') {
         return Err(Error::usage_with(
             format!("KEY must be HOST/BLOCK_ID, as in ls --json: {key}"),
@@ -577,6 +590,34 @@ pub fn seen(key: &str, json: bool) -> Result<()> {
         println!("{}", json!({ "ok": true, "key": key }));
     } else {
         println!("seen {key}");
+    }
+    Ok(())
+}
+
+/// `seen --all-done`: every unseen done row that --host and --filter keep, as `:seen` marks.
+fn seen_all_done(args: &SeenArgs, json: bool) -> Result<()> {
+    let rows = current()?;
+    let fields = rows.fields.clone();
+    let list = pick(rows, args.host.as_deref(), false)?;
+    let query = crate::tui::query::Query {
+        filters: &args.filter,
+        ..Default::default()
+    };
+    let keys: Vec<String> = crate::tui::query::arrange(list, fields, &query)?
+        .into_iter()
+        .filter(|row| row.pane.state == "done" && !row.seen)
+        .map(|row| row.key)
+        .collect();
+    for key in &keys {
+        call(&json!({ "cmd": "seen", "key": key }))?;
+    }
+    if json {
+        println!("{}", json!({ "ok": true, "keys": keys }));
+    } else if keys.is_empty() {
+        println!("no unseen done rows");
+    } else {
+        let rows = if keys.len() == 1 { "row" } else { "rows" };
+        println!("{} done {rows} marked seen", keys.len());
     }
     Ok(())
 }

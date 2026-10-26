@@ -51,6 +51,7 @@ rexboard reaches Rex only through the `rex` command: `rex do` for the scripts, `
 | `src/output.rs` | Text for the `ls` table and the board: labels and paths cut to fit, `#N` for twins, widths, ages |
 | `src/rex.rs` | Finds `rex`, runs one-shot scripts, and holds the one lock around every spawn, bind, accept and connect |
 | `src/jump.rs` | `jump`, `next` and `pick`'s jump: runs `jump.lua`, then marks the row seen through serve; turns Rex's failures into plain errors |
+| `src/show.rs` | `show` and `views`: what the board's card and `v` show, for the CLI; `show --tail` reads the pane through the board's own tail |
 | `src/send.rs` | Runs `send.lua` for an answer, within 5s, and turns its refusals into plain reasons; runs `rex block close` for a close |
 | `src/upgrade.rs` | `rexboard upgrade`: finds how this binary was installed and upgrades it the same way |
 | `src/config.rs` | `config.toml` |
@@ -60,6 +61,7 @@ rexboard reaches Rex only through the `rex` command: `rex do` for the scripts, `
 | `src/lua/send.lua` | After `tail.lua`: re-checks that the pane still shows the report, the agent and the dialog or input line the board read, then sends; a refusal sends nothing |
 | `src/tui/` | The board and `pick`, a client of serve's rows |
 | `src/tui/keys.rs` | The keymap: one table per layer (the board, the full view) of key sequences, what they do, and how `?` and the footers name them. Dispatch, `?` and every footer read it, and tests check that no key is bound twice and every key does something |
+| `src/tui/query.rs` | The board's views, `/` filter, `f` status and `o` sort run headless for `ls --view/--filter/--status/--sort` and `seen --all-done`, so the CLI lists what the board would |
 | `src/tui/columns.rs`, `views.rs`, `status.rs` | Which columns a width shows; views (a grouping plus a sort); the `f` status filter |
 | `src/tui/card.rs` | The turn card: the selected row's bar, headline, ask or body, and tail |
 | `src/tui/full.rs`, `vt.rs` | The full view, read again every 2s; `vt.rs` keeps only a line's colours (SGR) and turns them into styles |
