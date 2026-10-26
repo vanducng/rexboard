@@ -31,7 +31,7 @@ pub enum Command {
         #[arg(value_name = "KEY")]
         key: String,
     },
-    /// Go to a pane in the main Rex window, on its host, and mark it seen.
+    /// Go to a pane in the Rex window you are in, on its host, and mark it seen.
     Jump {
         /// HOST/BLOCK_ID (the `key` from `ls --json`), or N for the nth NEEDS YOU row.
         #[arg(value_name = "TARGET")]
