@@ -13,6 +13,8 @@ use crate::output::{labels, path};
 
 const TOAST: Duration = Duration::from_secs(3);
 
+const HIDDEN: &str = "the detail pane is hidden · c shows it";
+
 /// What a key asks the outside world to do.
 #[derive(Debug, PartialEq)]
 pub enum Effect {
@@ -356,10 +358,10 @@ impl App {
         self.view.group_by.is_none() && !self.pick
     }
 
-    /// Whether the detail pane shows: unless `c` hid it, and always while a peek or the key table,
-    /// which live in it, is open.
+    /// Whether the detail pane shows: unless `c` hid it, and always while a peek, the key table or
+    /// a failed jump's reason, which only it shows whole, is up.
     pub fn pane_shown(&self) -> bool {
-        !self.hidden || self.keys || self.peek.is_some()
+        !self.hidden || self.keys || self.peek.is_some() || self.failed.is_some()
     }
 
     /// Whether the detail pane sits beside the list on a board `board` wide (from 100 columns);
@@ -594,11 +596,14 @@ impl App {
             }
             KeyCode::Char('c') if !self.pick => {
                 self.hidden = !self.hidden;
+                if self.hidden {
+                    self.say(HIDDEN);
+                } else {
+                    self.toast = None;
+                }
                 return Some(Effect::SavePrefs(self.prefs()));
             }
-            KeyCode::Char('<' | '>') if self.hidden && !self.pick => {
-                self.say("the detail pane is hidden · c shows it");
-            }
+            KeyCode::Char('<' | '>') if self.hidden && !self.pick => self.say(HIDDEN),
             KeyCode::Char(c @ ('<' | '>')) if self.width >= 100 && !self.pick => {
                 let wider = c == '>';
                 let share = super::detail::step(self.width, self.detail, wider);

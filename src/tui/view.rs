@@ -704,11 +704,12 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled(kept, theme::bright()));
         spans.push(Span::styled(" · esc clears · ", theme::dim()));
     }
-    // The essentials first, so a narrow board keeps them; `v view` then shows after `/ filter`.
-    let keys: &[(&str, &str)] = if app.pick {
-        &[("enter", "go"), ("j/k", "move"), ("/", "filter")]
+    // The essentials first, so a narrow board keeps them; `v view` then shows after `/ filter`,
+    // and `c pane`, which says the pane is hidden, after `? keys`.
+    let mut keys: Vec<(&str, &str)> = if app.pick {
+        vec![("enter", "go"), ("j/k", "move"), ("/", "filter")]
     } else {
-        &[
+        vec![
             ("j/k", "move"),
             ("s", "seen"),
             ("/", "filter"),
@@ -719,6 +720,9 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
             ("1-9", "select"),
         ]
     };
+    if app.hidden && !app.pick {
+        keys.push(("c", "pane"));
+    }
     let (quit_key, quit_what) = if app.pick {
         ("esc", " cancel")
     } else {
@@ -726,7 +730,7 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
     };
     let quit = format!("{quit_key}{quit_what}");
     let mut shown: Vec<(&str, &str)> = Vec::new();
-    for &(key, what) in keys {
+    for (key, what) in keys {
         if key == "space" && app.peek.is_some() {
             continue;
         }
@@ -738,13 +742,15 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         used += piece;
         shown.push((key, what));
     }
-    if let Some(at) = shown.iter().position(|&(key, _)| key == "v") {
-        let v = shown.remove(at);
-        let after = shown
-            .iter()
-            .position(|&(key, _)| key == "/")
-            .map_or(at, |i| i + 1);
-        shown.insert(after, v);
+    for (moved, after) in [("v", "/"), ("c", "?")] {
+        if let Some(at) = shown.iter().position(|&(key, _)| key == moved) {
+            let piece = shown.remove(at);
+            let to = shown
+                .iter()
+                .position(|&(key, _)| key == after)
+                .map_or(at, |i| i + 1);
+            shown.insert(to, piece);
+        }
     }
     for (i, (key, what)) in shown.into_iter().enumerate() {
         spans.push(Span::styled(if i == 0 { "" } else { " · " }, theme::dim()));
@@ -951,7 +957,46 @@ mod tests {
             !render(&app, 140, 40).contains('│'),
             "and hides when it closes"
         );
+        let why = "the Rex app on studio did not answer within 5s; it does not answer while the \
+                   Mac's screen is locked";
+        app.jumped(Err(why.into()));
+        let text = render(&app, 80, 40);
+        assert!(
+            text.contains("screen is locked"),
+            "a failed jump's reason shows whole:\n{text}"
+        );
+        press(&mut app, KeyCode::Char('j'));
+        assert!(
+            !render(&app, 80, 40).contains("screen is locked"),
+            "and hides with the next key"
+        );
         assert!(app.hidden, "the choice is kept throughout");
+    }
+
+    #[test]
+    fn while_hidden_the_footer_says_c_pane_after_the_keys_and_drops_it_first() {
+        let mut app = fuller();
+        let footer = |app: &App, width| render(app, width, 40).lines().last().unwrap().to_owned();
+        assert!(!footer(&app, 140).contains("c pane"), "shown: no cue");
+        press(&mut app, KeyCode::Char('c'));
+        assert_eq!(
+            app.toast(),
+            Some("the detail pane is hidden · c shows it"),
+            "c says so as it hides"
+        );
+        app.toast = None;
+        assert!(
+            footer(&app, 140).contains("? keys · c pane · space peek"),
+            "{}",
+            footer(&app, 140)
+        );
+        let narrow = footer(&app, 50);
+        assert!(
+            narrow.contains("? keys") && !narrow.contains("c pane"),
+            "{narrow}"
+        );
+        press(&mut app, KeyCode::Char('c'));
+        assert_eq!(app.toast(), None, "showing it again clears the toast");
     }
 
     #[test]
