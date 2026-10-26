@@ -457,3 +457,103 @@ mod tests {
         assert!(parse(r#"{"hosts": [{"host": 1}]}"#).is_err());
     }
 }
+
+/// Today's detection, pinned row by row, so moving it changes no harness, source or state.
+#[cfg(test)]
+mod corpus {
+    use super::*;
+
+    #[test]
+    fn derive_matches_the_recorded_corpus() {
+        let apps: [Option<(&str, &str)>; 8] = [
+            None,
+            Some(("app", "claude-code")),
+            Some(("app", "codex")),
+            Some(("app", "pi")),
+            Some(("app", "grok-build")),
+            Some(("app", "opencode")),
+            Some(("effective_app", "codex")),
+            Some(("app", "")),
+        ];
+        let processes = [
+            None,
+            Some("claude"),
+            Some("codex"),
+            Some("pi"),
+            Some("2.1.310"),
+            Some("2.1"),
+            Some("10.20.30"),
+            Some("tmux"),
+            Some("zsh"),
+            Some("node"),
+            Some("grok"),
+            Some("grok-1.0.70-darwin-arm64"),
+            Some("rexboard"),
+        ];
+        let titles = [
+            "",
+            "plain",
+            "✳ idle seat",
+            "⠋ working seat",
+            "⣿ busy",
+            "◐ half",
+            "◑ half",
+            "◉ seat",
+            "api | gpt-5.1",
+            "api | gpt5",
+            "env | sort",
+            "a b | gpt-5",
+            "api | model",
+            "api | gpt-5 | x",
+        ];
+        let owners = [None, Some("tmux")];
+        let mut out = String::new();
+        for app in apps {
+            for process in processes {
+                for title in titles {
+                    for owner in owners {
+                        if owner.is_some() && app.is_none() {
+                            continue;
+                        }
+                        let mut record = serde_json::json!({ "state": "working" });
+                        if let Some((key, value)) = app {
+                            record[key] = serde_json::json!(value);
+                        }
+                        if let Some(owner) = owner {
+                            record["owner"] = serde_json::json!({ "name": owner });
+                        }
+                        let records = if app.is_some() || owner.is_some() {
+                            serde_json::json!([record])
+                        } else {
+                            serde_json::json!([])
+                        };
+                        let mut block = serde_json::json!({
+                            "block_id": "b", "label": "seat", "title": title, "records": records,
+                        });
+                        if let Some(process) = process {
+                            block["process"] = serde_json::json!({ "name": process });
+                        }
+                        let pane = derive(
+                            "local",
+                            "api",
+                            "main",
+                            &Source::new("s", "w", parse_block(&block).unwrap()),
+                        );
+                        out.push_str(&format!(
+                            "{app:?} {process:?} {title:?} {owner:?} => {:?} {} {}\n",
+                            pane.harness, pane.source, pane.state
+                        ));
+                    }
+                }
+            }
+        }
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/harness/derive.txt"
+        );
+        if std::env::var_os("UPDATE_HARNESS_CORPUS").is_some() {
+            std::fs::write(path, &out).unwrap();
+        }
+        assert_eq!(out, std::fs::read_to_string(path).expect("the corpus"));
+    }
+}

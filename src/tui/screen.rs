@@ -428,3 +428,58 @@ mod tests {
         assert!(screen.options.is_empty());
     }
 }
+
+/// Today's dialog reading, pinned screen by screen, so moving the grammar changes nothing.
+#[cfg(test)]
+mod corpus {
+    use super::*;
+
+    #[test]
+    fn parse_matches_the_recorded_corpus() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/screens");
+        let mut screens: Vec<(String, String)> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| {
+                let path = entry.unwrap().path();
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                (name, std::fs::read_to_string(&path).unwrap())
+            })
+            .collect();
+        screens.sort();
+        for (name, text) in [
+            ("codex cursor", " Allow it?\n › 1. Yes\n   2. No\n"),
+            ("paren options", " Pick one\n 1) red\n 2) blue\n 3) green\n"),
+            ("one option", " Only\n ❯ 1. Yes\n"),
+            ("skipped digit", " Pick\n 1. a\n 3. c\n"),
+            ("input under options", " 1. a\n 2. b\n ────\n ❯ \n"),
+            ("boxed prompt", "╭────╮\n│ > hello │\n╰────╯\n"),
+            (
+                "lasting words",
+                " Edit?\n ❯ 1. Yes\n   2. Yes, allow all edits during this session\n   3. Yes, and don’t ask again\n   4. No\n",
+            ),
+        ] {
+            screens.push((name.to_owned(), text.to_owned()));
+        }
+        let mut out = String::new();
+        for (name, text) in screens {
+            let screen = Screen::parse(&text, None);
+            let options: Vec<String> = screen
+                .options
+                .iter()
+                .map(|c| format!("{}:{}:{}:{}", c.digit, c.label, c.line, c.lasting()))
+                .collect();
+            out.push_str(&format!(
+                "== {name}\noptions {options:?}\nfingerprint {:?}\ndraft {} dialog {:?}\n",
+                screen.fingerprint, screen.draft, screen.dialog
+            ));
+        }
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/harness/screens.txt"
+        );
+        if std::env::var_os("UPDATE_HARNESS_CORPUS").is_some() {
+            std::fs::write(path, &out).unwrap();
+        }
+        assert_eq!(out, std::fs::read_to_string(path).expect("the corpus"));
+    }
+}

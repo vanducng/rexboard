@@ -1,0 +1,56 @@
+== claude-ask-user-question.txt
+options ["1:Red:13:false", "2:Green:15:false", "3:Blue:17:false", "4:Type something.:19:false", "5:Chat about this:21:false"]
+fingerprint Some("\n ☐ Color \n\nWhich color do you prefer?\n\n❯ 1. Red\n     Red\n  2. Green\n     Green\n  3. Blue\n     Blue\n  4. Type something.\n────────────────────────────────────────────────────────────────────────────────\n  5. Chat about this\n")
+draft false dialog Some(15)
+== claude-draft.txt
+options []
+fingerprint Some("\n────────────────────────────────────────────────────────────────────────────────\n❯\u{a0}reply with the word pong\n")
+draft true dialog None
+== claude-idle-after-list.txt
+options []
+fingerprint Some("\n────────────────────────────────────────────────────────────────────────────────\n❯\u{a0}Run the touch command again\n")
+draft true dialog None
+== claude-idle-placeholder.txt
+options []
+fingerprint Some("\n────────────────────────────────────────────────────────────────────────────────\n❯\u{a0}Try \"fix lint errors\"\n")
+draft true dialog None
+== claude-idle.txt
+options []
+fingerprint Some("\n────────────────────────────────────────────────────────────────────────────────\n❯\u{a0}\n")
+draft false dialog None
+== claude-permission-wrapped.txt
+options ["1:Yes:16:false", "2:Yes, and always allow access to /work/projects/a-folder-with-a-rather-long-name-th:17:true", "3:Yes, and switch to auto mode · auto mode handles these prompts for you:19:true", "4:No:20:false"]
+fingerprint Some("\n Bash command\n Tip: auto mode handles these prompts for you - choose \"switch to auto mode\" \n below\n Create empty file zz-probe-file\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n touch zz-probe-file\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and always allow access to /work/projects/a-folder-with-a-rather-long-name-th\n      at-wraps-onto-a-second-line/and-a-third from this project\n   3. Yes, and switch to auto mode · auto mode handles these prompts for you\n   4. No\n")
+draft false dialog Some(15)
+== claude-permission.txt
+options ["1:Yes:7:false", "2:Yes, and always allow access to /work/project from this project:8:true", "3:Yes, and switch to auto mode · auto mode handles these prompts for you:9:true", "4:No:10:false"]
+fingerprint Some("\n Bash command\n Tip: auto mode handles these prompts for you - choose \"switch to auto mode\" below\n Create empty file zz-probe-file-2 in the working directory\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n touch zz-probe-file-2\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and always allow access to /work/project from this project\n   3. Yes, and switch to auto mode · auto mode handles these prompts for you\n   4. No\n")
+draft false dialog Some(13)
+== codex cursor
+options []
+fingerprint Some("\n Allow it?\n › 1. Yes\n")
+draft true dialog None
+== paren options
+options ["1:red:1:false", "2:blue:2:false", "3:green:3:false"]
+fingerprint Some("\n Pick one\n 1) red\n 2) blue\n 3) green\n")
+draft false dialog Some(4)
+== one option
+options []
+fingerprint None
+draft false dialog None
+== skipped digit
+options []
+fingerprint None
+draft false dialog None
+== input under options
+options []
+fingerprint Some("\n ────\n ❯ \n")
+draft false dialog None
+== boxed prompt
+options []
+fingerprint Some("\n╭────╮\n│ > hello │\n")
+draft true dialog None
+== lasting words
+options ["1:Yes:1:false", "2:Yes, allow all edits during this session:2:true", "3:Yes, and don’t ask again:3:true", "4:No:4:false"]
+fingerprint Some("\n Edit?\n ❯ 1. Yes\n   2. Yes, allow all edits during this session\n   3. Yes, and don’t ask again\n   4. No\n")
+draft false dialog Some(5)
