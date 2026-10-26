@@ -2517,6 +2517,12 @@ fn mini_mixed(serve: &Serve) -> String {
 fn mixed_serve() -> Serve {
     let serve = Serve::new();
     let observer = mini_mixed(&serve);
+    serve_mini(&serve, &observer);
+    serve
+}
+
+/// Starts `serve` with `observer` as mini's, and waits for its three rows.
+fn serve_mini(serve: &Serve, observer: &str) {
     serve
         .cmd()
         .env("FAKE_REX_OBSERVER_mini", observer)
@@ -2531,7 +2537,6 @@ fn mixed_serve() -> Serve {
         );
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    serve
 }
 
 fn keys(rows: &[serde_json::Value]) -> Vec<&str> {
@@ -2991,6 +2996,72 @@ fn answer_text_goes_only_to_an_empty_input_line() {
         .assert()
         .code(1)
         .stderr(predicate::str::contains("\"code\":\"NOT_FOUND\""));
+}
+
+#[test]
+fn a_newer_report_changes_an_input_lines_id_but_not_a_dialogs() {
+    let serve = mixed_serve();
+    let (idle, ask) = ("mini/block:web-done", "mini/block:web-ask");
+    let prompt = screen_reply("claude-idle.txt");
+    let dialog = screen_reply("claude-permission.txt");
+    let (prompt_id, dialog_id) = (
+        dialog_of(&serve, idle, &prompt),
+        dialog_of(&serve, ask, &dialog),
+    );
+    serve.cmd().args(["serve", "--stop"]).assert().success();
+    let observer = mini_mixed(&serve);
+    let later = std::fs::read_to_string(&observer)
+        .unwrap()
+        .replace("2026-01-01T00:00:00Z", "2026-01-01T00:05:00Z");
+    std::fs::write(&observer, later).unwrap();
+    serve_mini(&serve, &observer);
+    serve
+        .cmd()
+        .env("FAKE_REX_TAIL_REPLY", &prompt)
+        .args([
+            "answer",
+            idle,
+            "--dialog",
+            &prompt_id,
+            "--text",
+            "run the tests",
+        ])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "the input line changed since you read it; nothing sent",
+        ));
+    assert!(
+        sends(&serve).is_empty(),
+        "a newer turn's prompt is not the one read"
+    );
+    assert_ne!(dialog_of(&serve, idle, &prompt), prompt_id);
+    assert_eq!(
+        dialog_of(&serve, ask, &dialog),
+        dialog_id,
+        "a second report of the same dialog keeps its id"
+    );
+}
+
+#[test]
+fn show_prints_the_row_when_its_screen_cannot_be_read() {
+    let serve = mixed_serve();
+    let failing = r#"{"ok":false,"step":"blob_read","error":"timeout"}"#;
+    let shown = shown_screen(&serve, "mini/block:web-ask", failing);
+    assert_eq!(shown["key"], "mini/block:web-ask");
+    assert_eq!(shown["dialog"], serde_json::Value::Null);
+    assert_eq!(shown["options"], serde_json::json!([]));
+    assert!(
+        shown["screen_error"].as_str().unwrap().contains("timeout"),
+        "{shown}"
+    );
+    serve
+        .cmd()
+        .env("FAKE_REX_TAIL_REPLY", failing)
+        .args(["show", "mini/block:web-ask", "--tail", "5", "--json"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("\"code\":\"REX\""));
 }
 
 #[test]

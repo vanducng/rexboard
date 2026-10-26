@@ -78,16 +78,19 @@ pub fn no_option(digit: char) -> String {
     format!("there is no option {digit}")
 }
 
-/// A short id for what `screen` shows, its dialog or its input line, so an answer can require
-/// the screen its caller read. FNV-1a, so it holds across builds.
-pub fn dialog_id(screen: &Screen) -> Option<String> {
-    let hash = screen
-        .fingerprint
-        .as_ref()?
-        .bytes()
-        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
-        });
+/// A short id for what `screen` shows, so an answer can require the screen its caller read: a
+/// dialog by its lines alone, which hold through a second report of the same dialog; an input
+/// line with `report`, the row's `updated_at`, since the same empty prompt comes back every
+/// turn. FNV-1a, so it holds across builds.
+pub fn dialog_id(screen: &Screen, report: Option<&str>) -> Option<String> {
+    let mut text = screen.fingerprint.clone()?;
+    if screen.options.is_empty() {
+        text.push('\n');
+        text.push_str(report.unwrap_or_default());
+    }
+    let hash = text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    });
     Some(format!("{:012x}", hash >> 16))
 }
 

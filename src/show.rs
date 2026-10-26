@@ -43,9 +43,19 @@ pub fn show(key: &str, tail: Option<usize>, json: bool) -> Result<()> {
         if let Some(tail) = &tail {
             shown["tail"] = json!(tail);
         }
-        let screen = crate::tui::read_screen(&row)?;
-        shown["dialog"] = json!(crate::tui::answer::dialog_id(&screen));
-        shown["options"] = crate::tui::answer::options_json(&screen);
+        // The row is still worth printing when its pane cannot be read.
+        match crate::tui::read_screen(&row) {
+            Ok(screen) => {
+                let report = row.pane.updated_at.as_deref();
+                shown["dialog"] = json!(crate::tui::answer::dialog_id(&screen, report));
+                shown["options"] = crate::tui::answer::options_json(&screen);
+            }
+            Err(err) => {
+                shown["dialog"] = json!(null);
+                shown["options"] = json!([]);
+                shown["screen_error"] = json!(err.to_string());
+            }
+        }
         println!("{shown}");
     } else {
         print!("{}", text(&row, &fields, tail.as_deref()));

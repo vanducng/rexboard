@@ -42,7 +42,7 @@ pub fn answer(args: &AnswerArgs, json: bool) -> Result<()> {
             &reread,
         )
     };
-    let id = dialog_id(&screen).ok_or_else(nothing_there)?;
+    let id = dialog_id(&screen, row.pane.updated_at.as_deref()).ok_or_else(nothing_there)?;
     if id != args.dialog {
         let what = if screen.options.is_empty() {
             "input line"
