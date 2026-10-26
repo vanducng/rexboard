@@ -18,16 +18,16 @@
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                     
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                    
 {Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                          
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump{Reset/Reset/NONE}          {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == status 140
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                                                                                 {Reset/Reset/DIM}hh:mm · local + mini
@@ -51,18 +51,18 @@
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                                                                                 
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                                                                                
 {Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                      
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                                      
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                   {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == every state 80
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 3 hosts · 11 panes · 11 agents · {Red/Reset/NONE}studio down{Reset/Reset/NONE}                    {Reset/Reset/DIM}hh:mm
@@ -85,17 +85,17 @@
 {Reset/Reset/DIM}◌ 5h43m  claude  studio  api › away              away msg                       
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · permission · allow · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} allow msg{Reset/Reset/NONE}                                                                      
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › allow                                                     
 {Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local         {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                           
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}allow title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                           
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump{Reset/Reset/NONE}          {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == every state 140
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 3 hosts · 11 panes · 11 agents · {Red/Reset/NONE}studio down{Reset/Reset/NONE}                                                                                {Reset/Reset/DIM}hh:mm
@@ -118,17 +118,17 @@
 {Reset/Reset/DIM}◌ working    5h43m  -      claude  studio  api                  main                 away                  away msg                         
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · permission · allow · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} allow msg{Reset/Reset/NONE}                                                                                                                                  
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › allow                                                                                                                 
 {Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local         {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                       
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}allow title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                                       
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                   {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == every state 200
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 3 hosts · 11 panes · 11 agents · {Red/Reset/NONE}studio down{Reset/Reset/NONE}                                                                                                                                            {Reset/Reset/DIM}hh:mm
@@ -151,18 +151,18 @@
 {Reset/Reset/DIM}◌ working    5h43m  -      claude  studio  api                               main                              away                                away msg                                             
 {Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · permission · allow · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} allow msg{Reset/Reset/NONE}                                                                                                                                                                                              
 {Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › allow                                                                                                                                                                             
 {Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local         {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                                                                                   
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}allow title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                                                                                                   
-{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                                                                               {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select · {Reset/Reset/BOLD}ctrl-e/y{Reset/Reset/DIM} scroll card{Reset/Reset/NONE}                                                        {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == table sorted 140
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · {Reset/Reset/BOLD}view: table ↓age{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                                                              {Reset/Reset/DIM}hh:mm · local + mini
 {Reset/Reset/NONE}                                                                                                                                            
@@ -183,16 +183,16 @@
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                                                                                 
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                                                                                
 {Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                      
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                                      
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
 {Cyan/Reset/NONE}click a header to sort · hold Option (iTerm2) or Shift to select text                                                                       
 == keys 120
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                                                             {Reset/Reset/DIM}hh:mm · local + mini
@@ -216,18 +216,18 @@
 {Reset/Reset/NONE}                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                        
 {Cyan/Reset/BOLD} keys{Reset/Reset/DIM} · "motion": "reduced" in tui.json stills the spinner{Reset/Reset/NONE}                                                              
-{Reset/Reset/BOLD} j/k      {Reset/Reset/DIM}move; the ends wrap           {Reset/Reset/BOLD} - ctrl-o {Reset/Reset/DIM}back and forth, like cd -     {Reset/Reset/BOLD} space    {Reset/Reset/DIM}full view of the pane, live   
-{Reset/Reset/BOLD} gg G     {Reset/Reset/DIM}first, last row               {Reset/Reset/BOLD} /        {Reset/Reset/DIM}filter: text or key:value     {Reset/Reset/BOLD} a i      {Reset/Reset/DIM}answer: pick an option, reply 
-{Reset/Reset/BOLD} H M L    {Reset/Reset/DIM}screen top, middle, bottom    {Reset/Reset/BOLD} f        {Reset/Reset/DIM}one status; ff clears         {Reset/Reset/BOLD} m        {Reset/Reset/DIM}mark seen                     
-{Reset/Reset/BOLD} ctrl-d/u {Reset/Reset/DIM}half a page down, up          {Reset/Reset/BOLD} :        {Reset/Reset/DIM}a view, :seen or :q           {Reset/Reset/BOLD} dd       {Reset/Reset/DIM}close the pane; y confirms    
-{Reset/Reset/BOLD} ctrl-f/b {Reset/Reset/DIM}a page down, up               {Reset/Reset/BOLD} v V      {Reset/Reset/DIM}next, previous view (gt gT)   {Reset/Reset/BOLD} yy yp    {Reset/Reset/DIM}copy the message, the place   
-{Reset/Reset/BOLD} ] [      {Reset/Reset/DIM}next, previous group          {Reset/Reset/BOLD} o        {Reset/Reset/DIM}sort by a column's letter     {Reset/Reset/BOLD} R        {Reset/Reset/DIM}reconnect to serve            
-{Reset/Reset/BOLD} n N tab  {Reset/Reset/DIM}next, previous needing you    {Reset/Reset/BOLD} za zo zc {Reset/Reset/DIM}fold: toggle, open, close     {Reset/Reset/BOLD} ?        {Reset/Reset/DIM}this table; q or esc closes it
-{Reset/Reset/BOLD} 1-9      {Reset/Reset/DIM}the nth NEEDS YOU row         {Reset/Reset/BOLD} zR zM    {Reset/Reset/DIM}open all, fold all            {Reset/Reset/BOLD} esc      {Reset/Reset/DIM}cancel a key, clear filters   
-{Reset/Reset/BOLD} enter    {Reset/Reset/DIM}go to the pane                {Reset/Reset/BOLD} c        {Reset/Reset/DIM}hide or show the card         {Reset/Reset/BOLD} q        {Reset/Reset/DIM}close a layer, else quit      
+{Reset/Reset/BOLD} j/k      {Reset/Reset/DIM}move; the ends wrap           {Reset/Reset/BOLD} /        {Reset/Reset/DIM}filter: text or key:value     {Reset/Reset/BOLD} a i      {Reset/Reset/DIM}answer: pick an option, reply 
+{Reset/Reset/BOLD} gg G     {Reset/Reset/DIM}first, last row               {Reset/Reset/BOLD} f        {Reset/Reset/DIM}one status; ff clears         {Reset/Reset/BOLD} m        {Reset/Reset/DIM}mark seen                     
+{Reset/Reset/BOLD} H M L    {Reset/Reset/DIM}screen top, middle, bottom    {Reset/Reset/BOLD} :        {Reset/Reset/DIM}a view, :seen or :q           {Reset/Reset/BOLD} dd       {Reset/Reset/DIM}close the pane; y confirms    
+{Reset/Reset/BOLD} ctrl-d/u {Reset/Reset/DIM}half a page down, up          {Reset/Reset/BOLD} v V      {Reset/Reset/DIM}next, previous view (gt gT)   {Reset/Reset/BOLD} yy yp    {Reset/Reset/DIM}copy the message, the place   
+{Reset/Reset/BOLD} ctrl-f/b {Reset/Reset/DIM}a page down, up               {Reset/Reset/BOLD} o        {Reset/Reset/DIM}sort by a column's letter     {Reset/Reset/BOLD} R        {Reset/Reset/DIM}reconnect to serve            
+{Reset/Reset/BOLD} ] [      {Reset/Reset/DIM}next, previous group          {Reset/Reset/BOLD} za zo zc {Reset/Reset/DIM}fold: toggle, open, close     {Reset/Reset/BOLD} ?        {Reset/Reset/DIM}this table; q or esc closes it
+{Reset/Reset/BOLD} n N tab  {Reset/Reset/DIM}next, previous needing you    {Reset/Reset/BOLD} zR zM    {Reset/Reset/DIM}open all, fold all            {Reset/Reset/BOLD} esc      {Reset/Reset/DIM}cancel a key, clear filters   
+{Reset/Reset/BOLD} 1-9      {Reset/Reset/DIM}the nth NEEDS YOU row         {Reset/Reset/BOLD} c        {Reset/Reset/DIM}hide or show the card         {Reset/Reset/BOLD} q        {Reset/Reset/DIM}close a layer, else quit      
+{Reset/Reset/BOLD} enter    {Reset/Reset/DIM}go to the pane                {Reset/Reset/BOLD} ctrl-e/y {Reset/Reset/DIM}scroll the card down, up      {Reset/Reset/NONE}                                        
+{Reset/Reset/BOLD} - ctrl-o {Reset/Reset/DIM}back and forth, like cd -     {Reset/Reset/BOLD} space    {Reset/Reset/DIM}full view of the pane, live   {Reset/Reset/NONE}                                        
+{Reset/Reset/NONE}                                                                                                                        
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full{Reset/Reset/NONE}            {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == keys 80
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                     {Reset/Reset/DIM}hh:mm · local + mini
@@ -243,22 +243,22 @@
 {Reset/Reset/DIM}○ {Reset/Reset/NONE}5h43m  claude  {Reset/Reset/DIM}local   {Reset/Reset/NONE}api › seat-a            seat-a msg                     
 {Reset/Reset/BOLD | DIM}UNREPORTED (1) ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
 {Reset/Reset/DIM}· -      claude? local   api › inferred          inferred msg                   
-{Reset/Reset/NONE}                                                                                
 {Cyan/Reset/BOLD} keys{Reset/Reset/DIM} · "motion": "reduced" in tui.json stills the spinner{Reset/Reset/NONE}                      
 {Reset/Reset/BOLD} j/k      {Reset/Reset/DIM}move; the ends wrap           {Reset/Reset/BOLD} o        {Reset/Reset/DIM}sort by a column's letter     
 {Reset/Reset/BOLD} gg G     {Reset/Reset/DIM}first, last row               {Reset/Reset/BOLD} za zo zc {Reset/Reset/DIM}fold: toggle, open, close     
 {Reset/Reset/BOLD} H M L    {Reset/Reset/DIM}screen top, middle, bottom    {Reset/Reset/BOLD} zR zM    {Reset/Reset/DIM}open all, fold all            
 {Reset/Reset/BOLD} ctrl-d/u {Reset/Reset/DIM}half a page down, up          {Reset/Reset/BOLD} c        {Reset/Reset/DIM}hide or show the card         
-{Reset/Reset/BOLD} ctrl-f/b {Reset/Reset/DIM}a page down, up               {Reset/Reset/BOLD} space    {Reset/Reset/DIM}full view of the pane, live   
-{Reset/Reset/BOLD} ] [      {Reset/Reset/DIM}next, previous group          {Reset/Reset/BOLD} a i      {Reset/Reset/DIM}answer: pick an option, reply 
-{Reset/Reset/BOLD} n N tab  {Reset/Reset/DIM}next, previous needing you    {Reset/Reset/BOLD} m        {Reset/Reset/DIM}mark seen                     
-{Reset/Reset/BOLD} 1-9      {Reset/Reset/DIM}the nth NEEDS YOU row         {Reset/Reset/BOLD} dd       {Reset/Reset/DIM}close the pane; y confirms    
-{Reset/Reset/BOLD} enter    {Reset/Reset/DIM}go to the pane                {Reset/Reset/BOLD} yy yp    {Reset/Reset/DIM}copy the message, the place   
-{Reset/Reset/BOLD} - ctrl-o {Reset/Reset/DIM}back and forth, like cd -     {Reset/Reset/BOLD} R        {Reset/Reset/DIM}reconnect to serve            
-{Reset/Reset/BOLD} /        {Reset/Reset/DIM}filter: text or key:value     {Reset/Reset/BOLD} ?        {Reset/Reset/DIM}this table; q or esc closes it
-{Reset/Reset/BOLD} f        {Reset/Reset/DIM}one status; ff clears         {Reset/Reset/BOLD} esc      {Reset/Reset/DIM}cancel a key, clear filters   
-{Reset/Reset/BOLD} :        {Reset/Reset/DIM}a view, :seen or :q           {Reset/Reset/BOLD} q        {Reset/Reset/DIM}close a layer, else quit      
-{Reset/Reset/BOLD} v V      {Reset/Reset/DIM}next, previous view (gt gT)   {Reset/Reset/NONE}                                        
+{Reset/Reset/BOLD} ctrl-f/b {Reset/Reset/DIM}a page down, up               {Reset/Reset/BOLD} ctrl-e/y {Reset/Reset/DIM}scroll the card down, up      
+{Reset/Reset/BOLD} ] [      {Reset/Reset/DIM}next, previous group          {Reset/Reset/BOLD} space    {Reset/Reset/DIM}full view of the pane, live   
+{Reset/Reset/BOLD} n N tab  {Reset/Reset/DIM}next, previous needing you    {Reset/Reset/BOLD} a i      {Reset/Reset/DIM}answer: pick an option, reply 
+{Reset/Reset/BOLD} 1-9      {Reset/Reset/DIM}the nth NEEDS YOU row         {Reset/Reset/BOLD} m        {Reset/Reset/DIM}mark seen                     
+{Reset/Reset/BOLD} enter    {Reset/Reset/DIM}go to the pane                {Reset/Reset/BOLD} dd       {Reset/Reset/DIM}close the pane; y confirms    
+{Reset/Reset/BOLD} - ctrl-o {Reset/Reset/DIM}back and forth, like cd -     {Reset/Reset/BOLD} yy yp    {Reset/Reset/DIM}copy the message, the place   
+{Reset/Reset/BOLD} /        {Reset/Reset/DIM}filter: text or key:value     {Reset/Reset/BOLD} R        {Reset/Reset/DIM}reconnect to serve            
+{Reset/Reset/BOLD} f        {Reset/Reset/DIM}one status; ff clears         {Reset/Reset/BOLD} ?        {Reset/Reset/DIM}this table; q or esc closes it
+{Reset/Reset/BOLD} :        {Reset/Reset/DIM}a view, :seen or :q           {Reset/Reset/BOLD} esc      {Reset/Reset/DIM}cancel a key, clear filters   
+{Reset/Reset/BOLD} v V      {Reset/Reset/DIM}next, previous view (gt gT)   {Reset/Reset/BOLD} q        {Reset/Reset/DIM}close a layer, else quit      
+{Reset/Reset/NONE}                                                                                
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump{Reset/Reset/NONE}          {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == keys 140 tall
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                                                                                 {Reset/Reset/DIM}hh:mm · local + mini
@@ -308,18 +308,18 @@
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
 {Cyan/Reset/BOLD} keys{Reset/Reset/DIM} · "motion": "reduced" in tui.json stills the spinner{Reset/Reset/NONE}                                                                                  
-{Reset/Reset/BOLD} j/k      {Reset/Reset/DIM}move; the ends wrap           {Reset/Reset/BOLD} - ctrl-o {Reset/Reset/DIM}back and forth, like cd -     {Reset/Reset/BOLD} space    {Reset/Reset/DIM}full view of the pane, live   {Reset/Reset/NONE}                    
-{Reset/Reset/BOLD} gg G     {Reset/Reset/DIM}first, last row               {Reset/Reset/BOLD} /        {Reset/Reset/DIM}filter: text or key:value     {Reset/Reset/BOLD} a i      {Reset/Reset/DIM}answer: pick an option, reply {Reset/Reset/NONE}                    
-{Reset/Reset/BOLD} H M L    {Reset/Reset/DIM}screen top, middle, bottom    {Reset/Reset/BOLD} f        {Reset/Reset/DIM}one status; ff clears         {Reset/Reset/BOLD} m        {Reset/Reset/DIM}mark seen                     {Reset/Reset/NONE}                    
-{Reset/Reset/BOLD} ctrl-d/u {Reset/Reset/DIM}half a page down, up          {Reset/Reset/BOLD} :        {Reset/Reset/DIM}a view, :seen or :q           {Reset/Reset/BOLD} dd       {Reset/Reset/DIM}close the pane; y confirms    {Reset/Reset/NONE}                    
-{Reset/Reset/BOLD} ctrl-f/b {Reset/Reset/DIM}a page down, up               {Reset/Reset/BOLD} v V      {Reset/Reset/DIM}next, previous view (gt gT)   {Reset/Reset/BOLD} yy yp    {Reset/Reset/DIM}copy the message, the place   {Reset/Reset/NONE}                    
-{Reset/Reset/BOLD} ] [      {Reset/Reset/DIM}next, previous group          {Reset/Reset/BOLD} o        {Reset/Reset/DIM}sort by a column's letter     {Reset/Reset/BOLD} R        {Reset/Reset/DIM}reconnect to serve            {Reset/Reset/NONE}                    
-{Reset/Reset/BOLD} n N tab  {Reset/Reset/DIM}next, previous needing you    {Reset/Reset/BOLD} za zo zc {Reset/Reset/DIM}fold: toggle, open, close     {Reset/Reset/BOLD} ?        {Reset/Reset/DIM}this table; q or esc closes it{Reset/Reset/NONE}                    
-{Reset/Reset/BOLD} 1-9      {Reset/Reset/DIM}the nth NEEDS YOU row         {Reset/Reset/BOLD} zR zM    {Reset/Reset/DIM}open all, fold all            {Reset/Reset/BOLD} esc      {Reset/Reset/DIM}cancel a key, clear filters   {Reset/Reset/NONE}                    
-{Reset/Reset/BOLD} enter    {Reset/Reset/DIM}go to the pane                {Reset/Reset/BOLD} c        {Reset/Reset/DIM}hide or show the card         {Reset/Reset/BOLD} q        {Reset/Reset/DIM}close a layer, else quit      {Reset/Reset/NONE}                    
+{Reset/Reset/BOLD} j/k      {Reset/Reset/DIM}move; the ends wrap           {Reset/Reset/BOLD} /        {Reset/Reset/DIM}filter: text or key:value     {Reset/Reset/BOLD} a i      {Reset/Reset/DIM}answer: pick an option, reply {Reset/Reset/NONE}                    
+{Reset/Reset/BOLD} gg G     {Reset/Reset/DIM}first, last row               {Reset/Reset/BOLD} f        {Reset/Reset/DIM}one status; ff clears         {Reset/Reset/BOLD} m        {Reset/Reset/DIM}mark seen                     {Reset/Reset/NONE}                    
+{Reset/Reset/BOLD} H M L    {Reset/Reset/DIM}screen top, middle, bottom    {Reset/Reset/BOLD} :        {Reset/Reset/DIM}a view, :seen or :q           {Reset/Reset/BOLD} dd       {Reset/Reset/DIM}close the pane; y confirms    {Reset/Reset/NONE}                    
+{Reset/Reset/BOLD} ctrl-d/u {Reset/Reset/DIM}half a page down, up          {Reset/Reset/BOLD} v V      {Reset/Reset/DIM}next, previous view (gt gT)   {Reset/Reset/BOLD} yy yp    {Reset/Reset/DIM}copy the message, the place   {Reset/Reset/NONE}                    
+{Reset/Reset/BOLD} ctrl-f/b {Reset/Reset/DIM}a page down, up               {Reset/Reset/BOLD} o        {Reset/Reset/DIM}sort by a column's letter     {Reset/Reset/BOLD} R        {Reset/Reset/DIM}reconnect to serve            {Reset/Reset/NONE}                    
+{Reset/Reset/BOLD} ] [      {Reset/Reset/DIM}next, previous group          {Reset/Reset/BOLD} za zo zc {Reset/Reset/DIM}fold: toggle, open, close     {Reset/Reset/BOLD} ?        {Reset/Reset/DIM}this table; q or esc closes it{Reset/Reset/NONE}                    
+{Reset/Reset/BOLD} n N tab  {Reset/Reset/DIM}next, previous needing you    {Reset/Reset/BOLD} zR zM    {Reset/Reset/DIM}open all, fold all            {Reset/Reset/BOLD} esc      {Reset/Reset/DIM}cancel a key, clear filters   {Reset/Reset/NONE}                    
+{Reset/Reset/BOLD} 1-9      {Reset/Reset/DIM}the nth NEEDS YOU row         {Reset/Reset/BOLD} c        {Reset/Reset/DIM}hide or show the card         {Reset/Reset/BOLD} q        {Reset/Reset/DIM}close a layer, else quit      {Reset/Reset/NONE}                    
+{Reset/Reset/BOLD} enter    {Reset/Reset/DIM}go to the pane                {Reset/Reset/BOLD} ctrl-e/y {Reset/Reset/DIM}scroll the card down, up      {Reset/Reset/NONE}                                                            
+{Reset/Reset/BOLD} - ctrl-o {Reset/Reset/DIM}back and forth, like cd -     {Reset/Reset/BOLD} space    {Reset/Reset/DIM}full view of the pane, live   {Reset/Reset/NONE}                                                            
+{Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                   {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == keys 200 tall
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                                                                                                                                             {Reset/Reset/DIM}hh:mm · local + mini
@@ -373,15 +373,15 @@
 {Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
 {Cyan/Reset/BOLD} keys{Reset/Reset/DIM} · "motion": "reduced" in tui.json stills the spinner{Reset/Reset/NONE}                                                                                                                                              
-{Reset/Reset/BOLD} j/k      {Reset/Reset/DIM}move; the ends wrap           {Reset/Reset/BOLD} n N tab  {Reset/Reset/DIM}next, previous needing you    {Reset/Reset/BOLD} :        {Reset/Reset/DIM}a view, :seen or :q           {Reset/Reset/BOLD} space    {Reset/Reset/DIM}full view of the pane, live   {Reset/Reset/BOLD} ?        {Reset/Reset/DIM}this table; q or esc closes it
-{Reset/Reset/BOLD} gg G     {Reset/Reset/DIM}first, last row               {Reset/Reset/BOLD} 1-9      {Reset/Reset/DIM}the nth NEEDS YOU row         {Reset/Reset/BOLD} v V      {Reset/Reset/DIM}next, previous view (gt gT)   {Reset/Reset/BOLD} a i      {Reset/Reset/DIM}answer: pick an option, reply {Reset/Reset/BOLD} esc      {Reset/Reset/DIM}cancel a key, clear filters   
-{Reset/Reset/BOLD} H M L    {Reset/Reset/DIM}screen top, middle, bottom    {Reset/Reset/BOLD} enter    {Reset/Reset/DIM}go to the pane                {Reset/Reset/BOLD} o        {Reset/Reset/DIM}sort by a column's letter     {Reset/Reset/BOLD} m        {Reset/Reset/DIM}mark seen                     {Reset/Reset/BOLD} q        {Reset/Reset/DIM}close a layer, else quit      
-{Reset/Reset/BOLD} ctrl-d/u {Reset/Reset/DIM}half a page down, up          {Reset/Reset/BOLD} - ctrl-o {Reset/Reset/DIM}back and forth, like cd -     {Reset/Reset/BOLD} za zo zc {Reset/Reset/DIM}fold: toggle, open, close     {Reset/Reset/BOLD} dd       {Reset/Reset/DIM}close the pane; y confirms    {Reset/Reset/NONE}                                        
-{Reset/Reset/BOLD} ctrl-f/b {Reset/Reset/DIM}a page down, up               {Reset/Reset/BOLD} /        {Reset/Reset/DIM}filter: text or key:value     {Reset/Reset/BOLD} zR zM    {Reset/Reset/DIM}open all, fold all            {Reset/Reset/BOLD} yy yp    {Reset/Reset/DIM}copy the message, the place   {Reset/Reset/NONE}                                        
-{Reset/Reset/BOLD} ] [      {Reset/Reset/DIM}next, previous group          {Reset/Reset/BOLD} f        {Reset/Reset/DIM}one status; ff clears         {Reset/Reset/BOLD} c        {Reset/Reset/DIM}hide or show the card         {Reset/Reset/BOLD} R        {Reset/Reset/DIM}reconnect to serve            {Reset/Reset/NONE}                                        
-{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                                                                               {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
+{Reset/Reset/BOLD} j/k      {Reset/Reset/DIM}move; the ends wrap           {Reset/Reset/BOLD} n N tab  {Reset/Reset/DIM}next, previous needing you    {Reset/Reset/BOLD} :        {Reset/Reset/DIM}a view, :seen or :q           {Reset/Reset/BOLD} ctrl-e/y {Reset/Reset/DIM}scroll the card down, up      {Reset/Reset/BOLD} R        {Reset/Reset/DIM}reconnect to serve            
+{Reset/Reset/BOLD} gg G     {Reset/Reset/DIM}first, last row               {Reset/Reset/BOLD} 1-9      {Reset/Reset/DIM}the nth NEEDS YOU row         {Reset/Reset/BOLD} v V      {Reset/Reset/DIM}next, previous view (gt gT)   {Reset/Reset/BOLD} space    {Reset/Reset/DIM}full view of the pane, live   {Reset/Reset/BOLD} ?        {Reset/Reset/DIM}this table; q or esc closes it
+{Reset/Reset/BOLD} H M L    {Reset/Reset/DIM}screen top, middle, bottom    {Reset/Reset/BOLD} enter    {Reset/Reset/DIM}go to the pane                {Reset/Reset/BOLD} o        {Reset/Reset/DIM}sort by a column's letter     {Reset/Reset/BOLD} a i      {Reset/Reset/DIM}answer: pick an option, reply {Reset/Reset/BOLD} esc      {Reset/Reset/DIM}cancel a key, clear filters   
+{Reset/Reset/BOLD} ctrl-d/u {Reset/Reset/DIM}half a page down, up          {Reset/Reset/BOLD} - ctrl-o {Reset/Reset/DIM}back and forth, like cd -     {Reset/Reset/BOLD} za zo zc {Reset/Reset/DIM}fold: toggle, open, close     {Reset/Reset/BOLD} m        {Reset/Reset/DIM}mark seen                     {Reset/Reset/BOLD} q        {Reset/Reset/DIM}close a layer, else quit      
+{Reset/Reset/BOLD} ctrl-f/b {Reset/Reset/DIM}a page down, up               {Reset/Reset/BOLD} /        {Reset/Reset/DIM}filter: text or key:value     {Reset/Reset/BOLD} zR zM    {Reset/Reset/DIM}open all, fold all            {Reset/Reset/BOLD} dd       {Reset/Reset/DIM}close the pane; y confirms    {Reset/Reset/NONE}                                        
+{Reset/Reset/BOLD} ] [      {Reset/Reset/DIM}next, previous group          {Reset/Reset/BOLD} f        {Reset/Reset/DIM}one status; ff clears         {Reset/Reset/BOLD} c        {Reset/Reset/DIM}hide or show the card         {Reset/Reset/BOLD} yy yp    {Reset/Reset/DIM}copy the message, the place   {Reset/Reset/NONE}                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select · {Reset/Reset/BOLD}ctrl-e/y{Reset/Reset/DIM} scroll card{Reset/Reset/NONE}                                                        {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == done card 80
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                     {Reset/Reset/DIM}hh:mm · local + mini
 {Reset/Reset/NONE}                                                                                
@@ -402,9 +402,6 @@
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
 {Reset/Reset/DIM}━━{Green/Reset/BOLD} ✓ done · claude · ended 5h43m ago {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} Opened PR #31; CI is green.{Reset/Reset/NONE}                                                    
 {Reset/Reset/NONE}   Next step is yours.                                                          
@@ -412,6 +409,9 @@
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › claude                                                    
 {Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local          {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude         {Reset/Reset/DIM}turn    {Reset/Reset/NONE}6m                       
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}claude title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                          
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump{Reset/Reset/NONE}          {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == done card 200 tall
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                                                                                                                                             {Reset/Reset/DIM}hh:mm · local + mini
@@ -451,21 +451,6 @@
 {Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
-{Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/DIM}━━{Green/Reset/BOLD} ✓ done · claude · ended 5h43m ago {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} Opened PR #31; CI is green.{Reset/Reset/NONE}                                                                                                                                                                            
 {Reset/Reset/NONE}   Next step is yours.                                                                                                                                                                                  
@@ -473,7 +458,22 @@
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › claude                                                                                                                                                                            
 {Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local          {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude         {Reset/Reset/DIM}turn    {Reset/Reset/NONE}6m                                                                                                                                               
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}claude title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                                                                                                  
-{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                                                                               {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select · {Reset/Reset/BOLD}ctrl-e/y{Reset/Reset/DIM} scroll card{Reset/Reset/NONE}                                                        {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == done card nerd 140
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                                                                                 {Reset/Reset/DIM}hh:mm · local + mini
 {Reset/Reset/NONE}                                                                                                                                            
@@ -494,9 +494,6 @@
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/DIM}━━{Green/Reset/BOLD} ✓ done · claude · ended 5h43m ago {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} Opened PR #31; CI is green.{Reset/Reset/NONE}                                                                                                                
 {Reset/Reset/NONE}   Next step is yours.                                                                                                                      
@@ -504,6 +501,9 @@
 {Reset/Reset/NONE} {Reset/Reset/DIM} {Reset/Reset/NONE}api ›  main ›  claude                                                                                                                  
 {Reset/Reset/NONE} {Reset/Reset/DIM} {Reset/Reset/NONE}local          {Reset/Reset/DIM} {Reset/Reset/NONE}claude         {Reset/Reset/DIM} {Reset/Reset/NONE}6m                                                                                                     
 {Reset/Reset/NONE} {Reset/Reset/DIM} {Reset/Reset/NONE}claude title   {Reset/Reset/DIM} {Reset/Reset/NONE}native                                                                                                                  
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                   {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == f picker 80
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                     {Reset/Reset/DIM}hh:mm · local + mini
@@ -517,14 +517,14 @@
 {Yellow/Reset/NONE}⠴ {Reset/Reset/NONE}≥5h43m claude  {Reset/Reset/DIM}mini    {Reset/Reset/NONE}api › rig                                              
 {Reset/Reset/BOLD | DIM}QUIET (1) ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
 {Reset/Reset/DIM}↓ 2 more{Reset/Reset/NONE}                                                                        
-{Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                     
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                    
 {Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                          
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
 {Reset/Reset/BOLD}f {Reset/Reset/BOLD | UNDERLINED}w{Reset/Reset/BOLD}orking 2{Reset/Reset/DIM}  {Reset/Reset/BOLD | UNDERLINED}d{Reset/Reset/BOLD}one 1{Reset/Reset/DIM}  {Reset/Reset/BOLD | UNDERLINED}q{Reset/Reset/BOLD}uestion 0{Reset/Reset/DIM}  {Reset/Reset/BOLD | UNDERLINED}p{Reset/Reset/BOLD}ermission 1{Reset/Reset/DIM}  {Reset/Reset/BOLD | UNDERLINED}e{Reset/Reset/BOLD}rror 0{Reset/Reset/DIM}  {Reset/Reset/BOLD | UNDERLINED}u{Reset/Reset/BOLD}nreported 1{Reset/Reset/DIM}  {Reset/Reset/BOLD | UNDERLINED}i{Reset/Reset/BOLD}dle 1{Reset/Reset/NONE}    
 == filter prompt 80
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                     {Reset/Reset/DIM}hh:mm · local + mini
@@ -538,14 +538,14 @@
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                     
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                    
 {Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                          
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
 {Reset/Reset/BOLD}/ seat▏                                                                         
 == command prompt 80
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                     {Reset/Reset/DIM}hh:mm · local + mini
@@ -559,14 +559,14 @@
 {Yellow/Reset/NONE}⠴ {Reset/Reset/NONE}≥5h43m claude  {Reset/Reset/DIM}mini    {Reset/Reset/NONE}api › rig                                              
 {Reset/Reset/BOLD | DIM}QUIET (1) ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
 {Reset/Reset/DIM}↓ 2 more{Reset/Reset/NONE}                                                                        
-{Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                     
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                    
 {Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                          
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
 {Reset/Reset/BOLD}: ▏ · tab completes · esc cancels                                               
 == card hidden 80
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                     {Reset/Reset/DIM}hh:mm · local + mini
@@ -613,9 +613,6 @@
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                     
 {Red/Reset/NONE} that pane is gone{Reset/Reset/NONE}                                                              
@@ -623,6 +620,9 @@
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                    
 {Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                          
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
 {Red/Reset/NONE}that pane is gone                                                               
 == toast 80
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                     {Reset/Reset/DIM}hh:mm · local + mini
@@ -636,14 +636,14 @@
 {Yellow/Reset/NONE}⠴ {Reset/Reset/NONE}≥5h43m claude  {Reset/Reset/DIM}mini    {Reset/Reset/NONE}api › rig                                              
 {Reset/Reset/BOLD | DIM}QUIET (1) ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
 {Reset/Reset/DIM}↓ 2 more{Reset/Reset/NONE}                                                                        
-{Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                     
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                    
 {Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                          
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
 {Cyan/Reset/NONE}a passing message                                                               
 == z prefix 140
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                                                                                 {Reset/Reset/DIM}hh:mm · local + mini
@@ -657,14 +657,14 @@
 {Yellow/Reset/NONE}⠴ working    {Reset/Reset/NONE}≥5h43m -      claude  {Reset/Reset/DIM}mini    {Reset/Reset/NONE}api                  2-toolrig:…abcdef#l2 rig                                                    
 {Reset/Reset/BOLD | DIM}QUIET (1) ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
 {Reset/Reset/DIM}↓ 2 more{Reset/Reset/NONE}                                                                                                                                    
-{Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                                                                                 
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                                                                                
 {Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                      
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                                      
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/BOLD}z… a{Reset/Reset/DIM} toggle · {Reset/Reset/BOLD}o{Reset/Reset/DIM} open · {Reset/Reset/BOLD}c{Reset/Reset/DIM} fold · {Reset/Reset/BOLD}R{Reset/Reset/DIM} open all · {Reset/Reset/BOLD}M{Reset/Reset/DIM} fold all · esc cancels{Reset/Reset/NONE}                                                                       
 == dd question 140
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                                                                                 {Reset/Reset/DIM}hh:mm · local + mini
@@ -678,14 +678,14 @@
 {Yellow/Reset/NONE}⠴ working    {Reset/Reset/NONE}≥5h43m -      claude  {Reset/Reset/DIM}mini    {Reset/Reset/NONE}api                  2-toolrig:…abcdef#l2 rig                                                    
 {Reset/Reset/BOLD | DIM}QUIET (1) ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
 {Reset/Reset/DIM}↓ 2 more{Reset/Reset/NONE}                                                                                                                                    
-{Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/BOLD} seat-b msg{Reset/Reset/NONE}                                                                                                                                 
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                                                                                
 {Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini           {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                      
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                                      
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
 {Red/Reset/BOLD}close api › main › seat-b on mini, ending claude (blocked)? y closes                                                                        
 == answer 80
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                     {Reset/Reset/DIM}hh:mm · local + mini
@@ -706,7 +706,6 @@
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
 {Red/Reset/NONE}━━{Red/Reset/BOLD} ANSWER → seat-b · api › main · mini · claude {Red/Reset/NONE}━━━━━━ captured hh:mm:ss · 2s ━━
 {Reset/Reset/DIM} │ ⏺ Bash(git push origin main --force-with-lease){Reset/Reset/NONE}                              
 {Reset/Reset/DIM} │  Bash command{Reset/Reset/NONE}                                                                
@@ -717,6 +716,7 @@
 {Reset/Reset/DIM} │ {Reset/Reset/BOLD}      /project{Reset/Reset/NONE}                                                               
 {Reset/Reset/DIM} │ {Reset/Reset/BOLD}   3. No, and tell Claude what to do differently{Reset/Reset/NONE}                             
 {Reset/Reset/DIM} ›{Reset/Reset/NONE}                                                                              
+{Reset/Reset/NONE}                                                                                
 {Reset/Reset/BOLD}1-3 pick · esc back to board                                                    
 == answer refused 80
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                     {Reset/Reset/DIM}hh:mm · local + mini
@@ -736,7 +736,6 @@
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
-{Reset/Reset/NONE}                                                                                
 {Red/Reset/NONE}━━{Red/Reset/BOLD} ANSWER → seat-b · api › main · mini · claude {Red/Reset/NONE}━━━━━━ captured hh:mm:ss · 2s ━━
 {Reset/Reset/DIM} │ ⏺ Bash(git push origin main --force-with-lease){Reset/Reset/NONE}                              
 {Reset/Reset/DIM} │  Bash command{Reset/Reset/NONE}                                                                
@@ -748,6 +747,7 @@
 {Reset/Reset/DIM} │ {Reset/Reset/BOLD}   3. No, and tell Claude what to do differently{Reset/Reset/NONE}                             
 {Red/Reset/NONE} the screen changed; nothing sent{Reset/Reset/NONE}                                               
 {Reset/Reset/DIM} ›{Reset/Reset/NONE}                                                                              
+{Reset/Reset/NONE}                                                                                
 {Reset/Reset/BOLD}1-3 pick · esc back to board                                                    
 == full coloured 80
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · api › main · waiting 5h43m {Reset/Reset/DIM}━━━━ live · 1s · following ━━

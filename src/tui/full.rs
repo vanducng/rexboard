@@ -90,9 +90,10 @@ pub fn draw(frame: &mut Frame, app: &App, full: &Full, row: &Row, now: DateTime<
     let peek = app.peek.as_ref();
     let area = frame.area();
     let width = usize::from(area.width);
-    let [top, body, bottom] = Layout::vertical([
+    let [top, body, _gap, bottom] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(0),
+        Constraint::Length(super::view::FOOTER_GAP),
         Constraint::Length(1),
     ])
     .areas(area);
@@ -442,19 +443,20 @@ mod tests {
                 }
             };
             assert_eq!(rows[29], footer, "whole keys only");
-            assert_eq!(rows[28], "last line", "the newest line sits on the bottom");
+            assert_eq!(rows[28], "", "a blank row above the footer");
+            assert_eq!(rows[27], "last line", "the newest line sits on the bottom");
             assert!(
-                rows[27].starts_with("start x") && rows[27].ends_with("x…"),
+                rows[26].starts_with("start x") && rows[26].ends_with("x…"),
                 "cut, not wrapped, and marked: {}",
-                rows[27]
+                rows[26]
             );
             assert_eq!(
-                rows[27].width(),
+                rows[26].width(),
                 usize::from(width),
                 "full width, no 120 cap"
             );
-            assert_eq!(rows[26], "peek line 60");
-            assert_eq!(rows[1], "peek line 35", "28 rows of body");
+            assert_eq!(rows[25], "peek line 60");
+            assert_eq!(rows[1], "peek line 36", "27 rows of body");
             assert!(!text.contains(" end"), "{text}");
         }
     }
@@ -469,7 +471,7 @@ mod tests {
             text.lines().next().unwrap().contains("paused · G follows"),
             "{text}"
         );
-        assert_eq!(text.lines().nth(28), Some("peek line 199"));
+        assert_eq!(text.lines().nth(27), Some("peek line 199"));
         app.peeked("mini/seat-b", Ok(numbered(201)));
         let text = render(&app, 80, 30);
         assert!(
@@ -481,14 +483,14 @@ mod tests {
         );
         assert!(!text.contains("peek line 201"), "held while paused");
         press(&mut app, KeyCode::PageUp);
-        assert_eq!(render(&app, 80, 30).lines().nth(28), Some("peek line 171"));
+        assert_eq!(render(&app, 80, 30).lines().nth(27), Some("peek line 172"));
         crate::tui::app::testkit::key(
             &mut app,
             KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL),
         );
         assert_eq!(
-            render(&app, 80, 30).lines().nth(28),
-            Some("peek line 143"),
+            render(&app, 80, 30).lines().nth(27),
+            Some("peek line 145"),
             "ctrl-b pages too"
         );
         crate::tui::app::testkit::key(
@@ -496,8 +498,8 @@ mod tests {
             KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
         );
         assert_eq!(
-            render(&app, 80, 30).lines().nth(28),
-            Some("peek line 157"),
+            render(&app, 80, 30).lines().nth(27),
+            Some("peek line 158"),
             "ctrl-d half a page"
         );
         crate::tui::app::testkit::key(
@@ -505,8 +507,8 @@ mod tests {
             KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL),
         );
         assert_eq!(
-            render(&app, 80, 30).lines().nth(28),
-            Some("peek line 156"),
+            render(&app, 80, 30).lines().nth(27),
+            Some("peek line 157"),
             "ctrl-y a line"
         );
         press(&mut app, KeyCode::Char('g'));
@@ -517,7 +519,7 @@ mod tests {
         press(&mut app, KeyCode::Char('G'));
         let text = render(&app, 80, 30);
         assert_eq!(
-            text.lines().nth(28),
+            text.lines().nth(27),
             Some("peek line 201"),
             "follows the newest read"
         );
@@ -536,7 +538,7 @@ mod tests {
                 .ends_with(" rex timed out · 1s old · retrying ━━"),
             "{text}"
         );
-        assert_eq!(text.lines().nth(28), Some("peek line 40"));
+        assert_eq!(text.lines().nth(27), Some("peek line 40"));
         app.peeked("mini/seat-b", Ok(numbered(41)));
         let text = render(&app, 80, 30);
         assert!(

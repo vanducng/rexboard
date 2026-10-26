@@ -8,9 +8,10 @@ use unicode_width::UnicodeWidthStr;
 
 use ratatui::crossterm::event::KeyCode;
 
-use super::app::{App, Item, Link, Spot};
+use super::app::{App, CardDrawn, Item, Link, Spot};
 use super::columns::{Col, Columns, Sort, Tier, Tone, column_of, tier};
 use super::keys::{self, Act};
+use super::prefs::CardHeight;
 use super::status::ALL;
 use super::theme;
 use super::views::{Bucket, Key, View};
@@ -76,6 +77,7 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
         return super::full::draw(frame, app, full, row, now);
     }
     let area = frame.area();
+    app.card_drawn.set(CardDrawn::default());
     let card = app.card_shown();
     let ruled = !card && tier(area.width) != Tier::Wide && area.height >= 20;
     let [top, _gap, body, above_footer, bottom] = Layout::vertical([
@@ -98,28 +100,37 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
         list(frame, list_area, app, area, now);
     }
     if height > 0 {
-        let mut lines = super::card::lines(app, now, usize::from(body.width), usize::from(height));
-        // A card shorter than its rows sits on the footer, so no dead band opens above it.
-        if app.answer.is_none() {
-            let gap = usize::from(height).saturating_sub(lines.len());
-            lines.splice(0..0, std::iter::repeat_n(Line::default(), gap));
-        }
+        let room = card_area.height.saturating_sub(FOOTER_GAP);
+        let lines = super::card::lines(app, now, usize::from(body.width), usize::from(room));
+        let card_area = Rect {
+            height: room,
+            ..card_area
+        };
         frame.render_widget(Paragraph::new(lines), card_area);
+        let mut drawn = app.card_drawn.get();
+        if drawn.last > 0 {
+            (drawn.top, drawn.bottom) = (card_area.y, card_area.bottom());
+            app.card_drawn.set(drawn);
+        }
     }
     frame.render_widget(rule_line(above_footer.width), above_footer);
     footer(frame, bottom, app);
 }
 
-/// The card's rows: at least 8 and 40% of the body, more for the key table
-/// or a blocked row's ask, which is never cut, but always leaving the list 3 rows under its column
-/// header, when it has one.
+/// The blank rows between the card and the footer, taken from the card's own height.
+pub const FOOTER_GAP: u16 = 1;
+
+/// The card's rows: the same for every row, so the list holds still under the selection, its
+/// text scrolling inside it; the key table's own rows; or for answer mode, enough to show every
+/// option. Always leaving the list 3 rows under its column header, when it has one.
 fn card_height(app: &App, now: DateTime<Utc>, body: Rect, headed: bool) -> u16 {
     let most = body.height.saturating_sub(LIST_FLOOR + u16::from(headed));
     if let Some(answer) = &app.answer {
         let lines = |rows: u16| {
-            super::card::lines(app, now, usize::from(body.width), usize::from(rows)).len() as u16
+            let room = usize::from(rows.saturating_sub(FOOTER_GAP));
+            super::card::lines(app, now, usize::from(body.width), room).len() as u16 + FOOTER_GAP
         };
-        let mut height = (body.height * 2 / 5).max(8).max(lines(most)).min(most);
+        let mut height = fixed_height(app, body).max(lines(most)).min(most);
         // A digit picks only an option the card drew, so the card takes rows from the list,
         // all of them if it must, until every option shows.
         while height < body.height {
@@ -131,18 +142,23 @@ fn card_height(app: &App, now: DateTime<Utc>, body: Rect, headed: bool) -> u16 {
         }
         return height;
     }
-    let base = (body.height * 2 / 5).max(8);
     // The key table takes only its own rows, so it sits on the footer and the list keeps the rest.
     if app.keys {
-        return (super::card::lines(app, now, usize::from(body.width), 0).len() as u16).min(most);
+        let table = super::card::lines(app, now, usize::from(body.width), 0).len() as u16;
+        return (table + FOOTER_GAP).min(most);
     }
-    let asks = app.current().is_some_and(|row| row.pane.state == "blocked");
-    let need = if asks {
-        super::card::lines(app, now, usize::from(body.width), 0).len() as u16
-    } else {
-        0
+    fixed_height(app, body).min(most)
+}
+
+/// tui.json's `card_height`: its rows, or its percent of the body and at least 8; 40% by default.
+fn fixed_height(app: &App, body: Rect) -> u16 {
+    let percent = match app.card_height {
+        Some(CardHeight::Rows(rows)) => return rows,
+        Some(CardHeight::Percent(percent)) => percent,
+        None => 40,
     };
-    base.max(need).min(most)
+    let rows = u32::from(body.height) * u32::from(percent) / 100;
+    u16::try_from(rows).unwrap_or(u16::MAX).max(8)
 }
 
 /// While a prefix waits for its second key, which-key style: `g… g top · t next view …`, cut to
@@ -1287,7 +1303,7 @@ mod tests {
     }
 
     #[test]
-    fn the_key_table_sits_on_the_footer_and_the_list_keeps_the_rest() {
+    fn the_key_table_sits_a_blank_row_above_the_footer_and_the_list_keeps_the_rest() {
         let mut app = fuller();
         press(&mut app, KeyCode::Char('?'));
         for (width, height) in [(80u16, 30u16), (140, 60), (200, 60)] {
@@ -1297,11 +1313,12 @@ mod tests {
                 .iter()
                 .position(|l| l.starts_with(" keys"))
                 .expect(&text);
-            let table = &lines[title + 1..lines.len() - 1];
+            let table = &lines[title + 1..lines.len() - 2];
             assert!(
                 !table.is_empty() && table.iter().all(|l| !l.trim().is_empty()),
-                "{width}x{height}: the table runs down to the footer:\n{text}"
+                "{width}x{height}: the table runs down to the row above the footer:\n{text}"
             );
+            assert_eq!(lines[lines.len() - 2], "", "{width}x{height}:\n{text}");
             assert_eq!(
                 list_rows(&text.replace(" keys", "━━")),
                 title - 3,

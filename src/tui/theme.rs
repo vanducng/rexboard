@@ -26,8 +26,10 @@ pub const LINE: &str = "─";
 /// After a group header's title.
 pub const GROUP_FILL: &str = "┄";
 pub const FOLDED: &str = "▸ ";
-/// Before the count of rows below the list.
+/// Before the count of rows below the list, or below the card's text.
 pub const MORE: &str = "↓";
+/// Before the count of the card's lines scrolled off its top.
+pub const ABOVE: &str = "↑";
 /// The end of a prompt's text.
 pub const CURSOR: &str = "▏";
 /// Before answer mode's reply line.

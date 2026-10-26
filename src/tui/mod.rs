@@ -50,6 +50,7 @@ fn start_app(pick: bool) -> App {
     app.hidden = prefs.detail_hidden;
     app.motion = prefs.motion;
     app.icons = prefs.icons;
+    app.card_height = prefs.card_height;
     app.nerd = match std::env::var("REXBOARD_ICONS").as_deref() {
         Ok("nerd") => true,
         Ok("text") => false,
@@ -230,8 +231,8 @@ fn mouse_capture(out: &mut impl std::io::Write, on: bool) -> std::io::Result<()>
 fn mouse(app: &mut App, event: MouseEvent) -> bool {
     match event.kind {
         MouseEventKind::Down(MouseButton::Left) => app.click(event.column, event.row),
-        MouseEventKind::ScrollUp => app.scroll(true),
-        MouseEventKind::ScrollDown => app.scroll(false),
+        MouseEventKind::ScrollUp => app.scroll(event.row, true),
+        MouseEventKind::ScrollDown => app.scroll(event.row, false),
         _ => return false,
     }
     true
