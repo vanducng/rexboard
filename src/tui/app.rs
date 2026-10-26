@@ -174,6 +174,11 @@ impl App {
     /// New rows from serve. The selection follows its key; a row that newly needs you opens
     /// NEEDS YOU if it was folded.
     pub fn set_rows(&mut self, all: Vec<Row>, hosts: BTreeMap<String, String>) {
+        let viewed = self
+            .full
+            .as_ref()
+            .and_then(|full| self.rows.iter().find(|row| row.key == full.key))
+            .map(crate::output::name);
         self.panes = all.len();
         self.rows = all.into_iter().filter(|row| row.pane.is_agent()).collect();
         self.hosts = hosts;
@@ -208,6 +213,10 @@ impl App {
             && !self.rows.iter().any(|row| row.key == full.key)
         {
             self.full = None;
+            self.say(format!(
+                "{} left the board",
+                viewed.unwrap_or_else(|| "the pane".to_owned())
+            ));
         }
         self.keep_selection_visible();
     }
@@ -552,11 +561,15 @@ impl App {
             KeyCode::PageUp => self.full_scroll(page),
             KeyCode::Char('g') | KeyCode::Home => self.full_scroll(isize::MAX),
             KeyCode::Char('G') | KeyCode::End => self.full_scroll(isize::MIN),
-            KeyCode::Char('a') => {
-                self.full = None;
-                return self.start_answer();
+            // The filter or a fold may have moved the board's selection off the viewed row.
+            KeyCode::Char('a') | KeyCode::Enter => {
+                self.selected = self.full.as_ref().map(|full| Spot::Row(full.key.clone()));
+                return if key.code == KeyCode::Enter {
+                    self.jump()
+                } else {
+                    self.start_answer()
+                };
             }
-            KeyCode::Enter => return self.jump(),
             _ => {}
         }
         None
@@ -1008,6 +1021,79 @@ fn read(row: &Row) -> Effect {
 pub mod tests {
     use super::*;
     use crate::tui::columns::{Col, Dir};
+
+    /// seat-b blocked and two working rows, with the status filter on working and the full
+    /// view open on pi, which then finishes and leaves the filter.
+    fn viewing_pi_as_it_leaves_the_filter() -> App {
+        let mut app = App::default();
+        let mut rows = rows();
+        rows.push(row("mini/pi", "working", "working", true));
+        app.set_rows(rows.clone(), hosts());
+        press(&mut app, KeyCode::Char('f'));
+        press(&mut app, KeyCode::Char('w'));
+        app.selected = Some(Spot::Row("mini/pi".into()));
+        press(&mut app, KeyCode::Char(' '));
+        rows.retain(|row| row.key != "mini/pi");
+        rows.push(row("mini/pi", "done", "needs_you", false));
+        app.set_rows(rows, hosts());
+        assert_eq!(
+            app.full.as_ref().map(|full| full.key.as_str()),
+            Some("mini/pi")
+        );
+        assert_ne!(
+            app.selected,
+            Some(Spot::Row("mini/pi".into())),
+            "the board moved on"
+        );
+        app
+    }
+
+    #[test]
+    fn full_view_a_and_enter_act_on_the_viewed_row_not_the_boards_selection() {
+        let mut app = viewing_pi_as_it_leaves_the_filter();
+        let effect = press(&mut app, KeyCode::Char('a'));
+        assert!(
+            matches!(effect, Some(Effect::Read { ref key, .. }) if key == "mini/pi"),
+            "{effect:?}"
+        );
+        assert_eq!(
+            app.answer.as_ref().map(|a| a.row.key.as_str()),
+            Some("mini/pi")
+        );
+        let mut app = viewing_pi_as_it_leaves_the_filter();
+        let effect = press(&mut app, KeyCode::Enter);
+        assert!(
+            matches!(effect, Some(Effect::Jump(ref row)) if row.key == "mini/pi"),
+            "{effect:?}"
+        );
+    }
+
+    #[test]
+    fn full_view_a_answers_the_viewed_row_when_its_group_is_folded() {
+        let mut app = app();
+        app.selected = Some(Spot::Row("mini/seat-b".into()));
+        press(&mut app, KeyCode::Char(' '));
+        app.folded.insert(Bucket::Status(Group::Working));
+        let mut rows = rows();
+        rows[0] = row("mini/seat-b", "working", "working", false);
+        app.set_rows(rows, hosts());
+        assert!(!matches!(&app.selected, Some(Spot::Row(key)) if key == "mini/seat-b"));
+        let effect = press(&mut app, KeyCode::Char('a'));
+        assert!(
+            matches!(effect, Some(Effect::Read { ref key, .. }) if key == "mini/seat-b"),
+            "{effect:?}"
+        );
+    }
+
+    #[test]
+    fn full_view_says_when_its_row_leaves_the_board() {
+        let mut app = app();
+        app.selected = Some(Spot::Row("mini/seat-b".into()));
+        press(&mut app, KeyCode::Char(' '));
+        app.set_rows(rows().split_off(1), hosts());
+        assert!(app.full.is_none());
+        assert_eq!(app.toast(), Some("seat-b left the board"));
+    }
 
     pub fn row(key: &str, state: &str, group: &str, seen: bool) -> Row {
         let (host, block) = key.split_once('/').unwrap();

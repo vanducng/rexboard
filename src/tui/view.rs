@@ -1340,8 +1340,8 @@ mod tests {
             assert_eq!(rows[29], footer, "whole keys only");
             assert_eq!(rows[28], "last line", "the newest line sits on the bottom");
             assert!(
-                rows[27].starts_with("start x"),
-                "cut, not wrapped: {}",
+                rows[27].starts_with("start x") && rows[27].ends_with("x…"),
+                "cut, not wrapped, and marked: {}",
                 rows[27]
             );
             assert_eq!(
@@ -1367,10 +1367,15 @@ mod tests {
         );
         assert_eq!(text.lines().nth(28), Some("peek line 199"));
         app.peeked("mini/seat-b", Ok(numbered(201)));
+        let text = render(&app, 80, 30);
         assert!(
-            !render(&app, 80, 30).contains("peek line 201"),
-            "held while paused"
+            text.lines()
+                .next()
+                .unwrap()
+                .contains(" paused · newer below · G follows ━━"),
+            "{text}"
         );
+        assert!(!text.contains("peek line 201"), "held while paused");
         press(&mut app, KeyCode::PageUp);
         assert_eq!(render(&app, 80, 30).lines().nth(28), Some("peek line 171"));
         press(&mut app, KeyCode::Char('g'));
@@ -1396,7 +1401,7 @@ mod tests {
             text.lines()
                 .next()
                 .unwrap()
-                .ends_with(" rex timed out · retrying ━━"),
+                .ends_with(" rex timed out · 1s old · retrying ━━"),
             "{text}"
         );
         assert_eq!(text.lines().nth(28), Some("peek line 40"));
@@ -1481,6 +1486,18 @@ mod tests {
             render(&app, 80, 30).lines().last(),
             Some("that pane is gone")
         );
+    }
+
+    #[test]
+    fn full_view_cuts_a_long_failure_so_the_name_keeps_its_room() {
+        let mut app = full_of(numbered(3));
+        app.peeked(
+            "mini/seat-b",
+            Err(format!("peek failed: {}", "detail ".repeat(20))),
+        );
+        let bar = render(&app, 80, 30).lines().next().unwrap().to_owned();
+        assert!(bar.contains("seat-b"), "{bar}");
+        assert!(bar.ends_with("… · 1s old · retrying ━━"), "{bar}");
     }
 
     #[test]

@@ -125,12 +125,12 @@ space back · j/k scroll · a answer · enter jump · g/G top, bottom · pgup/pg
 
 A narrow terminal drops whole keys from the end of the footer: 80 columns ends at `g/G top, bottom`.
 
-- **Lines:** the end of the pane as tail.lua reads it: its last 48 KiB, the last 200 lines kept, escape sequences removed, so text only and no colours. Each line keeps the pane's own layout at any width: a line longer than the terminal is cut at the edge, never wrapped, and nothing caps the width.
+- **Lines:** the end of the pane as tail.lua reads it: its last 48 KiB, the last 200 lines kept, escape sequences removed, so text only and no colours. Each line keeps the pane's own layout at any width: a line longer than the terminal is cut at the edge and ends in a dim `…`, never wrapped, and nothing caps the width. `enter` shows it whole in the pane.
 - **Live:** while the view is open it reads the pane again every 2 seconds, counted from when the last read was asked, and asks again only once that read is back, so a slow host is never asked twice. Only the open row is read. Closing the view stops the reads, and the board's own tail of a blocked row waits while it is open. The bar says `live · 1s · following`, how long ago the last read came back.
-- **Failed reads:** a host that does not answer in 3 seconds, or any failed read, leaves the last lines up and puts the reason in the bar, `the pane did not answer within 3s · retrying`. With no lines yet, the reason shows in red in the body.
-- **Scroll:** the view follows the bottom. `k` or `up`, `pgup`, `g` or `home`, and the mouse wheel in the table view move up and pause it: the bar says `paused · G follows`, and the lines hold still while reads go on. `j` or `down` and `pgdn` move back down, and reaching the bottom, or `G` or `end`, follows again with the newest read.
-- **Keys:** `a` leaves for [answer mode](#answer-mode) on the same row, `enter` jumps to the pane, `space` or `esc` returns to the board, and `q` or `ctrl+c` quits. Other keys do nothing while the view is open. A jump's progress, a failed jump's reason and a passing message take the footer as they do on the board.
-- The view closes by itself when its row leaves the board.
+- **Failed reads:** a host that does not answer in 3 seconds, or any failed read, leaves the last lines up and puts the reason and their age in the bar, `the pane did not answer within 3s · 2m old · retrying`. The reason is cut to half the bar, so the row's name keeps its room. With no lines yet, the bar says only `… · retrying` and the reason shows whole in red in the body.
+- **Scroll:** the view follows the bottom. `k` or `up`, `pgup`, `g` or `home`, and the mouse wheel in the table view move up and pause it: the bar says `paused · G follows`, or `paused · newer below · G follows` once a read has brought lines the screen is not showing, and the lines hold still while reads go on. `j` or `down` and `pgdn` move back down, and reaching the bottom, or `G` or `end`, follows again with the newest read.
+- **Keys:** `a` leaves for [answer mode](#answer-mode) on the row the view shows, and `enter` jumps to its pane, even when a filter or a folded group has moved the board's selection since; `space` or `esc` returns to the board, and `q` or `ctrl+c` quits. Other keys do nothing while the view is open. A jump's progress, a failed jump's reason and a passing message take the footer as they do on the board.
+- The view closes by itself when its row leaves the board, and the footer says so: `seat-b left the board`.
 
 ## Answer mode
 

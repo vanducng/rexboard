@@ -108,7 +108,12 @@ pub fn draw(frame: &mut Frame, app: &App, full: &Full, row: &Row, now: DateTime<
     ])
     .areas(area);
     frame.render_widget(
-        Paragraph::new(card::bar(row, Some(right(full, peek, now)), now, width)),
+        Paragraph::new(card::bar(
+            row,
+            Some(right(full, peek, now, width)),
+            now,
+            width,
+        )),
         top,
     );
     let all = lines(full, peek);
@@ -116,15 +121,7 @@ pub fn draw(frame: &mut Frame, app: &App, full: &Full, row: &Row, now: DateTime<
     let end = all.len().saturating_sub(full.back);
     let mut shown: Vec<Line<'static>> = all[end.saturating_sub(room)..end]
         .iter()
-        // Cut, not wrapped, so the pane's own layout holds.
-        .map(|line| {
-            Line::raw(
-                chop(line, width.max(1))
-                    .into_iter()
-                    .next()
-                    .unwrap_or_default(),
-            )
-        })
+        .map(|line| cut(line, width))
         .collect();
     if all.is_empty() {
         shown.push(match &full.error {
@@ -138,6 +135,16 @@ pub fn draw(frame: &mut Frame, app: &App, full: &Full, row: &Row, now: DateTime<
         |(text, style)| Line::styled(fit(text, width), style),
     );
     frame.render_widget(Paragraph::new(footer), bottom);
+}
+
+/// A line in `width` columns: cut, not wrapped, so the pane's own layout holds, and a cut one
+/// ends in the board's dim `…`.
+fn cut(line: &str, width: usize) -> Line<'static> {
+    if line.width() <= width {
+        return Line::raw(line.to_owned());
+    }
+    let kept = chop(line, width.saturating_sub(1).max(1)).swap_remove(0);
+    Line::from(vec![Span::raw(kept), Span::styled("…", theme::dim())])
 }
 
 fn keys(width: usize) -> Line<'static> {
@@ -157,22 +164,33 @@ fn keys(width: usize) -> Line<'static> {
     Line::from(spans)
 }
 
-/// `live · 1s · following`, `paused`, or why the last read failed.
-fn right(full: &Full, peek: Option<&Peek>, now: DateTime<Utc>) -> String {
-    let at = peek
+/// `live · 1s · following`; while paused, whether newer lines came; after a failed read, why,
+/// cut so the row's name keeps its room, and how old the lines on screen are.
+fn right(full: &Full, peek: Option<&Peek>, now: DateTime<Utc>, width: usize) -> String {
+    let Some((peek, at)) = peek
         .filter(|peek| peek.key == full.key)
-        .and_then(|peek| peek.at);
-    let Some(at) = at else {
+        .and_then(|peek| Some((peek, peek.at?)))
+    else {
         return "capturing…".to_owned();
     };
-    let mode = if full.following() {
-        "following"
+    let old = age(&at.to_rfc3339(), now);
+    if let Some(why) = &full.error {
+        let rest = if matches!(peek.lines, Some(Ok(_))) {
+            format!(" · {old} old · retrying")
+        } else {
+            " · retrying".to_owned()
+        };
+        let room = (width / 2).saturating_sub(rest.width());
+        return format!("{}{rest}", fit(why, room).trim_end());
+    }
+    if full.following() {
+        return format!("live · {old} · following");
+    }
+    let newer = matches!((&peek.lines, &full.held), (Some(Ok(lines)), Some(held)) if lines != held);
+    if newer {
+        "paused · newer below · G follows".to_owned()
     } else {
-        "paused · G follows"
-    };
-    match &full.error {
-        Some(why) => format!("{why} · retrying"),
-        None => format!("live · {} · {mode}", age(&at.to_rfc3339(), now)),
+        "paused · G follows".to_owned()
     }
 }
 
