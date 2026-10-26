@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/vanducng/rexboard/compare/v0.6.0...v0.6.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **tui:** drop the pane tail after an answer ([#44](https://github.com/vanducng/rexboard/issues/44)) ([920a5ef](https://github.com/vanducng/rexboard/commit/920a5ef83934a82997833c05bcfb8826b741e76c))
+
 ## [0.6.0](https://github.com/vanducng/rexboard/compare/v0.5.0...v0.6.0) (2026-10-26)
 
 
