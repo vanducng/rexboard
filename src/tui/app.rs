@@ -5,11 +5,15 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 
+use super::answer::{Answer, Step};
 use super::columns::{Columns, Sort, by_letter};
+use super::screen::Screen;
 use super::status::Status;
 use super::views::{Bucket, View, arrange, bucket, views};
 use crate::board::{Group, Row};
-use crate::output::{labels, path};
+use crate::output::{labels, name, path};
+use crate::pane::Pane;
+use crate::send::{Action, Expect};
 
 const TOAST: Duration = Duration::from_secs(3);
 
@@ -33,6 +37,21 @@ pub enum Effect {
         session: String,
         block: String,
     },
+    /// Read a pane for answer mode: its tail, and its input line with styles.
+    Read {
+        key: String,
+        host: String,
+        session: String,
+        block: String,
+    },
+    /// Answer a pane, if it still shows `expect`; `what` names the answer.
+    Send {
+        key: String,
+        pane: Box<Pane>,
+        expect: Expect,
+        action: Action,
+        what: String,
+    },
     /// Mark these unseen `done` rows seen.
     SeenAll(Vec<String>),
     /// Go to this row's pane.
@@ -41,6 +60,16 @@ pub enum Effect {
     SavePrefs(super::prefs::Prefs),
     Reconnect,
     Quit,
+}
+
+/// An answer the board sent, which the card's bar names.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Sent {
+    pub key: String,
+    /// `sent 1 (Yes) → seat-b 11:22:04`
+    pub text: String,
+    /// The report the answer was checked against.
+    pub report: Option<String>,
 }
 
 /// One line of the list: a group header or a row (an index into `App::rows`).
@@ -132,6 +161,12 @@ pub struct App {
     /// Why the last jump failed, until the next key.
     pub failed: Option<String>,
     needs: BTreeSet<String>,
+    /// `a`: answering one row; the board's keys are off.
+    pub answer: Option<Answer>,
+    /// The last answer that went out, until its row needs you again.
+    pub sent: Option<Sent>,
+    /// The board's own pane (`REX_BLOCK`), which it never answers.
+    pub own: Option<String>,
 }
 
 impl App {
@@ -152,6 +187,22 @@ impl App {
             self.folded.remove(&Bucket::Status(Group::NeedsYou));
         }
         self.needs = needs;
+        // A row that needs you again with a newer report asks something new; the old answer
+        // must not sit on it.
+        if let Some(sent) = &self.sent {
+            let asks_again = |row: &Row| {
+                row.group == Group::NeedsYou
+                    && newer(row.pane.updated_at.as_deref(), sent.report.as_deref())
+            };
+            let stands = self
+                .rows
+                .iter()
+                .find(|row| row.key == sent.key)
+                .is_some_and(|row| !asks_again(row));
+            if !stands {
+                self.sent = None;
+            }
+        }
         self.keep_selection_visible();
     }
 
@@ -374,7 +425,12 @@ impl App {
     /// Whether the card shows under the list: unless `c` hid it, and always while it is zoomed or
     /// holds the key table or a failed jump's reason, which only it shows whole. `pick` has none.
     pub fn card_shown(&self) -> bool {
-        !self.pick && (!self.hidden || self.keys || self.zoom || self.failed.is_some())
+        !self.pick
+            && (!self.hidden
+                || self.keys
+                || self.zoom
+                || self.failed.is_some()
+                || self.answer.is_some())
     }
 
     fn prefs(&self) -> super::prefs::Prefs {
@@ -398,7 +454,7 @@ impl App {
 
     /// A tail for a blocked row whose card has shown for SETTLE, once per report.
     pub fn auto_tail(&mut self, now: Instant) -> Option<Effect> {
-        let (key, since) = self.shown.as_ref()?;
+        let (key, since) = self.shown.as_ref().filter(|_| self.answer.is_none())?;
         let row = self.current().filter(|row| row.key == *key)?;
         if now.duration_since(*since) < SETTLE || row.pane.state != "blocked" {
             return None;
@@ -495,7 +551,7 @@ impl App {
 
     /// Whether a prompt (`/`, `:` or `f`) has the keyboard, so the mouse leaves the list alone.
     fn prompting(&self) -> bool {
-        self.filtering || self.commanding || self.picking_status
+        self.filtering || self.commanding || self.picking_status || self.answer.is_some()
     }
 
     /// The wheel moves the selection, as `k` and `j` do, but stops at the ends; with the mouse
@@ -522,6 +578,9 @@ impl App {
 
     pub fn handle(&mut self, key: KeyEvent) -> Option<Effect> {
         self.failed = None;
+        if self.answer.is_some() {
+            return self.answer_key(key, Instant::now());
+        }
         if self.commanding {
             match key.code {
                 KeyCode::Esc => self.commanding = false,
@@ -660,6 +719,7 @@ impl App {
                 return self.tail();
             }
             KeyCode::Tab if !self.pick => return self.next_waiting(Instant::now()),
+            KeyCode::Char('a') if !self.pick => return self.start_answer(),
             KeyCode::Enter if self.going.is_some() => self.say("a jump is already running"),
             KeyCode::Enter => {
                 let row = self.current()?.clone();
@@ -692,6 +752,119 @@ impl App {
         None
     }
 
+    /// `a`: answer mode on the current row, once a fresh read of its pane comes back.
+    fn start_answer(&mut self) -> Option<Effect> {
+        let Some(row) = self.current() else {
+            self.say("select a row to answer it");
+            return None;
+        };
+        if row.pane.host == "local" && self.own.as_deref() == Some(row.pane.block_id.as_str()) {
+            self.say("that is the board's own pane");
+            return None;
+        }
+        let Some(updated_at) = row.pane.updated_at.clone() else {
+            self.say("this pane reports no status, so it cannot be answered here · enter jumps");
+            return None;
+        };
+        let row = row.clone();
+        self.zoom = false;
+        self.keys = false;
+        let effect = read(&row);
+        self.answer = Some(Answer::new(row, updated_at));
+        Some(effect)
+    }
+
+    fn answer_key(&mut self, key: KeyEvent, now: Instant) -> Option<Effect> {
+        let answer = self.answer.as_mut()?;
+        match answer.key(key, now) {
+            Step::Stay => None,
+            Step::Leave => {
+                self.answer = None;
+                None
+            }
+            Step::Next => {
+                self.answer = None;
+                self.next_waiting(now)
+            }
+            Step::Send(action) => {
+                let expect = answer.expect()?;
+                let what = answer.describe(&action);
+                answer.sending = Some(what.clone());
+                Some(Effect::Send {
+                    key: answer.row.key.clone(),
+                    pane: Box::new(answer.row.pane.clone()),
+                    expect,
+                    action,
+                    what,
+                })
+            }
+        }
+    }
+
+    /// A read for answer mode came back.
+    pub fn screen(&mut self, key: &str, result: Result<Screen, String>) {
+        let Some(answer) = self.answer.as_mut().filter(|a| a.row.key == key) else {
+            return;
+        };
+        match result {
+            Ok(screen) => {
+                // Text typed for an input line must never meet a dialog.
+                if !screen.options.is_empty() {
+                    answer.input.reset();
+                }
+                answer.shown.set(0);
+                answer.screen = Some(screen);
+                answer.captured = Some(chrono::Utc::now());
+            }
+            Err(why) => {
+                answer.screen = Some(Screen::default());
+                answer.error = Some(why);
+            }
+        }
+    }
+
+    /// A send finished. Sent: back to the board, with the card's bar saying so. Refused: stay,
+    /// with the reason, and read the pane again, against the row's latest report.
+    pub fn sent(&mut self, key: &str, what: &str, result: Result<(), String>) -> Option<Effect> {
+        let latest = self.rows.iter().find(|row| row.key == key).cloned();
+        let answering = self.answer.as_ref().is_some_and(|a| a.row.key == key);
+        let why = match result {
+            Ok(()) => {
+                let report = match self.answer.take_if(|a| a.row.key == key) {
+                    Some(answer) => Some(answer.updated_at),
+                    None => latest.as_ref().and_then(|row| row.pane.updated_at.clone()),
+                };
+                let to = latest.as_ref().map_or_else(|| key.to_owned(), name);
+                let at = chrono::Local::now().format("%H:%M:%S");
+                self.sent = Some(Sent {
+                    key: key.to_owned(),
+                    text: format!("sent {what} → {to} {at}"),
+                    report,
+                });
+                return None;
+            }
+            Err(why) if !answering => {
+                self.say(why);
+                return None;
+            }
+            Err(why) => why,
+        };
+        let answer = self.answer.as_mut()?;
+        if let Some(row) = latest
+            && let Some(at) = row.pane.updated_at.clone()
+        {
+            answer.updated_at = at;
+            answer.row = row;
+        }
+        answer.sending = None;
+        answer.input.reset();
+        answer.armed = None;
+        answer.screen = None;
+        answer.captured = None;
+        answer.error = Some(why);
+        Some(read(&answer.row))
+    }
+
     /// `ctrl+s`: every unseen `done` row the list shows, to be marked seen.
     fn seen_all(&mut self) -> Option<Effect> {
         let keys: Vec<String> = self
@@ -716,6 +889,24 @@ impl App {
         {
             self.selected = spots.first().cloned();
         }
+    }
+}
+
+/// Whether report `a` came after `b`.
+fn newer(a: Option<&str>, b: Option<&str>) -> bool {
+    let at = |s: Option<&str>| s.and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok());
+    match (at(a), at(b)) {
+        (Some(a), Some(b)) => a > b,
+        _ => a != b,
+    }
+}
+
+fn read(row: &Row) -> Effect {
+    Effect::Read {
+        key: row.key.clone(),
+        host: row.pane.host.clone(),
+        session: row.pane.session_id.clone(),
+        block: row.pane.block_id.clone(),
     }
 }
 
@@ -937,6 +1128,228 @@ pub mod tests {
         press(&mut app, KeyCode::Esc);
         assert!(app.folded.is_empty());
         assert!(app.current().is_some());
+    }
+
+    const DIALOG: &str = " ❯ 1. Yes\n   2. Yes, and don't ask again\n   3. No\n Esc to cancel\n";
+
+    /// `a` on the selected row, with its pane read back as `text`.
+    fn answering(app: &mut App, text: &str) -> String {
+        let Some(Effect::Read { key, .. }) = press(app, KeyCode::Char('a')) else {
+            panic!("a reads the pane first");
+        };
+        app.screen(&key, Ok(Screen::parse(text, None)));
+        drawn(app);
+        key
+    }
+
+    /// The card drawn as the board draws it, which tells answer mode the options on screen.
+    fn drawn(app: &App) {
+        if let Some(answer) = &app.answer {
+            answer.lines(chrono::Utc::now(), 120, 40);
+        }
+    }
+
+    #[test]
+    fn answer_a_reads_the_pane_then_a_digit_sends_to_the_row_it_was_opened_on() {
+        let mut app = app();
+        assert_eq!(
+            press(&mut app, KeyCode::Char('a')),
+            Some(Effect::Read {
+                key: "mini/seat-b".into(),
+                host: "mini".into(),
+                session: "session:api".into(),
+                block: "seat-b".into(),
+            })
+        );
+        assert_eq!(
+            press(&mut app, KeyCode::Char('1')),
+            None,
+            "waits for the read"
+        );
+        app.screen("mini/seat-b", Ok(Screen::parse(DIALOG, None)));
+        drawn(&app);
+        let mut moved = rows();
+        moved.reverse();
+        app.set_rows(moved, hosts());
+        let Some(Effect::Send {
+            key,
+            pane,
+            expect,
+            action,
+            what,
+        }) = press(&mut app, KeyCode::Char('1'))
+        else {
+            panic!("1 sends");
+        };
+        assert_eq!((key.as_str(), pane.host.as_str()), ("mini/seat-b", "mini"));
+        assert_eq!(action, Action::Pick('1'));
+        assert_eq!(what, "1 (Yes)");
+        assert_eq!(expect.updated_at, "2026-01-01T00:00:00Z");
+        assert!(expect.fingerprint.starts_with("\n ❯ 1. Yes"));
+        assert_eq!(expect.title, None, "a native row has no title check");
+    }
+
+    #[test]
+    fn answer_board_keys_are_off_and_ctrl_c_leaves_without_quitting() {
+        let mut app = app();
+        answering(&mut app, "────\n❯\u{a0}\n");
+        for code in [
+            KeyCode::Char('j'),
+            KeyCode::Char('s'),
+            KeyCode::Char('1'),
+            KeyCode::Char('f'),
+            KeyCode::Char(':'),
+            KeyCode::Char('q'),
+        ] {
+            assert_eq!(press(&mut app, code), None, "{code:?}");
+        }
+        assert_eq!(selected(&app), "mini/seat-b");
+        assert!(!app.filtering && !app.picking_status && !app.commanding);
+        assert_eq!(app.answer.as_ref().unwrap().input.value(), "js1f:q");
+        press(&mut app, KeyCode::Esc);
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert_eq!(app.handle(ctrl_c), None, "not Quit");
+        assert!(app.answer.is_none());
+        assert_eq!(
+            app.handle(ctrl_c),
+            Some(Effect::Quit),
+            "on the board it quits"
+        );
+    }
+
+    #[test]
+    fn answer_tab_leaves_for_the_next_row_that_needs_you() {
+        let mut app = app();
+        answering(&mut app, DIALOG);
+        assert_eq!(press(&mut app, KeyCode::Tab), None);
+        assert!(app.answer.is_none());
+        assert_eq!(selected(&app), "local/claude");
+    }
+
+    #[test]
+    fn answer_is_refused_on_the_boards_own_pane_and_a_pane_with_no_record() {
+        let mut app = App::default();
+        let mut quiet = row("local/plain", "idle", "needs_you", false);
+        quiet.pane.updated_at = None;
+        app.set_rows(
+            vec![row("local/board", "idle", "needs_you", false), quiet],
+            hosts(),
+        );
+        app.own = Some("board".into());
+        assert_eq!(press(&mut app, KeyCode::Char('a')), None);
+        assert_eq!(app.toast(), Some("that is the board's own pane"));
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!(press(&mut app, KeyCode::Char('a')), None);
+        assert!(
+            app.toast()
+                .unwrap()
+                .starts_with("this pane reports no status")
+        );
+        assert!(app.answer.is_none());
+    }
+
+    #[test]
+    fn answer_a_refusal_keeps_the_mode_and_reads_again_against_the_newest_report() {
+        let mut app = app();
+        let key = answering(&mut app, DIALOG);
+        press(&mut app, KeyCode::Char('1'));
+        let mut newer = rows();
+        newer[0].pane.updated_at = Some("2026-01-01T00:00:09Z".into());
+        app.set_rows(newer, hosts());
+        let again = app.sent(
+            &key,
+            "1 (Yes)",
+            Err("the agent's status changed since it was read; nothing sent".into()),
+        );
+        assert!(matches!(again, Some(Effect::Read { .. })), "{again:?}");
+        let answer = app.answer.as_ref().expect("still answering");
+        assert_eq!(
+            answer.error.as_deref(),
+            Some("the agent's status changed since it was read; nothing sent")
+        );
+        assert_eq!(answer.updated_at, "2026-01-01T00:00:09Z");
+        assert!(answer.screen.is_none() && answer.sending.is_none());
+    }
+
+    #[test]
+    fn answer_text_typed_for_an_idle_prompt_never_reaches_a_dialog_that_replaced_it() {
+        let mut app = app();
+        let key = answering(&mut app, "────\n❯\u{a0}\n");
+        for c in "go ahead".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        assert!(matches!(
+            press(&mut app, KeyCode::Enter),
+            Some(Effect::Send {
+                action: Action::Text(_),
+                ..
+            })
+        ));
+        let why = "the agent's status changed since it was read; nothing sent";
+        assert!(matches!(
+            app.sent(&key, "\"go ahead\"", Err(why.into())),
+            Some(Effect::Read { .. })
+        ));
+        assert_eq!(
+            app.answer.as_ref().unwrap().input.value(),
+            "",
+            "a refusal clears it"
+        );
+        app.screen(&key, Ok(Screen::parse(DIALOG, None)));
+        assert_eq!(press(&mut app, KeyCode::Enter), None);
+        for c in "go ahead".chars() {
+            assert_eq!(press(&mut app, KeyCode::Char(c)), None);
+        }
+        assert_eq!(
+            app.answer.as_ref().unwrap().error.as_deref(),
+            Some("pick a number; this dialog takes no text")
+        );
+        assert_eq!(
+            press(&mut app, KeyCode::Enter),
+            None,
+            "no text into a dialog"
+        );
+    }
+
+    #[test]
+    fn answer_the_sent_line_lasts_until_the_row_needs_you_again() {
+        let mut app = app();
+        let key = answering(&mut app, DIALOG);
+        press(&mut app, KeyCode::Char('1'));
+        app.sent(&key, "1 (Yes)", Ok(()));
+        let report = |app: &mut App, state: &str, group: &str, at: &str| {
+            let mut all = rows();
+            all[0] = row("mini/seat-b", state, group, false);
+            all[0].pane.updated_at = Some(at.into());
+            app.set_rows(all, hosts());
+        };
+        report(&mut app, "blocked", "needs_you", "2026-01-01T00:00:00Z");
+        assert!(app.sent.is_some(), "the same report: kept");
+        report(&mut app, "working", "working", "2026-01-01T00:00:05Z");
+        assert!(
+            app.sent.is_some(),
+            "kept while the agent works on the answer"
+        );
+        report(&mut app, "blocked", "needs_you", "2026-01-01T00:01:00Z");
+        assert_eq!(app.sent, None, "a new ask drops it");
+    }
+
+    #[test]
+    fn answer_sent_returns_to_the_board_on_the_same_row_and_says_what_went() {
+        let mut app = app();
+        let key = answering(&mut app, DIALOG);
+        press(&mut app, KeyCode::Char('1'));
+        assert_eq!(app.sent(&key, "1 (Yes)", Ok(())), None);
+        assert!(app.answer.is_none());
+        assert_eq!(selected(&app), "mini/seat-b");
+        let sent = app.sent.clone().unwrap();
+        assert_eq!(sent.key, "mini/seat-b");
+        assert_eq!(sent.report.as_deref(), Some("2026-01-01T00:00:00Z"));
+        assert!(
+            sent.text.starts_with("sent 1 (Yes) → seat-b "),
+            "{}",
+            sent.text
+        );
     }
 
     #[test]

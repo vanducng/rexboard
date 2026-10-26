@@ -1,6 +1,7 @@
 -- Reads the end of one pane: `format` with a tiny max_bytes gives the size and a blob id, then
 -- `blob_read` reads only the last a.max_bytes. Rex renders the whole scrollback on its side, but
 -- only the tail crosses the wire. Defines `tail` only, so another script can reuse it.
+-- a.format is "text" when left out; "vt" keeps the styles, as answer mode's draft check needs.
 -- Returns { ok = true, text, total, cut }, or { ok = false, step, error }.
 function tail(a)
   local term = "com.superlogical.terminal"
@@ -15,7 +16,7 @@ function tail(a)
   local _, aerr = rex.call("session.attach", { session_id = a.session_id })
   if aerr then return fail("session.attach", aerr) end
   -- max_bytes 0 would mean everything.
-  local f, ferr = call("format", { format = "text", unwrap = true, max_bytes = 1 })
+  local f, ferr = call("format", { format = a.format or "text", unwrap = true, max_bytes = 1 })
   if not f then return fail("format", ferr) end
   if not f.id then
     local text = f.content or ""

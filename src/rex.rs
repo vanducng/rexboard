@@ -20,6 +20,19 @@ pub const SNAPSHOT: &str = concat!(
 /// Reads the end of one pane; the args are `session_id`, `block_id` and `max_bytes`.
 pub const TAIL: &str = concat!(include_str!("lua/tail.lua"), "\nreturn tail(rex.args)");
 
+/// TAIL's reply plus `vt`, the last few KB of the same pane with their styles, from which answer
+/// mode tells a typed draft from a dim placeholder.
+pub const READ: &str = concat!(
+    include_str!("lua/tail.lua"),
+    r#"
+local t = tail(rex.args)
+if t.ok then
+  local v = tail({ session_id = rex.args.session_id, block_id = rex.args.block_id, max_bytes = 4096, format = "vt" })
+  t.vt = v.ok and v.text or nil
+end
+return t"#
+);
+
 static FDS: Mutex<()> = Mutex::new(());
 
 /// macOS std creates pipes and sockets, then sets close-on-exec in a second step, so a child

@@ -5,7 +5,8 @@
 #                with status 1 and $FAKE_REX_STDERR on stderr when that is set
 #   do -         prints a recorded snapshot, or for the jump script $FAKE_REX_JUMP_REPLY
 #                (default {"ok":true}), or for the tail script $FAKE_REX_TAIL_REPLY (default: a few
-#                lines of generic pane text), after sleeping $FAKE_REX_TAIL_SLEEP seconds when set
+#                lines of generic pane text), after sleeping $FAKE_REX_TAIL_SLEEP seconds when set,
+#                or for the answer script $FAKE_REX_SEND_REPLY (default {"ok":true})
 #   hosts        lists one remote host, mini
 #   FAKE_REX_ENV_LOG  each call appends the REX_BLOCK, REX_SESSION and REX_CLIENT it sees (- if unset)
 if [ -n "${FAKE_REX_LOG:-}" ]; then
@@ -45,12 +46,14 @@ case " $* " in
     script=$(cat)
     case "$script" in
       *session.focus_block*) ok='{"ok":true}'; printf '%s\n' "${FAKE_REX_JUMP_REPLY:-$ok}" ;;
+      *block.event*) ok='{"ok":true}'; printf '%s\n' "${FAKE_REX_SEND_REPLY:-$ok}" ;;
       *blob_read*)
         if [ -n "${FAKE_REX_TAIL_SLEEP:-}" ]; then
           sleep "$FAKE_REX_TAIL_SLEEP"
         fi
         text='$ cargo test\nrunning 12 tests\ntest parser::empty ... ok\ntest parser::nested ... ok\ntest result: ok. 12 passed\n\nAllow Bash: cargo test? (y/n)\n'
-        printf '%s\n' "${FAKE_REX_TAIL_REPLY:-{\"ok\":true,\"text\":\"$text\",\"total\":140,\"cut\":false}}"
+        reply="{\"ok\":true,\"text\":\"$text\",\"total\":140,\"cut\":false}"
+        printf '%s\n' "${FAKE_REX_TAIL_REPLY:-$reply}"
         ;;
       *) cat "${FAKE_REX_FIXTURE:-$dir/snapshot-two-hosts.json}" ;;
     esac

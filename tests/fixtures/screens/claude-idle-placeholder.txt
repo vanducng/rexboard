@@ -1,0 +1,24 @@
+
+ ▐▛███▛█   Claude Code v2.1.310
+▝▜██████▀  Haiku 5.5 · Claude Max
+ ▝▝   ▝▝   /work/project
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                            ◐ medium · /effort
+────────────────────────────────────────────────────────────────────────────────
+❯ Try "fix lint errors"
+────────────────────────────────────────────────────────────────────────────────
+  Haiku 5.5 medium  …/work/project
+  -- INSERT -- ⏸ manual mode on · ← 4 agents

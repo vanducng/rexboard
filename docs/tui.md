@@ -38,7 +38,7 @@ The board is built to live in a narrow column, so the narrow layout is the main 
 
   Glyphs: `◉` blocked, `✖` error, `●` done, `◐` working, `○` idle or seen done, `·` unknown. Blocked and error are red, unseen done green, working yellow, the rest dim. Time in state is `≥5h43m` when estimated and `-` for a pane with no status record. A harness read from the title, with no record, ends in `?` (`claude?`). A `working` report more than 120 seconds old on a pane that looks idle (an idle `✳ ` title, or a shell back in front) is not trusted: the row shows `idle?` (from 100 columns; narrower, its `○` glyph), dim, under `UNREPORTED`, and the turn card says `may be stale:` and why. The check cannot see inside tmux: with `tmux` in front the title is tmux's, so only a shell back in front makes such a row suspect. serve checks this every second, since time alone can make a report suspect. Rows of a host that is down, and every row while serve is stopped, are dim. The selected row has a raised background. A pane labelled `shell`, or named after its foreground process, tells you nothing, so its path is `session › window` (also below 100 columns), and its `BLOCK` is its title, else its window. When a path is too long, the window is cut first (to `…` below 6 columns), then the session down to an 8-column stem, then the last label. Rows on one host that would still read the same, as shown, end in `#N`, their place among those rows by window and then by block age. A number can shift when a twin's title changes and it stops reading the same; once split the `#N` goes on `BLOCK`, and a long session, window or block keeps both ends with `…` in the middle. Below 60 columns, where there is no host column, a row from a host other than `local` also gets `@HOST` when a twin is on another host; at 50 columns that reads `api…way › pair #1`, `api…way › pair #2` and `ap…y › pair @mini`. The suffix is never cut: the path gives way first, down to `…`. When rows do not fit, the last line says how many are below (`↓ 4 more`).
 - **Turn card**, for the selected row, under the list at full width, at every width (see [Turn card](#turn-card)). `c` hides it.
-- **Footer:** the keys that fit, most needed first (`j/k move · s seen · / filter · ? keys` at 50 columns, then `tab next`, `enter jump`, `space zoom` and `v view` as they fit, so 80 columns ends at `enter jump`; `v view` shows after `/ filter`), or the filter being typed, or a message for 3 seconds. A zoomed card starts the footer with `space returns ·` (and drops `space zoom`), and a kept filter with `/mini · esc clears ·`. While `c` has the card hidden, `c card` follows `? keys`. It goes before `space zoom` when the footer is narrow, so at 80 columns the footer shows `c card` and drops `space zoom`. A filter that matches nothing says `no rows match "mini" · esc clears` in the list. With the card hidden, below 100 columns, a rule sits above the footer when the screen is 20 rows or more.
+- **Footer:** the keys that fit, most needed first (`j/k move · s seen · / filter · ? keys` at 50 columns, then `tab next`, `enter jump`, `a answer`, `space zoom` and `v view` as they fit, so 80 columns ends at `enter jump`; `v view` shows after `/ filter`), or the filter being typed, or a message for 3 seconds. A zoomed card starts the footer with `space returns ·` (and drops `space zoom`), and a kept filter with `/mini · esc clears ·`. While `c` has the card hidden, `c card` follows `? keys`. It goes before `space zoom` when the footer is narrow, so at 80 columns the footer shows `c card` and drops `space zoom`. A filter that matches nothing says `no rows match "mini" · esc clears` in the list. With the card hidden, below 100 columns, a rule sits above the footer when the screen is 20 rows or more.
 
 Long labels are cut to fit: a session, window or block label to 24 columns with `…` in the middle, and every cell at its column's edge with `…`. Widths count CJK and emoji as two columns. Colours are ANSI named colours only, so the terminal's theme carries through.
 
@@ -80,9 +80,10 @@ In the `table` view a click on a column's header sorts by that column, as its le
 | `c` | Hide or show the turn card. Hidden, the list fills the body, the footer shows `c card`, and the choice is kept in `tui.json`. A zoom, the key table or a failed jump's reason still opens the card until it goes. `pick` has no card and ignores `c` |
 | `?` | Show every key in the card, in as many columns as fit; `?` or `esc` hides it |
 | `enter` | Go to the pane in the Rex window you are in, on its host, and mark it seen, as [`rexboard jump`](cli.md#rexboard-jump-next-and-pick) does. The footer says `going to SESSION › PANE…` until the jump ends, then where it went; Enter during a jump says one is already running. A failed jump's reason stays in the footer until the next key, and in full in the turn card. The board stays open |
+| `a` | Answer the selected row from the board: pick a dialog's option or reply with a line. See [Answer mode](#answer-mode) |
 | `r` | Reconnect to serve |
 | `esc` | Clear the `/` filter, the status filter and the sort, end a zoom, close the key table, and open every folded group |
-| `q`, `ctrl-c` | Quit |
+| `q`, `ctrl-c` | Quit (in answer mode, `ctrl-c` only leaves it) |
 
 The board redraws when serve sends rows, on a key, and once a second for the clock and the times in state. SIGTERM and SIGHUP (closing its window) quit it the same way as `q`, so the terminal is left as it was, and the board exits on its own within a second if its terminal goes away.
 
@@ -111,6 +112,47 @@ The card is 8 rows, or 40% of the body when that is more, and always leaves the 
 Reading a card does not mark a row seen. `s` does, and so does `tab` off a `done` row whose card has shown for at least a second. The tail of a blocked row is read by itself once its card has shown for 300 ms, once per report, so the ask can be checked against the screen; moving through rows reads none.
 
 `c`'s choice lives in `tui.json` beside serve's `state.json` (`~/.local/state/rexboard/tui.json`, or under `XDG_STATE_HOME`), as `detail_hidden` (missing means shown). The file is read when the board starts and written on each `c`. The side pane's old width key is ignored, and `<` and `>` say once that they are gone.
+
+## Answer mode
+
+`a` answers the selected row without leaving the board. The board first reads the pane, then the card turns into a red bar naming the target, the pane's last lines and a reply line:
+
+```
+━━ ANSWER → seat-a · api-gateway › main · local · claude ━━━━━━━━━━━━━━━━━━━━━━━━━━ captured 11:22:01 · 1s ━━
+ │  Do you want to proceed?
+ │  ❯ 1. Yes
+ │    2. Yes, and don't ask again for git push commands in /work/api-gateway   press 2 twice
+ │    3. No, and tell Claude what to do differently
+ ›
+1-3 pick · esc back to board                       the pane is re-checked before sending · board keys are off
+```
+
+| Key | Does |
+| --- | --- |
+| `1`-`9` | When the screen shows a numbered dialog (the reply line is then a dim `›` with no cursor), picks that option: one key press, no Enter. An option that grants something for later (`always`, `don't ask again`, `auto mode`) needs the same digit again within 3 seconds; the first press only says `press 2 again to send it`. A digit picks only an option the card shows: on a short board the card takes rows from the list, all of them if it must, and an option still off screen is refused (`option 1 is off screen; make the board taller or jump to it`) and left out of the footer's `1-3 pick` |
+| text, then `enter` | When the screen shows an input line and no dialog, sends the line as a paste, then Enter. `enter` with nothing typed does nothing. Text into a dialog is refused: `pick a number; this dialog takes no text` |
+| `esc` | Clears the typed text (the footer then says `esc clears`), or leaves when there is none |
+| `ctrl-c` | Leaves; it never quits the board here |
+| `tab` | Leaves and selects the next row that needs you; press `a` again there |
+
+Board keys are off while answering, and nothing but these keys reaches the pane: never Esc, never Ctrl+C.
+
+The mode is bound to the row's host and pane, not its place in the list, so a re-sort cannot move it. It is refused on the board's own pane and on a pane with no status record (`enter` jumps there instead).
+
+Before anything is sent, one `rex do` on the pane's host checks, in order, that:
+
+1. the pane's status report is the one the board read (else `the agent's status changed since it was read; nothing sent`);
+2. an agent, not a shell, is in front (else `zsh is in front, not the agent; nothing sent`); a tmux seat must still show the same seat's title;
+3. the dialog's options, or the input line and the line above it, are still on the last 40 lines, whole (else `the screen changed since it was read; nothing sent`);
+4. for a line, no dialog is up: options 1 and 2 with no input line below them (else `a dialog is up; pick a number; nothing sent`). Text into a dialog would be read as its highlighted option, so this holds whatever the board believes it shows.
+
+A pane that is gone says `the pane is gone; nothing sent`. Only then does the key or the line go out, in the same script. A refusal sends nothing, clears any typed text, keeps the mode open with the reason in red, and reads the pane again. A read that shows a dialog clears typed text too.
+
+Two failures are not refusals. `the pane did not answer within 5s, so it may or may not have the key; look before sending again` means the script ran out of time and the key may have gone out. `the text was pasted but Enter did not go through; it is in the pane's input line, so jump to it` means the paste landed and its Enter did not. Any other failure before the send ends `; nothing sent`. A line is also refused when the input line already holds typed text, which the reply would join (`the input line already has text, which a reply would join; nothing sent`). A dim placeholder or suggested prompt does not count as typed.
+
+After a send the board returns to the same row, marks it seen, and the card's bar says what went where: `sent 1 (Yes) → seat-a 11:22:04`, until the row needs you again with a newer report. Nothing moves on by itself; `tab` goes to the next row that needs you.
+
+Options are read for Claude Code's dialogs (permission prompts and questions). Other harnesses get line replies at an input line they show; a dialog the board does not recognise offers nothing to send, so jump to it.
 
 ## Status filter
 

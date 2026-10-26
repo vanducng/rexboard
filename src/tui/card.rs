@@ -19,10 +19,13 @@ use crate::pane::bare_title;
 const TEXT: usize = 120;
 /// One entry of the key table: the key, a space and what it does.
 const KEY_COLUMN: usize = 40;
-const GUTTER: &str = " │ ";
+pub(super) const GUTTER: &str = " │ ";
 
 /// The card's lines for a board `width` wide, with the tail filling up to `room` lines.
 pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Line<'static>> {
+    if let Some(answer) = &app.answer {
+        return answer.lines(now, width, room);
+    }
     if app.keys {
         return keys(width);
     }
@@ -38,7 +41,12 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
     let peek = app.peek.as_ref().filter(|peek| peek.key == row.key);
     let title = bare_title(&row.pane.title);
     let text = width.clamp(1, TEXT);
-    let mut lines = vec![bar(row, peek, now, width)];
+    let sent = app
+        .sent
+        .as_ref()
+        .filter(|sent| sent.key == row.key)
+        .map(|sent| sent.text.as_str());
+    let mut lines = vec![bar(row, peek, sent, now, width)];
     let msg = clean(row.pane.msg.as_deref().unwrap_or_default());
     let mut segments = msg.split(BREAK).map(str::trim).filter(|s| !s.is_empty());
     match segments.next() {
@@ -83,14 +91,24 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
     lines
 }
 
-/// The first line: the row's state and place, how the turn went, and how fresh the tail is.
+/// The first line: the row's state and place, how the turn went, and how fresh the tail is, or
+/// the answer the board last sent it.
 /// `━━ ● done · seat-a · api › main · mini · claude · ended 4m ago · turn 6m12s ━━ captured …`
-fn bar(row: &Row, peek: Option<&Peek>, now: DateTime<Utc>, width: usize) -> Line<'static> {
+fn bar(
+    row: &Row,
+    peek: Option<&Peek>,
+    sent: Option<&str>,
+    now: DateTime<Utc>,
+    width: usize,
+) -> Line<'static> {
     let mut state = state_word(row);
     if let Some(kind) = &row.pane.kind {
         state = format!("{state} · {kind}");
     }
-    let right = fresh(row, peek, now).map_or_else(|| "━━".to_owned(), |text| format!(" {text} ━━"));
+    let right = sent
+        .map(str::to_owned)
+        .or_else(|| fresh(row, peek, now))
+        .map_or_else(|| "━━".to_owned(), |text| format!(" {text} ━━"));
     let room = width.saturating_sub("━━".width() + right.width() + 1);
     let line = |place: Option<&str>, extra: &[String]| {
         let mut parts = vec![name(row)];
