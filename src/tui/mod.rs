@@ -67,7 +67,10 @@ fn board(pick: bool) -> Result<Option<Row>> {
     listen(&tx, &generation);
     let mut app = App::default();
     app.pick = pick;
-    app.detail = tui_json().and_then(|path| detail::load(&path).detail);
+    let prefs = tui_json()
+        .map(|path| detail::load(&path))
+        .unwrap_or_default();
+    (app.detail, app.hidden) = (prefs.detail, prefs.detail_hidden);
     let mut terminal = ratatui::init();
     let _restore = Restore;
     let mut tick = Instant::now();
@@ -220,20 +223,14 @@ fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
                 let _ = tx.send(Msg::Peek(key, lines));
             });
         }
-        Effect::SaveDetail(share) => {
+        Effect::SavePrefs(prefs) => {
             let saved = tui_json()
                 .ok_or_else(|| "no state dir".to_owned())
                 .and_then(|path| {
-                    detail::save(
-                        &path,
-                        &detail::Prefs {
-                            detail: Some(share),
-                        },
-                    )
-                    .map_err(|err| format!("{}: {err}", path.display()))
+                    detail::save(&path, &prefs).map_err(|err| format!("{}: {err}", path.display()))
                 });
             if let Err(why) = saved {
-                let _ = tx.send(Msg::Say(format!("could not keep the width: {why}")));
+                let _ = tx.send(Msg::Say(format!("could not keep the detail pane: {why}")));
             }
         }
         Effect::Reconnect => listen(&tx, generation),

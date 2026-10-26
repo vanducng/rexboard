@@ -514,7 +514,7 @@ mod tests {
             let list = list_width(&app, width);
             let header: String = line(&buf, 2).chars().take(list).collect();
             let columns = Columns::new(
-                crate::tui::detail::columns_board(width, list, app.pick),
+                crate::tui::detail::columns_board(width, list, app.beside(width)),
                 list,
             );
             let row_y = (3..buf.area.height)
@@ -564,8 +564,8 @@ mod tests {
             app.view = crate::tui::views::views().remove(1);
             (app.width, app.height, app.detail) = (width, 30, share);
             let header = line(&buffer(&app, width, 30), 2);
-            let list = usize::from(list(width, share, false));
-            let columns = Columns::new(columns_board(width, list, false), list);
+            let list = usize::from(list(width, share, width >= 100));
+            let columns = Columns::new(columns_board(width, list, width >= 100), list);
             for (column, _) in columns.cols.iter().filter(|(c, _)| c.letter.is_some()) {
                 let x = header.find(column.header).unwrap();
                 for at in [x, x + column.header.len() - 1] {

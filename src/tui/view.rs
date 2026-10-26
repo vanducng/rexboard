@@ -24,7 +24,7 @@ pub(super) const HEADER_ROW: u16 = 2;
 const STOPPED: &str = "serve stopped · r reconnects";
 
 /// The `?` table: every key, in the order an operator reaches for them.
-pub const KEYS: [(&str, &str); 20] = [
+pub const KEYS: [(&str, &str); 21] = [
     ("j/k", "move; g/G first, last"),
     ("1-9", "the nth NEEDS YOU row"),
     ("s", "mark seen"),
@@ -42,6 +42,7 @@ pub const KEYS: [(&str, &str); 20] = [
     ("z", "fold or open a group"),
     ("enter", "go to the pane"),
     ("r", "reconnect to serve"),
+    ("c", "hide or show the detail pane"),
     ("< >", "narrow, widen the detail pane"),
     ("?", "this table"),
     ("q", "quit"),
@@ -60,7 +61,7 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
     ])
     .areas(area);
     header(frame, top, app, now);
-    if tier == Tier::Wide && !app.pick {
+    if app.beside(area.width) {
         let [list_area, rule, detail_area] = Layout::horizontal([
             Constraint::Min(40),
             Constraint::Length(1),
@@ -90,7 +91,7 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
         } else {
             (body.height / 2).min(body.height.saturating_sub(4))
         };
-        let lines = if app.pick {
+        let lines = if app.pick || !app.pane_shown() {
             Vec::new()
         } else {
             detail(app, now, usize::from(body.width), false, usize::from(most))
@@ -285,7 +286,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
     }
     let width = usize::from(area.width);
     let columns = Columns::new(
-        super::detail::columns_board(board.width, width, app.pick),
+        super::detail::columns_board(board.width, width, app.beside(board.width)),
         width,
     );
     let area = if board.height >= HEADED {
@@ -869,6 +870,96 @@ mod tests {
         let window = text.lines().find(|l| l.contains("│ window ")).unwrap();
         assert!(window.ends_with("window    main"), "{window}");
         assert!(!text.lines().any(|l| l.contains("│ tab ")), "{text}");
+    }
+
+    #[test]
+    fn c_hides_and_shows_the_detail_pane_at_80_140_and_200() {
+        let rules = |text: &str| text.lines().filter(|l| l.starts_with("────")).count();
+        for width in [80u16, 140, 200] {
+            let mut app = fuller();
+            let shown = render(&app, width, 40);
+            let effect = press(&mut app, KeyCode::Char('c'));
+            assert!(
+                matches!(effect, Some(Effect::SavePrefs(prefs)) if prefs.detail_hidden),
+                "{width}: c asks to keep it hidden"
+            );
+            let hidden = render(&app, width, 40);
+            assert!(
+                !hidden.contains("enter goes to the pane"),
+                "{width}: no fields:\n{hidden}"
+            );
+            if width >= 100 {
+                assert!(
+                    shown.contains('│') && !hidden.contains('│'),
+                    "{width}: no rule:\n{hidden}"
+                );
+                let header = hidden.lines().nth(2).unwrap();
+                assert!(
+                    header.contains("TURN") && header.contains("SESSION"),
+                    "{width}: the full width's columns:\n{hidden}"
+                );
+                assert!(
+                    hidden.lines().any(|l| l.ends_with("seat-b msg")),
+                    "{width}: MSG runs to the edge:\n{hidden}"
+                );
+            } else {
+                assert_eq!(
+                    (rules(&shown), rules(&hidden)),
+                    (2, 1),
+                    "80: only the footer's rule:\n{hidden}"
+                );
+            }
+            press(&mut app, KeyCode::Char('c'));
+            assert_eq!(render(&app, width, 40), shown, "{width}: c shows it again");
+        }
+    }
+
+    #[test]
+    fn while_hidden_the_size_keys_say_so_and_peek_and_keys_still_show() {
+        let mut app = fuller();
+        press(&mut app, KeyCode::Char('c'));
+        app.width = 140;
+        let detail = app.detail;
+        assert_eq!(press(&mut app, KeyCode::Char('>')), None);
+        assert_eq!(app.toast(), Some("the detail pane is hidden · c shows it"));
+        assert_eq!(app.detail, detail, "the width is unchanged");
+        press(&mut app, KeyCode::Char('?'));
+        let keys = render(&app, 140, 40);
+        assert!(
+            keys.contains("│ keys") && keys.contains("hide or show the detail pane"),
+            "{keys}"
+        );
+        press(&mut app, KeyCode::Char('?'));
+        assert!(
+            !render(&app, 140, 40).contains('│'),
+            "hidden again once the table closes"
+        );
+        app.peek = Some(Peek {
+            key: "mini/seat-b".into(),
+            lines: Some(Ok(vec!["peek line 1".into()])),
+            at: None,
+        });
+        for width in [140, 80] {
+            let text = render(&app, width, 40);
+            assert!(
+                text.contains("peek line 1"),
+                "{width}: the peek shows:\n{text}"
+            );
+        }
+        app.peek = None;
+        assert!(
+            !render(&app, 140, 40).contains('│'),
+            "and hides when it closes"
+        );
+        assert!(app.hidden, "the choice is kept throughout");
+    }
+
+    #[test]
+    fn pick_ignores_c() {
+        let mut app = fuller();
+        app.pick = true;
+        assert_eq!(press(&mut app, KeyCode::Char('c')), None);
+        assert!(!app.hidden);
     }
 
     #[test]
