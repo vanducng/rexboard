@@ -6,7 +6,7 @@
 #   do -         prints a recorded snapshot, or for the jump script $FAKE_REX_JUMP_REPLY
 #                (default {"ok":true})
 #   hosts        lists one remote host, mini
-#   capture      prints a few lines of generic pane text
+#   capture      prints a few lines of generic pane text, or $FAKE_REX_CAPTURE when set
 #   new          succeeds, and touches $FAKE_REX_STATE/made when FAKE_REX_STATE is set
 #   do - (window script, mode open) prints $FAKE_REX_OPEN_REPLY (default {"ok":true,"reply":{}});
 #                mode destroy prints $FAKE_REX_DESTROY_REPLY, other modes $FAKE_REX_WINDOW_REPLY
@@ -85,6 +85,10 @@ case " $* " in
     esac
     ;;
   *" capture "*)
+    if [ -n "${FAKE_REX_CAPTURE:-}" ]; then
+      cat "$FAKE_REX_CAPTURE"
+      exit 0
+    fi
     printf '%s\n' '$ cargo test' 'running 12 tests' 'test parser::empty ... ok' \
       'test parser::nested ... ok' 'test result: ok. 12 passed' '' 'Allow Bash: cargo test? (y/n)'
     ;;

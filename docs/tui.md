@@ -62,7 +62,7 @@ The column header underlines each column's sort letter and puts `↑` or `↓` j
 | `1`-`9` | Select the nth `NEEDS YOU` row, counted in the order shown (so a sort changes which row a digit picks), opening its group if it is folded |
 | `/` | Filter rows by host, session, tab, pane, title, state, message or harness; `enter` keeps it, `esc` clears it |
 | `f`, then a letter | Show one status only (see [Status filter](#status-filter)). `f f` or `esc` clears it |
-| `space` | Peek: the last 12 lines of the pane, from `rex capture`, with escape sequences removed. It shows in the detail pane, in place of its fields below 100 columns. `space` again closes it |
+| `space` | Peek: the newest lines of the pane that fit, from `rex capture` (it keeps the last 200), with escape sequences removed and each line cut at the pane's edge. From 100 columns it fills the detail pane under the fields; below 100 it takes the fields' place, in up to half the screen. A resize shows more or fewer lines without a new capture. `space` again closes it |
 | `s` | Mark the selected pane seen, through serve. The message names it `session › pane` (`session › tab` for a generic pane label). A blocked or erroring pane stays in `NEEDS YOU`, and the message says so |
 | `ctrl+s` | Mark every unseen `done` row the list shows seen (a kept filter narrows it), through serve, and say how many (`9 done rows marked seen`). Blocked and erroring rows are left alone. Before v0.2 this was `S`, which now sorts by state; the `?` table says `(was S)`, and the first `S` of a run says `sorted by state · bulk seen is ctrl+s now` |
 | `v` | Next view: `status`, `flat`, `harness`, `host`, then `status` again |

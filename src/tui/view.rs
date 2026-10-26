@@ -71,19 +71,25 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
             width: detail_area.width.saturating_sub(1),
             ..detail_area
         };
-        let lines = detail(app, now, usize::from(padded.width), true);
+        let lines = detail(
+            app,
+            now,
+            usize::from(padded.width),
+            true,
+            usize::from(padded.height),
+        );
         frame.render_widget(Paragraph::new(lines), padded);
     } else {
-        let lines = if app.pick {
-            Vec::new()
-        } else {
-            detail(app, now, usize::from(body.width), false)
-        };
         // The key table takes what it needs, down to 3 list lines; anything else half the body.
         let most = if app.keys {
             body.height.saturating_sub(3)
         } else {
             body.height / 2
+        };
+        let lines = if app.pick {
+            Vec::new()
+        } else {
+            detail(app, now, usize::from(body.width), false, usize::from(most))
         };
         let height = (lines.len() as u16).min(most);
         let [list_area, rule, detail_area] = Layout::vertical([
@@ -94,15 +100,6 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
         .areas(body);
         list(frame, list_area, app, area, now);
         frame.render_widget(rule_line(rule.width), rule);
-        // A peek keeps its newest lines when the pane is short.
-        let skip = lines.len().saturating_sub(usize::from(height));
-        let lines = if skip > 0 && app.peek.is_some() {
-            std::iter::once(lines[0].clone())
-                .chain(lines.into_iter().skip(skip + 1))
-                .collect()
-        } else {
-            lines
-        };
         frame.render_widget(Paragraph::new(lines), detail_area);
     }
     frame.render_widget(rule_line(above_footer.width), above_footer);
@@ -434,7 +431,14 @@ fn row_line(
 
 /// The detail pane's lines: the key table, a folded group's hint, or the selected row. Below
 /// 100 columns it leaves out what the row already shows, and a peek takes the fields' place.
-fn detail(app: &App, now: DateTime<Utc>, width: usize, wide: bool) -> Vec<Line<'static>> {
+/// A peek fills what is left of `height` with its newest lines.
+fn detail(
+    app: &App,
+    now: DateTime<Utc>,
+    width: usize,
+    wide: bool,
+    height: usize,
+) -> Vec<Line<'static>> {
     if app.keys {
         let mut lines = vec![Line::styled(fit("keys", width), theme::accent())];
         lines.extend(KEYS.iter().map(|(key, what)| {
@@ -466,7 +470,7 @@ fn detail(app: &App, now: DateTime<Utc>, width: usize, wide: bool) -> Vec<Line<'
     }
     let peek = app.peek.as_ref().filter(|peek| peek.key == row.key);
     if let (false, Some(peek)) = (wide, peek) {
-        lines.extend(peek_lines(peek, width));
+        lines.extend(peek_lines(peek, width, height.saturating_sub(lines.len())));
         return lines;
     }
     let mut state = match &p.kind {
@@ -553,15 +557,16 @@ fn detail(app: &App, now: DateTime<Utc>, width: usize, wide: bool) -> Vec<Line<'
     ));
     if let Some(peek) = peek {
         lines.push(Line::styled("peek", theme::header()));
-        lines.extend(peek_lines(peek, width));
+        lines.extend(peek_lines(peek, width, height.saturating_sub(lines.len())));
     }
     lines
 }
 
-fn peek_lines(peek: &super::app::Peek, width: usize) -> Vec<Line<'static>> {
+/// The newest `room` captured lines, each cut at the pane's edge.
+fn peek_lines(peek: &super::app::Peek, width: usize, room: usize) -> Vec<Line<'static>> {
     match &peek.lines {
         None => vec![Line::styled("capturing…", theme::dim())],
-        Some(Ok(text)) => text
+        Some(Ok(text)) => text[text.len().saturating_sub(room)..]
             .iter()
             .map(|line| Line::raw(fit(line, width)))
             .collect(),
@@ -823,6 +828,87 @@ mod tests {
                 !text.contains("harness"),
                 "the peek takes the fields' place:\n{text}"
             );
+        }
+    }
+
+    fn peeking(captured: usize) -> App {
+        let mut app = fuller();
+        app.peek = Some(Peek {
+            key: "mini/seat-b".into(),
+            lines: Some(Ok((1..=captured)
+                .map(|n| format!("peek line {n}"))
+                .collect())),
+        });
+        app
+    }
+
+    /// The numbers of the peek lines drawn, top to bottom, and the rows they sit on.
+    fn peek_rows(text: &str) -> (Vec<usize>, Vec<usize>) {
+        text.lines()
+            .enumerate()
+            .filter_map(|(y, line)| {
+                let n = line.split("peek line ").nth(1)?;
+                Some((n.trim().parse::<usize>().ok()?, y))
+            })
+            .unzip()
+    }
+
+    #[test]
+    fn a_peek_fills_the_pane_on_the_right_with_its_newest_lines() {
+        let app = peeking(200);
+        let mut shown = Vec::new();
+        for height in [20u16, 40, 60] {
+            let text = render(&app, 140, height);
+            let (numbers, rows) = peek_rows(&text);
+            let header = text.lines().position(|l| l.ends_with("│ peek")).unwrap();
+            let last = text
+                .lines()
+                .collect::<Vec<_>>()
+                .iter()
+                .rposition(|l| l.contains('│'))
+                .unwrap();
+            assert_eq!(numbers.last(), Some(&200), "{height}:\n{text}");
+            assert!(numbers.windows(2).all(|w| w[1] == w[0] + 1), "{numbers:?}");
+            assert_eq!(
+                (rows[0], rows[rows.len() - 1]),
+                (header + 1, last),
+                "{height}: from under the header to the pane's last row:\n{text}"
+            );
+            shown.push(numbers.len());
+        }
+        assert_eq!(
+            shown,
+            [4, 24, 44],
+            "20, 40 and 60 rows, under 15 rows of fields"
+        );
+    }
+
+    #[test]
+    fn a_peek_fills_the_area_under_the_list_below_100_columns() {
+        let text = render(&peeking(200), 80, 30);
+        let (numbers, rows) = peek_rows(&text);
+        let lines: Vec<&str> = text.lines().collect();
+        let name = rows[0] - 1;
+        assert!(lines[name].starts_with("seat-b"), "{text}");
+        assert!(
+            lines[rows[rows.len() - 1] + 1].starts_with("────"),
+            "{text}"
+        );
+        assert_eq!(numbers.last(), Some(&200));
+        assert!(numbers.windows(2).all(|w| w[1] == w[0] + 1), "{numbers:?}");
+        assert_eq!(
+            numbers.len(),
+            12,
+            "half the 26-row body, less the name:\n{text}"
+        );
+    }
+
+    #[test]
+    fn a_short_capture_shows_whole_at_the_top_of_its_space() {
+        for (width, height) in [(140, 60), (80, 30)] {
+            let (numbers, rows) = peek_rows(&render(&peeking(5), width, height));
+            assert_eq!(numbers, [1, 2, 3, 4, 5], "{width}x{height}");
+            assert_eq!(rows[4] - rows[0], 4);
         }
     }
 

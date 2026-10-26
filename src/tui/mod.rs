@@ -25,8 +25,9 @@ use crate::{interrupted, jump, rex, stop_on_signals};
 
 use app::{App, Effect, Link};
 
-/// Peek shows this many lines from the end of the pane.
-const PEEK_LINES: usize = 12;
+/// Peek keeps this many lines from the end of the pane, enough for a 200-row pane; each draw shows
+/// the newest that fit, so a resize needs no new capture.
+const PEEK_LINES: usize = 200;
 
 enum Msg {
     Rows(Rows),
@@ -336,8 +337,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn peek_lines_keep_the_last_twelve_without_escape_sequences() {
-        let mut text: String = (1..=20).map(|n| format!("line {n}\n")).collect();
+    fn peek_lines_keep_the_last_200_without_escape_sequences() {
+        let mut text: String = (1..=250).map(|n| format!("line {n}\n")).collect();
         text.push_str("\x1b[31mRED\x1b[0m\n");
         text.push_str("clip \x1b]52;c;aGVsbG8=\x07end\n");
         text.push_str("title \x1b]0;set by the pane\x1b\\end\n");
