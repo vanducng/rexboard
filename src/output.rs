@@ -149,8 +149,8 @@ pub fn labels(row: &Row, short: bool) -> Vec<&str> {
 
 /// WHERE for each row in `max` columns. Rows that would still read the same get told apart:
 /// `@HOST` for a host other than `local` when they are on different hosts and the host has no
-/// column of its own, and `#N`, the pane's place among its tab's agent panes, when another of
-/// them is on the same host. The suffix is never cut; the path gives way, down to `…`.
+/// column of its own, and `#N`, its place among the rows on its host that read the same, when
+/// there are any. The suffix is never cut; the path gives way, down to `…`.
 pub fn wheres(rows: &[Row], max: usize, short: bool, host_column: bool) -> Vec<String> {
     let first: Vec<String> = rows
         .iter()
@@ -173,13 +173,12 @@ pub fn wheres(rows: &[Row], max: usize, short: bool, host_column: bool) -> Vec<S
             {
                 suffix.push_str(&format!(" @{}", clean(&row.pane.host)));
             }
-            if twins
-                .iter()
+            let here: Vec<&Row> = twins
+                .into_iter()
                 .filter(|other| other.pane.host == row.pane.host)
-                .count()
-                > 1
-            {
-                suffix.push_str(&format!(" #{}", position(row, rows)));
+                .collect();
+            if here.len() > 1 {
+                suffix.push_str(&format!(" #{}", place_among(row, &here)));
             }
             if suffix.is_empty() {
                 return place.clone();
@@ -195,16 +194,49 @@ pub fn wheres(rows: &[Row], max: usize, short: bool, host_column: bool) -> Vec<S
         .collect()
 }
 
-/// The pane's place among the agent panes of its tab, oldest first: Rex block ids sort by
-/// creation time.
-fn position(row: &Row, rows: &[Row]) -> usize {
-    let p = &row.pane;
-    1 + rows
+/// BLOCK for each row once WHERE splits, in `block` columns: its name, and `#N` when another row
+/// on its host reads the same in SESSION, WINDOW and BLOCK as drawn `session`, `window` and
+/// `block` columns wide. The suffix is never cut; the name gives way.
+pub fn blocks(rows: &[Row], session: usize, window: usize, block: usize) -> Vec<String> {
+    let shown: Vec<(String, String, String)> = rows
         .iter()
-        .filter(|other| {
-            let o = &other.pane;
-            o.host == p.host && o.window_id == p.window_id && o.block_id < p.block_id
+        .map(|row| {
+            (
+                squeeze(&clean(&row.pane.session), session),
+                squeeze(&clean(&row.pane.tab), window),
+                squeeze(&name(row), block),
+            )
         })
+        .collect();
+    rows.iter()
+        .zip(&shown)
+        .map(|(row, own)| {
+            let twins: Vec<&Row> = rows
+                .iter()
+                .zip(&shown)
+                .filter(|(other, text)| *text == own && other.pane.host == row.pane.host)
+                .map(|(other, _)| other)
+                .collect();
+            if twins.len() > 1 {
+                let suffix = format!(" #{}", place_among(row, &twins));
+                format!(
+                    "{}{suffix}",
+                    squeeze(&name(row), block.saturating_sub(suffix.width()))
+                )
+            } else {
+                own.2.clone()
+            }
+        })
+        .collect()
+}
+
+/// `row`'s place, from 1, among rows that read the same, by window and then block: Rex block ids
+/// sort by creation time.
+fn place_among(row: &Row, twins: &[&Row]) -> usize {
+    let at = (&row.pane.window_id, &row.pane.block_id);
+    1 + twins
+        .iter()
+        .filter(|o| (&o.pane.window_id, &o.pane.block_id) < at)
         .count()
 }
 
