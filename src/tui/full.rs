@@ -16,17 +16,6 @@ use super::{card, theme, vt};
 use crate::board::Row;
 use crate::output::{age, chop, fit};
 
-/// The footer's keys, most needed first; a narrow terminal drops them from the end.
-const KEYS: [(&str, &str); 7] = [
-    ("space", "back"),
-    ("j/k", "scroll"),
-    ("a", "answer"),
-    ("enter", "jump"),
-    ("g/G", "top, bottom"),
-    ("pgup/pgdn", "page"),
-    ("q", "quit"),
-];
-
 /// How often an open view reads its pane again.
 pub const EVERY: Duration = Duration::from_secs(2);
 
@@ -203,7 +192,12 @@ fn hidden_is_blank(spans: &[Span], width: usize) -> bool {
 fn keys(width: usize) -> Line<'static> {
     let mut spans = Vec::new();
     let mut used = 0;
-    for (key, what) in KEYS {
+    // The footer's keys, most needed first; a narrow terminal drops them from the end.
+    let listed = super::keys::FULL
+        .iter()
+        .filter(|entry| !entry.keys.is_empty())
+        .map(|entry| (entry.keys, entry.word));
+    for (key, what) in listed {
         let sep = if spans.is_empty() { "" } else { " · " };
         let piece = sep.width() + key.width() + 1 + what.width();
         if used + piece > width {

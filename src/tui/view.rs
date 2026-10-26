@@ -6,8 +6,11 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthStr;
 
+use ratatui::crossterm::event::KeyCode;
+
 use super::app::{App, Item, Link, Spot};
 use super::columns::{Col, Columns, Tier, Tone, column_of, tier};
+use super::keys::{self, Act};
 use super::status::ALL;
 use super::theme;
 use super::views::{Key, View};
@@ -22,43 +25,15 @@ pub(super) const HEADER_ROW: u16 = 2;
 /// The list rows the card always leaves.
 const LIST_FLOOR: u16 = 3;
 
-const STOPPED: &str = "serve stopped · r reconnects";
+const STOPPED: &str = "serve stopped · R reconnects";
 
-/// The `?` table: every key, in the order an operator reaches for them.
-pub const KEYS: [(&str, &str); 25] = [
-    ("j/k", "move; g/G first, last"),
-    ("1-9", "the nth NEEDS YOU row"),
-    ("s", "mark seen"),
-    ("ctrl+s", "mark done rows seen (was S)"),
-    ("space", "full view of the pane, live"),
-    ("tab", "the next row that needs you"),
-    ("/", "filter: text or key:value"),
-    ("f", "one status: w d q p e u i"),
-    ("v", "status → host, then fields"),
-    (":", "a view by name; tab completes"),
-    ("S A T", "sort by state, age, turn"),
-    ("R O W M", "by harness, host, where, msg"),
-    ("E N B", "by session, window, block"),
-    ("click", "a header sorts, in table"),
-    ("esc", "clear filters/sort/peek/folds"),
-    ("z", "fold or open a group"),
-    ("enter", "go to the pane"),
-    ("-", "back to the pane jumped from"),
-    ("a", "answer: pick an option, reply"),
-    ("y Y", "copy the message, the place"),
-    ("ctrl+k", "close the pane: ctrl+k twice"),
-    ("r", "reconnect to serve"),
-    ("c", "hide or show the card"),
-    ("?", "this table"),
-    ("q", "quit"),
-];
-
-/// The `?` table: KEYS, and while extensions declare fields, a row for their sort letters
-/// after the built-in ones, naming each field and, when it differs, its extension.
+/// The `?` table: the board's keymap, and while extensions declare fields, a row for their sort
+/// letters after the built-in ones, naming each field and, when it differs, its extension.
 pub fn key_rows(app: &App) -> Vec<(String, String)> {
-    let mut rows: Vec<(String, String)> = KEYS
+    let mut rows: Vec<(String, String)> = keys::BOARD
         .iter()
-        .map(|(k, w)| ((*k).to_owned(), (*w).to_owned()))
+        .filter(|entry| !entry.keys.is_empty())
+        .map(|entry| (entry.keys.to_owned(), entry.help.to_owned()))
         .collect();
     if app.fields.is_empty() {
         return rows;
@@ -78,16 +53,16 @@ pub fn key_rows(app: &App) -> Vec<(String, String)> {
                 _ => f.name.clone(),
             })
             .collect();
-        format!("by {}", names.join(", "))
+        format!("sort by {}", names.join(", "))
     };
     let what = Some(named(true))
         .filter(|w| w.width() <= KEY_WIDTH)
         .unwrap_or_else(|| named(false));
     let after = rows
         .iter()
-        .position(|(k, _)| k == "E N B")
+        .position(|(k, _)| k == "o")
         .map_or(rows.len(), |i| i + 1);
-    rows.insert(after, (letters.join(" "), what));
+    rows.insert(after, (format!("o {}", letters.join(" ")), what));
     rows
 }
 
@@ -161,6 +136,42 @@ fn card_height(app: &App, now: DateTime<Utc>, body: Rect, headed: bool) -> u16 {
     base.max(need).min(most)
 }
 
+/// While a prefix waits for its second key, which-key style: `g… g top · t next view …`, cut to
+/// the footer. `o` lists the sort letters with their columns.
+fn prefix_keys(app: &App, prefix: char, width: usize) -> Line<'static> {
+    let pairs: Vec<(String, String)> = if prefix == 'o' {
+        let fields = app.field_columns();
+        crate::tui::columns::COLUMNS
+            .iter()
+            .chain(fields.iter().copied())
+            .filter_map(|c| Some((c.letter?.to_string(), c.header.to_lowercase())))
+            .collect()
+    } else {
+        keys::after(keys::BOARD, keys::K(KeyCode::Char(prefix), false))
+            .into_iter()
+            .map(|(k, word)| (k.to_string(), word.to_owned()))
+            .collect()
+    };
+    let mut spans = vec![Span::styled(format!("{prefix}… "), theme::strong())];
+    let mut used = prefix.len_utf8() + "… ".width();
+    let tail = " · esc cancels";
+    for (i, (key, word)) in pairs.iter().enumerate() {
+        let sep = if i == 0 { "" } else { " · " };
+        let piece = sep.width() + key.width() + 1 + word.width();
+        if used + piece > width {
+            break;
+        }
+        used += piece;
+        spans.push(Span::styled(sep, theme::quiet()));
+        spans.push(Span::styled(key.clone(), theme::strong()));
+        spans.push(Span::styled(format!(" {word}"), theme::quiet()));
+    }
+    if used + tail.width() <= width {
+        spans.push(Span::styled(tail, theme::quiet()));
+    }
+    Line::from(spans)
+}
+
 /// While `f` waits: each status with its count and its letter underlined, as the column header
 /// marks sort letters. Narrower, the separators tighten and the hint goes, then `w4 d6 …`.
 fn status_keys(app: &App, width: usize) -> Line<'static> {
@@ -183,7 +194,7 @@ fn status_keys(app: &App, width: usize) -> Line<'static> {
         spans.push(Span::styled(tail.to_owned(), theme::quiet()));
         Line::from(spans)
     };
-    for line in [named(" · ", " · f/esc clears"), named("  ", "")] {
+    for line in [named(" · ", " · ff clears"), named("  ", "")] {
         if line.width() <= width {
             return line;
         }
@@ -193,7 +204,7 @@ fn status_keys(app: &App, width: usize) -> Line<'static> {
         .map(|&s| format!("{}{}", s.letter(), app.status_count(s)))
         .collect();
     Line::styled(
-        fit(&format!("f {} · f/esc clears", short.join(" ")), width),
+        fit(&format!("f {} · ff clears", short.join(" ")), width),
         theme::strong(),
     )
 }
@@ -334,7 +345,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
         let query = app.filter.value();
         let text = if let Some(status) = app.status {
             if query.is_empty() {
-                format!("no {} rows · f f or esc clears", status.name())
+                format!("no {} rows · ff or esc clears", status.name())
             } else {
                 format!("no {} rows match \"{query}\" · esc clears", status.name())
             }
@@ -552,9 +563,16 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         );
         return;
     }
-    if app.picking_status {
-        frame.render_widget(Paragraph::new(status_keys(app, width)), area);
-        return;
+    match app.pending {
+        Some('f') => {
+            frame.render_widget(Paragraph::new(status_keys(app, width)), area);
+            return;
+        }
+        Some(prefix) => {
+            frame.render_widget(Paragraph::new(prefix_keys(app, prefix, width)), area);
+            return;
+        }
+        None => {}
     }
     if let Some(answer) = &app.answer {
         frame.render_widget(Paragraph::new(answer.footer(width)), area);
@@ -586,24 +604,14 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
     let keys: Vec<(&str, &str)> = if app.pick {
         vec![("enter", "go"), ("j/k", "move"), ("/", "filter")]
     } else {
-        let mut keys = vec![
-            ("j/k", "move"),
-            ("s", "seen"),
-            ("/", "filter"),
-            ("?", "keys"),
-        ];
+        let mut acts = keys::FOOTER.to_vec();
         if app.hidden {
-            keys.push(("c", "card"));
+            acts.insert(4, Act::Card);
         }
-        keys.extend([
-            ("tab", "next"),
-            ("enter", "jump"),
-            ("a", "answer"),
-            ("space", "full"),
-            ("v", "view"),
-            ("1-9", "select"),
-        ]);
-        keys
+        acts.into_iter()
+            .filter_map(|act| keys::entry(keys::BOARD, act))
+            .map(|entry| (keys::short(entry), entry.word))
+            .collect()
     };
     let (quit_key, quit_what) = if app.pick {
         ("esc", " cancel")
@@ -656,6 +664,15 @@ mod tests {
 
     use super::*;
     use crate::tui::app::tests::{app, hosts, press, row};
+
+    /// The rows `?` lists for the board.
+    pub fn listed() -> Vec<(&'static str, &'static str)> {
+        keys::BOARD
+            .iter()
+            .filter(|entry| !entry.keys.is_empty())
+            .map(|entry| (entry.keys, entry.help))
+            .collect()
+    }
     use std::time::{Duration, Instant};
 
     use crate::tui::app::{App, Effect, Peek, Spot};
@@ -812,9 +829,10 @@ mod tests {
     fn a_folded_group_is_marked_and_says_how_to_open_it() {
         let mut app = fuller();
         press(&mut app, KeyCode::Char('z'));
+        press(&mut app, KeyCode::Char('a'));
         let text = render(&app, 50, 30);
         assert!(text.contains("▸ NEEDS YOU (2)"), "{text}");
-        assert!(text.contains("NEEDS YOU is folded · z opens it"), "{text}");
+        assert!(text.contains("NEEDS YOU is folded · za opens it"), "{text}");
     }
 
     #[test]
@@ -842,7 +860,7 @@ mod tests {
             text.lines()
                 .next()
                 .unwrap()
-                .contains("serve stopped · r reconnects"),
+                .contains("serve stopped · R reconnects"),
             "{text}"
         );
         app.link = Link::Up;
@@ -872,24 +890,60 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_k_puts_its_question_in_the_footer_until_the_next_key() {
-        use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
+    fn dd_puts_its_question_in_the_footer_until_the_next_key() {
         let mut app = fuller();
-        app.handle(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
-        let text = render(&app, 80, 30);
+        press(&mut app, KeyCode::Char('d'));
         assert_eq!(
-            text.lines().last().unwrap(),
-            "close api › … › seat-b on mini, ending claude (blocked)? ctrl+k again closes it",
-            "at 80 columns the place gives way, never the key"
+            render(&app, 80, 30).lines().last().unwrap(),
+            "d… d close · esc cancels"
         );
-        let text = render(&app, 120, 30);
+        press(&mut app, KeyCode::Char('d'));
         assert_eq!(
-            text.lines().last().unwrap(),
-            "close api › main › seat-b on mini, ending claude (blocked)? ctrl+k again closes it"
+            render(&app, 80, 30).lines().last().unwrap(),
+            "close api › main › seat-b on mini, ending claude (blocked)? y closes"
+        );
+        assert_eq!(
+            render(&app, 60, 30).lines().last().unwrap(),
+            "close api › main › seat-b on mini? y closes",
+            "a narrow footer drops what it ends first"
+        );
+        assert_eq!(
+            render(&app, 36, 30).lines().last().unwrap(),
+            "close api › …eat-b on mini? y closes",
+            "then cuts the place in the middle, never the key"
         );
         press(&mut app, KeyCode::Esc);
-        let text = render(&app, 80, 30);
-        assert_eq!(text.lines().last().unwrap(), "nothing closed");
+        assert_eq!(
+            render(&app, 80, 30).lines().last().unwrap(),
+            "nothing closed"
+        );
+    }
+
+    /// A prefix lists the keys that may follow it, which-key style.
+    #[test]
+    fn a_pending_prefix_lists_its_next_keys() {
+        let last = |keys: &str, width: u16| {
+            let mut app = fuller();
+            for c in keys.chars() {
+                press(&mut app, KeyCode::Char(c));
+            }
+            render(&app, width, 30).lines().last().unwrap().to_owned()
+        };
+        assert_eq!(
+            last("g", 140),
+            "g… g top · t next view · T previous view · esc cancels"
+        );
+        assert_eq!(
+            last("z", 140),
+            "z… a toggle · o open · c fold · R open all · M fold all · esc cancels"
+        );
+        assert_eq!(last("y", 140), "y… y message · p place · esc cancels");
+        assert_eq!(
+            last("o", 140),
+            "o… s state · a age · t turn · h harness · o host · w where · e session · n window · b block · m msg · esc cancels"
+        );
+        assert_eq!(last("o", 40), "o… s state · a age · t turn · h harness");
+        assert!(!last("gx", 140).contains("g…"), "another key drops it");
     }
 
     #[test]
@@ -897,13 +951,13 @@ mod tests {
         let mut app = fuller();
         let text = render(&app, 50, 30);
         let bar = text.lines().last().unwrap();
-        for want in ["j/k move", "s seen", "/ filter", "? keys", "q quit"] {
+        for want in ["j/k move", "m seen", "/ filter", "? keys", "q quit"] {
             assert!(bar.contains(want), "{bar}");
         }
         press(&mut app, KeyCode::Char('?'));
-        // One column of 25 keys under the shortest list.
-        let text = render(&app, 50, 33);
-        for (key, _) in KEYS {
+        // One column of 29 keys under the shortest list.
+        let text = render(&app, 50, 37);
+        for (key, _) in listed() {
             assert!(
                 text.lines().any(|l| l.trim_start().starts_with(key)),
                 "{key} missing:\n{text}"
@@ -1109,7 +1163,7 @@ mod tests {
                 .contains("view:")
         );
         press(&mut app, KeyCode::Char('v'));
-        press(&mut app, KeyCode::Char('A'));
+        crate::tui::app::tests::sort(&mut app, 'a');
         let top = render(&app, 120, 30).lines().next().unwrap().to_owned();
         assert!(top.starts_with("rexboard · view: table ↓age · "), "{top}");
         let narrow = render(&app, 50, 30).lines().next().unwrap().to_owned();
@@ -1121,7 +1175,7 @@ mod tests {
 
     #[test]
     fn the_key_table_names_every_view_and_sort_letter() {
-        for (key, what) in KEYS {
+        for (key, what) in listed() {
             assert!(
                 what.width() <= KEY_WIDTH,
                 "{key}: {what:?} is cut in the key table"
@@ -1131,14 +1185,14 @@ mod tests {
         press(&mut app, KeyCode::Char('?'));
         let text = render(&app, 120, 30);
         for want in [
-            "ctrl+s",
-            "v       status → host, then fields",
-            "/       filter: text or key:value",
-            ":       a view by name; tab completes",
-            "S A T   sort by state, age, turn",
-            "R O W M by harness, host, where, msg",
-            "esc     clear filters/sort/peek/folds",
-            "f       one status: w d q p e u i",
+            "v V      next, previous view (gt gT)",
+            "/        filter: text or key:value",
+            ":        a view, :seen or :q",
+            "o        sort: o and a column letter",
+            "esc      cancel a key, clear filters",
+            "f        one status; ff clears",
+            "dd       close the pane; y confirms",
+            "- ctrl-o back and forth, like cd -",
         ] {
             assert!(text.contains(want), "{want:?}:\n{text}");
         }
@@ -1158,13 +1212,13 @@ mod tests {
         };
         assert_eq!(
             last(&app, 140),
-            "f working 1 · done 2 · question 1 · permission 2 · error 1 · unreported 2 · idle 1 · f/esc clears"
+            "f working 1 · done 2 · question 1 · permission 2 · error 1 · unreported 2 · idle 1 · ff clears"
         );
         assert_eq!(
             last(&app, 80),
             "f working 1  done 2  question 1  permission 2  error 1  unreported 2  idle 1"
         );
-        assert_eq!(last(&app, 50), "f w1 d2 q1 p2 e1 u2 i1 · f/esc clears");
+        assert_eq!(last(&app, 50), "f w1 d2 q1 p2 e1 u2 i1 · ff clears");
         press(&mut app, KeyCode::Char('p'));
         assert!(
             !last(&app, 140).starts_with("f w"),
@@ -1186,7 +1240,7 @@ mod tests {
         press(&mut app, KeyCode::Char('f'));
         press(&mut app, KeyCode::Char('e'));
         assert!(
-            render(&app, 80, 30).contains("no error rows · f f or esc clears"),
+            render(&app, 80, 30).contains("no error rows · ff or esc clears"),
             "{}",
             render(&app, 80, 30)
         );
@@ -1213,7 +1267,7 @@ mod tests {
             }
         }
         press(&mut app, KeyCode::Char('v'));
-        press(&mut app, KeyCode::Char('A'));
+        crate::tui::app::tests::sort(&mut app, 'a');
         let top = render(&app, 120, 30).lines().next().unwrap().to_owned();
         assert!(
             top.starts_with("rexboard · view: table ↓age · only question · "),
@@ -1230,14 +1284,14 @@ mod tests {
     }
 
     #[test]
-    fn the_footer_ranks_tab_next_above_v_view_and_shows_v_after_filter() {
+    fn the_footer_ranks_n_next_above_v_next_view_and_shows_v_after_filter() {
         let app = fuller();
         let wide = render(&app, 120, 30);
         assert!(
             wide.lines()
                 .last()
                 .unwrap()
-                .contains("/ filter · v view · ? keys"),
+                .contains("/ filter · v next view · ? keys"),
             "{wide}"
         );
         for width in [50, 64, 65, 80] {
@@ -1245,14 +1299,14 @@ mod tests {
             let bar = text.lines().last().unwrap();
             assert!(bar.contains("? keys"), "{width}: {bar}");
             assert!(
-                !bar.contains("v view") || bar.contains("tab next"),
-                "{width}: tab next outranks v view: {bar}"
+                !bar.contains("v next view") || bar.contains("n next"),
+                "{width}: n next outranks v next view: {bar}"
             );
         }
         let at_80 = render(&app, 80, 30);
         let bar = at_80.lines().last().unwrap();
         assert!(
-            bar.starts_with("j/k move · s seen · / filter · ? keys · tab next · enter jump ")
+            bar.starts_with("j/k move · m seen · / filter · ? keys · n next · enter jump ")
                 && bar.trim_end().ends_with(" q quit"),
             "{bar}"
         );
@@ -1597,9 +1651,9 @@ mod tests {
                 rows[0]
             );
             let footer = match width {
-                80 => "space back · j/k scroll · a answer · enter jump · g/G top, bottom",
+                80 => "space back · j/k scroll · a answer · enter jump · gg/G top, bottom",
                 _ => {
-                    "space back · j/k scroll · a answer · enter jump · g/G top, bottom · pgup/pgdn page · q quit"
+                    "space back · j/k scroll · a answer · enter jump · gg/G top, bottom · ctrl-d/u half page · ctrl-f/b page"
                 }
             };
             assert_eq!(rows[29], footer, "whole keys only");
@@ -1643,6 +1697,34 @@ mod tests {
         assert!(!text.contains("peek line 201"), "held while paused");
         press(&mut app, KeyCode::PageUp);
         assert_eq!(render(&app, 80, 30).lines().nth(28), Some("peek line 171"));
+        crate::tui::app::tests::key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(
+            render(&app, 80, 30).lines().nth(28),
+            Some("peek line 143"),
+            "ctrl-b pages too"
+        );
+        crate::tui::app::tests::key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(
+            render(&app, 80, 30).lines().nth(28),
+            Some("peek line 157"),
+            "ctrl-d half a page"
+        );
+        crate::tui::app::tests::key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(
+            render(&app, 80, 30).lines().nth(28),
+            Some("peek line 156"),
+            "ctrl-y a line"
+        );
+        press(&mut app, KeyCode::Char('g'));
         press(&mut app, KeyCode::Char('g'));
         assert_eq!(render(&app, 80, 30).lines().nth(1), Some("peek line 1"));
         press(&mut app, KeyCode::Char('j'));
@@ -1706,7 +1788,7 @@ mod tests {
     }
 
     #[test]
-    fn full_view_keys_answer_jump_quit_and_leave_the_board_keys_alone() {
+    fn full_view_keys_answer_jump_go_back_and_leave_the_board_keys_alone() {
         let mut app = full_of(numbered(3));
         assert_eq!(
             press(&mut app, KeyCode::Char('s')),
@@ -1717,9 +1799,16 @@ mod tests {
         assert!(
             matches!(press(&mut app, KeyCode::Enter), Some(Effect::Jump(row)) if row.key == "mini/seat-b")
         );
-        assert_eq!(press(&mut app, KeyCode::Char('q')), Some(Effect::Quit));
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
         assert_eq!(app.handle(ctrl_c), Some(Effect::Quit));
+        assert_eq!(press(&mut app, KeyCode::Char('q')), None, "q goes back");
+        assert!(app.full.is_none());
+        assert_eq!(
+            press(&mut app, KeyCode::Char('q')),
+            Some(Effect::Quit),
+            "then quits"
+        );
+        press(&mut app, KeyCode::Char(' '));
         press(&mut app, KeyCode::Char('a'));
         assert!(app.full.is_none());
         assert_eq!(
@@ -1874,9 +1963,9 @@ mod tests {
         press(&mut app, KeyCode::Char('f'));
         press(&mut app, KeyCode::Char('c'));
         assert!(!app.hidden, "c after f belongs to f");
-        assert_eq!(app.toast(), Some("f takes w d q p e u i; f or esc clears"));
-        press(&mut app, KeyCode::Char('S'));
-        assert!(app.sort.is_some(), "S still sorts");
+        assert_eq!(app.toast(), Some("f takes w d q p e u i; ff clears"));
+        crate::tui::app::tests::sort(&mut app, 's');
+        assert!(app.sort.is_some(), "o s sorts");
     }
 
     #[test]
@@ -1947,19 +2036,6 @@ mod tests {
         let card = card_of(&render(&app, 80, 30));
         assert_eq!(card[1], " no status from this pane");
         assert_eq!(card[2], "   space captures the screen");
-    }
-
-    #[test]
-    fn angle_brackets_say_once_that_they_are_gone() {
-        let mut app = fuller();
-        assert_eq!(press(&mut app, KeyCode::Char('>')), None);
-        assert_eq!(
-            app.toast(),
-            Some("the card spans the board now, so < and > are gone · c hides it")
-        );
-        app.toast = None;
-        press(&mut app, KeyCode::Char('<'));
-        assert_eq!(app.toast(), None, "once a run");
     }
 
     const PERMISSION: &str = "⏺ Bash(git push origin main --force-with-lease)\n Bash command\n   git push origin main --force-with-lease\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and don't ask again for git push commands in /work/project\n   3. No, and tell Claude what to do differently\n\n Esc to cancel · Tab to amend\n";
@@ -2180,7 +2256,7 @@ mod tests {
         ];
         let mut table = fuller();
         press(&mut table, KeyCode::Char('v'));
-        press(&mut table, KeyCode::Char('A'));
+        crate::tui::app::tests::sort(&mut table, 'a');
         screens.push(("table sorted 140", table, 140, 30));
         let mut keys = fuller();
         press(&mut keys, KeyCode::Char('?'));
@@ -2208,6 +2284,13 @@ mod tests {
         let mut toast = fuller();
         toast.say("a passing message");
         screens.push(("toast 80", toast, 80, 20));
+        let mut prefix = fuller();
+        press(&mut prefix, KeyCode::Char('z'));
+        screens.push(("z prefix 140", prefix, 140, 20));
+        let mut close = fuller();
+        press(&mut close, KeyCode::Char('d'));
+        press(&mut close, KeyCode::Char('d'));
+        screens.push(("dd question 140", close, 140, 20));
         let pinned = |mut app: App| {
             let at = DateTime::parse_from_rfc3339("2026-01-01T05:42:58Z").unwrap();
             app.answer.as_mut().unwrap().captured = Some(at.with_timezone(&Utc));
@@ -2269,6 +2352,7 @@ mod extension_tests {
     use ratatui::backend::TestBackend;
     use ratatui::crossterm::event::KeyCode;
 
+    use super::tests::listed;
     use super::*;
     use crate::client::{ExtRun, Field};
     use crate::tui::app::App;
@@ -2397,14 +2481,14 @@ mod extension_tests {
         let mut app = with_fields(&[]);
         let cells = Columns::new(140, 140, &app.field_columns()).header(None);
         let rig = cells.iter().find(|c| c.text.starts_with("RIG")).unwrap();
-        assert_eq!(rig.underline, Some(1), "R is HARNESS's, so I");
+        assert_eq!(rig.underline, Some(0), "r, since HARNESS sorts by h");
         let project = cells
             .iter()
             .find(|c| c.text.starts_with("PROJECT"))
             .unwrap();
         assert_eq!(project.underline, Some(0));
         press(&mut app, KeyCode::Char('v'));
-        press(&mut app, KeyCode::Char('I'));
+        crate::tui::app::tests::sort(&mut app, 'r');
         assert_eq!(app.sort, Some((Col::Field("fake.rig"), Dir::Up)));
         assert_eq!(
             keys(&app),
@@ -2486,27 +2570,23 @@ mod extension_tests {
         let text = render(&app, 120, 30);
         assert!(
             text.lines()
-                .any(|l| l.contains("I P L   by rig, project, lane")),
+                .any(|l| l.contains("o r p l  sort by rig, project, lane")),
             "the names alone when the sources would be cut:\n{text}"
         );
         let rows = key_rows(&app);
-        let at = rows.iter().position(|(k, _)| k == "I P L").unwrap();
-        assert_eq!(
-            rows[at - 1].0,
-            "E N B",
-            "right after the built-in sort letters"
-        );
+        let at = rows.iter().position(|(k, _)| k == "o r p l").unwrap();
+        assert_eq!(rows[at - 1].0, "o", "right after the sort row");
         let mut one = crate::tui::app::tests::app();
         one.set_extensions(vec![field("fake.rig", "RIG")], BTreeMap::new());
         assert!(
-            key_rows(&one).contains(&("I".to_owned(), "by rig (fake)".to_owned())),
+            key_rows(&one).contains(&("o r".to_owned(), "sort by rig (fake)".to_owned())),
             "the source while it fits"
         );
         let mut plain = crate::tui::app::tests::app();
         press(&mut plain, KeyCode::Char('?'));
         assert_eq!(
             key_rows(&plain).len(),
-            KEYS.len(),
+            listed().len(),
             "no row without extensions"
         );
     }

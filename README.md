@@ -22,11 +22,13 @@ rexboard pick            # choose a pane from the list and go to it
 rexboard upgrade         # upgrade to the latest release
 ```
 
+On the board the keys are vim's, plain keys and vim's own ctrl chords only, so they work in a stock Rex window: `j`/`k` move, `n` goes to the next row that needs you, `enter` jumps to its pane and `-` comes back, `space` shows the pane live, `a` answers it, `m` marks it seen, `/` filters, `o` sorts, `dd` closes a pane after asking, and `?` lists the rest. A prefix shows its next keys in the footer. See [TUI](docs/tui.md#keys).
+
 The first command starts `rexboard serve` in the background. It watches this host and every host in `rex hosts`, and keeps what Rex does not: how long each pane has been in its state, and whether you have seen it.
 
 ## What "needs you" and "seen" mean
 
-A pane needs you when it is blocked (often on a permission prompt), has an error, or is done and you have not seen it yet. Going to a pane marks it seen, and so does `s` on the board (`ctrl+s` marks every shown done row seen). A done pane you have seen moves to QUIET; a blocked or erroring one stays in NEEDS YOU until it moves on. A pane is unseen again each time it enters `done`, `blocked` or `error`.
+A pane needs you when it is blocked (often on a permission prompt), has an error, or is done and you have not seen it yet. Going to a pane marks it seen, and so does `m` on the board (`:seen` marks every shown done row seen). A done pane you have seen moves to QUIET; a blocked or erroring one stays in NEEDS YOU until it moves on. A pane is unseen again each time it enters `done`, `blocked` or `error`.
 
 ## Where status comes from
 
