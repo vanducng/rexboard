@@ -44,8 +44,8 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
     let sent = app
         .sent
         .as_ref()
-        .filter(|(key, _)| *key == row.key)
-        .map(|(_, text)| text.as_str());
+        .filter(|sent| sent.key == row.key)
+        .map(|sent| sent.text.as_str());
     let mut lines = vec![bar(row, peek, sent, now, width)];
     let msg = clean(row.pane.msg.as_deref().unwrap_or_default());
     let mut segments = msg.split(BREAK).map(str::trim).filter(|s| !s.is_empty());

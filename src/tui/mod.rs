@@ -286,7 +286,7 @@ fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
         } => {
             thread::spawn(move || {
                 let result = rex::locate()
-                    .map_err(|err| format!("send failed: {err}"))
+                    .map_err(|err| format!("send failed: {err}; nothing sent"))
                     .and_then(|rex| send::send(&rex, &pane, &expect, &action));
                 // A reply marks the row seen, as a jump does.
                 if result.is_ok() {

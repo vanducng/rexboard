@@ -150,7 +150,9 @@ impl Answer {
         let Some(screen) = self.screen.as_ref().filter(|_| !text.is_empty()) else {
             return Step::Stay;
         };
-        let why = if screen.fingerprint.is_none() {
+        let why = if !screen.options.is_empty() {
+            "pick a number; this dialog takes no text"
+        } else if screen.fingerprint.is_none() {
             "no input line on the screen; nothing sent"
         } else if screen.draft {
             "the input line already has text, which a reply would join; nothing sent"
@@ -282,6 +284,10 @@ impl Answer {
             let text = format!(" press {} again to send it: {}", choice.digit, choice.label);
             return Line::styled(fit(&text, width), theme::accent());
         }
+        // A dialog takes no text, so the reply line shows no cursor to invite it.
+        if self.screen.as_ref().is_some_and(|s| !s.options.is_empty()) {
+            return Line::styled(" ›", theme::dim());
+        }
         Line::styled(
             fit(&format!(" › {}▏", self.input.value()), width),
             theme::bright(),
@@ -291,16 +297,21 @@ impl Answer {
     /// The footer: what keys do here, and the promise that nothing goes out unchecked.
     pub fn footer(&self, width: usize) -> Line<'static> {
         let options = self.screen.as_ref().map_or(0, |s| s.options.len());
+        let esc = if self.input.value().is_empty() {
+            "esc back to board"
+        } else {
+            "esc clears"
+        };
         let keys = match &self.screen {
-            None => "esc back to board".to_owned(),
-            Some(_) if options > 0 => format!("1-{options} pick · esc back to board"),
+            None => esc.to_owned(),
+            Some(_) if options > 0 => format!("1-{options} pick · {esc}"),
             Some(screen) if screen.fingerprint.is_none() => {
-                "esc back to board · no dialog or input line on this screen".to_owned()
+                format!("{esc} · no dialog or input line on this screen")
             }
             Some(screen) if screen.draft => {
-                "esc back to board · the input line has text, so jump to it".to_owned()
+                format!("{esc} · the input line has text, so jump to it")
             }
-            Some(_) => "type to reply · enter send · esc back to board".to_owned(),
+            Some(_) => format!("type to reply · enter send · {esc}"),
         };
         let gap = width.saturating_sub(keys.width() + CHECKED.width());
         if gap < 4 {
@@ -412,6 +423,23 @@ mod tests {
         assert_eq!(
             key(&mut answer, KeyCode::Enter, now),
             Step::Send(Action::Text("fix the test".into()))
+        );
+    }
+
+    #[test]
+    fn answer_enter_never_sends_held_text_into_a_dialog() {
+        let mut answer = dialog();
+        answer.input = Input::new("go ahead".into());
+        let now = Instant::now();
+        assert_eq!(key(&mut answer, KeyCode::Enter, now), Step::Stay);
+        assert_eq!(
+            answer.error.as_deref(),
+            Some("pick a number; this dialog takes no text")
+        );
+        assert_eq!(
+            answer.reply_line(80).to_string(),
+            " ›",
+            "no cursor in a dialog"
         );
     }
 

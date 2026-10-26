@@ -62,9 +62,51 @@ if not t.ok then return t end
 local lines = {}
 for line in (t.text .. "\n"):gmatch("(.-)\n") do lines[#lines + 1] = line end
 while #lines > 0 and lines[#lines]:match("^%s*$") do lines[#lines] = nil end
+local last = {}
+for i = math.max(1, #lines - 39), #lines do last[#last + 1] = lines[i] end
 -- The fingerprint starts and ends with a newline, so it matches whole lines only.
-local window = "\n" .. table.concat(lines, "\n", math.max(1, #lines - 39)) .. "\n"
+local window = "\n" .. table.concat(last, "\n") .. "\n"
 if not window:find(a.expect.fingerprint, 1, true) then return refuse("prompt_changed") end
+
+-- `1. Yes` or `❯ 2) No`: the option's digit.
+local function option(line)
+  local rest = line:gsub("^%s+", "")
+  for _, mark in ipairs({ "❯", ">" }) do
+    if rest:sub(1, #mark) == mark then
+      rest = rest:sub(#mark + 1)
+      break
+    end
+  end
+  return rest:match("^%s*([1-9])[.)]%s+%S")
+end
+
+local function input_line(line)
+  if option(line) then return false end
+  local rest = line:gsub("^%s+", "")
+  if rest:sub(1, #"│") == "│" then rest = rest:sub(#"│" + 1):gsub("^%s+", "") end
+  for _, mark in ipairs({ "❯", "›", ">" }) do
+    if rest:sub(1, #mark) == mark then return true end
+  end
+  return false
+end
+
+-- A dialog is up when options 1 and 2 show with no input line below them. Text into a dialog
+-- would be read as its highlighted option, whatever the board believes it shows.
+local function dialog_up()
+  local one, two = false, false
+  for _, line in ipairs(last) do
+    local digit = option(line)
+    if digit == "1" then
+      one, two = true, false
+    elseif digit == "2" and one then
+      two = true
+    elseif input_line(line) then
+      one, two = false, false
+    end
+  end
+  return two
+end
+if a.action.text and dialog_up() then return refuse("dialog_up") end
 
 local events
 if a.action.pick then
@@ -80,8 +122,9 @@ else
     { type = "key", payload = { key = "enter", action = "press" } },
   }
 end
-for _, event in ipairs(events) do
+for i, event in ipairs(events) do
   local _, err = rex.call("block.event", { session_id = a.session_id, block_id = a.block_id, event = event })
-  if err then return fail("block.event", err) end
+  -- After a paste, a failed Enter leaves the text in the pane's input line.
+  if err then return fail(i == 2 and "enter" or "block.event", err) end
 end
 return { ok = true }

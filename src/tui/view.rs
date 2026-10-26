@@ -1537,7 +1537,11 @@ mod tests {
                 !text.contains("Esc to cancel"),
                 "chrome below the options is cut: {text}"
             );
-            assert!(card.last().unwrap().starts_with(" › "), "{text}");
+            assert_eq!(
+                card.last().unwrap(),
+                " ›",
+                "no cursor under a dialog: {text}"
+            );
             let footer = text.lines().last().unwrap();
             assert!(
                 footer.starts_with("1-3 pick · esc back to board"),

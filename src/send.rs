@@ -82,7 +82,10 @@ pub fn send(
     }
     let field = |name: &str| reply[name].as_str().map(clean).unwrap_or_default();
     Err(match reply["code"].as_str() {
-        Some("status_changed") => "the agent moved on; nothing sent".to_owned(),
+        Some("status_changed") => {
+            "the agent's status changed since it was read; nothing sent".to_owned()
+        }
+        Some("dialog_up") => "a dialog is up; pick a number; nothing sent".to_owned(),
         Some("not_harness") => format!(
             "{} is in front, not the agent; nothing sent",
             field("detail")
@@ -90,7 +93,11 @@ pub fn send(
         Some("prompt_changed") => "the screen changed since it was read; nothing sent".to_owned(),
         Some("gone") => "the pane is gone; nothing sent".to_owned(),
         Some(code) => format!("{}; nothing sent", clean(code)),
-        None => format!("send failed at {}: {}", field("step"), field("error")),
+        None => match field("step").as_str() {
+            "enter" => "the text was pasted but Enter did not go through; it is in the pane's input line, so jump to it".to_owned(),
+            "block.event" => format!("send failed at block.event: {}", field("error")),
+            step => format!("send failed at {step}: {}; nothing sent", field("error")),
+        },
     })
 }
 
@@ -187,7 +194,19 @@ mod tests {
         for (reply, text) in [
             (
                 json!({ "code": "status_changed" }),
-                "the agent moved on; nothing sent",
+                "the agent's status changed since it was read; nothing sent",
+            ),
+            (
+                json!({ "code": "dialog_up" }),
+                "a dialog is up; pick a number; nothing sent",
+            ),
+            (
+                json!({ "step": "program_status", "error": "timeout" }),
+                "send failed at program_status: timeout; nothing sent",
+            ),
+            (
+                json!({ "step": "enter", "error": "bad_request" }),
+                "the text was pasted but Enter did not go through; it is in the pane's input line, so jump to it",
             ),
             (
                 json!({ "code": "not_harness", "detail": "zsh" }),
@@ -214,6 +233,17 @@ mod tests {
                 Err(text.to_owned())
             );
         }
+    }
+
+    #[test]
+    fn answer_send_lua_refuses_text_into_a_dialog_before_any_event() {
+        let lua = include_str!("lua/send.lua");
+        let guard = lua.find("if a.action.text and dialog_up() then return refuse(\"dialog_up\")");
+        let first_event = lua.find("rex.call(\"block.event\"");
+        assert!(
+            guard.is_some() && guard < first_event,
+            "the dialog check runs before a paste"
+        );
     }
 
     #[test]

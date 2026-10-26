@@ -62,6 +62,16 @@ pub enum Effect {
     Quit,
 }
 
+/// An answer the board sent, which the card's bar names.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Sent {
+    pub key: String,
+    /// `sent 1 (Yes) → seat-b 11:22:04`
+    pub text: String,
+    /// The report the answer was checked against.
+    pub report: Option<String>,
+}
+
 /// One line of the list: a group header or a row (an index into `App::rows`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
@@ -153,8 +163,8 @@ pub struct App {
     needs: BTreeSet<String>,
     /// `a`: answering one row; the board's keys are off.
     pub answer: Option<Answer>,
-    /// The last answer that went out: the row's key and `sent 1 (Yes) → seat-b 11:22:04`.
-    pub sent: Option<(String, String)>,
+    /// The last answer that went out, until its row needs you again.
+    pub sent: Option<Sent>,
     /// The board's own pane (`REX_BLOCK`), which it never answers.
     pub own: Option<String>,
 }
@@ -177,6 +187,22 @@ impl App {
             self.folded.remove(&Bucket::Status(Group::NeedsYou));
         }
         self.needs = needs;
+        // A row that needs you again with a newer report asks something new; the old answer
+        // must not sit on it.
+        if let Some(sent) = &self.sent {
+            let asks_again = |row: &Row| {
+                row.group == Group::NeedsYou
+                    && newer(row.pane.updated_at.as_deref(), sent.report.as_deref())
+            };
+            let stands = self
+                .rows
+                .iter()
+                .find(|row| row.key == sent.key)
+                .is_some_and(|row| !asks_again(row));
+            if !stands {
+                self.sent = None;
+            }
+        }
         self.keep_selection_visible();
     }
 
@@ -782,6 +808,10 @@ impl App {
         };
         match result {
             Ok(screen) => {
+                // Text typed for an input line must never meet a dialog.
+                if !screen.options.is_empty() {
+                    answer.input.reset();
+                }
                 answer.screen = Some(screen);
                 answer.captured = Some(chrono::Utc::now());
             }
@@ -799,12 +829,17 @@ impl App {
         let answering = self.answer.as_ref().is_some_and(|a| a.row.key == key);
         let why = match result {
             Ok(()) => {
-                if answering {
-                    self.answer = None;
-                }
+                let report = match self.answer.take_if(|a| a.row.key == key) {
+                    Some(answer) => Some(answer.updated_at),
+                    None => latest.as_ref().and_then(|row| row.pane.updated_at.clone()),
+                };
                 let to = latest.as_ref().map_or_else(|| key.to_owned(), name);
                 let at = chrono::Local::now().format("%H:%M:%S");
-                self.sent = Some((key.to_owned(), format!("sent {what} → {to} {at}")));
+                self.sent = Some(Sent {
+                    key: key.to_owned(),
+                    text: format!("sent {what} → {to} {at}"),
+                    report,
+                });
                 return None;
             }
             Err(why) if !answering => {
@@ -821,6 +856,7 @@ impl App {
             answer.row = row;
         }
         answer.sending = None;
+        answer.input.reset();
         answer.armed = None;
         answer.screen = None;
         answer.captured = None;
@@ -852,6 +888,15 @@ impl App {
         {
             self.selected = spots.first().cloned();
         }
+    }
+}
+
+/// Whether report `a` came after `b`.
+fn newer(a: Option<&str>, b: Option<&str>) -> bool {
+    let at = |s: Option<&str>| s.and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok());
+    match (at(a), at(b)) {
+        (Some(a), Some(b)) => a > b,
+        _ => a != b,
     }
 }
 
@@ -1204,16 +1249,79 @@ pub mod tests {
         let again = app.sent(
             &key,
             "1 (Yes)",
-            Err("the agent moved on; nothing sent".into()),
+            Err("the agent's status changed since it was read; nothing sent".into()),
         );
         assert!(matches!(again, Some(Effect::Read { .. })), "{again:?}");
         let answer = app.answer.as_ref().expect("still answering");
         assert_eq!(
             answer.error.as_deref(),
-            Some("the agent moved on; nothing sent")
+            Some("the agent's status changed since it was read; nothing sent")
         );
         assert_eq!(answer.updated_at, "2026-01-01T00:00:09Z");
         assert!(answer.screen.is_none() && answer.sending.is_none());
+    }
+
+    #[test]
+    fn answer_text_typed_for_an_idle_prompt_never_reaches_a_dialog_that_replaced_it() {
+        let mut app = app();
+        let key = answering(&mut app, "────\n❯\u{a0}\n");
+        for c in "go ahead".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        assert!(matches!(
+            press(&mut app, KeyCode::Enter),
+            Some(Effect::Send {
+                action: Action::Text(_),
+                ..
+            })
+        ));
+        let why = "the agent's status changed since it was read; nothing sent";
+        assert!(matches!(
+            app.sent(&key, "\"go ahead\"", Err(why.into())),
+            Some(Effect::Read { .. })
+        ));
+        assert_eq!(
+            app.answer.as_ref().unwrap().input.value(),
+            "",
+            "a refusal clears it"
+        );
+        app.screen(&key, Ok(Screen::parse(DIALOG, None)));
+        assert_eq!(press(&mut app, KeyCode::Enter), None);
+        for c in "go ahead".chars() {
+            assert_eq!(press(&mut app, KeyCode::Char(c)), None);
+        }
+        assert_eq!(
+            app.answer.as_ref().unwrap().error.as_deref(),
+            Some("pick a number; this dialog takes no text")
+        );
+        assert_eq!(
+            press(&mut app, KeyCode::Enter),
+            None,
+            "no text into a dialog"
+        );
+    }
+
+    #[test]
+    fn answer_the_sent_line_lasts_until_the_row_needs_you_again() {
+        let mut app = app();
+        let key = answering(&mut app, DIALOG);
+        press(&mut app, KeyCode::Char('1'));
+        app.sent(&key, "1 (Yes)", Ok(()));
+        let report = |app: &mut App, state: &str, group: &str, at: &str| {
+            let mut all = rows();
+            all[0] = row("mini/seat-b", state, group, false);
+            all[0].pane.updated_at = Some(at.into());
+            app.set_rows(all, hosts());
+        };
+        report(&mut app, "blocked", "needs_you", "2026-01-01T00:00:00Z");
+        assert!(app.sent.is_some(), "the same report: kept");
+        report(&mut app, "working", "working", "2026-01-01T00:00:05Z");
+        assert!(
+            app.sent.is_some(),
+            "kept while the agent works on the answer"
+        );
+        report(&mut app, "blocked", "needs_you", "2026-01-01T00:01:00Z");
+        assert_eq!(app.sent, None, "a new ask drops it");
     }
 
     #[test]
@@ -1224,9 +1332,14 @@ pub mod tests {
         assert_eq!(app.sent(&key, "1 (Yes)", Ok(())), None);
         assert!(app.answer.is_none());
         assert_eq!(selected(&app), "mini/seat-b");
-        let (sent_to, text) = app.sent.clone().unwrap();
-        assert_eq!(sent_to, "mini/seat-b");
-        assert!(text.starts_with("sent 1 (Yes) → seat-b "), "{text}");
+        let sent = app.sent.clone().unwrap();
+        assert_eq!(sent.key, "mini/seat-b");
+        assert_eq!(sent.report.as_deref(), Some("2026-01-01T00:00:00Z"));
+        assert!(
+            sent.text.starts_with("sent 1 (Yes) → seat-b "),
+            "{}",
+            sent.text
+        );
     }
 
     #[test]

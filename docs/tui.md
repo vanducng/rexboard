@@ -123,15 +123,15 @@ Reading a card does not mark a row seen. `s` does, and so does `tab` off a `done
  │  ❯ 1. Yes
  │    2. Yes, and don't ask again for git push commands in /work/api-gateway   press 2 twice
  │    3. No, and tell Claude what to do differently
- › ▏
+ ›
 1-3 pick · esc back to board                       the pane is re-checked before sending · board keys are off
 ```
 
 | Key | Does |
 | --- | --- |
-| `1`-`9` | When the screen shows a numbered dialog, picks that option: one key press, no Enter. An option that grants something for later (`always`, `don't ask again`, `auto mode`) needs the same digit again within 3 seconds; the first press only says `press 2 again to send it` |
+| `1`-`9` | When the screen shows a numbered dialog (the reply line is then a dim `›` with no cursor), picks that option: one key press, no Enter. An option that grants something for later (`always`, `don't ask again`, `auto mode`) needs the same digit again within 3 seconds; the first press only says `press 2 again to send it` |
 | text, then `enter` | When the screen shows an input line and no dialog, sends the line as a paste, then Enter. `enter` with nothing typed does nothing. Text into a dialog is refused: `pick a number; this dialog takes no text` |
-| `esc` | Clears the typed text, or leaves when there is none |
+| `esc` | Clears the typed text (the footer then says `esc clears`), or leaves when there is none |
 | `ctrl-c` | Leaves; it never quits the board here |
 | `tab` | Leaves and selects the next row that needs you; press `a` again there |
 
@@ -141,13 +141,16 @@ The mode is bound to the row's host and pane, not its place in the list, so a re
 
 Before anything is sent, one `rex do` on the pane's host checks, in order, that:
 
-1. the pane's status report is the one the board read (else `the agent moved on; nothing sent`);
+1. the pane's status report is the one the board read (else `the agent's status changed since it was read; nothing sent`);
 2. an agent, not a shell, is in front (else `zsh is in front, not the agent; nothing sent`); a tmux seat must still show the same seat's title;
-3. the dialog's options, or the input line and the line above it, are still on the last 40 lines, whole (else `the screen changed since it was read; nothing sent`).
+3. the dialog's options, or the input line and the line above it, are still on the last 40 lines, whole (else `the screen changed since it was read; nothing sent`);
+4. for a line, no dialog is up: options 1 and 2 with no input line below them (else `a dialog is up; pick a number; nothing sent`). Text into a dialog would be read as its highlighted option, so this holds whatever the board believes it shows.
 
-Only then does the key or the line go out, in the same script. A refusal sends nothing, keeps the mode open with the reason in red, and reads the pane again. A line is also refused when the input line already holds typed text, which the reply would join (`the input line already has text, which a reply would join; nothing sent`). A dim placeholder or suggested prompt does not count as typed.
+A pane that is gone says `the pane is gone; nothing sent`. Only then does the key or the line go out, in the same script. A refusal sends nothing, clears any typed text, keeps the mode open with the reason in red, and reads the pane again. A read that shows a dialog clears typed text too.
 
-After a send the board returns to the same row, marks it seen, and the card's bar says what went where: `sent 1 (Yes) → seat-a 11:22:04`. Nothing moves on by itself; `tab` goes to the next row that needs you.
+Two failures are not refusals. `the pane did not answer within 5s, so it may or may not have the key; look before sending again` means the script ran out of time and the key may have gone out. `the text was pasted but Enter did not go through; it is in the pane's input line, so jump to it` means the paste landed and its Enter did not. Any other failure before the send ends `; nothing sent`. A line is also refused when the input line already holds typed text, which the reply would join (`the input line already has text, which a reply would join; nothing sent`). A dim placeholder or suggested prompt does not count as typed.
+
+After a send the board returns to the same row, marks it seen, and the card's bar says what went where: `sent 1 (Yes) → seat-a 11:22:04`, until the row needs you again with a newer report. Nothing moves on by itself; `tab` goes to the next row that needs you.
 
 Options are read for Claude Code's dialogs (permission prompts and questions). Other harnesses get line replies at an input line they show; a dialog the board does not recognise offers nothing to send, so jump to it.
 
