@@ -42,14 +42,15 @@ rexboard reaches Rex only through the `rex` command: `rex do` for these scripts 
 | `src/board.rs` | The reducer: rows with `since`, turns, `seen` and groups, from host events and an injected clock |
 | `src/serve.rs` | The daemon: collectors, the reducer thread, the socket |
 | `src/state.rs` | Paths, the `flock`, `state.json`, `transitions.jsonl`, and the startup sweep |
-| `src/tui/detail.rs` | The detail pane's width and `tui.json` |
+| `src/tui/card.rs` | The turn card: the selected row's bar, headline, ask or body, and tail |
+| `src/tui/prefs.rs` | `tui.json` |
 | `src/client.rs` | `ls`, `watch --json`, `seen` and `serve` as clients; starts serve when nothing answers |
 | `src/rex.rs` | Finds `rex`, runs one-shot scripts, and holds the one lock around every spawn, bind, accept and connect |
 | `src/jump.rs` | `jump`, `next` and `pick`'s jump: runs `jump.lua`, then marks the row seen through serve; turns Rex's failures into plain errors |
 | `src/lua/tail.lua` | Defines `tail(a)`: the last `a.max_bytes` of a pane's text, starting at a whole line, through `format` and `blob_read`. The board's peek runs it with 48 KiB and a 3s limit; a newer peek stops an older one |
 | `src/lua/jump.lua` | Runs through `rex do -`: finds this Mac's Rex app, attaches to the pane's session, focuses the pane on its own server, and asks the app to select the session |
 | `src/config.rs` | `config.toml`: `client` and `hosts.exclude` |
-| `src/tui/` | The board and `pick`: a client of serve's rows, with peek, seen, folds, filter and Enter to jump |
+| `src/tui/` | The board and `pick`: a client of serve's rows, with the turn card, its tail, seen, folds, filter and Enter to jump |
 
 serve uses std threads and channels; there is no async runtime. Collectors, the socket listener and each connection run on their own thread, and only the reducer thread touches the board.
 
@@ -63,7 +64,7 @@ serve uses std threads and channels; there is no async runtime. Collectors, the 
 | `state.json` | `{"v":1,"panes":{KEY:{state,kind,since,since_estimated,turn_started,last_turn,seen}}}`, written through a temp file and a rename at most once a second, and on stop. Entries for a host that has not sent its first snapshot this run are kept as loaded |
 | `transitions.jsonl` | One line per state change: `{at, host, block_id, from, to, kind}`. Over 5 MB at serve start, it moves to `transitions.jsonl.1`, replacing the older one |
 | `serve.log` | serve's output when a command started it. A client clears it first when it is over 1 MB |
-| `tui.json` | The board's own settings on this machine: `{"detail": SHARE, "detail_hidden": BOOL}`, the detail pane's share of the width and whether `c` hid it. Written by the board, not serve, on each `<`, `>` or `c`; a missing or unreadable file means the default third, shown |
+| `tui.json` | The board's own settings on this machine: `{"detail_hidden": BOOL}`, whether `c` hid the turn card. Written by the board, not serve, on each `c`; a missing or unreadable file means shown, and the side pane's old `detail` key is ignored |
 
 On start, serve takes the lock, removes a stale socket, then stops observers a dead serve left behind. A recorded pid is stopped only if it is still its own process group, its parent is init or the recorded serve, and its command is the recorded `rex` running `do - --all --fail-fast`. Anything else is skipped and logged, because the pid may now belong to another program.
 

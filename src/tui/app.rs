@@ -13,7 +13,11 @@ use crate::output::{labels, path};
 
 const TOAST: Duration = Duration::from_secs(3);
 
-const HIDDEN: &str = "the detail pane is hidden · c shows it";
+const HIDDEN: &str = "the card is hidden · c shows it";
+/// A blocked row's tail is read once its card has shown this long, so j/k across rows reads none.
+const SETTLE: Duration = Duration::from_millis(300);
+/// `tab` off a done row whose card showed at least this long marks it seen.
+const READ: Duration = Duration::from_secs(1);
 
 /// What a key asks the outside world to do.
 #[derive(Debug, PartialEq)]
@@ -33,8 +37,8 @@ pub enum Effect {
     SeenAll(Vec<String>),
     /// Go to this row's pane.
     Jump(Box<Row>),
-    /// Keep the detail pane's width and whether it is hidden in tui.json.
-    SavePrefs(super::detail::Prefs),
+    /// Keep whether the card is hidden in tui.json.
+    SavePrefs(super::prefs::Prefs),
     Reconnect,
     Quit,
 }
@@ -63,6 +67,8 @@ pub struct Peek {
     pub lines: Option<Result<Vec<String>, String>>,
     /// When the capture came back.
     pub at: Option<chrono::DateTime<chrono::Utc>>,
+    /// The row's report when the tail was asked for; a later one makes it stale.
+    pub updated_at: Option<String>,
 }
 
 /// Where the board stands with serve.
@@ -101,15 +107,21 @@ pub struct App {
     pub drawn: std::cell::Cell<(u16, usize, usize)>,
     pub folded: BTreeSet<Bucket>,
     pub peek: Option<Peek>,
-    /// The `?` key table is open in the detail pane.
+    /// The `?` key table is open in the card.
     pub keys: bool,
+    /// `space`: the card takes the whole body.
+    pub zoom: bool,
+    /// The row whose card shows, and since when: `tab` reads it, and a blocked row's tail waits
+    /// for it to settle.
+    pub shown: Option<(String, Instant)>,
+    /// The row and report the last automatic tail was for, so each is read once.
+    tailed: Option<(String, Option<String>)>,
+    told_angles: bool,
     pub toast: Option<(String, Instant)>,
     pub link: Link,
     /// `rexboard pick`: the list alone; enter goes and esc gives up.
     pub pick: bool,
-    /// The detail pane's share of the width (`<` `>`), from tui.json; none is the default.
-    pub detail: Option<f64>,
-    /// `c` hid the detail pane, from tui.json.
+    /// `c` hid the card, from tui.json.
     pub hidden: bool,
     /// The terminal's size at the last draw, which `<` and `>` move the pane against and a
     /// click is read against.
@@ -359,38 +371,114 @@ impl App {
         self.view.group_by.is_none() && !self.pick
     }
 
-    /// Whether the detail pane shows: unless `c` hid it, and always while a peek, the key table or
-    /// a failed jump's reason, which only it shows whole, is up.
-    pub fn pane_shown(&self) -> bool {
-        !self.hidden || self.keys || self.peek.is_some() || self.failed.is_some()
+    /// Whether the card shows under the list: unless `c` hid it, and always while it is zoomed or
+    /// holds the key table or a failed jump's reason, which only it shows whole. `pick` has none.
+    pub fn card_shown(&self) -> bool {
+        !self.pick && (!self.hidden || self.keys || self.zoom || self.failed.is_some())
     }
 
-    /// Whether the detail pane sits beside the list on a board `board` wide (from 100 columns);
-    /// below that it sits under it, and `pick` has none.
-    pub fn beside(&self, board: u16) -> bool {
-        board >= 100 && !self.pick && self.pane_shown()
-    }
-
-    fn prefs(&self) -> super::detail::Prefs {
-        super::detail::Prefs {
-            detail: self.detail,
+    fn prefs(&self) -> super::prefs::Prefs {
+        super::prefs::Prefs {
             detail_hidden: self.hidden,
         }
+    }
+
+    /// Notes which row's card shows from `now`; the board calls it after every change.
+    pub fn note_card(&mut self, now: Instant) {
+        let key = self
+            .card_shown()
+            .then(|| self.current().map(|row| row.key.clone()))
+            .flatten();
+        match key {
+            Some(key) if self.shown.as_ref().is_some_and(|(shown, _)| *shown == key) => {}
+            Some(key) => self.shown = Some((key, now)),
+            None => self.shown = None,
+        }
+    }
+
+    /// A tail for a blocked row whose card has shown for SETTLE, once per report.
+    pub fn auto_tail(&mut self, now: Instant) -> Option<Effect> {
+        let (key, since) = self.shown.as_ref()?;
+        let row = self.current().filter(|row| row.key == *key)?;
+        if now.duration_since(*since) < SETTLE || row.pane.state != "blocked" {
+            return None;
+        }
+        let want = (row.key.clone(), row.pane.updated_at.clone());
+        if self.tailed.as_ref() == Some(&want) {
+            return None;
+        }
+        self.tailed = Some(want);
+        self.tail()
+    }
+
+    /// Asks for the current row's tail; the card shows it when it comes.
+    fn tail(&mut self) -> Option<Effect> {
+        let row = self.current()?;
+        let effect = Effect::Peek {
+            key: row.key.clone(),
+            host: row.pane.host.clone(),
+            session: row.pane.session_id.clone(),
+            block: row.pane.block_id.clone(),
+        };
+        self.peek = Some(Peek {
+            key: row.key.clone(),
+            lines: None,
+            at: None,
+            updated_at: row.pane.updated_at.clone(),
+        });
+        Some(effect)
+    }
+
+    /// `tab`: a done row read for READ is seen; then on to the next NEEDS YOU row, wrapping.
+    fn next_waiting(&mut self, now: Instant) -> Option<Effect> {
+        let seen = self.current().and_then(|row| {
+            let read = self
+                .shown
+                .as_ref()
+                .is_some_and(|(key, since)| *key == row.key && now.duration_since(*since) >= READ);
+            (read && row.pane.state == "done" && !row.seen).then(|| Effect::Seen {
+                key: row.key.clone(),
+                label: path(&labels(row, true), usize::MAX),
+                state: row.pane.state.clone(),
+            })
+        });
+        for row in self.rows.iter().filter(|row| row.group == Group::NeedsYou) {
+            if let Some(group) = bucket(&self.view, row) {
+                self.folded.remove(&group);
+            }
+        }
+        let waiting: Vec<Spot> = self
+            .items()
+            .into_iter()
+            .filter_map(|item| match item {
+                Item::Row(i) if self.rows[i].group == Group::NeedsYou => {
+                    Some(Spot::Row(self.rows[i].key.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        let at = waiting
+            .iter()
+            .position(|spot| Some(spot) == self.selected.as_ref());
+        let next = at.map_or(0, |at| at + 1) % waiting.len().max(1);
+        match waiting.get(next) {
+            Some(spot) => self.selected = Some(spot.clone()),
+            None => self.say("nobody needs you"),
+        }
+        seen
     }
 
     /// A click at `x`, `y` in the table view: on a column's header cell it sorts as that
     /// column's letter does, on its arrow it flips the sort, and on a row it selects the row.
     pub fn click(&mut self, x: u16, y: u16) {
-        use super::detail::{columns_board, list};
         use super::view::{HEADED, HEADER_ROW};
         let items = self.items();
-        let beside = self.beside(self.width);
-        let list = usize::from(list(self.width, self.detail, beside));
-        if !self.clicks() || self.prompting() || items.is_empty() || usize::from(x) >= list {
+        let list = usize::from(self.width);
+        if !self.clicks() || self.prompting() || items.is_empty() || self.zoom {
             return;
         }
         if self.height >= HEADED && y == HEADER_ROW {
-            let columns = Columns::new(columns_board(self.width, list, beside), list);
+            let columns = Columns::new(self.width, list);
             if let Some(letter) = columns.at(usize::from(x), self.sort).and_then(|c| c.letter) {
                 self.sort_by(letter);
             }
@@ -510,7 +598,7 @@ impl App {
             KeyCode::Char(c) if by_letter(c).is_some() => self.sort_by(c),
             KeyCode::Char('?') => {
                 self.keys = !self.keys;
-                self.peek = None;
+                self.zoom = false;
             }
             KeyCode::Esc if self.pick => return Some(Effect::Quit),
             KeyCode::Esc => {
@@ -518,6 +606,7 @@ impl App {
                 self.status = None;
                 self.peek = None;
                 self.keys = false;
+                self.zoom = false;
                 self.sort = None;
                 self.unfold_all();
                 self.keep_selection_visible();
@@ -563,31 +652,14 @@ impl App {
                     state: row.pane.state.clone(),
                 });
             }
-            KeyCode::Char(' ') => {
-                let row = self.current()?;
-                let (key, host, session, block) = (
-                    row.key.clone(),
-                    row.pane.host.clone(),
-                    row.pane.session_id.clone(),
-                    row.pane.block_id.clone(),
-                );
-                if self.peek.as_ref().is_some_and(|peek| peek.key == key) {
-                    self.peek = None;
-                    return None;
-                }
+            KeyCode::Char(' ') if self.zoom => self.zoom = false,
+            KeyCode::Char(' ') if !self.pick => {
+                self.current()?;
                 self.keys = false;
-                self.peek = Some(Peek {
-                    key: key.clone(),
-                    lines: None,
-                    at: None,
-                });
-                return Some(Effect::Peek {
-                    key,
-                    host,
-                    session,
-                    block,
-                });
+                self.zoom = true;
+                return self.tail();
             }
+            KeyCode::Tab if !self.pick => return self.next_waiting(Instant::now()),
             KeyCode::Enter if self.going.is_some() => self.say("a jump is already running"),
             KeyCode::Enter => {
                 let row = self.current()?.clone();
@@ -610,24 +682,10 @@ impl App {
                 }
                 return Some(Effect::SavePrefs(self.prefs()));
             }
-            KeyCode::Char('<' | '>') if self.hidden && !self.pick => self.say(HIDDEN),
-            KeyCode::Char(c @ ('<' | '>')) if self.width >= 100 && !self.pick => {
-                let wider = c == '>';
-                let share = super::detail::step(self.width, self.detail, wider);
-                let width = |share| super::detail::width(self.width, share);
-                if width(Some(share)) == width(self.detail) {
-                    self.say(if wider {
-                        "the detail pane is as wide as it goes"
-                    } else {
-                        "the detail pane is as narrow as it goes"
-                    });
-                    return None;
-                }
-                self.detail = Some(share);
-                return Some(Effect::SavePrefs(self.prefs()));
-            }
-            KeyCode::Char('<' | '>') if !self.pick => {
-                self.say("< and > size the detail pane on boards wider than 100 columns");
+            // The card spans the board, so there is no width left to size; said once a run.
+            KeyCode::Char('<' | '>') if !self.pick && !self.told_angles => {
+                self.told_angles = true;
+                self.say("the card spans the board now, so < and > are gone · c hides it");
             }
             _ => {}
         }

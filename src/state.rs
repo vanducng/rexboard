@@ -77,7 +77,7 @@ impl Paths {
         self.dir.join("restart.lock")
     }
 
-    /// The board's own settings on this machine, such as the detail pane's width.
+    /// The board's own settings on this machine, such as whether the turn card is hidden.
     pub fn tui(&self) -> PathBuf {
         self.dir.join("tui.json")
     }

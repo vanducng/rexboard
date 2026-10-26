@@ -122,6 +122,25 @@ pub fn in_state(row: &Row, now: DateTime<Utc>) -> String {
     format!("{estimated}{}", age(&row.since, now))
 }
 
+/// Where a hook joined the lines of an agent's message, which Rex keeps on one line.
+pub const BREAK: &str = " ⏎ ";
+
+/// What the board's MSG column says: the agent's own message, first line. Blank for none, and
+/// for the filler a hook sends when it has no words (`Done`, `Working`, `Allow Bash?`).
+pub fn turn_msg(row: &Row) -> &str {
+    let msg = row.pane.msg.as_deref().unwrap_or_default();
+    let first = msg.split(BREAK).next().unwrap_or_default().trim();
+    let allow = first
+        .strip_prefix("Allow ")
+        .and_then(|rest| rest.strip_suffix('?'))
+        .is_some_and(|tool| !tool.is_empty() && !tool.contains(char::is_whitespace));
+    if allow || first == "Done" || first == "Working" {
+        ""
+    } else {
+        first
+    }
+}
+
 /// The record's message, else the title without its state glyph.
 pub fn what(row: &Row) -> &str {
     row.pane
@@ -422,6 +441,23 @@ pub fn span(secs: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_msg_column_is_the_agents_own_first_line_and_never_filler() {
+        let msg = |m: &str| turn_msg(&row("seat", "t", m)).to_owned();
+        for filler in ["Done", "Working", "Allow Bash?", "Allow mcp__fs__read?", ""] {
+            assert_eq!(msg(filler), "", "{filler:?}");
+        }
+        assert_eq!(msg("a ⏎ b"), "a");
+        assert_eq!(
+            msg("Allow Bash: git push?"),
+            "Allow Bash: git push?",
+            "a real ask stays"
+        );
+        let native = format!("Which layout should the card use? {}", "option ".repeat(33));
+        assert!(native.trim().chars().count() >= 263);
+        assert_eq!(msg(&native), native.trim(), "a native question, whole");
+    }
 
     #[test]
     fn chop_never_splits_a_wide_character() {
