@@ -429,18 +429,7 @@ impl Reducer {
             HostEvent::Failed(err) => self.stop_host(host, err),
             event => match self.board.apply(host, event, chrono::Utc::now()) {
                 Ok(mut changed) => {
-                    match event {
-                        HostEvent::Down { .. } => {
-                            self.hosts.insert(host.to_owned(), "down");
-                        }
-                        HostEvent::Event(Event::Snapshot { .. }, _) => {
-                            if self.restored.insert(host.to_owned()) {
-                                changed.extend(self.board.restore(host, &self.memory));
-                            }
-                            self.hosts.insert(host.to_owned(), "up");
-                        }
-                        _ => {}
-                    }
+                    self.note_host(host, event, &mut changed);
                     changed
                 }
                 Err(err) => {
@@ -459,6 +448,23 @@ impl Reducer {
         }
         if !changed.is_empty() {
             self.rows_changed();
+        }
+    }
+
+    /// A host's state from an event the board took: down, or up on a snapshot, restoring its
+    /// remembered rows on the first one.
+    fn note_host(&mut self, host: &str, event: &HostEvent, changed: &mut Vec<(String, String)>) {
+        match event {
+            HostEvent::Down { .. } => {
+                self.hosts.insert(host.to_owned(), "down");
+            }
+            HostEvent::Event(Event::Snapshot { .. }, _) => {
+                if self.restored.insert(host.to_owned()) {
+                    changed.extend(self.board.restore(host, &self.memory));
+                }
+                self.hosts.insert(host.to_owned(), "up");
+            }
+            _ => {}
         }
     }
 
