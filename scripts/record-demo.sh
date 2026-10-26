@@ -147,11 +147,12 @@ k() { for key in "$@"; do tmux -L "$tmux_socket" send-keys -t demo "$key"; sleep
 for _ in $(seq 1 100); do tmux -L "$tmux_socket" capture-pane -p -t demo 2>/dev/null | grep -q 'NEEDS YOU' && break; sleep 0.1; done
 sleep 1.5
 touch "$go"
-# A done row's two-line card; the permission row's ask and screen; `a`, then `1`, answers it from
-# the board; the question row zoomed; the card hidden and back; `tab` through the rows that need you.
+# A done row's two-line card; the permission row's ask and screen; `a`, `2` once to show that a
+# lasting option asks again, then `1`, answers it from the board; the question row zoomed; the
+# card hidden and back; `tab` through the rows that need you.
 sleep 2; k 2; sleep 3.5
 k 2; sleep 3
-k a; sleep 3; k 1; sleep 3.5
+k a; sleep 4.5; k 2; sleep 2; k 1; sleep 3.5
 k 1; sleep 2; k Space; sleep 3; k Space
 sleep 1; k c; sleep 2; k c
 sleep 1; k Tab; sleep 2.5; k Tab; sleep 3
