@@ -143,5 +143,9 @@ mod tests {
         app.set_rows(rows().split_off(1), hosts());
         assert!(app.full.is_none());
         assert_eq!(app.toast(), Some("seat-b left the board"));
+        assert!(
+            render(&app, 80, 30).contains("WORKING"),
+            "the board draws again"
+        );
     }
 }

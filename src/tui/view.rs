@@ -1290,19 +1290,6 @@ mod tests {
     }
 
     #[test]
-    fn full_view_closes_when_its_row_goes() {
-        let mut app = full_of(numbered(3));
-        let rows = app
-            .rows
-            .iter()
-            .filter(|row| row.key != "mini/seat-b")
-            .cloned()
-            .collect();
-        app.set_rows(rows, hosts());
-        assert!(app.full.is_none() && render(&app, 80, 30).contains("WORKING"));
-    }
-
-    #[test]
     fn c_hides_the_card_and_keeps_the_choice() {
         let mut app = fuller();
         let effect = press(&mut app, KeyCode::Char('c'));
