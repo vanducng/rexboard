@@ -386,7 +386,8 @@ fn hang(line: &str, width: usize, indent: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::app::testkit::row;
+    use crate::tui::app::Peek;
+    use crate::tui::app::testkit::*;
 
     fn dialog() -> Answer {
         let mut answer = Answer::new(
@@ -517,5 +518,152 @@ mod tests {
         assert_eq!(key(&mut answer, KeyCode::Char('1'), now), Step::Stay);
         assert_eq!(key(&mut answer, KeyCode::Enter, now), Step::Stay);
         assert_eq!(key(&mut answer, KeyCode::Esc, now), Step::Leave);
+    }
+
+    #[test]
+    fn answer_mode_shows_a_red_bar_the_options_and_its_own_footer_at_80_and_140() {
+        let app = answer_mode_on(PERMISSION);
+        for width in [80, 140] {
+            let text = render(&app, width, 24);
+            let card = card_of(&text);
+            assert!(
+                card[0].starts_with("━━ ANSWER → seat-b · api › main · mini · claude "),
+                "{text}"
+            );
+            assert!(card[0].contains("captured"), "{text}");
+            assert!(card.iter().any(|l| l == " │  ❯ 1. Yes"), "{text}");
+            assert!(
+                card.iter()
+                    .any(|l| l.contains("2. Yes, and don't ask") && l.ends_with("press 2 twice")),
+                "{text}"
+            );
+            assert!(
+                !text.contains("Esc to cancel"),
+                "chrome below the options is cut: {text}"
+            );
+            assert_eq!(
+                card.last().unwrap(),
+                " ›",
+                "no cursor under a dialog: {text}"
+            );
+            let footer = text.lines().last().unwrap();
+            assert!(
+                footer.starts_with("1-3 pick · esc back to board"),
+                "{footer}"
+            );
+            assert_eq!(
+                footer.contains("board keys are off"),
+                width == 140,
+                "the promise shows when it fits: {footer}"
+            );
+        }
+    }
+
+    #[test]
+    fn answer_mode_says_why_a_key_did_nothing_and_shows_a_pending_double_press() {
+        let mut app = answer_mode_on(PERMISSION);
+        press(&mut app, KeyCode::Char('x'));
+        let text = render(&app, 100, 24);
+        assert!(
+            text.contains(" pick a number; this dialog takes no text"),
+            "{text}"
+        );
+        press(&mut app, KeyCode::Char('2'));
+        let text = render(&app, 100, 24);
+        assert!(
+            text.contains(" press 2 again to send it: Yes, and don't ask again"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn after_a_send_the_card_drops_the_tail_from_before_the_answer() {
+        let mut app = answer_mode_on(PERMISSION);
+        app.peek = Some(Peek {
+            key: "mini/seat-b".into(),
+            lines: Some(Ok(PERMISSION.lines().map(str::to_owned).collect())),
+            at: Some(Utc::now()),
+            updated_at: None,
+        });
+        press(&mut app, KeyCode::Char('1'));
+        app.sent("mini/seat-b", "1 (Yes)", Ok(()));
+        assert!(app.peek.is_none());
+        let card = card_of(&render(&app, 140, 24)).join("\n");
+        assert!(!card.contains("Do you want to proceed"), "{card}");
+        assert!(card.contains(" sent 1 (Yes) → seat-b "), "{card}");
+    }
+
+    #[test]
+    fn after_a_send_the_bar_says_what_went_where() {
+        let mut app = answer_mode_on(PERMISSION);
+        press(&mut app, KeyCode::Char('1'));
+        app.sent("mini/seat-b", "1 (Yes)", Ok(()));
+        let text = render(&app, 140, 24);
+        let bar = &card_of(&text)[0];
+        assert!(bar.contains(" sent 1 (Yes) → seat-b "), "{bar}");
+    }
+
+    #[test]
+    fn answer_a_short_board_shows_every_option_or_refuses_the_hidden_ones() {
+        let four = include_str!("../../tests/fixtures/screens/claude-permission.txt");
+        for text in [PERMISSION, four] {
+            for (height, refused) in [(12, false), (9, false), (13, true), (6, false)] {
+                let mut app = answer_mode_on(text);
+                if refused {
+                    app.answer.as_mut().unwrap().error =
+                        Some("the screen changed since it was read; nothing sent".into());
+                }
+                let screen = render(&app, 80, height);
+                let footer = screen.lines().last().unwrap().to_owned();
+                let digits: Vec<char> = app
+                    .answer
+                    .as_ref()
+                    .unwrap()
+                    .screen
+                    .as_ref()
+                    .unwrap()
+                    .options
+                    .iter()
+                    .map(|c| c.digit)
+                    .collect();
+                let picks = footer
+                    .split(" pick")
+                    .next()
+                    .filter(|_| footer.contains(" pick"));
+                let shown: Vec<char> = match picks.map(|p| p.split_once('-')) {
+                    Some(Some((a, b))) => {
+                        let (a, b) = (a.chars().next().unwrap(), b.chars().next().unwrap());
+                        digits
+                            .iter()
+                            .copied()
+                            .filter(|d| (a..=b).contains(d))
+                            .collect()
+                    }
+                    Some(None) => picks.unwrap().chars().take(1).collect(),
+                    None => Vec::new(),
+                };
+                if height >= 12 {
+                    assert_eq!(shown, digits, "every option fits at 80x{height}: {screen}");
+                }
+                for digit in digits {
+                    let drawn = screen.lines().any(|l| l.contains(&format!("{digit}. ")));
+                    let mut copy = answer_mode_on(text);
+                    render(&copy, 80, height);
+                    let sent = press(&mut copy, KeyCode::Char(digit));
+                    if shown.contains(&digit) {
+                        assert!(drawn, "{digit} is in the footer, so on the card: {screen}");
+                    } else {
+                        assert_eq!(sent, None, "{digit} is off screen at 80x{height}");
+                        let why = copy.answer.as_ref().unwrap().error.clone().unwrap();
+                        assert_eq!(
+                            why,
+                            format!(
+                                "option {digit} is off screen; make the board taller or jump to it"
+                            )
+                        );
+                    }
+                }
+            }
+        }
     }
 }
