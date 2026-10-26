@@ -4,6 +4,8 @@ Unofficial attention board for agent panes across Rex hosts. The binary is `rexb
 
 `--help` is the command contract. Do not treat the Rust library API as stable.
 
+Follow [CONTRIBUTING.md](CONTRIBUTING.md) and the records in [docs/decisions](docs/decisions/README.md); a change that goes against a decision proposes a new record.
+
 ## Layout
 
 - `src/lib.rs` dispatches commands. `src/main.rs` only parses and reports errors.
@@ -20,7 +22,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-User docs live in `docs/`: cli, tui, configuration, system architecture, development and deployment. Keep `README.md` a short hub.
+User docs live in `docs/`: cli, tui, agent status, configuration, extensions, system architecture, development, deployment and decisions. Keep `README.md` a short hub.
 
 ## Privacy
 

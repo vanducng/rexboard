@@ -40,7 +40,9 @@ rexboard only reads Rex, except to jump to a pane and, from the board, to answer
 | [Configuration](docs/configuration.md) | `config.toml`: the app client, excluded hosts and extensions |
 | [Extensions](docs/extensions.md) | Add fields, and a fallback status, from any tool |
 | [System architecture](docs/system-architecture.md) | serve, the observers, the Rex calls, the protocol and the files |
-| [Development](docs/development-guidelines.md) | Setup, checks, conventions and tests |
+| [Decisions](docs/decisions/README.md) | Why rexboard works the way it does, one record per decision |
+| [Contributing](CONTRIBUTING.md) | Setup, checks, how to add a key, command or page, and pull request rules |
+| [Development](docs/development-guidelines.md) | The code map and the tests |
 | [Deployment](docs/deployment.md) | CI, releases, install, upgrade and rollback |
 
 ## License
