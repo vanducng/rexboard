@@ -37,9 +37,11 @@ impl App {
             return true;
         }
         let p = &row.pane;
+        let shown = &self.marked(row).plain;
         [&p.host, &p.session, &p.tab, &p.pane, &p.title, &p.state]
             .into_iter()
             .chain(p.msg.as_ref())
+            .chain(Some(shown))
             .chain(p.harness.as_ref())
             .any(|field| field.to_lowercase().contains(&free))
     }

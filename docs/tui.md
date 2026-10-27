@@ -213,7 +213,7 @@ Nerd mode needs a Nerd Font **Mono** variant from Nerd Fonts **3.5.0** or later:
 
 ### Markdown
 
-`MSG` and the card's message draw an agent's inline markdown: `**bold**`, `__bold__` and `` `code` `` in the `strong` role, and `[text](url)` as its text. The markers go, and the cut and the wrap count what shows, not the markers. Italics stay as written, so `snake_case` and `2*3*4` are unchanged, and an unmatched marker shows as typed. In the card a heading loses its `#`s and is all `strong`, a code fence's line (with its info string) is left out, and every other line stays as written, `- `, `1. ` and `> ` included; lists, tables and code blocks are not laid out. Control and escape sequences are removed first. Each report is mapped once, not on every frame. `rexboard ls --json`, `rexboard show` and what `yy` copies keep the raw text.
+`MSG` and the card's message draw an agent's inline markdown: `**bold**`, `__bold__` and `` `code` `` in the `strong` role, and `[text](url)` as its text. The markers go, and the cut and the wrap count what shows, not the markers. Italics stay as written, so `snake_case` and `2*3*4` are unchanged, and an unmatched marker shows as typed. In the card a heading loses its `#`s and is all `strong`, a code fence's line (with its info string) is left out, and every other line stays as written, `- `, `1. ` and `> ` included; lists, tables and code blocks are not laid out. Control and escape sequences are removed first. Each report is mapped once, not on every frame. Sorting by `MSG` (`o m`, `ls --sort msg`) goes by what `MSG` shows, and `/` matches a phrase as it shows as well as as it was sent. `rexboard ls --json`, `rexboard show` and what `yy` copies keep the raw text.
 
 ## Full view
 

@@ -111,6 +111,29 @@ fn closes(chars: &[char], from: usize, c: char) -> Option<usize> {
     })
 }
 
+/// What MSG shows of a row's message: its line as runs, or none for a hook's filler (`Done`,
+/// `Allow Bash?`). The board draws it and sorts by it.
+pub fn msg(row: &crate::board::Row) -> Vec<Run> {
+    if crate::output::turn_msg(row).is_empty() {
+        return Vec::new();
+    }
+    let msg = crate::output::clean(row.pane.msg.as_deref().unwrap_or_default());
+    msg_line(&lines(&msg))
+}
+
+/// A cleaned message's lines, trimmed, the blank ones left out.
+pub fn lines(msg: &str) -> Vec<&str> {
+    msg.split(crate::output::BREAK)
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+/// The text of `runs`, as it shows.
+pub fn text(runs: &[Run]) -> String {
+    runs.iter().map(|(text, _)| text.as_str()).collect()
+}
+
 /// MSG's line among the message's: the first with words that is not a heading, else the first
 /// heading. A fence line is never one.
 pub fn msg_line(lines: &[&str]) -> Vec<Run> {
@@ -436,6 +459,59 @@ mod board_tests {
             row.0
         );
         assert!(bold(row, "Tests pass") && !bold(row, "…"));
+    }
+
+    /// The keys of the rows the list shows, in order.
+    fn listed(app: &App) -> Vec<String> {
+        app.items()
+            .into_iter()
+            .filter_map(|item| match item {
+                crate::tui::app::Item::Row(i) => Some(app.rows[i].key.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn sorting_by_msg_orders_rows_by_what_msg_shows() {
+        let mut app = App::default();
+        let mut rows = Vec::new();
+        for (key, msg) in [
+            ("local/zebra", "## Summary ⏎ Zebra done"),
+            ("local/zeta", "**Zeta** done"),
+            ("local/alpha", "Alpha done"),
+        ] {
+            let mut row = row(key, "idle", "quiet", true);
+            row.pane.msg = Some(msg.into());
+            rows.push(row);
+        }
+        app.set_rows(rows, hosts());
+        press(&mut app, ratatui::crossterm::event::KeyCode::Char('v'));
+        sort(&mut app, 'm');
+        assert_eq!(
+            listed(&app),
+            ["local/alpha", "local/zebra", "local/zeta"],
+            "raw, `## summary` and `**zeta**` would sort first"
+        );
+    }
+
+    #[test]
+    fn the_filter_matches_a_phrase_as_it_shows_and_as_it_was_sent() {
+        for (typed, kept) in [
+            ("cargo test on", true),
+            ("on the pr", true),
+            ("next: merge", true),
+            ("`cargo test`", true),
+            ("x.test/31", true),
+            ("cargo test off", false),
+        ] {
+            let mut app = board();
+            press(&mut app, ratatui::crossterm::event::KeyCode::Char('/'));
+            for c in typed.chars() {
+                press(&mut app, ratatui::crossterm::event::KeyCode::Char(c));
+            }
+            assert_eq!(listed(&app) == ["local/claude"], kept, "/{typed}");
+        }
     }
 
     #[test]

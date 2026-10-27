@@ -13,9 +13,7 @@ use super::theme;
 use crate::board::Row;
 use crate::client::Field;
 use crate::harness::usage::Usage;
-use crate::output::{
-    clean, fit, harness, in_state, labels, name, path, span, squeeze, state_word, turn_msg,
-};
+use crate::output::{clean, fit, harness, in_state, labels, name, path, span, squeeze, state_word};
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
 pub enum Tier {
@@ -445,7 +443,7 @@ fn sort_key(id: Col, row: &Row) -> Option<SortKey> {
             (row.usage.as_ref()?.cost_usd? * 100.0).round() as i64,
         )),
         Col::Quota => Some(SortKey::Num(row.usage.as_ref()?.quota_5h?.into())),
-        Col::Msg => text(turn_msg(row)),
+        Col::Msg => text(&markdown::text(&markdown::msg(row))),
         Col::Field(id) => row.ext.get(id).and_then(|value| text(value)),
     }
 }
