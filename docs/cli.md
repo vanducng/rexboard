@@ -60,6 +60,7 @@ In a terminal each line fits its width: `WHAT` is cut first, then `WHERE` (a lon
 | `pane` | string | Block (pane) label |
 | `title` | string | Terminal title, `""` when none |
 | `process` | string or null | The pane's foreground process, as in `zsh`, `tmux`, or a version such as `2.1.310` (Claude Code runs under its version number) |
+| `pid` | integer or null | That process's pid on its host |
 | `harness` | string or null | `effective_app` (else `app`) of the record, else the foreground process (`codex`, `pi`; `claude`, or a version string like `2.1.310`, is `claude-code`), else `claude-code` for a title that starts with a Claude state glyph, else `codex` for a tmux pane titled `DIR | MODEL` (exactly one ` | `, a `DIR` with no spaces, a `MODEL` of letters, digits, `.` and `-` with at least one letter and one digit) |
 | `state` | string | `blocked`, `error`, `done`, `working` or `idle` from the record; with no record, from the title glyph (`✳ ` is `idle`, a braille spinner or `◐`/`◑` is `working`), else `unknown` |
 | `kind` | string or null | The record's `kind`, such as `permission` |
@@ -77,6 +78,7 @@ In a terminal each line fits its width: `WHAT` is cut first, then `WHERE` (a lon
 | `suspect_reason` | string or null | Why, as in `reported working at 14:02; the title shows idle`. A report a day old or more gives its date: `reported working at Oct 24 14:02; zsh is back in front` |
 | `group` | string | `needs_you` (`blocked`, `error`, unseen `done`), `working`, `quiet` (`idle`, seen `done`), or `unreported` (`source` is `inferred`, `state` is `unknown`, `stale`, or `suspect`) |
 | `ext` | object | Fields from [extensions](extensions.md), by id: `{"session-prefix.project": "api"}` |
+| `usage` | object or null | What the agent's last turn used, for a pane on serve's own host whose harness runs [`rexboard usage`](#rexboard-usage); `null` otherwise, and once its file is 10 minutes old. Only the figures the harness reported: `model` (string), `ctx_pct` (0-100), `ctx_window` and `tok` (tokens), `cost_usd` (number), `quota_5h` (0-100): `{"model": "Opus 5.5", "ctx_pct": 82, "tok": 820000}`. `ls --direct` has no serve, so it is always `null` there |
 
 The pane's main record is the one with no `id`; if every record has one, the most urgent wins.
 
@@ -229,7 +231,7 @@ rexboard show mini/block:web-seat-b            # what the board's card says
 rexboard show mini/block:web-seat-b --tail 20  # and the pane's last 20 lines
 ```
 
-Everything the board's card says about a pane, by the `key` from `ls --json`, plain shells included, in the card's order: the bar (`blocked · permission · seat-b · waiting 2m`), the message in full, the tail with `│` before each line, then where, host, harness, last turn, extension fields, title, source and key. `--tail N` reads the pane's last N lines (at most 200) the way the card does: the end of its scrollback through `tail.lua`, plain text, within 3 seconds. With `--json`, the pane as `ls --json` has it, plus `where` (`session › window › block`); with `--tail`, `tail`, an array of lines; and what the pane shows now, read the way [`answer`](#rexboard-answer) reads it: `dialog`, a short id of the dialog or input line on screen (`null` with neither), and `options`, the dialog's options, each with whether it grants something for later. A dialog's id is its lines, so the same dialog keeps it through a second report; an input line's also takes the row's `updated_at`, since the same empty prompt comes back every turn. When the pane cannot be read (its host is down, or it does not answer within 3 seconds), the row still prints, with `dialog` `null`, `options` `[]` and the reason in `screen_error`:
+Everything the board's card says about a pane, by the `key` from `ls --json`, plain shells included, in the card's order: the bar (`blocked · permission · seat-b · waiting 2m`), the message in full, the tail with `│` before each line, then where, host, harness, last turn, model, ctx and tok (when its harness reports them), extension fields, title, source and key. `--tail N` reads the pane's last N lines (at most 200) the way the card does: the end of its scrollback through `tail.lua`, plain text, within 3 seconds. With `--json`, the pane as `ls --json` has it, plus `where` (`session › window › block`); with `--tail`, `tail`, an array of lines; and what the pane shows now, read the way [`answer`](#rexboard-answer) reads it: `dialog`, a short id of the dialog or input line on screen (`null` with neither), and `options`, the dialog's options, each with whether it grants something for later. A dialog's id is its lines, so the same dialog keeps it through a second report; an input line's also takes the row's `updated_at`, since the same empty prompt comes back every turn. When the pane cannot be read (its host is down, or it does not answer within 3 seconds), the row still prints, with `dialog` `null`, `options` `[]` and the reason in `screen_error`:
 
 ```json
 {"key":"mini/block:web-seat-b","host":"mini","session":"web","tab":"main","pane":"seat-b","state":"blocked","kind":"permission","msg":"Bash wants to run: cargo test","source":"native","seen":false,"group":"needs_you","last_turn":372,"ext":{},"where":"web › main › seat-b","tail":[" Do you want to proceed?"," ❯ 1. Yes","   2. Yes, and don't ask again for cargo test"],"dialog":"3f9a1c07be42","options":[{"digit":1,"label":"Yes","lasting":false},{"digit":2,"label":"Yes, and don't ask again for cargo test","lasting":true}]}
@@ -289,7 +291,7 @@ rexboard usage claude -- my-status-line   # as Claude Code's statusLine command
 rexboard usage codex                      # from a Codex Stop hook
 ```
 
-Keeps what an agent's last turn used, for the board's `MODEL`, `CTX` and `TOK`. The harness runs it from its own per-turn surface with its JSON on stdin, so rexboard never reads a transcript:
+Keeps what an agent's last turn used, for the board's `MODEL`, `CTX` and `TOK` (and `COST` and `5H` when `tui.json` asks for them; see [the board](tui.md#layout)) and the `usage` field of `ls --json` and `show --json`. The harness runs it from its own per-turn surface with its JSON on stdin, so rexboard never reads a transcript:
 
 | Harness | Runs it from | Reads |
 | --- | --- | --- |
