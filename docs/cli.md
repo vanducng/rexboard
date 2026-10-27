@@ -82,7 +82,7 @@ In a terminal each line fits its width: `WHAT` is cut first, then `WHERE` (a lon
 
 The pane's main record is the one with no `id`; if every record has one, the most urgent wins.
 
-Fields are a contract. New fields may appear. Renaming or removing one is a breaking change.
+Fields are a contract. New fields may appear. Renaming or removing one is a breaking change. Key order is not part of it; read fields by name.
 
 ### Exit codes and errors
 
@@ -351,7 +351,7 @@ rexboard hooks replay SESSION          # from tmux, when a client attaches
 | `claude` | `$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json` | `rexboard hook claude EVENT` for the nine events above (`PostToolUse` for `AskUserQuestion` only), each with a 5 s timeout. The `statusLine` runs through `rexboard usage claude`: yours keeps running and printing, through rexboard while `rexboard` is there and on its own when it is not. With no status line, `rexboard usage claude` |
 | `codex` | `$CODEX_HOME/hooks.json`, else `~/.codex/hooks.json` | `rexboard hook codex EVENT` for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `Stop` and `SessionEnd`; `Stop` keeps the usage too |
 | `pi` | `rexboard.js` in `$PI_CODING_AGENT_DIR/extensions`, else `~/.pi/agent/extensions` | An extension that runs `rexboard hook pi` on pi's events and `rexboard usage pi` at each turn's end |
-| `grok` | | Nothing: grok reports to a Rex pane itself, and reads a status line only from `~/.grok/config.toml`, which rexboard does not edit. Add `rexboard usage grok` there by hand |
+| `grok` | | Nothing: grok reports to a Rex pane itself, and reads a status line only from `~/.grok/config.toml`, which rexboard does not edit. For its usage, add the lines below there by hand |
 
 A settings file is merged, never replaced. Hooks that already report to Rex (rexboard's, or the `rex-agent-status` bridge it replaces) give way to rexboard's, where the first of them was; every other key and hook stays, in its order. Before it writes, the old file is kept beside it as `FILE.bak-<UTC>`, with the file's own permissions, and the write is a rename. A second install changes nothing. The hooks run `rexboard` when that is this binary on `PATH`, else its full path.
 
@@ -362,7 +362,19 @@ What `install` leaves alone:
 
 A directory with no settings file yet gets one. With pi's old `rex-status.js` extension still there, the line says so, as pi would report twice.
 
-Each harness gets one line, `HARNESS STATE FILE`, then each change:
+For grok's usage, in `~/.grok/config.toml` (end the command with ` -- YOUR-SCRIPT` to keep a status line of your own):
+
+```toml
+[ui.status_line]
+type = "command"
+command = "rexboard usage grok"
+```
+
+Inside tmux a status reaches Rex only through tmux passthrough, so tmux needs `set -g allow-passthrough on` in `tmux.conf`. `status` says when the default tmux server has it off.
+
+To undo an install, move `FILE.bak-<UTC>` back over the file, or delete the hooks that run `rexboard hook`, the `statusLine`'s `rexboard usage` wrapper and pi's `rexboard.js`. Do that before removing rexboard: until then each of those hooks fails on every event. A second backup in the same second takes `-2`, so none is ever written over.
+
+Each harness gets one line, `HARNESS STATE FILE`, then each change: `EVENT: add …` (`, keeping your 1 hook` when the event has others), `EVENT: replace OLD with …`, or `EVENT: remove …`. `status` ends with `rexboard hooks install writes these` when there is anything to write, a dry run with `dry run: nothing written`, and `status` adds a `tmux` line when a tmux server runs:
 
 | State | Meaning |
 | --- | --- |
@@ -371,10 +383,10 @@ Each harness gets one line, `HARNESS STATE FILE`, then each change:
 | `written` | this install wrote them; the old file's name follows |
 | `absent`, `symlink`, `not managed` | left alone, as above |
 
-With `--json`:
+With `--json` (`tmux` from `status` only; `null` with no tmux server):
 
 ```json
-{"harnesses":[{"harness":"claude","file":"~/.claude/settings.json","state":"changes","changes":["Stop: `rex-agent-status` -> `rexboard hook claude Stop`"]},{"harness":"grok","file":null,"state":"not managed","changes":[],"note":"grok reports to a Rex pane itself"}]}
+{"harnesses":[{"harness":"claude","file":"~/.claude/settings.json","state":"changes","changes":["PreToolUse: add `rexboard hook claude PreToolUse`, keeping your 1 hook","Stop: replace `rex-agent-status` with `rexboard hook claude Stop`"]},{"harness":"grok","file":null,"state":"not managed","changes":[],"note":"grok reports to a Rex pane itself. For its usage, add to ~/.grok/config.toml: ..."}],"tmux":{"allow_passthrough":"on"}}
 ```
 
 `replay` sends each pane's last status in tmux session `SESSION` again, for a tmux client that just attached and so missed it. In `tmux.conf`:
