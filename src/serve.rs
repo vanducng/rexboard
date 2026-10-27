@@ -277,21 +277,22 @@ fn watch_usage(
             let tmux = if asked {
                 usage::tmux_keys(&pids)
             } else {
-                BTreeMap::new()
+                usage::Tmux::default()
             };
             let live: BTreeSet<String> = panes
                 .iter()
                 .map(|p| p.block.clone())
-                .chain(tmux.values().cloned())
+                .chain(tmux.shown.values().cloned())
+                .chain(tmux.panes.iter().cloned())
                 .collect();
             // A tmux client that did not answer this time may show a live pane: keep every file.
-            let whole = known.is_some() && (!asked || tmux.len() == pids.len());
+            let whole = known.is_some() && (!asked || tmux.shown.len() == pids.len());
             let kept = files.read(&state, whole.then_some(&live), chrono::Utc::now());
             let by_row = panes
                 .iter()
                 .filter_map(|pane| {
                     let key = match pane.tmux_client {
-                        Some(pid) => tmux.get(&pid)?,
+                        Some(pid) => tmux.shown.get(&pid)?,
                         None => &pane.block,
                     };
                     Some((pane.row.clone(), kept.get(key)?.clone()))

@@ -259,38 +259,56 @@ fn read_one(path: &Path) -> Kept {
     Some((sidecar.key, sidecar.usage))
 }
 
-/// Each tmux client's pid with the `tmux:<socket>:<server>:<pane>` key of the pane it shows: what a
-/// bridged row is joined to its usage by. One `ps` per client and one `tmux list-clients` per
-/// socket; a client whose socket or pane cannot be read is left out.
-pub fn tmux_keys(pids: &[u32]) -> BTreeMap<u32, String> {
+/// What the tmux servers behind some clients say: each client's pid with the
+/// `tmux:<socket>:<server>:<pane>` key of the pane it shows, what a bridged row is joined to its
+/// usage by; and the key of every pane on those servers, shown or not, which are all live.
+#[derive(Debug, Default)]
+pub struct Tmux {
+    pub shown: BTreeMap<u32, String>,
+    pub panes: BTreeSet<String>,
+}
+
+/// One `ps` per client, and `tmux list-clients` and `list-panes -a` per socket; a client whose
+/// socket or pane cannot be read is left out.
+pub fn tmux_keys(pids: &[u32]) -> Tmux {
     let mut sockets: BTreeMap<PathBuf, Vec<u32>> = BTreeMap::new();
     for &pid in pids {
         if let Some(socket) = client_socket(pid) {
             sockets.entry(socket).or_default().push(pid);
         }
     }
-    let mut keys = BTreeMap::new();
+    let mut tmux = Tmux::default();
     for (socket, wanted) in sockets {
         let Some(name) = socket.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        let Ok(out) = Command::new("tmux")
-            .arg("-S")
-            .arg(&socket)
-            .args(["list-clients", "-F", "#{client_pid} #{pid} #{pane_id}"])
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-        else {
-            continue;
+        let ask = |args: &[&str]| {
+            Command::new("tmux")
+                .arg("-S")
+                .arg(&socket)
+                .args(args)
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .output()
+                .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+                .unwrap_or_default()
         };
-        keys.extend(clients(
-            &String::from_utf8_lossy(&out.stdout),
-            name,
-            &wanted,
-        ));
+        let listed = ask(&["list-clients", "-F", "#{client_pid} #{pid} #{pane_id}"]);
+        tmux.shown.extend(clients(&listed, name, &wanted));
+        let listed = ask(&["list-panes", "-a", "-F", "#{pid} #{pane_id}"]);
+        tmux.panes.extend(panes(&listed, name));
     }
-    keys
+    tmux
+}
+
+/// `list-panes -a` lines (`server_pid pane_id`) as pane keys.
+fn panes(out: &str, socket: &str) -> Vec<String> {
+    out.lines()
+        .filter_map(|line| {
+            let (server, pane) = line.split_once(' ')?;
+            Some(tmux_key(socket, server, pane))
+        })
+        .collect()
 }
 
 /// `list-clients` lines (`client_pid server_pid pane_id`) as each wanted client's pane key.
@@ -496,6 +514,35 @@ mod tests {
             Some(PathBuf::from("/var/run/s"))
         );
         assert_eq!(socket_of(""), None, "the client is gone");
+    }
+
+    #[test]
+    fn a_tmux_pane_no_client_shows_still_keeps_its_old_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = Utc::now();
+        let usage = Usage {
+            ctx_pct: Some(41),
+            ..Usage::default()
+        };
+        // The client shows %3; the agent in %5 sits in a window nobody looks at.
+        write(dir.path(), "tmux:seats:1234:%5", "claude-code", &usage, now).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(dir.path().join("usage/tmux-seats-1234--5.json"))
+            .unwrap()
+            .set_modified(SystemTime::from(now - ORPHAN_AFTER * 3))
+            .unwrap();
+        let shown = clients("4242 1234 %3\n", "seats", &[4242]);
+        let live: BTreeSet<String> = shown
+            .into_iter()
+            .map(|(_, key)| key)
+            .chain(panes("1234 %3\n1234 %5\n", "seats"))
+            .collect();
+        let read = Files::default().read(dir.path(), Some(&live), now);
+        assert_eq!(
+            read["tmux:seats:1234:%5"], usage,
+            "every pane on the server is live"
+        );
     }
 
     #[test]
