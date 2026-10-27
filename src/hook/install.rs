@@ -259,11 +259,66 @@ fn quoted(text: &str) -> String {
 /// A hook that reports to Rex: rexboard's own, or the `rex-agent-status` bridge it replaces.
 fn reports(hook: &Value) -> bool {
     let command = hook["command"].as_str().unwrap_or_default();
-    let words: Vec<&str> = command.split_whitespace().collect();
-    command.contains("rex-agent-status")
-        || words.windows(2).any(|pair| {
-            pair[0].trim_matches(['\'', '"']).ends_with("rexboard") && pair[1] == "hook"
-        })
+    command.contains("rex-agent-status") || runs_hook(command, 2)
+}
+
+/// Whether `command`, read as a shell reads it, runs `rexboard hook`: its program is a file named
+/// `rexboard` and its first argument `hook`, also inside `sh -c '…'`, however the path is quoted.
+fn runs_hook(command: &str, depth: u8) -> bool {
+    let words = shell_words(command);
+    let named = |word: &str| {
+        Path::new(word)
+            .file_name()
+            .is_some_and(|name| name == "rexboard")
+    };
+    if depth > 0
+        && let [shell, flag, script, ..] = &words[..]
+        && Path::new(shell)
+            .file_name()
+            .is_some_and(|name| name == "sh")
+        && flag == "-c"
+    {
+        return runs_hook(script, depth - 1);
+    }
+    matches!(&words[..], [program, verb, ..] if named(program) && verb == "hook")
+}
+
+/// `command` split into words as a POSIX shell splits them: whitespace between, `'…'` literal,
+/// `"…"` with `\` before `"`, `\`, `$` and `` ` ``, and `\` quoting the next character.
+fn shell_words(command: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word: Option<String> = None;
+    let mut chars = command.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            c if c.is_whitespace() => words.extend(word.take()),
+            '\'' => {
+                let w = word.get_or_insert_with(String::new);
+                w.extend(chars.by_ref().take_while(|&c| c != '\''));
+            }
+            '"' => {
+                let w = word.get_or_insert_with(String::new);
+                while let Some(c) = chars.next() {
+                    match c {
+                        '"' => break,
+                        '\\' => match chars.next() {
+                            Some(next) if "\"\\$`".contains(next) => w.push(next),
+                            Some(next) => {
+                                w.push('\\');
+                                w.push(next);
+                            }
+                            None => w.push('\\'),
+                        },
+                        c => w.push(c),
+                    }
+                }
+            }
+            '\\' => word.get_or_insert_with(String::new).extend(chars.next()),
+            c => word.get_or_insert_with(String::new).push(c),
+        }
+    }
+    words.extend(word);
+    words
 }
 
 /// A hook that exits 0 whatever happens, since exit 2 blocks the agent: a missing rexboard, or one
@@ -760,5 +815,36 @@ mod tests {
             .collect();
         kept.sort();
         assert_eq!(kept, ["first", "original", "second"]);
+    }
+
+    #[test]
+    fn a_hook_is_rexboards_however_its_path_is_quoted() {
+        for bin in [
+            "/opt/homebrew/bin/rexboard",
+            "/tmp/My Tools/rexboard",
+            "/tmp/it's/rexboard",
+            "/tmp/a \"b\" $c/rexboard",
+        ] {
+            let command = hook_command(&quoted(bin), "claude", "Stop");
+            assert!(reports(&json!({ "command": command })), "{command}");
+            let inner = &shell_words(&command)[2];
+            assert_eq!(shell_words(inner)[0], bin, "{command}");
+        }
+        for theirs in [
+            "afplay done.aiff",
+            "/usr/local/bin/rexboard-notes hook",
+            "/bin/sh -c 'echo rexboard hook'",
+            "echo 'rexboard'",
+        ] {
+            assert!(!reports(&json!({ "command": theirs })), "{theirs}");
+        }
+        assert!(
+            reports(&json!({ "command": "rexboard hook claude Stop" })),
+            "the bare form"
+        );
+        assert_eq!(
+            shell_words(r#"a 'b c' "d \"e\" \$f" g\ h"#),
+            ["a", "b c", r#"d "e" $f"#, "g h"]
+        );
     }
 }

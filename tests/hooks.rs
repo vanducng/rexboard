@@ -441,3 +441,68 @@ fn installed_hooks_and_status_line_fail_open_with_rexboard_missing_or_too_old() 
         assert_eq!(String::from_utf8_lossy(&shown.stdout), "theirs\n", "{bin}");
     }
 }
+
+#[test]
+fn a_rexboard_whose_path_has_a_space_or_a_quote_installs_once() {
+    for dir in ["My Tools", "it's"] {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path();
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        let bin = home.join(dir).join("rexboard");
+        std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+        std::fs::copy(assert_cmd::cargo::cargo_bin("rexboard"), &bin).unwrap();
+        let install = || {
+            let mut cmd = Command::new(&bin);
+            for name in [
+                "TMUX",
+                "TMUX_PANE",
+                "REX_BLOCK",
+                "CLAUDE_CONFIG_DIR",
+                "CODEX_HOME",
+            ] {
+                cmd.env_remove(name);
+            }
+            let out = cmd
+                .env("HOME", home)
+                .env("PATH", "/usr/bin:/bin")
+                .args(["hooks", "install", "claude", "codex", "--json"])
+                .output()
+                .unwrap();
+            let plan: Value = serde_json::from_slice(&out.stdout).unwrap();
+            plan["harnesses"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|h| h["state"].as_str().unwrap().to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(install(), ["written", "written"], "{dir}");
+        assert_eq!(
+            install(),
+            ["installed", "installed"],
+            "{dir}: a second install"
+        );
+        let stop = settings(home)["hooks"]["Stop"].clone();
+        assert_eq!(
+            stop.as_array().unwrap().len(),
+            1,
+            "{dir}: one group, not two"
+        );
+        let command = stop[0]["hooks"][0]["command"].as_str().unwrap().to_owned();
+        let ran = std::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .env("REXBOARD_HOOK_LOG", home.join("hook.log"))
+            .env("REX_BLOCK", "block:1")
+            .env_remove("TMUX")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(ran.status.code(), Some(0), "{dir}");
+        let log = std::fs::read_to_string(home.join("hook.log")).unwrap();
+        assert!(
+            log.contains("Stop"),
+            "{dir}: the copy itself ran the hook: {log}"
+        );
+    }
+}
