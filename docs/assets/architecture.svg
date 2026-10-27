@@ -43,16 +43,15 @@
   <rect class="mask" x="544" y="56" width="216" height="16" rx="2"/>
   <text class="zlabel" x="552" y="68">REXBOARD · ONE RUST BINARY</text>
 
-  <line class="edge" x1="200" y1="128" x2="278" y2="128" marker-end="url(#architecture-arrow)"/>
-  <rect class="mask" x="212" y="106" width="56" height="14" rx="2"/>
-  <text class="elabel" x="240" y="117" text-anchor="middle">STATUS</text>
-  <line class="edge" x1="200" y1="232" x2="278" y2="232" marker-end="url(#architecture-arrow)"/>
-  <rect class="mask" x="212" y="210" width="56" height="14" rx="2"/>
-  <text class="elabel" x="240" y="221" text-anchor="middle">STATUS</text>
-  <line class="edge" x1="472" y1="128" x2="558" y2="128" marker-end="url(#architecture-arrow)"/>
-  <rect class="mask" x="488" y="106" width="56" height="14" rx="2"/>
-  <text class="elabel" x="516" y="117" text-anchor="middle">NDJSON</text>
-  <path class="edge" d="M472,216 H508 Q516,216 516,208 V176 Q516,168 524,168 H558" marker-end="url(#architecture-arrow)"/>
+  <path class="edge" d="M278,100 H272 V260 H278"/>
+  <path class="edge" d="M474,100 H480 V260 H474"/>
+  <path class="edge" d="M200,128 H204 Q208,128 208,132 V176 Q208,180 212,180 H268" marker-end="url(#architecture-arrow)"/>
+  <path class="edge" d="M200,232 H204 Q208,232 208,228 V184 Q208,180 212,180"/>
+  <rect class="mask" x="220" y="163" width="44" height="14" rx="2"/>
+  <text class="elabel" x="242" y="174" text-anchor="middle">STATUS</text>
+  <line class="edge" x1="480" y1="148" x2="558" y2="148" marker-end="url(#architecture-arrow)"/>
+  <rect class="mask" x="490" y="126" width="56" height="14" rx="2"/>
+  <text class="elabel" x="518" y="137" text-anchor="middle">NDJSON</text>
   <line class="edge" x1="672" y1="202" x2="672" y2="254" marker-start="url(#architecture-arrow)" marker-end="url(#architecture-arrow)"/>
   <rect class="mask" x="680" y="221" width="104" height="14" rx="2"/>
   <text class="elabel" x="684" y="232">ROWS · FIELDS</text>
@@ -64,7 +63,7 @@
   <rect class="mask" x="948" y="264" width="40" height="14" rx="2"/>
   <text class="elabel" x="950" y="275">ACTS</text>
 
-  <path class="jump" d="M840,320 H504 Q496,320 496,312 V256 Q496,248 488,248 H476" marker-end="url(#architecture-arrow-link)"/>
+  <path class="jump" d="M840,320 H504 Q496,320 496,312 V240 Q496,232 488,232 H484" marker-end="url(#architecture-arrow-link)"/>
   <rect class="mask" x="552" y="313" width="272" height="14" rx="2"/>
   <text class="elabel-jump" x="688" y="324" text-anchor="middle">its host: focus · answer · close</text>
   <line class="jump" x1="840" y1="352" x2="476" y2="352" marker-end="url(#architecture-arrow-link)"/>
