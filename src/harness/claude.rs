@@ -1,10 +1,15 @@
 use super::Harness;
+use crate::tui::icons::{Icon, icon};
 
 pub struct Claude;
 
 impl Harness for Claude {
     fn id(&self) -> &'static str {
         "claude-code"
+    }
+
+    fn mark(&self) -> Option<Icon> {
+        Some(icon("cod-claude", "\u{ec82}"))
     }
 
     fn name(&self) -> &'static str {

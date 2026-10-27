@@ -3,6 +3,7 @@ use std::path::Path;
 
 use super::Harness;
 use super::usage::{Usage, percent};
+use crate::tui::icons::{Icon, icon};
 
 /// Only the end of a rollout is read: they grow to hundreds of megabytes.
 const TAIL: u64 = 64 * 1024;
@@ -14,6 +15,10 @@ pub struct Codex;
 impl Harness for Codex {
     fn id(&self) -> &'static str {
         "codex"
+    }
+
+    fn mark(&self) -> Option<Icon> {
+        Some(icon("cod-openai", "\u{ec81}"))
     }
 
     fn processes(&self) -> &'static [&'static str] {

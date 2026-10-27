@@ -95,7 +95,7 @@ fn listed(app: &App) -> Vec<usize> {
         .into_iter()
         .filter_map(|item| match item {
             Item::Row(i) => Some(i),
-            Item::Header { .. } => None,
+            Item::Header { .. } | Item::Gap => None,
         })
         .collect()
 }

@@ -4,9 +4,14 @@
 use super::*;
 
 impl App {
-    /// Headers and rows in the view's groups and order, filtered, with folded groups showing
-    /// only their header.
+    /// The list as last drawn: with blank rows between the groups when they all fit.
     pub fn items(&self) -> Vec<Item> {
+        self.listed(self.spaced.get())
+    }
+
+    /// Headers and rows in the view's groups and order, filtered, with folded groups showing
+    /// only their header, and with `gaps` a blank row above each header but the first.
+    pub fn listed(&self, gaps: bool) -> Vec<Item> {
         let mut items = Vec::new();
         for (bucket, members) in arrange(&self.rows, &self.view, self.sort) {
             let members: Vec<usize> = members
@@ -21,6 +26,9 @@ impl App {
                 continue;
             };
             let folded = self.folded.contains(&bucket);
+            if gaps && !items.is_empty() {
+                items.push(Item::Gap);
+            }
             items.push(Item::Header {
                 bucket,
                 count: members.len(),
@@ -50,7 +58,7 @@ impl App {
                 folded: true,
                 ..
             } => Some(Spot::Group(bucket.clone())),
-            Item::Header { .. } => None,
+            Item::Header { .. } | Item::Gap => None,
         }
     }
 
@@ -140,6 +148,7 @@ impl App {
             let spot = match item {
                 Item::Row(r) => Spot::Row(self.rows[*r].key.clone()),
                 Item::Header { bucket, .. } => Spot::Group(bucket.clone()),
+                Item::Gap => return false,
             };
             Some(&spot) == self.selected.as_ref()
         });
@@ -246,7 +255,7 @@ impl App {
             .into_iter()
             .filter_map(|item| match item {
                 Item::Header { bucket, .. } => Some(bucket),
-                Item::Row(_) => None,
+                Item::Row(_) | Item::Gap => None,
             })
             .collect();
         let mine = self.current().and_then(|row| bucket(&self.view, row));
@@ -294,12 +303,7 @@ impl App {
             return;
         }
         if self.height >= HEADED && y == HEADER_ROW {
-            let columns = Columns::with_usage(
-                self.width,
-                list,
-                &self.field_columns(),
-                &self.usage_columns(),
-            );
+            let columns = self.columns(self.width, list);
             if let Some(letter) = columns.at(usize::from(x), self.sort).and_then(|c| c.letter) {
                 self.sort_by(letter);
             }
@@ -362,7 +366,7 @@ impl App {
             .take(room)
             .filter_map(|item| match item {
                 Item::Row(i) => Some(&self.rows[*i]),
-                Item::Header { .. } => None,
+                Item::Header { .. } | Item::Gap => None,
             });
         let carded = self.current().filter(|_| self.card_shown());
         crate::tui::theme::redraw_every(

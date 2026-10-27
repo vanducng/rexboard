@@ -364,7 +364,7 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
 
 /// The list, under a header line naming its columns. `board` is the whole screen.
 fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc>) {
-    let items = app.items();
+    let items = app.listed(false);
     if items.is_empty() {
         let width = usize::from(area.width);
         frame.render_widget(
@@ -377,12 +377,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
         return;
     }
     let width = usize::from(area.width);
-    let columns = Columns::with_usage(
-        board.width,
-        width,
-        &app.field_columns(),
-        &app.usage_columns(),
-    );
+    let columns = app.columns(board.width, width);
     let area = if board.height >= HEADED {
         let [top, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
         frame.render_widget(Paragraph::new(column_header(&columns, app.sort)), top);
@@ -391,6 +386,14 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
         area
     };
     let height = usize::from(area.height);
+    // Blank rows part the groups only while every item still fits, so they never cost a row.
+    let gaps = items
+        .iter()
+        .filter(|item| matches!(item, Item::Header { .. }))
+        .count()
+        .saturating_sub(1);
+    app.spaced.set(gaps > 0 && items.len() + gaps <= height);
+    let items = app.items();
     let room = if items.len() > height {
         height.saturating_sub(1)
     } else {
@@ -425,7 +428,15 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
                 bucket,
                 count,
                 folded,
-            } => group_header_line(bucket, *count, *folded, is_selected(app, item), width),
+            } => group_header_line(
+                bucket,
+                *count,
+                *folded,
+                group_mark(app, bucket),
+                is_selected(app, item),
+                width,
+            ),
+            Item::Gap => Line::default(),
             &Item::Row(i) => row_line(
                 &app.rows[i],
                 &places[i],
@@ -505,15 +516,27 @@ fn scroll_offset(at: Option<usize>, kept: usize, len: usize, room: usize) -> usi
     }
 }
 
+/// In nerd mode, a harness group's mark before its name, or room for one so the names line up.
+fn group_mark(app: &App, bucket: &Bucket) -> Option<&'static str> {
+    match bucket {
+        Bucket::Value(name) if app.nerd && app.view.group_by == Some(Key::Harness) => {
+            Some(crate::harness::mark(name).map_or(" ", |icon| icon.glyph))
+        }
+        _ => None,
+    }
+}
+
 fn group_header_line(
     bucket: &Bucket,
     count: usize,
     folded: bool,
+    mark: Option<&str>,
     selected: bool,
     width: usize,
 ) -> Line<'static> {
-    let mark = if folded { theme::FOLDED } else { "" };
-    let title = format!("{mark}{} ({count}) ", bucket.title());
+    let fold = if folded { theme::FOLDED } else { "" };
+    let mark = mark.map(|m| format!("{m} ")).unwrap_or_default();
+    let title = format!("{fold}{mark}{} ({count}) ", bucket.title());
     let fill = theme::GROUP_FILL.repeat(width.saturating_sub(title.width()));
     let line = Line::styled(format!("{title}{fill}"), theme::header());
     if selected {
@@ -535,7 +558,7 @@ fn hidden_below(items: &[Item], from: usize) -> usize {
                 folded: true,
                 ..
             } => *count,
-            Item::Header { .. } => 0,
+            Item::Header { .. } | Item::Gap => 0,
         })
         .sum()
 }
@@ -1434,6 +1457,139 @@ mod tests {
     }
 
     #[test]
+    fn groups_part_with_a_blank_row_only_while_every_row_fits() {
+        let line_above = |text: &str, header: &str| {
+            let lines: Vec<&str> = text.lines().collect();
+            let at = lines.iter().position(|l| l.starts_with(header)).unwrap();
+            lines[at - 1].to_owned()
+        };
+        let mut app = fuller();
+        let roomy = render(&app, 80, 30);
+        assert!(app.spaced.get());
+        for header in ["WORKING (2)", "QUIET (1)", "UNREPORTED (1)"] {
+            assert_eq!(line_above(&roomy, header), "", "{header}:\n{roomy}");
+        }
+        assert!(
+            line_above(&roomy, "NEEDS YOU (2)").contains("HARNESS"),
+            "none above the first:\n{roomy}"
+        );
+        assert_eq!(app.spots().len(), 6, "a blank row is never a spot");
+        let mut seen = Vec::new();
+        for _ in 0..7 {
+            press(&mut app, KeyCode::Char('j'));
+            seen.push(app.selected.clone().unwrap());
+        }
+        assert_eq!(seen[0], seen[6], "j walks the six rows and wraps");
+        let (first, ..) = app.drawn.get();
+        let gap = roomy
+            .lines()
+            .position(|l| l.starts_with("WORKING"))
+            .unwrap()
+            - 1;
+        let before = app.selected.clone();
+        app.click(5, gap as u16);
+        assert_eq!(
+            app.selected, before,
+            "a click on a blank row selects nothing"
+        );
+        assert!(gap as u16 > first);
+
+        press(&mut app, KeyCode::Char('c'));
+        let tight = render(&app, 80, 14);
+        assert!(!app.spaced.get(), "{tight}");
+        assert!(
+            line_above(&tight, "WORKING (2)").contains("claude"),
+            "no blank rows once the list scrolls:\n{tight}"
+        );
+    }
+
+    #[test]
+    fn a_view_grouped_by_a_column_gives_that_column_to_msg() {
+        let header_and_msg = |view: &str| {
+            let app = harnesses(view);
+            let text = render(&app, 140, 30);
+            let header = text
+                .lines()
+                .nth(usize::from(HEADER_ROW))
+                .unwrap()
+                .to_owned();
+            (header, app.columns(140, 140).width(Col::Msg))
+        };
+        let (status, msg) = header_and_msg("status");
+        assert!(
+            status.contains("HARNESS") && status.contains("HOST"),
+            "{status}"
+        );
+        let (harness, harness_msg) = header_and_msg("harness");
+        assert!(
+            !harness.contains("HARNESS") && harness.contains("HOST"),
+            "{harness}"
+        );
+        assert_eq!(harness_msg, msg + 8);
+        let (host, host_msg) = header_and_msg("host");
+        assert!(host.contains("HARNESS") && !host.contains("HOST"), "{host}");
+        assert_eq!(host_msg, msg + 8);
+        let text = render(&harnesses("harness"), 140, 30);
+        for group in [
+            "CLAUDE (2)",
+            "CODEX (1)",
+            "GROK (1)",
+            "OPENCODE (1)",
+            "PI (1)",
+        ] {
+            assert!(text.contains(group), "{group}:\n{text}");
+        }
+    }
+
+    #[test]
+    fn harness_marks_show_only_in_nerd_mode_and_only_for_an_adapter_with_one() {
+        let claude = "\u{ec82}";
+        let mut status = harnesses("status");
+        let words = render(&status, 140, 30);
+        assert!(!words.contains(claude), "{words}");
+        status.nerd = true;
+        let marked = render(&status, 140, 30);
+        assert!(marked.contains(&format!("{claude} claude")), "{marked}");
+        assert!(marked.contains("\u{ec81} codex"), "{marked}");
+        let column = |msg: &str, word: &str| {
+            let line = marked.lines().find(|l| l.contains(msg)).unwrap();
+            line.chars()
+                .collect::<String>()
+                .find(word)
+                .map(|at| line[..at].chars().count())
+        };
+        assert_eq!(
+            column("seat-a msg", "grok"),
+            column("claude msg", "claude"),
+            "grok keeps its word, under the marked ones:\n{marked}"
+        );
+        let mut grouped = harnesses("harness");
+        grouped.nerd = true;
+        let text = render(&grouped, 140, 30);
+        assert!(text.contains(&format!("{claude} CLAUDE (2)")), "{text}");
+        assert!(text.contains("\u{e22c} PI (1)"), "{text}");
+        assert!(text.lines().any(|l| l.starts_with("  GROK (1)")), "{text}");
+    }
+
+    #[test]
+    fn the_selection_stays_put_when_a_group_empties_or_appears() {
+        let mut app = fuller();
+        app.selected = Some(Spot::Row("local/seat-a".into()));
+        render(&app, 80, 30);
+        let working = |row: &Row| row.group == crate::board::Group::Working;
+        let rows: Vec<Row> = app.rows.iter().filter(|r| !working(r)).cloned().collect();
+        let all = app.rows.clone();
+        app.set_rows(rows, hosts());
+        let text = render(&app, 80, 30);
+        assert!(!text.contains("WORKING"), "{text}");
+        assert_eq!(app.selected, Some(Spot::Row("local/seat-a".into())));
+        app.set_rows(all, hosts());
+        let text = render(&app, 80, 14);
+        assert_eq!(app.selected, Some(Spot::Row("local/seat-a".into())));
+        assert!(text.contains("seat-a msg"), "still on screen:\n{text}");
+    }
+
+    #[test]
     fn the_host_view_drops_the_at_host_its_group_already_names() {
         let mut app = App::default();
         let mut rows = Vec::new();
@@ -1653,6 +1809,16 @@ mod tests {
             done.selected = Some(Spot::Row("local/claude".into()));
             done.nerd = name.contains("nerd");
             screens.push((name, done, width, height));
+        }
+        for view in ["harness", "host"] {
+            for width in [140, 200] {
+                for nerd in [false, true] {
+                    let mut app = harnesses(view);
+                    app.nerd = nerd;
+                    let name = format!("{view} view{} {width}", if nerd { " nerd" } else { "" });
+                    screens.push((name.leak(), app, width, 40));
+                }
+            }
         }
         let mut status = fuller();
         press(&mut status, KeyCode::Char('f'));

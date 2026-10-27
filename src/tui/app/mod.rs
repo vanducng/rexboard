@@ -109,6 +109,8 @@ pub enum Item {
         folded: bool,
     },
     Row(usize),
+    /// The blank row above a group's header, never selected.
+    Gap,
 }
 
 /// What the selection rests on: a row, or a folded group's header so `z` can open it again.
@@ -182,6 +184,8 @@ pub struct App {
     /// Where the list's rows were last drawn: the first row's line, the first item shown, and
     /// how many rows fit. The draw sets it, so a click can find the row under it.
     pub drawn: std::cell::Cell<(u16, usize, usize)>,
+    /// Whether the list was drawn with blank rows between its groups, which it is while they fit.
+    pub spaced: std::cell::Cell<bool>,
     pub folded: BTreeSet<Bucket>,
     pub peek: Option<Peek>,
     /// The `?` key table is open in the card.

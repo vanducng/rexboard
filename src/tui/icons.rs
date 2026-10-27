@@ -1,6 +1,7 @@
 //! The Nerd Font glyphs the card's facts take with `"icons": "nerd"`, each pinned by its Nerd
 //! Fonts name and code point. All are single BMP scalars, one cell wide in a Nerd Font Mono;
-//! `cod-claude`, `cod-openai`, `cod-robot` and `cod-search_sparkle` need Nerd Fonts 3.5.0.
+//! `cod-search_sparkle` and the harnesses' `cod-claude` and `cod-openai` need Nerd Fonts 3.5.0.
+//! A harness's mark lives on its adapter, `Harness::mark`.
 
 /// A glyph and the Nerd Fonts name it is pinned to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -9,7 +10,7 @@ pub struct Icon {
     pub glyph: &'static str,
 }
 
-const fn icon(name: &'static str, glyph: &'static str) -> Icon {
+pub const fn icon(name: &'static str, glyph: &'static str) -> Icon {
     Icon { name, glyph }
 }
 
@@ -26,28 +27,9 @@ pub const QUOTA: Icon = icon("fa-pie_chart", "\u{f200}");
 /// An extension that declares no icon of its own.
 pub const EXTENSION: Icon = icon("oct-package", "\u{f487}");
 
-const CLAUDE: Icon = icon("cod-claude", "\u{ec82}");
-const CODEX: Icon = icon("cod-openai", "\u{ec81}");
-const OPENCODE: Icon = icon("cod-terminal", "\u{ea85}");
-const GEMINI: Icon = icon("cod-sparkle", "\u{ec10}");
-const PI: Icon = icon("fae-pi", "\u{e22c}");
-const ROBOT: Icon = icon("cod-robot", "\u{ec20}");
-
 const NATIVE: Icon = icon("cod-verified", "\u{eb77}");
 const BRIDGE: Icon = icon("cod-plug", "\u{eb2d}");
 const INFERRED: Icon = icon("cod-search_sparkle", "\u{ec50}");
-
-/// A harness's mark, by the harness name a pane reports; any other harness is a robot.
-pub fn harness(name: Option<&str>) -> Icon {
-    match name {
-        Some("claude-code" | "claude") => CLAUDE,
-        Some("codex") => CODEX,
-        Some("opencode") => OPENCODE,
-        Some("gemini") => GEMINI,
-        Some("pi") => PI,
-        _ => ROBOT,
-    }
-}
 
 /// How a row's status reached the board: its own record, a bridge, or a guess from the pane.
 pub fn source(source: &str) -> Option<Icon> {
@@ -59,11 +41,16 @@ pub fn source(source: &str) -> Option<Icon> {
     }
 }
 
+/// Every glyph the board draws, the harnesses' marks included.
 #[cfg(test)]
-pub const ALL: [Icon; 20] = [
-    HOST, TURN, TITLE, SESSION, WINDOW, BLOCK, MODEL, CTX, COST, QUOTA, EXTENSION, CLAUDE, CODEX,
-    OPENCODE, GEMINI, PI, ROBOT, NATIVE, BRIDGE, INFERRED,
-];
+pub fn all() -> Vec<Icon> {
+    let own = [
+        HOST, TURN, TITLE, SESSION, WINDOW, BLOCK, MODEL, CTX, COST, QUOTA, EXTENSION, NATIVE,
+        BRIDGE, INFERRED,
+    ];
+    let marks = crate::harness::BUILTIN.iter().filter_map(|h| h.mark());
+    own.into_iter().chain(marks).collect()
+}
 
 #[cfg(test)]
 mod tests {
@@ -72,7 +59,8 @@ mod tests {
 
     #[test]
     fn every_icon_is_one_bmp_scalar_one_cell_wide_and_named_once() {
-        for icon in ALL {
+        let all = all();
+        for &icon in &all {
             let mut chars = icon.glyph.chars();
             let c = chars.next().unwrap();
             assert!(chars.next().is_none(), "{} is one scalar", icon.name);
@@ -83,7 +71,7 @@ mod tests {
             );
             assert_eq!(icon.glyph.width(), 1, "{}", icon.name);
             assert_eq!(
-                ALL.iter().filter(|other| other.glyph == icon.glyph).count(),
+                all.iter().filter(|other| other.glyph == icon.glyph).count(),
                 1,
                 "{} is used once",
                 icon.name
@@ -92,11 +80,7 @@ mod tests {
     }
 
     #[test]
-    fn harnesses_and_sources_find_their_marks() {
-        assert_eq!(harness(Some("claude-code")), CLAUDE);
-        assert_eq!(harness(Some("codex")), CODEX);
-        assert_eq!(harness(Some("grok")), ROBOT);
-        assert_eq!(harness(None), ROBOT);
+    fn sources_find_their_marks() {
         assert_eq!(source("bridge"), Some(BRIDGE));
         assert_eq!(source("other"), None);
     }
