@@ -1,6 +1,6 @@
 # 12. Scope and non-goals
 
-**Status:** Accepted, 2026-10-25
+**Status:** Superseded by [15](0015-scope-and-non-goals.md), 2026-10-27
 
 ## Context
 

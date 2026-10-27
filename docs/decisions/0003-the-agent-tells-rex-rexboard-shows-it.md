@@ -1,6 +1,6 @@
 # 3. The agent tells Rex, rexboard shows it
 
-**Status:** Accepted, 2026-10-26. Its install bullet is superseded by [13](0013-rexboard-ships-the-hooks-it-relies-on.md)
+**Status:** Accepted, 2026-10-26. Its install bullet is superseded by [13](0013-rexboard-ships-the-hooks-it-relies-on.md). Amended 2026-10-27
 
 ## Context
 
@@ -18,7 +18,8 @@ A row is only useful if its state is right. Options were: agents report their st
 - Coverage is the agent setup's job; [Agent status](../agent-status.md) says how to check it.
 - What rexboard shows is the same for local and remote rows, and costs nothing per view.
 - An extension can add a fallback status for rows with no record ([4](0004-extensions-not-a-built-in-core.md)); a record always wins over it.
+- Usage figures (model, context, tokens) are local only: a harness hands them to `rexboard usage`, which keeps them beside serve's state for each pane. A remote row shows them blank until Rex's record carries them.
 
 ## Supersedes
 
-The idea of capturing each pane's whole scrollback on selection.
+The idea of capturing each pane's whole scrollback on selection. Amended 2026-10-27: the usage consequence.
