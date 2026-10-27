@@ -83,7 +83,10 @@ pub fn execute(cli: &Cli) -> Result<()> {
         Command::Ext(command) => extension::cli::run(command, cli.json),
         Command::Hook { harness, event } => hook::run(harness, event.as_deref()),
         Command::Hooks(cli::HooksCommand::Install { harness, dry_run }) => {
-            hook::install::install(harness, *dry_run, cli.json)
+            hook::install::run(hook::install::Mode::Install, harness, *dry_run, cli.json)
+        }
+        Command::Hooks(cli::HooksCommand::Uninstall { harness, dry_run }) => {
+            hook::install::run(hook::install::Mode::Uninstall, harness, *dry_run, cli.json)
         }
         Command::Hooks(cli::HooksCommand::Status) => hook::install::status(cli.json),
         Command::Hooks(cli::HooksCommand::Replay { session }) => hook::replay(session),

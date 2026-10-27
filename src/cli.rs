@@ -120,6 +120,17 @@ pub enum HooksCommand {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Take out exactly what install put in: rexboard's hooks, the status line it chained (the
+    /// user's own command comes back), and pi's extension when it is rexboard's. A backup comes
+    /// first; every other key and hook stays.
+    Uninstall {
+        /// claude, codex or pi; every one with settings on this host when none is named.
+        #[arg(value_name = "HARNESS")]
+        harness: Vec<String>,
+        /// Say what would change, and write nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Each harness: whether its settings have rexboard's hooks, and what an install would change.
     Status,
     /// Send each pane's last status again to a tmux client that just attached to SESSION; for

@@ -18,8 +18,7 @@
 ## Consequences
 
 - A new write into a harness's files follows every bullet here, or comes with a record that says why it cannot.
-- Until `hooks uninstall` ships, the undo is the backup or removing the entries by hand, as [CLI](../cli.md) says.
-- Not built yet: `hooks status` saying what a linked file lacks (today it prints `symlink`).
+- The undo is `hooks uninstall`, or the backup, as [CLI](../cli.md) says.
 - The fail-open rule costs the hook its error code: a broken install is found with `hooks status` and the hook log, not by the agent stopping.
 
 ## Supersedes
