@@ -3,7 +3,7 @@
 //! hook, a pi extension) hands it to `rexboard usage`, which keeps it in a small file per pane;
 //! serve reads those files and never a transcript.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -12,8 +12,9 @@ use std::time::SystemTime;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// A file older than this says nothing about the pane now.
-pub const STALE_AFTER: chrono::Duration = chrono::Duration::minutes(10);
+/// A file no live pane names is removed once it is this old; younger, its pane may not be on
+/// the board yet.
+pub const ORPHAN_AFTER: chrono::Duration = chrono::Duration::minutes(10);
 
 /// Blank is blank: a harness that does not report a figure leaves it out, never zero.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -121,8 +122,10 @@ fn dir(state: &Path) -> PathBuf {
 }
 
 /// The pane this process runs in. Outside tmux, Rex's block id. Inside tmux, REX_BLOCK is the
-/// pane that started the tmux server, so the tmux socket and pane name it instead:
-/// `tmux:<socket file name>:<pane id>`, which serve finds again from the tmux client in front.
+/// pane that started the tmux server, so the tmux socket, server and pane name it instead:
+/// `tmux:<socket file name>:<server pid>:<pane id>`, which serve finds again from the tmux
+/// client in front. A server restarted on the same socket numbers its panes from `%0` again;
+/// its new pid keeps them apart.
 pub fn own_key(
     tmux: Option<&str>,
     tmux_pane: Option<&str>,
@@ -130,17 +133,28 @@ pub fn own_key(
 ) -> Option<String> {
     match tmux {
         Some(tmux) => {
-            let socket = tmux.split(',').next().filter(|s| !s.is_empty())?;
+            let mut parts = tmux.split(',');
+            let socket = parts.next().filter(|s| !s.is_empty())?;
+            let server = parts.next().filter(|s| !s.is_empty())?;
             let name = Path::new(socket).file_name()?.to_str()?;
             let pane = tmux_pane.filter(|p| !p.is_empty())?;
-            Some(tmux_key(name, pane))
+            Some(tmux_key(name, server, pane))
         }
         None => rex_block.filter(|b| !b.is_empty()).map(str::to_owned),
     }
 }
 
-pub fn tmux_key(socket: &str, pane: &str) -> String {
-    format!("tmux:{socket}:{pane}")
+pub fn tmux_key(socket: &str, server: &str, pane: &str) -> String {
+    format!("tmux:{socket}:{server}:{pane}")
+}
+
+/// Whether any file in `usage/` is a tmux pane's, so serve asks tmux only when one is.
+pub fn any_tmux(state: &Path) -> bool {
+    std::fs::read_dir(dir(state))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|entry| entry.file_name().to_string_lossy().starts_with("tmux-"))
 }
 
 /// A key as a file name: only letters, digits, `.`, `_` and `-`.
@@ -183,8 +197,8 @@ pub fn write(
     std::fs::rename(tmp, path)
 }
 
-/// What one file held: its pane's key, when it was written, and the usage.
-type Kept = Option<(String, DateTime<chrono::FixedOffset>, Usage)>;
+/// What one file held: its pane's key and the usage.
+type Kept = Option<(String, Usage)>;
 
 /// serve's view of `usage/`: each file's modified time and what it held, so a scan reads only
 /// the files that changed since the last one.
@@ -194,10 +208,17 @@ pub struct Files {
 }
 
 impl Files {
-    /// Every pane's usage that is not stale at `now`, by its key. A file untouched for longer
-    /// than STALE_AFTER is removed: Rex never reuses a block id, so its pane is gone or quiet,
-    /// and either way it says nothing. A file that cannot be read is skipped until it changes.
-    pub fn read(&mut self, state: &Path, now: DateTime<Utc>) -> BTreeMap<String, Usage> {
+    /// Every file's usage, by its key, at any age: the last turn's figures stay true while a
+    /// pane is idle. With `live`, the keys of the panes on the board, a file no live pane names
+    /// is removed once it is ORPHAN_AFTER old, and a stray temp file too; without it (before
+    /// the first snapshot) nothing is removed. A file that cannot be read is skipped until it
+    /// changes.
+    pub fn read(
+        &mut self,
+        state: &Path,
+        live: Option<&BTreeSet<String>>,
+        now: DateTime<Utc>,
+    ) -> BTreeMap<String, Usage> {
         let mut seen = HashMap::new();
         let mut kept = BTreeMap::new();
         for entry in std::fs::read_dir(dir(state))
@@ -209,20 +230,21 @@ impl Files {
             let Ok(modified) = entry.metadata().and_then(|m| m.modified()) else {
                 continue;
             };
-            if now.signed_duration_since(DateTime::<Utc>::from(modified)) > STALE_AFTER {
+            let json = path.extension().is_some_and(|ext| ext == "json");
+            let held = match self.seen.remove(&path) {
+                Some((at, held)) if at == modified => held,
+                _ if json => read_one(&path),
+                _ => None,
+            };
+            let orphan = live.is_some_and(|live| {
+                held.as_ref().is_none_or(|(key, _)| !live.contains(key))
+                    && now.signed_duration_since(DateTime::<Utc>::from(modified)) > ORPHAN_AFTER
+            });
+            if orphan {
                 let _ = std::fs::remove_file(&path);
                 continue;
             }
-            if path.extension().is_none_or(|ext| ext != "json") {
-                continue;
-            }
-            let held = match self.seen.remove(&path) {
-                Some((at, held)) if at == modified => held,
-                _ => read_one(&path),
-            };
-            if let Some((key, ts, usage)) = &held
-                && now.signed_duration_since(*ts) <= STALE_AFTER
-            {
+            if let Some((key, usage)) = &held {
                 kept.insert(key.clone(), usage.clone());
             }
             seen.insert(path, (modified, held));
@@ -234,11 +256,10 @@ impl Files {
 
 fn read_one(path: &Path) -> Kept {
     let sidecar: Sidecar = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
-    let ts = DateTime::parse_from_rfc3339(&sidecar.ts).ok()?;
-    Some((sidecar.key, ts, sidecar.usage))
+    Some((sidecar.key, sidecar.usage))
 }
 
-/// Each tmux client's pid with the `tmux:<socket>:<pane>` key of the pane it shows: what a
+/// Each tmux client's pid with the `tmux:<socket>:<server>:<pane>` key of the pane it shows: what a
 /// bridged row is joined to its usage by. One `ps` per client and one `tmux list-clients` per
 /// socket; a client whose socket or pane cannot be read is left out.
 pub fn tmux_keys(pids: &[u32]) -> BTreeMap<u32, String> {
@@ -256,23 +277,34 @@ pub fn tmux_keys(pids: &[u32]) -> BTreeMap<u32, String> {
         let Ok(out) = Command::new("tmux")
             .arg("-S")
             .arg(&socket)
-            .args(["list-clients", "-F", "#{client_pid} #{pane_id}"])
+            .args(["list-clients", "-F", "#{client_pid} #{pid} #{pane_id}"])
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .output()
         else {
             continue;
         };
-        for line in String::from_utf8_lossy(&out.stdout).lines() {
-            if let Some((pid, pane)) = line.split_once(' ')
-                && let Ok(pid) = pid.parse()
-                && wanted.contains(&pid)
-            {
-                keys.insert(pid, tmux_key(name, pane));
-            }
-        }
+        keys.extend(clients(
+            &String::from_utf8_lossy(&out.stdout),
+            name,
+            &wanted,
+        ));
     }
     keys
+}
+
+/// `list-clients` lines (`client_pid server_pid pane_id`) as each wanted client's pane key.
+fn clients(out: &str, socket: &str, wanted: &[u32]) -> Vec<(u32, String)> {
+    out.lines()
+        .filter_map(|line| {
+            let mut words = line.split(' ');
+            let pid: u32 = words.next()?.parse().ok()?;
+            let (server, pane) = (words.next()?, words.next()?);
+            wanted
+                .contains(&pid)
+                .then(|| (pid, tmux_key(socket, server, pane)))
+        })
+        .collect()
 }
 
 /// The socket a tmux client talks to, from its command line: `-S path`, `-L name`, or the
@@ -409,7 +441,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pane_is_keyed_by_its_block_outside_tmux_and_by_its_tmux_pane_inside() {
+    fn a_pane_is_keyed_by_its_block_outside_tmux_and_by_its_tmux_server_and_pane_inside() {
         assert_eq!(
             own_key(None, None, Some("block:01a1")).as_deref(),
             Some("block:01a1")
@@ -421,14 +453,33 @@ mod tests {
                 Some("block:stale")
             )
             .as_deref(),
-            Some("tmux:default:%3"),
+            Some("tmux:default:1234:%3"),
             "inside tmux, REX_BLOCK is the server's pane, not this one"
+        );
+        assert_ne!(
+            own_key(Some("/tmp/tmux-501/default,5678,0"), Some("%3"), None),
+            own_key(Some("/tmp/tmux-501/default,1234,0"), Some("%3"), None),
+            "a restarted server's %3 is another pane"
         );
         assert_eq!(
             own_key(Some("/tmp/tmux-501/default,1,0"), None, Some("block:x")),
             None
         );
+        assert_eq!(
+            own_key(Some("/tmp/tmux-501/default"), Some("%3"), None),
+            None
+        );
         assert_eq!(own_key(None, None, Some("")), None);
+    }
+
+    #[test]
+    fn a_tmux_client_is_joined_to_its_server_and_pane() {
+        let out = "4242 1234 %3\n5151 1234 %0\nbad line\n";
+        assert_eq!(
+            clients(out, "default", &[4242]),
+            [(4242, "tmux:default:1234:%3".to_owned())],
+            "the key the pane's own `rexboard usage` wrote"
+        );
     }
 
     #[test]
@@ -448,7 +499,7 @@ mod tests {
     }
 
     #[test]
-    fn written_usage_reads_back_until_it_goes_stale() {
+    fn written_usage_reads_back_at_any_age_while_its_pane_lives() {
         let dir = tempfile::tempdir().unwrap();
         let now = Utc::now();
         let usage = Usage {
@@ -457,26 +508,28 @@ mod tests {
             tok: Some(67910),
             ..Usage::default()
         };
-        write(dir.path(), "tmux:default:%3", "claude-code", &usage, now).unwrap();
         write(
             dir.path(),
-            "block:01a1",
-            "codex",
-            &Usage::default(),
-            now - STALE_AFTER * 2,
+            "tmux:default:1234:%3",
+            "claude-code",
+            &usage,
+            now,
         )
         .unwrap();
         std::fs::write(dir.path().join("usage/broken.json"), "{").unwrap();
         let mut files = Files::default();
-        let read = files.read(dir.path(), now);
+        let read = files.read(dir.path(), None, now);
         assert_eq!(read.len(), 1, "{read:?}");
-        assert_eq!(read["tmux:default:%3"], usage);
+        assert_eq!(read["tmux:default:1234:%3"], usage);
+        let live = BTreeSet::from(["tmux:default:1234:%3".to_owned()]);
+        let later = now + chrono::Duration::minutes(30);
         assert_eq!(
-            files.read(dir.path(), now),
+            files.read(dir.path(), Some(&live), later),
             read,
-            "unchanged files read the same"
+            "30 minutes idle, its last turn still stands"
         );
-        let file = std::fs::read_to_string(dir.path().join("usage/tmux-default--3.json")).unwrap();
+        let file =
+            std::fs::read_to_string(dir.path().join("usage/tmux-default-1234--3.json")).unwrap();
         assert!(
             !file.contains("cost_usd"),
             "a figure not reported is left out: {file}"
@@ -484,7 +537,7 @@ mod tests {
     }
 
     #[test]
-    fn a_scan_rereads_only_a_changed_file_and_removes_one_long_untouched() {
+    fn a_scan_rereads_only_a_changed_file_and_removes_one_no_live_pane_names() {
         let dir = tempfile::tempdir().unwrap();
         let now = Utc::now();
         let usage = |pct| Usage {
@@ -493,6 +546,7 @@ mod tests {
         };
         write(dir.path(), "block:live", "claude-code", &usage(7), now).unwrap();
         write(dir.path(), "block:gone", "claude-code", &usage(9), now).unwrap();
+        write(dir.path(), "block:new", "claude-code", &usage(3), now).unwrap();
         let usage_dir = dir.path().join("usage");
         std::fs::write(usage_dir.join("left.json.4242"), "{").unwrap();
         let age = |name: &str, by: chrono::Duration| {
@@ -504,43 +558,56 @@ mod tests {
                 .set_modified(at)
                 .unwrap();
         };
+        let live = BTreeSet::from(["block:live".to_owned()]);
         let mut files = Files::default();
-        assert_eq!(files.read(dir.path(), now).len(), 2);
+        assert_eq!(files.read(dir.path(), Some(&live), now).len(), 3);
         // Same modified time, new bytes: the scan keeps what it read.
-        let live = usage_dir.join("block-live.json");
-        let modified = std::fs::metadata(&live).unwrap().modified().unwrap();
+        let path = usage_dir.join("block-live.json");
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
         std::fs::write(
-            &live,
-            std::fs::read_to_string(&live).unwrap().replace("7", "8"),
+            &path,
+            std::fs::read_to_string(&path).unwrap().replace("7", "8"),
         )
         .unwrap();
         std::fs::File::options()
             .write(true)
-            .open(&live)
+            .open(&path)
             .unwrap()
             .set_modified(modified)
             .unwrap();
-        assert_eq!(files.read(dir.path(), now)["block:live"], usage(7));
+        assert_eq!(
+            files.read(dir.path(), Some(&live), now)["block:live"],
+            usage(7)
+        );
         write(dir.path(), "block:live", "claude-code", &usage(12), now).unwrap();
         age("block-live.json", chrono::Duration::seconds(-1));
         assert_eq!(
-            files.read(dir.path(), now)["block:live"],
+            files.read(dir.path(), Some(&live), now)["block:live"],
             usage(12),
             "a rewrite is read"
         );
-        age("block-gone.json", STALE_AFTER * 2);
-        age("left.json.4242", STALE_AFTER * 2);
-        let read = files.read(dir.path(), now);
-        assert_eq!(read.keys().collect::<Vec<_>>(), ["block:live"]);
-        let mut left: Vec<_> = std::fs::read_dir(&usage_dir)
-            .unwrap()
-            .map(|e| e.unwrap().file_name().into_string().unwrap())
-            .collect();
-        left.sort();
+        for name in ["block-live.json", "block-gone.json", "left.json.4242"] {
+            age(name, ORPHAN_AFTER * 2);
+        }
+        let left = |files: &mut Files, live: Option<&BTreeSet<String>>| {
+            files.read(dir.path(), live, now);
+            let mut names: Vec<_> = std::fs::read_dir(&usage_dir)
+                .unwrap()
+                .map(|e| e.unwrap().file_name().into_string().unwrap())
+                .collect();
+            names.sort();
+            names
+        };
         assert_eq!(
-            left,
-            ["block-live.json"],
-            "the old file and the stray temp file are gone"
+            left(&mut files, None).len(),
+            4,
+            "before the first snapshot nothing is removed"
+        );
+        assert_eq!(
+            left(&mut files, Some(&live)),
+            ["block-live.json", "block-new.json"],
+            "a closed pane's old file and a stray temp file go; a live pane's stays at any age, \
+             and a young one may be a pane the board has not seen yet"
         );
     }
 }

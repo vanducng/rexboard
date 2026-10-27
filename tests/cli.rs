@@ -3251,8 +3251,8 @@ fn usage_keeps_the_last_turn_by_pane_and_passes_the_json_on() {
         .success()
         .stdout(line.clone());
     assert!(
-        usage("tmux-seats--7").exists(),
-        "inside tmux, keyed by its pane"
+        usage("tmux-seats-1234--7").exists(),
+        "inside tmux, keyed by its server and pane"
     );
     assert!(!usage("block-the-servers-pane").exists());
     serve
@@ -3287,45 +3287,43 @@ fn usage_keeps_the_last_turn_by_pane_and_passes_the_json_on() {
 }
 
 #[test]
-fn serve_puts_a_local_panes_usage_on_its_row_until_it_goes_stale() {
+fn serve_keeps_a_local_panes_usage_while_it_lives_and_removes_a_gone_panes_file() {
     let serve = Serve::new();
     serve.rows(&[]);
-    let keep = |key: &str, ts: &str| {
-        let dir = serve.file("usage");
-        std::fs::create_dir_all(&dir).unwrap();
-        let name = key.replace(':', "-");
+    let dir = serve.file("usage");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = |key: &str| dir.join(format!("{}.json", key.replace(':', "-")));
+    let half_hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(30 * 60);
+    let keep = |key: &str| {
         std::fs::write(
-            dir.join(format!("{name}.json")),
+            path(key),
             serde_json::json!({
-                "key": key, "ts": ts, "harness": "claude-code",
+                "key": key, "ts": "2020-01-01T00:00:00.000Z", "harness": "claude-code",
                 "model": "Opus 5.5", "ctx_pct": 82, "tok": 820000,
             })
             .to_string(),
         )
         .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(path(key))
+            .unwrap()
+            .set_modified(half_hour_ago)
+            .unwrap();
     };
-    let now = chrono_now();
-    keep("block:api-seat-a", &now);
-    keep("block:web-seat-b", &now);
-    eventually_within("the local pane's usage", 10, || {
+    keep("block:api-seat-a");
+    keep("block:web-seat-b");
+    keep("block:closed-pane");
+    eventually_within("the local pane's usage, idle half an hour", 10, || {
         row(&serve.rows(&[]), SEAT)["usage"]
             == serde_json::json!({ "model": "Opus 5.5", "ctx_pct": 82, "tok": 820000 })
     });
-    let rows = serve.rows(&[]);
     assert!(
-        row(&rows, "mini/block:web-seat-b")["usage"].is_null(),
+        row(&serve.rows(&[]), "mini/block:web-seat-b")["usage"].is_null(),
         "a file on this host says nothing of mini's panes"
     );
-    keep("block:api-seat-a", "2020-01-01T00:00:00.000Z");
-    eventually_within("a stale file to blank it", 10, || {
-        row(&serve.rows(&[]), SEAT)["usage"].is_null()
+    eventually_within("the files no local pane names to go", 10, || {
+        !path("block:closed-pane").exists() && !path("block:web-seat-b").exists()
     });
-}
-
-fn chrono_now() -> String {
-    let out = std::process::Command::new("date")
-        .args(["-u", "+%Y-%m-%dT%H:%M:%S.000Z"])
-        .output()
-        .unwrap();
-    String::from_utf8(out.stdout).unwrap().trim().to_owned()
+    assert!(path("block:api-seat-a").exists(), "a live pane's stays");
 }

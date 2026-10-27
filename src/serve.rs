@@ -243,7 +243,7 @@ struct Reducer {
     extensions: Running,
     usage: BTreeMap<String, Usage>,
     /// The local rows the usage watcher joins its files to.
-    usage_panes: Arc<Mutex<Vec<UsagePane>>>,
+    usage_panes: Arc<Mutex<Option<Vec<UsagePane>>>>,
 }
 
 /// A row on serve's own host: its usage file is named for its block, or for the tmux pane its
@@ -259,20 +259,34 @@ struct UsagePane {
 const USAGE_EVERY: Duration = Duration::from_secs(2);
 
 /// Reads the usage files off the reducer's thread, since joining a tmux seat runs `ps` and
-/// `tmux`, and sends each local row's usage whenever it is read.
-fn watch_usage(state: std::path::PathBuf, panes: Arc<Mutex<Vec<UsagePane>>>, tx: Sender<Msg>) {
+/// `tmux`, and sends each local row's usage whenever it is read. `panes` is None until this
+/// host's first snapshot, and while it is, no file is removed.
+fn watch_usage(
+    state: std::path::PathBuf,
+    panes: Arc<Mutex<Option<Vec<UsagePane>>>>,
+    tx: Sender<Msg>,
+) {
     thread::spawn(move || {
         let mut files = usage::Files::default();
         loop {
             thread::sleep(USAGE_EVERY);
-            let panes = panes.lock().unwrap_or_else(PoisonError::into_inner).clone();
-            let kept = files.read(&state, chrono::Utc::now());
+            let known = panes.lock().unwrap_or_else(PoisonError::into_inner).clone();
+            let panes = known.clone().unwrap_or_default();
             let pids: Vec<u32> = panes.iter().filter_map(|p| p.tmux_client).collect();
-            let tmux = if pids.is_empty() || !kept.keys().any(|k| k.starts_with("tmux:")) {
-                BTreeMap::new()
-            } else {
+            let asked = !pids.is_empty() && usage::any_tmux(&state);
+            let tmux = if asked {
                 usage::tmux_keys(&pids)
+            } else {
+                BTreeMap::new()
             };
+            let live: BTreeSet<String> = panes
+                .iter()
+                .map(|p| p.block.clone())
+                .chain(tmux.values().cloned())
+                .collect();
+            // A tmux client that did not answer this time may show a live pane: keep every file.
+            let whole = known.is_some() && (!asked || tmux.len() == pids.len());
+            let kept = files.read(&state, whole.then_some(&live), chrono::Utc::now());
             let by_row = panes
                 .iter()
                 .filter_map(|pane| {
@@ -382,7 +396,8 @@ impl Reducer {
                 *self
                     .usage_panes
                     .lock()
-                    .unwrap_or_else(PoisonError::into_inner) = self.local_panes();
+                    .unwrap_or_else(PoisonError::into_inner) =
+                    self.restored.contains("local").then(|| self.local_panes());
                 let pids: Vec<i32> = self
                     .collectors
                     .values()

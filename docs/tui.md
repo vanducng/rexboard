@@ -21,7 +21,7 @@ The board is built to live in a narrow column, so the narrow layout is the main 
 
   The list is as wide as the board at every width (the turn card sits under it), and `pick` uses the same columns.
 
-  The usage columns are for panes on serve's own host whose harness runs `rexboard usage`; a file older than 10 minutes counts as none. A figure the harness does not report is `-`, never `0`. `TOK`, `COST` and `5H` are off until `tui.json` names them: `"columns": ["tok", "cost", "5h"]` (see [Turn card](#turn-card) for where the file lives). They keep the table's order whatever the list's, and any other name is ignored. From 160 columns `MODEL` widens to the longest model name, up to 20. The figures are right-aligned, so their digits line up.
+  The usage columns are for panes on serve's own host whose harness runs `rexboard usage`. A pane keeps its last turn's figures while it lives, however long it idles, since a harness writes only when it works. A figure the harness does not report is `-`, never `0`. `TOK`, `COST` and `5H` are off until `tui.json` names them: `"columns": ["tok", "cost", "5h"]` (see [Turn card](#turn-card) for where the file lives). They keep the table's order whatever the list's, and any other name is ignored. From 160 columns `MODEL` widens to the longest model name, up to 20. The figures are right-aligned, so their digits line up.
 
   Each column answers one question:
 
