@@ -20,6 +20,10 @@ impl Harness for Codex {
         &["codex"]
     }
 
+    fn usage_hook(&self) -> Option<&'static str> {
+        Some("Stop")
+    }
+
     /// Its Stop hook's JSON, which names the model and the rollout; the numbers come from the
     /// rollout's last `token_count` event, as the footer shows them.
     fn usage(&self, payload: &serde_json::Value) -> Option<Usage> {

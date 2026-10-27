@@ -43,6 +43,12 @@ pub trait Harness: Sync {
     fn usage(&self, _payload: &serde_json::Value) -> Option<usage::Usage> {
         None
     }
+
+    /// The hook event whose JSON carries the usage, for a harness with no status line to run
+    /// `rexboard usage` from: `rexboard hook` keeps it on that event.
+    fn usage_hook(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 /// In title order: Claude's glyph is checked before Codex's title.

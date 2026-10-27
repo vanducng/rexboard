@@ -46,26 +46,11 @@ impl Usage {
 /// `rexboard usage HARNESS [-- CMD]`. Keeping the numbers never breaks the status line it runs
 /// in: a payload it cannot read, or a pane it cannot name, is skipped without a word.
 pub fn run(name: &str, then: &[String]) -> crate::error::Result<()> {
-    let harness = super::by_name(name).ok_or_else(|| {
-        let names: Vec<&str> = super::BUILTIN.iter().map(|h| h.name()).collect();
-        crate::error::Error::usage_with(
-            format!("no harness named {name}; harnesses: {}", names.join(", ")),
-            &["rexboard usage claude -- your-status-line"],
-        )
-    })?;
+    let harness = named(name)?;
     let mut input = Vec::new();
     std::io::stdin().take(1 << 20).read_to_end(&mut input)?;
-    let env = |name: &str| std::env::var(name).ok();
-    if let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&input)
-        && let Some(usage) = harness.usage(&payload)
-        && let Some(key) = own_key(
-            env("TMUX").as_deref(),
-            env("TMUX_PANE").as_deref(),
-            env("REX_BLOCK").as_deref(),
-        )
-        && let Ok(paths) = crate::state::Paths::find()
-    {
-        let _ = write(&paths.dir, &key, harness.id(), &usage, Utc::now());
+    if let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&input) {
+        keep(harness, &payload);
     }
     let Some((cmd, args)) = then.split_first() else {
         return Ok(());
@@ -78,6 +63,33 @@ pub fn run(name: &str, then: &[String]) -> crate::error::Result<()> {
         std::process::exit(status.code().unwrap_or(1));
     }
     Ok(())
+}
+
+/// The harness `name` names, by its id or its short name.
+pub fn named(name: &str) -> crate::error::Result<&'static dyn super::Harness> {
+    super::by_name(name).ok_or_else(|| {
+        let names: Vec<&str> = super::BUILTIN.iter().map(|h| h.name()).collect();
+        crate::error::Error::usage_with(
+            format!("no harness named {name}; harnesses: {}", names.join(", ")),
+            &["rexboard hooks status"],
+        )
+    })
+}
+
+/// Keeps what `payload` says the last turn used, for the pane this process runs in; a payload
+/// with no usage, or a pane it cannot name, keeps nothing.
+pub fn keep(harness: &dyn super::Harness, payload: &serde_json::Value) {
+    let env = |name: &str| std::env::var(name).ok();
+    if let Some(usage) = harness.usage(payload)
+        && let Some(key) = own_key(
+            env("TMUX").as_deref(),
+            env("TMUX_PANE").as_deref(),
+            env("REX_BLOCK").as_deref(),
+        )
+        && let Ok(paths) = crate::state::Paths::find()
+    {
+        let _ = write(&paths.dir, &key, harness.id(), &usage, Utc::now());
+    }
 }
 
 /// A percent as Rex and the harnesses report it, rounded into 0-100.
