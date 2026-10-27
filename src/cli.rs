@@ -84,6 +84,20 @@ pub enum Command {
     /// List extensions, run one once against real rows, or start a new one from the example.
     #[command(subcommand)]
     Ext(ExtCommand),
+    /// Tell Rex an agent's status from one of its hooks, with the hook's JSON on stdin. The hooks
+    /// `rexboard hooks install` writes run it; it never fails the hook.
+    Hook {
+        /// The harness whose hook runs it: claude, codex, pi or grok.
+        #[arg(value_name = "HARNESS")]
+        harness: String,
+        /// The hook event, for JSON that names none.
+        #[arg(value_name = "EVENT")]
+        event: Option<String>,
+    },
+    /// Put `rexboard hook` and `rexboard usage` into each harness's own settings, or say whether
+    /// they are there.
+    #[command(subcommand)]
+    Hooks(HooksCommand),
     /// Upgrade rexboard the way it was installed (Homebrew, or install.sh), then stop serve so the
     /// next command runs the new one.
     #[command(alias = "update")]
@@ -91,6 +105,29 @@ pub enum Command {
         /// Only say whether a newer release is out.
         #[arg(long)]
         check: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum HooksCommand {
+    /// Merge rexboard's hooks into each harness this host has, or the ones named, after a
+    /// backup beside each file. A second install changes nothing.
+    Install {
+        /// claude, codex, pi or grok; every one with settings on this host when none is named.
+        #[arg(value_name = "HARNESS")]
+        harness: Vec<String>,
+        /// Say what would change, and write nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Each harness: whether its settings have rexboard's hooks, and what an install would change.
+    Status,
+    /// Send each pane's last status again to a tmux client that just attached to SESSION; for
+    /// tmux's client-attached hook.
+    Replay {
+        /// The tmux session, as `#{session_id}` gives it.
+        #[arg(value_name = "SESSION")]
+        session: String,
     },
 }
 

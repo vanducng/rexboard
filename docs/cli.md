@@ -82,7 +82,7 @@ In a terminal each line fits its width: `WHAT` is cut first, then `WHERE` (a lon
 
 The pane's main record is the one with no `id`; if every record has one, the most urgent wins.
 
-Fields are a contract. New fields may appear. Renaming or removing one is a breaking change.
+Fields are a contract. New fields may appear. Renaming or removing one is a breaking change. Key order is not part of it; read fields by name.
 
 ### Exit codes and errors
 
@@ -303,6 +303,98 @@ Keeps what an agent's last turn used, for the board's `MODEL` and `CTX` (and `TO
 It keeps one small file per pane in `usage/` in the state dir, named for the pane: `REX_BLOCK` in a plain Rex pane, or inside tmux the tmux socket, server pid and `TMUX_PANE`, where `REX_BLOCK` names the pane that started the tmux server. Serve reads a file again only when it changes, and keeps a pane's figures while the pane lives, at any age: a harness writes only when it works. A file that no pane on this host names (a Rex pane, or any pane on a tmux server a local tmux client talks to) is removed once it is 10 minutes old (Rex never reuses a block id, and a restarted tmux server has a new pid). Figures a harness does not report stay blank, never zero, and so do a token count of 0 and a cost of 0 (before the first request, or a proxy or a subscription).
 
 It prints nothing itself. `-- CMD …` runs your own status line command with the same JSON and passes its output and exit code through, so the status line looks as it did. A payload it cannot read, or a pane it cannot name, keeps nothing and still runs `CMD`: it never breaks the status line it runs in. An unknown harness fails with `USAGE` (exit 2).
+
+## `rexboard hook`
+
+```bash
+rexboard hook claude Stop    # a Claude Code hook, with the hook's JSON on stdin
+```
+
+Tells Rex an agent's status from one of its hooks. The hooks `rexboard hooks install` writes run it. It reads the hook's JSON on stdin, turns the event into a status, and writes the OSC 7501 sequence where Rex sees it:
+
+| Where the agent runs | What it writes |
+| --- | --- |
+| Inside tmux: `TMUX_PANE`, or under a tmux `TERM`, the one tmux pane on the agent's tty | The sequence in tmux passthrough to that pane, which forwards it to the Rex pane running `tmux attach`. It also keeps it on the tmux pane (`@rex_status`) for [`hooks replay`](#rexboard-hooks) |
+| Straight in a Rex pane (`REX_BLOCK`) | pi: the sequence, to pi's terminal. Claude Code reports its own state there, so only a `turn` record with the final message ([Agent status](agent-status.md)). Codex reports its own: nothing |
+| Neither | Nothing |
+
+| Event | Status |
+| --- | --- |
+| `SessionStart` | `idle` |
+| `UserPromptSubmit` | `working`, `Working` |
+| `PreToolUse` | `working`, the tool's description, else its name. For `AskUserQuestion`: `blocked` `question`, with the first question and its numbered options |
+| `PostToolUse` of `AskUserQuestion` | `working`, `Working` |
+| `PermissionRequest` | `blocked` `permission`, `Allow TOOL?` (Codex: its description) |
+| `Notification` of type `permission_prompt` | `blocked` `permission`, the notification's message |
+| `Stop` | `done`, the final message, else `Done` |
+| `StopFailure` | `error`, the message so far, else the error |
+| `SessionEnd` | clears the status |
+
+Any other event changes nothing. A message goes on one line, ` ⏎ ` for each line break, cut to Rex's 2048 bytes and to 4096 for the whole sequence. `EVENT` names the event for JSON that has no `hook_event_name`. On Codex's `Stop` it also keeps the turn's usage, as [`rexboard usage codex`](#rexboard-usage) does.
+
+It prints nothing and exits 0 whatever happens, so it never fails the agent's hook; only an unknown harness fails, with `USAGE` (exit 2). `REXBOARD_HOOK_LOG=FILE` appends one line per call: the event, which of `TMUX`, `TMUX_PANE` and `REX_BLOCK` were set, the pane found, and what it did. It never logs the hook's text.
+
+## `rexboard hooks`
+
+```bash
+rexboard hooks status                  # what each harness has, and what an install would change
+rexboard hooks install --dry-run       # the same changes, written nowhere
+rexboard hooks install                 # every harness this host has
+rexboard hooks install claude codex    # only these
+rexboard hooks replay SESSION          # from tmux, when a client attaches
+```
+
+`install` puts `rexboard hook` and `rexboard usage` into each harness's own settings:
+
+| Harness | File | What it adds |
+| --- | --- | --- |
+| `claude` | `$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json` | `rexboard hook claude EVENT` for the nine events above (`PostToolUse` for `AskUserQuestion` only), each with a 5 s timeout. The `statusLine` runs through `rexboard usage claude`: yours keeps running and printing, through rexboard while `rexboard` is there and on its own when it is not. With no status line, `rexboard usage claude` |
+| `codex` | `$CODEX_HOME/hooks.json`, else `~/.codex/hooks.json` | `rexboard hook codex EVENT` for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `Stop` and `SessionEnd`; `Stop` keeps the usage too |
+| `pi` | `rexboard.js` in `$PI_CODING_AGENT_DIR/extensions`, else `~/.pi/agent/extensions` | An extension that runs `rexboard hook pi` on pi's events and `rexboard usage pi` at each turn's end |
+| `grok` | | Nothing: grok reports to a Rex pane itself, and reads a status line only from `~/.grok/config.toml`, which rexboard does not edit. For its usage, add the lines below there by hand |
+
+A settings file is merged, never replaced. Hooks that already report to Rex (rexboard's, or the `rex-agent-status` bridge it replaces) give way to rexboard's, where the first of them was; every other key and hook stays, in its order. Before it writes, the old file is kept beside it as `FILE.bak-<UTC>`, with the file's own permissions, and the write is a rename. A second install changes nothing. The hooks run `rexboard` when that is this binary on `PATH`, else its full path.
+
+What `install` leaves alone:
+- a harness whose settings directory is missing (`absent`);
+- a settings file that is a symlink, as a dotfiles checkout makes it (`symlink`): change it at its source;
+- a file that is not valid JSON, or whose `hooks` is not an object: `CONFIG` (exit 1), and nothing is written.
+
+A directory with no settings file yet gets one. With pi's old `rex-status.js` extension still there, the line says so, as pi would report twice.
+
+For grok's usage, in `~/.grok/config.toml` (end the command with ` -- YOUR-SCRIPT` to keep a status line of your own):
+
+```toml
+[ui.status_line]
+type = "command"
+command = "rexboard usage grok"
+```
+
+Inside tmux a status reaches Rex only through tmux passthrough, so tmux needs `set -g allow-passthrough on` in `tmux.conf`. `status` says when the default tmux server has it off.
+
+To undo an install, move `FILE.bak-<UTC>` back over the file, or delete the hooks that run `rexboard hook`, the `statusLine`'s `rexboard usage` wrapper and pi's `rexboard.js`. Do that before removing rexboard: until then each of those hooks fails on every event. A second backup in the same second takes `-2`, so none is ever written over.
+
+Each harness gets one line, `HARNESS STATE FILE`, then each change: `EVENT: add …` (`, keeping your 1 hook` when the event has others), `EVENT: replace OLD with …`, or `EVENT: remove …`. `status` ends with `rexboard hooks install writes these` when there is anything to write, a dry run with `dry run: nothing written`, and `status` adds a `tmux` line when a tmux server runs:
+
+| State | Meaning |
+| --- | --- |
+| `installed` | rexboard's hooks are there and current |
+| `changes` | an install would change what follows |
+| `written` | this install wrote them; the old file's name follows |
+| `absent`, `symlink`, `not managed` | left alone, as above |
+
+With `--json` (`tmux` from `status` only; `null` with no tmux server):
+
+```json
+{"harnesses":[{"harness":"claude","file":"~/.claude/settings.json","state":"changes","changes":["PreToolUse: add `rexboard hook claude PreToolUse`, keeping your 1 hook","Stop: replace `rex-agent-status` with `rexboard hook claude Stop`"]},{"harness":"grok","file":null,"state":"not managed","changes":[],"note":"grok reports to a Rex pane itself. For its usage, add to ~/.grok/config.toml: ..."}],"tmux":{"allow_passthrough":"on"}}
+```
+
+`replay` sends each pane's last status in tmux session `SESSION` again, for a tmux client that just attached and so missed it. In `tmux.conf`:
+
+```bash
+set-hook -g client-attached[7501] 'run-shell -b "sleep 0.3; rexboard hooks replay #{session_id}"'
+set-hook -g client-session-changed[7501] 'run-shell -b "sleep 0.3; rexboard hooks replay #{session_id}"'
+```
 
 ## `rexboard views`
 

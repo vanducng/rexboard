@@ -8,6 +8,7 @@ mod error;
 mod event;
 mod extension;
 mod harness;
+mod hook;
 mod jump;
 mod output;
 mod pane;
@@ -79,6 +80,12 @@ pub fn execute(cli: &Cli) -> Result<()> {
         Command::Next { back } => jump::next(*back, cli.json),
         Command::Upgrade { check } => upgrade::run(*check, cli.json),
         Command::Ext(command) => extension::cli::run(command, cli.json),
+        Command::Hook { harness, event } => hook::run(harness, event.as_deref()),
+        Command::Hooks(cli::HooksCommand::Install { harness, dry_run }) => {
+            hook::install::install(harness, *dry_run, cli.json)
+        }
+        Command::Hooks(cli::HooksCommand::Status) => hook::install::status(cli.json),
+        Command::Hooks(cli::HooksCommand::Replay { session }) => hook::replay(session),
         Command::Board | Command::Pick => {
             if !stdout().is_terminal() || !stdin().is_terminal() {
                 return Err(Error::usage_with(

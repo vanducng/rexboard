@@ -48,7 +48,7 @@ fn no_command_with_json_is_usage_json() {
         .assert()
         .code(2)
         .stderr(
-            "{\"error\":{\"code\":\"USAGE\",\"message\":\"a command is required\",\"next_steps\":[\"rexboard --help\"]},\"ok\":false}\n",
+            "{\"ok\":false,\"error\":{\"code\":\"USAGE\",\"message\":\"a command is required\",\"next_steps\":[\"rexboard --help\"]}}\n",
         );
 }
 
@@ -3106,7 +3106,7 @@ fn close_asks_on_a_terminal_and_needs_yes_without_one() {
         .args(["close", "mini/block:web-ask", "--yes", "--json"])
         .assert()
         .success()
-        .stdout("{\"closed\":true,\"key\":\"mini/block:web-ask\",\"ok\":true}\n");
+        .stdout("{\"ok\":true,\"key\":\"mini/block:web-ask\",\"closed\":true}\n");
     assert!(
         serve
             .log_lines()

@@ -26,6 +26,8 @@ rexboard
 
 The board opens in this terminal. The first run starts `rexboard serve` in the background, which watches this host and every host in `rex hosts`. Rows that need you (blocked, an error, or done and not yet seen) are on top.
 
+Agents inside tmux, and pi, report through hooks: run `rexboard hooks install` once (`rexboard hooks install --dry-run` first). See [Agent status](docs/agent-status.md).
+
 | Key | Does |
 | --- | --- |
 | `j` / `k` | Move down / up |
