@@ -59,6 +59,8 @@ The last four are in `tests/direction.rs`.
 - **The title is the squash commit's subject**, so write it as a [Conventional Commit](https://www.conventionalcommits.org): `fix(tui): …`, `feat(cli): …`, `docs: …`. The type decides the next version ([Deployment](docs/deployment.md#releases)).
 - **UI changes show screens** at 80 and 140 columns in the PR body, from a generic fixture. Screens go in the PR, not the repo.
 - **Say what you checked:** the three checks, and for anything that talks to Rex, how you tried it. Live checks that type into or close a pane use a throwaway `zz-rexboard-probe-*` pane, never a real one ([decision 7](docs/decisions/0007-acting-on-panes-is-guarded.md)).
+- **Try harness writes in a sandbox.** Before running `hooks install` or `rexboard hook` by hand, point `HOME` at a temp dir and unset or redirect `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and `PI_CODING_AGENT_DIR` as well, in every command: each one wins over `HOME`. Run `--dry-run` first and check the paths it prints are inside the sandbox ([decision 14](docs/decisions/0014-writes-to-user-config-are-explicit-reversible-and-fail-open.md)).
+- **Remove a hook's old target last.** A change that retires something an installed hook runs lands only after the replacement is installed and `rexboard hooks status` says so.
 - **Changing a decision** means a new record under `docs/decisions/` that supersedes the old one, in the same PR.
 
 [Development](docs/development-guidelines.md) maps the code and the tests.

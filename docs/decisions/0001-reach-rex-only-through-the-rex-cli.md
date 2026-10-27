@@ -1,6 +1,6 @@
 # 1. Reach Rex only through the `rex` CLI
 
-**Status:** Accepted, 2026-10-25
+**Status:** Accepted, 2026-10-25. Amended 2026-10-27
 
 ## Context
 
@@ -12,6 +12,7 @@ rexboard needs every pane's status, title and process on every Rex host, and a f
 - It never opens Rex's socket, reads Rex's private files, or scrapes Rex's own UI. Reading a pane's text goes through Rex's API (`format` and `blob_read`), bounded.
 - Each host runs one long-lived observer script; one-shot scripts handle snapshots, jumps, tails and answers.
 - The scripts live in `src/lua/` and ship inside the binary, so the binary and the scripts never disagree.
+- `rexboard hook` writes OSC 7501 on the agent's own terminal, as the agent, the channel [3](0003-the-agent-tells-rex-rexboard-shows-it.md) describes. That is the agent speaking, not rexboard reaching Rex.
 
 ## Consequences
 
@@ -22,4 +23,4 @@ rexboard needs every pane's status, title and process on every Rex host, and a f
 
 ## Supersedes
 
-None.
+None. Amended 2026-10-27: the hook bullet, after [13](0013-rexboard-ships-the-hooks-it-relies-on.md).

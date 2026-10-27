@@ -1,6 +1,6 @@
 # 13. rexboard ships the hooks it relies on
 
-**Status:** Accepted, 2026-10-27
+**Status:** Accepted, 2026-10-27. Amended 2026-10-27
 
 ## Context
 
@@ -16,9 +16,11 @@
 ## Consequences
 
 - A fresh machine needs `rexboard hooks install` once; `rexboard hooks status` shows what it would do.
+- How rexboard writes those files, and how a hook fails open, is [14](0014-writes-to-user-config-are-explicit-reversible-and-fail-open.md).
+- `hooks status` reads a symlinked settings file too and says what it lacks; the change is made in the file it links to. Not built yet: today it prints `symlink`.
 - The hook vocabulary lives in one place, tested against the bridge it replaces. A harness change to its hook JSON is a rexboard release.
 - `serde_json`'s `preserve_order` feature (approved 2026-10-26) keeps a merged settings file in its own key order. Every JSON object rexboard prints now keeps the order it is built in, not sorted keys.
 
 ## Supersedes
 
-The "rexboard installs nothing into agents" bullet of [3](0003-the-agent-tells-rex-rexboard-shows-it.md).
+The "rexboard installs nothing into agents" bullet of [3](0003-the-agent-tells-rex-rexboard-shows-it.md). Amended 2026-10-27: the link to 14, and status on a symlinked file.

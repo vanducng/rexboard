@@ -1,6 +1,6 @@
 # 4. Extensions, not a built-in core
 
-**Status:** Accepted, 2026-10-25
+**Status:** Accepted, 2026-10-25. Amended 2026-10-27
 
 ## Context
 
@@ -14,6 +14,7 @@ Tools around the agents (a seat manager, a project layout, a ticket system) each
 - Contract 1 gives fields, and optionally a fallback status for rows with no record. It cannot act, add keys or add views. Fields become columns, views and filter keys on their own.
 - Not in-process Lua or a plugin API: rexboard only fetches data, so a process with JSON in and out is enough, works in any language, and cannot crash or stall the board (timeouts, output caps, its own process group).
 - No tool is named in `src/`.
+- Harness adapters (`src/harness/`) are not extensions. They run inside the agent's hook on every event, and they read the dialogs answer mode's guard depends on ([7](0007-acting-on-panes-is-guarded.md)), so they stay compiled and pinned by captured fixtures. Extensions add data and never decide an action.
 
 ## Consequences
 
@@ -23,4 +24,4 @@ Tools around the agents (a seat manager, a project layout, a ticket system) each
 
 ## Supersedes
 
-None.
+None. Amended 2026-10-27: the harness adapter bullet.
