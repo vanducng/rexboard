@@ -557,7 +557,8 @@ mod tests {
                     "| crate | before | after |",
                     "|---|:-:|---|",
                     "| **rexboard** | 0.15 | 0.16.0 |",
-                    "| 修复 | 1 | 2 |"
+                    "| 修复 | 1 | 2 |",
+                    "| a \\| b | c |",
                 ],
                 80
             ),
@@ -565,6 +566,7 @@ mod tests {
                 "   | crate    | before | after  |",
                 "   | rexboard | 0.15   | 0.16.0 |",
                 "   | 修复     | 1      | 2      |",
+                "   | a | b    | c      |",
             ],
             "columns pad to their widest cell as it shows"
         );

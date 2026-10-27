@@ -228,8 +228,13 @@ fn table(rows: &[&str]) -> Vec<Block> {
             let header = rows.get(n + 1).is_some_and(|next| separator(next));
             let inner = row.trim();
             let inner = inner.strip_prefix('|').unwrap_or(inner);
-            let inner = inner.strip_suffix('|').unwrap_or(inner);
-            let cells = inner.split('|').map(|cell| inline(cell.trim()));
+            let inner = inner
+                .strip_suffix('|')
+                .filter(|rest| !rest.ends_with('\\'))
+                .unwrap_or(inner);
+            let cells = split_cells(inner)
+                .into_iter()
+                .map(|cell| inline(cell.trim()));
             (
                 cells.map(|c| if header { strong(c) } else { c }).collect(),
                 header,
@@ -261,6 +266,21 @@ fn table(rows: &[&str]) -> Vec<Block> {
             Block::Cut(runs, false)
         })
         .collect()
+}
+
+/// A table row's cells: split at each `|` but an escaped `\|`, which shows as `|`.
+fn split_cells(row: &str) -> Vec<String> {
+    let mut cells = vec![String::new()];
+    let mut chars = row.chars().peekable();
+    while let Some(c) = chars.next() {
+        let cell = cells.last_mut().expect("one cell");
+        match c {
+            '\\' if chars.peek() == Some(&'|') => cell.push(chars.next().expect("a pipe")),
+            '|' => cells.push(String::new()),
+            c => cell.push(c),
+        }
+    }
+    cells
 }
 
 /// A numbered list's numbers right-aligned past 9 (` 9.`, `10.`), so its text keeps one edge.
