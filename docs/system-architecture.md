@@ -43,7 +43,7 @@ rexboard reaches Rex only through the `rex` command: `rex do` for the scripts, `
 | `src/lua/observer.lua` | Runs inside `rex do - --all --fail-fast`: one snapshot, then one line per event, and a `tick` every 30s |
 | `src/collector.rs` | Keeps one observer alive per host, with backoff, in its own process group |
 | `src/event.rs` | The observer line contract, `v` 1 |
-| `src/harness/` | The agent harnesses rexboard knows, one file each (`claude.rs`, `codex.rs`, `pi.rs`) behind one `Harness` trait whose methods default to the shared behaviour: how a pane is recognised as one (its record's app, else the process in front, else the title), and `dialog.rs`, the one grammar the board and `send.lua` read a dialog by |
+| `src/harness/` | The agent harnesses rexboard knows, one file each (`claude.rs`, `codex.rs`, `pi.rs`, `grok.rs`) behind one `Harness` trait whose methods default to the shared behaviour: how a pane is recognised as one (its record's app, else the process in front, else the title), and `dialog.rs`, the one grammar the board and `send.lua` read a dialog by |
 | `src/pane.rs` | One pane from Rex's records: the main record, `source`, the harness, the title glyph, the `turn` message |
 | `src/board.rs` | The reducer: rows with `since`, turns, `seen` and groups, from host events and an injected clock |
 | `src/serve.rs` | The daemon: collectors, the reducer thread, the socket |

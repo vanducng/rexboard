@@ -10,7 +10,7 @@ An agent reports its state (`working`, `blocked`, `done`, `idle` or `error`), wi
 | --- | --- | --- |
 | `native` | Straight in a Rex pane | The agent itself. Claude Code and Codex report on their own there |
 | `bridge` | Inside tmux, in a Rex pane that runs `tmux attach` (an OpenRig seat, for example) | A hook in the agent that sends the sequence through tmux, which would otherwise swallow it. A record counts as `bridge` when tmux wrote it or tmux is the pane's foreground process |
-| `inferred` | Anywhere, with nothing reporting | No record. The state comes from the title's glyph (`✳ ` idle, a spinner working, else `unknown`), and the harness, if any, from the process or the title, so it ends in `?`. `AGE` is `-`, and the row sits under `UNREPORTED` |
+| `inferred` | Anywhere, with nothing reporting | No record. The state comes from the title's glyph (`✳ ` idle, a spinner working, else `unknown`), and the harness, if any, from the process (`claude` or a version such as `2.1.310` for Claude Code, `codex`, `pi`, `grok-…` for grok) or the title, so it ends in `?`. `AGE` is `-`, and the row sits under `UNREPORTED` |
 | An extension's name | Anywhere, with nothing reporting | No record, but an enabled [extension](extensions.md) with `provides.status` gave the row a fallback status. The row is grouped by that state, like a reported one. A pane's own record always wins over it |
 
 The turn card shows `source`, and `rexboard ls --json` has it on every row ([JSON fields](cli.md#json-fields)).

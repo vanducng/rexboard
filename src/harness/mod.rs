@@ -5,6 +5,7 @@
 mod claude;
 mod codex;
 pub mod dialog;
+mod grok;
 mod pi;
 
 pub trait Harness: Sync {
@@ -16,8 +17,14 @@ pub trait Harness: Sync {
         &[]
     }
 
+    /// Starts of process names that carry a version.
+    fn process_prefixes(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     fn is_process(&self, name: &str) -> bool {
         self.processes().contains(&name)
+            || self.process_prefixes().iter().any(|p| name.starts_with(p))
     }
 
     /// Weaker evidence from the pane's title, checked after the record and the process.
@@ -27,13 +34,21 @@ pub trait Harness: Sync {
 }
 
 /// In title order: Claude's glyph is checked before Codex's title.
-pub static BUILTIN: &[&dyn Harness] = &[&claude::Claude, &codex::Codex, &pi::Pi];
+pub static BUILTIN: &[&dyn Harness] = &[&claude::Claude, &codex::Codex, &pi::Pi, &grok::Grok];
 
 /// The process names an agent runs as, besides Claude Code's binary named for its version.
 pub fn processes() -> Vec<&'static str> {
     BUILTIN
         .iter()
         .flat_map(|h| h.processes())
+        .copied()
+        .collect()
+}
+
+pub fn process_prefixes() -> Vec<&'static str> {
+    BUILTIN
+        .iter()
+        .flat_map(|h| h.process_prefixes())
         .copied()
         .collect()
 }

@@ -68,6 +68,7 @@ pub fn send(
             "title": expect.title,
         },
         "harness": crate::harness::processes(),
+        "harness_prefixes": crate::harness::process_prefixes(),
         "dialog": crate::harness::dialog::SHARED,
         "action": action.args(),
     });
@@ -199,6 +200,7 @@ mod tests {
             json!(["claude", "codex", "pi"]),
             "from the registry"
         );
+        assert_eq!(args["harness_prefixes"], json!(["grok-"]));
         assert_eq!(
             args["dialog"],
             json!({

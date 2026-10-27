@@ -54,6 +54,9 @@ local function agent(name)
   for _, h in ipairs(a.harness or {}) do
     if h == name then return true end
   end
+  for _, prefix in ipairs(a.harness_prefixes or {}) do
+    if name:sub(1, #prefix) == prefix then return true end
+  end
   return false
 end
 local front = agent(fg.name) or agent(fg.argv0)
