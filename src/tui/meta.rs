@@ -33,7 +33,12 @@ impl Fact {
         if nerd {
             return match self {
                 Fact::Host => icons::HOST.glyph,
-                Fact::Harness => icons::harness(row.pane.harness.as_deref()).glyph,
+                Fact::Harness => row
+                    .pane
+                    .harness
+                    .as_deref()
+                    .and_then(crate::harness::mark)
+                    .map_or("harness", |i| i.glyph),
                 Fact::Turn => icons::TURN.glyph,
                 Fact::Model => icons::MODEL.glyph,
                 Fact::Ctx => icons::CTX.glyph,

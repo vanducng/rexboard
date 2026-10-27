@@ -153,6 +153,23 @@ impl App {
         }
     }
 
+    /// The list's columns on a board `board` wide, `list` of it for the list: a view grouped by
+    /// harness or host leaves that column to its group headers, and nerd marks widen HARNESS.
+    pub fn columns(&self, board: u16, list: usize) -> Columns {
+        let mut columns =
+            Columns::with_usage(board, list, &self.field_columns(), &self.usage_columns());
+        match self.view.group_by {
+            Some(Key::Harness) => columns.resize(Col::Harness, 0),
+            Some(Key::Host) => columns.resize(Col::Host, 0),
+            _ => {}
+        }
+        if self.nerd {
+            columns.marks = true;
+            columns.resize(Col::Harness, columns.width(Col::Harness) + 2);
+        }
+        columns
+    }
+
     /// The columns of the fields, but for the one the view groups by, whose group header says it.
     pub fn field_columns(&self) -> Vec<&'static Column> {
         self.fields

@@ -9,6 +9,8 @@ mod grok;
 mod pi;
 pub mod usage;
 
+use crate::tui::icons::Icon;
+
 pub trait Harness: Sync {
     /// The wire id: the Rex record `app` its hooks write. Never renamed.
     fn id(&self) -> &'static str;
@@ -49,6 +51,11 @@ pub trait Harness: Sync {
     fn usage_hook(&self) -> Option<&'static str> {
         None
     }
+
+    /// Its Nerd Font mark, drawn only with `"icons": "nerd"`; a harness without one keeps its word.
+    fn mark(&self) -> Option<Icon> {
+        None
+    }
 }
 
 /// In title order: Claude's glyph is checked before Codex's title.
@@ -60,6 +67,11 @@ pub fn by_name(name: &str) -> Option<&'static dyn Harness> {
         .iter()
         .copied()
         .find(|h| h.id() == name || h.name() == name)
+}
+
+/// The Nerd Font mark for a wire id or display name, if its harness has one.
+pub fn mark(name: &str) -> Option<Icon> {
+    by_name(name)?.mark()
 }
 
 /// The display name for a wire id; an id rexboard does not know shows as it is.
@@ -110,5 +122,16 @@ mod tests {
         assert_eq!(display("grok-build"), "grok");
         assert_eq!(display("codex"), "codex");
         assert_eq!(display("opencode"), "opencode");
+    }
+
+    #[test]
+    fn only_a_harness_with_an_adapter_and_a_glyph_has_a_mark() {
+        let name = |h: &str| mark(h).map(|icon| icon.name);
+        assert_eq!(name("claude-code"), Some("cod-claude"));
+        assert_eq!(name("claude"), Some("cod-claude"));
+        assert_eq!(name("codex"), Some("cod-openai"));
+        assert_eq!(name("pi"), Some("fae-pi"));
+        assert_eq!(name("grok"), None);
+        assert_eq!(name("opencode"), None);
     }
 }

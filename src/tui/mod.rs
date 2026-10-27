@@ -5,7 +5,7 @@ mod clipboard;
 pub(crate) mod columns;
 mod effects;
 mod full;
-mod icons;
+pub(crate) mod icons;
 mod keys;
 mod markdown;
 mod meta;

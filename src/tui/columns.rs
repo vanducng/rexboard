@@ -474,6 +474,8 @@ fn usage(row: &Row, figure: impl Fn(&Usage) -> Option<String>) -> String {
 pub struct Columns {
     pub tier: Tier,
     pub cols: Vec<(&'static Column, usize)>,
+    /// HARNESS leads with the harness's mark, where it has one.
+    pub marks: bool,
 }
 
 impl Columns {
@@ -542,7 +544,29 @@ impl Columns {
                 (c, width)
             })
             .collect();
-        Columns { tier, cols }
+        Columns {
+            tier,
+            cols,
+            marks: false,
+        }
+    }
+
+    /// Gives `id`, if shown, `width` columns, dropping it at 0; MSG gives or takes the difference.
+    pub fn resize(&mut self, id: Col, width: usize) {
+        let Some(at) = self.cols.iter().position(|(c, _)| c.id == id) else {
+            return;
+        };
+        let Some(msg) = self.cols.iter().position(|(c, _)| c.id == Col::Msg) else {
+            return;
+        };
+        let had = self.cols[at].1;
+        let width = width.min(had + self.cols[msg].1);
+        self.cols[msg].1 = self.cols[msg].1 + had - width;
+        if width == 0 {
+            self.cols.remove(at);
+        } else {
+            self.cols[at].1 = width;
+        }
     }
 
     pub fn width(&self, id: Col) -> usize {
@@ -593,7 +617,7 @@ impl Columns {
                     Col::State => state(row),
                     Col::Age => in_state(row, now),
                     Col::Turn => row.last_turn.map_or_else(|| "-".to_owned(), span),
-                    Col::Harness => harness(row),
+                    Col::Harness => self.harness(row),
                     Col::Host => row.pane.host.clone(),
                     Col::Where => place.to_owned(),
                     Col::Session => squeeze(&clean(&row.pane.session), width.saturating_sub(1)),
@@ -631,6 +655,17 @@ impl Columns {
                 vec![(fitted + " ", tone)]
             })
             .collect()
+    }
+
+    fn harness(&self, row: &Row) -> String {
+        let word = harness(row);
+        let mark = row.pane.harness.as_deref().and_then(crate::harness::mark);
+        match mark {
+            _ if !self.marks => word,
+            Some(mark) => format!("{} {word}", mark.glyph),
+            // Under the marked names, not two cells left of them.
+            None => format!("  {word}"),
+        }
     }
 
     /// Where the sorted column's arrow goes, as a column on the line: in the gap just left of its
