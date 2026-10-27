@@ -20,8 +20,6 @@ const SCRIPT: &str = concat!(
 /// The re-read takes as much of the pane as the card's tail does.
 const BYTES: usize = 48 * 1024;
 const WITHIN: Duration = Duration::from_secs(5);
-/// Names an agent runs as, besides Claude Code's binary named for its version.
-const HARNESS: [&str; 3] = ["claude", "codex", "pi"];
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
@@ -69,7 +67,9 @@ pub fn send(
             "fingerprint": expect.fingerprint,
             "title": expect.title,
         },
-        "harness": HARNESS,
+        "harness": crate::harness::processes(),
+        "harness_prefixes": crate::harness::process_prefixes(),
+        "dialog": crate::harness::dialog::SHARED,
         "action": action.args(),
     });
     let remote = (pane.host != "local").then_some(pane.host.as_str());
@@ -195,6 +195,22 @@ mod tests {
         assert_eq!(args["expect"]["state"], "blocked");
         assert_eq!(args["expect"]["kind"], "permission");
         assert_eq!(args["expect"]["fingerprint"], " ❯ 1. Yes\n   2. No");
+        assert_eq!(
+            args["harness"],
+            json!(["claude", "codex", "pi"]),
+            "from the registry"
+        );
+        assert_eq!(args["harness_prefixes"], json!(["grok-"]));
+        assert_eq!(
+            args["dialog"],
+            json!({
+                "cursor": ["❯", ">"],
+                "input": ["❯", "›", ">"],
+                "separators": [".", ")"],
+                "lasting": ["don't ask again", "always", "auto mode", "this session", "accept edits"],
+            }),
+            "the board's own grammar, so send.lua reads the screen as the board does"
+        );
         let script = std::fs::read_to_string(dir.path().join("script")).unwrap();
         assert!(script.contains("function tail(") && script.contains("block.event"));
         assert_eq!(

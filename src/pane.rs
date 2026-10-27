@@ -203,11 +203,11 @@ pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
         }
     }
     let process = src.process.as_deref();
-    let harness = main
-        .and_then(|r| r.effective_app.clone().or_else(|| r.app.clone()))
-        .or_else(|| process.and_then(process_harness))
-        .or_else(|| title_state(&src.title).map(|_| "claude-code".to_owned()))
-        .or_else(|| codex_title(&src.title, process).then(|| "codex".to_owned()));
+    let harness = crate::harness::name_of(
+        main.and_then(|r| r.effective_app.clone().or_else(|| r.app.clone())),
+        process,
+        &src.title,
+    );
     let owner = main
         .and_then(|r| r.owner.as_ref())
         .and_then(|o| o.name.as_deref());
@@ -282,38 +282,6 @@ fn turn_msg(root: &Record, turn: Option<&Record>) -> Option<String> {
     }
 }
 
-/// Codex in tmux reports nothing and titles the pane `<dir> | <model>`, as in `api | gpt-4x`.
-/// Strict, so a shell command with a pipe (`env | sort`) never matches: the pane must be tmux
-/// and the model must have a digit.
-fn codex_title(title: &str, process: Option<&str>) -> bool {
-    let Some((dir, model)) = title.split_once(" | ") else {
-        return false;
-    };
-    process == Some("tmux")
-        && title.matches('|').count() == 1
-        && !dir.is_empty()
-        && !dir.contains(char::is_whitespace)
-        && !model.is_empty()
-        && model.chars().any(|c| c.is_ascii_alphabetic())
-        && model.chars().any(|c| c.is_ascii_digit())
-        && model
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
-}
-
-fn process_harness(name: &str) -> Option<String> {
-    let is_version = name.split('.').count() == 3
-        && name
-            .split('.')
-            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()));
-    match name {
-        "claude" => Some("claude-code".to_owned()),
-        "codex" | "pi" => Some(name.to_owned()),
-        _ if is_version => Some("claude-code".to_owned()),
-        _ => None,
-    }
-}
-
 /// Claude Code and the seat status line put a state glyph at the start of the title.
 fn glyph(title: &str) -> Option<(&'static str, &str)> {
     if let Some(rest) = title.strip_prefix("✳ ") {
@@ -329,7 +297,7 @@ fn glyph(title: &str) -> Option<(&'static str, &str)> {
     }
 }
 
-fn title_state(title: &str) -> Option<&'static str> {
+pub(crate) fn title_state(title: &str) -> Option<&'static str> {
     glyph(title).map(|(state, _)| state)
 }
 
@@ -394,34 +362,6 @@ mod tests {
     }
 
     #[test]
-    fn codex_title_is_strict() {
-        let tmux = Some("tmux");
-        assert!(codex_title("api | gpt-x1", tmux));
-        assert!(codex_title("work | Model-2.5-Pro", tmux));
-        assert!(
-            !codex_title("api | gpt-x1", Some("zsh")),
-            "only a tmux pane"
-        );
-        assert!(!codex_title("api | gpt-x1", None), "only a tmux pane");
-        assert!(!codex_title("env | sort", tmux), "a model has a digit");
-        assert!(!codex_title("dmesg | less", tmux), "a model has a digit");
-        assert!(!codex_title("history | tail", tmux), "a model has a digit");
-        assert!(!codex_title("tail -f log | grep err", tmux), "a shell pipe");
-        assert!(!codex_title("a | b1 | c", tmux), "two separators");
-        assert!(!codex_title("api | gpt x1", tmux), "a space in the model");
-        assert!(!codex_title("api|gpt-x1", tmux), "no spaces around the bar");
-        assert!(!codex_title(" | gpt-x1", tmux), "no dir");
-        assert!(!codex_title("api | 6.1", tmux), "a model has letters");
-    }
-
-    #[test]
-    fn version_string_process_is_claude() {
-        assert_eq!(process_harness("2.1.310").as_deref(), Some("claude-code"));
-        assert_eq!(process_harness("2.1"), None);
-        assert_eq!(process_harness("zsh"), None);
-    }
-
-    #[test]
     fn title_glyphs_map_to_states() {
         assert_eq!(title_state("✳ seat-a@demo"), Some("idle"));
         assert_eq!(title_state("⠋ seat-a@demo"), Some("working"));
@@ -455,5 +395,105 @@ mod tests {
         assert!(parse(r#"{"hosts": {"a": 1}}"#).is_err());
         assert!(parse(r#"{"hosts": "nope"}"#).is_err());
         assert!(parse(r#"{"hosts": [{"host": 1}]}"#).is_err());
+    }
+}
+
+/// Today's detection, pinned row by row, so moving it changes no harness, source or state.
+#[cfg(test)]
+mod corpus {
+    use super::*;
+
+    #[test]
+    fn derive_matches_the_recorded_corpus() {
+        let apps: [Option<(&str, &str)>; 8] = [
+            None,
+            Some(("app", "claude-code")),
+            Some(("app", "codex")),
+            Some(("app", "pi")),
+            Some(("app", "grok-build")),
+            Some(("app", "opencode")),
+            Some(("effective_app", "codex")),
+            Some(("app", "")),
+        ];
+        let processes = [
+            None,
+            Some("claude"),
+            Some("codex"),
+            Some("pi"),
+            Some("2.1.310"),
+            Some("2.1"),
+            Some("10.20.30"),
+            Some("tmux"),
+            Some("zsh"),
+            Some("node"),
+            Some("grok"),
+            Some("grok-1.0.70-darwin-arm64"),
+            Some("rexboard"),
+        ];
+        let titles = [
+            "",
+            "plain",
+            "✳ idle seat",
+            "⠋ working seat",
+            "⣿ busy",
+            "◐ half",
+            "◑ half",
+            "◉ seat",
+            "api | gpt-5.1",
+            "api | gpt5",
+            "env | sort",
+            "a b | gpt-5",
+            "api | model",
+            "api | gpt-5 | x",
+        ];
+        let owners = [None, Some("tmux")];
+        let mut out = String::new();
+        for app in apps {
+            for process in processes {
+                for title in titles {
+                    for owner in owners {
+                        if owner.is_some() && app.is_none() {
+                            continue;
+                        }
+                        let mut record = serde_json::json!({ "state": "working" });
+                        if let Some((key, value)) = app {
+                            record[key] = serde_json::json!(value);
+                        }
+                        if let Some(owner) = owner {
+                            record["owner"] = serde_json::json!({ "name": owner });
+                        }
+                        let records = if app.is_some() || owner.is_some() {
+                            serde_json::json!([record])
+                        } else {
+                            serde_json::json!([])
+                        };
+                        let mut block = serde_json::json!({
+                            "block_id": "b", "label": "seat", "title": title, "records": records,
+                        });
+                        if let Some(process) = process {
+                            block["process"] = serde_json::json!({ "name": process });
+                        }
+                        let pane = derive(
+                            "local",
+                            "api",
+                            "main",
+                            &Source::new("s", "w", parse_block(&block).unwrap()),
+                        );
+                        out.push_str(&format!(
+                            "{app:?} {process:?} {title:?} {owner:?} => {:?} {} {}\n",
+                            pane.harness, pane.source, pane.state
+                        ));
+                    }
+                }
+            }
+        }
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/harness/derive.txt"
+        );
+        if std::env::var_os("UPDATE_HARNESS_CORPUS").is_some() {
+            std::fs::write(path, &out).unwrap();
+        }
+        assert_eq!(out, std::fs::read_to_string(path).expect("the corpus"));
     }
 }

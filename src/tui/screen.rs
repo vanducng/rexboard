@@ -1,6 +1,7 @@
 //! What answer mode reads off a pane's tail: the numbered options of a dialog, or the input line,
 //! and the literal text `send.lua` must still find on screen before it sends.
 
+use crate::harness::dialog::SHARED;
 use crate::output::clean;
 
 /// Only the end of the screen counts, so an old dialog in the scrollback never matches;
@@ -19,15 +20,7 @@ impl Choice {
     /// An option that writes a rule or changes the mode for later prompts too.
     pub fn lasting(&self) -> bool {
         let label = self.label.to_lowercase().replace('’', "'");
-        [
-            "don't ask again",
-            "always",
-            "auto mode",
-            "this session",
-            "accept edits",
-        ]
-        .iter()
-        .any(|words| label.contains(words))
+        SHARED.lasting.iter().any(|words| label.contains(words))
     }
 }
 
@@ -138,10 +131,13 @@ fn choices(lines: &[String]) -> Option<Vec<Choice>> {
 /// `❯ 1. Yes` or `  2) No`: the digit and its label.
 fn option(line: &str) -> Option<(char, &str)> {
     let rest = line.trim_start();
-    let rest = rest.strip_prefix(['❯', '>']).unwrap_or(rest).trim_start();
+    let rest = rest
+        .strip_prefix(SHARED.cursor)
+        .unwrap_or(rest)
+        .trim_start();
     let mut chars = rest.chars();
     let digit = chars.next().filter(|c| ('1'..='9').contains(c))?;
-    let rest = chars.as_str().strip_prefix(['.', ')'])?;
+    let rest = chars.as_str().strip_prefix(SHARED.separators)?;
     if !rest.starts_with(char::is_whitespace) {
         return None;
     }
@@ -156,7 +152,7 @@ fn prompt(line: &str) -> Option<&str> {
     }
     let rest = line.trim_start();
     let rest = rest.strip_prefix('│').unwrap_or(rest).trim_start();
-    let rest = rest.strip_prefix(['❯', '›', '>'])?;
+    let rest = rest.strip_prefix(SHARED.input)?;
     Some(rest.trim().trim_end_matches('│').trim())
 }
 
@@ -173,7 +169,7 @@ fn vt_typed(vt: &str) -> bool {
         .is_some_and(|chars| {
             let at = chars
                 .iter()
-                .position(|&(c, _)| matches!(c, '❯' | '›' | '>'))
+                .position(|&(c, _)| SHARED.input.contains(&c))
                 .unwrap_or(0);
             chars[at + 1..]
                 .iter()
@@ -426,5 +422,60 @@ mod tests {
         let screen = Screen::parse("$ cargo test\nok\n", None);
         assert_eq!(screen.fingerprint, None);
         assert!(screen.options.is_empty());
+    }
+}
+
+/// Today's dialog reading, pinned screen by screen, so moving the grammar changes nothing.
+#[cfg(test)]
+mod corpus {
+    use super::*;
+
+    #[test]
+    fn parse_matches_the_recorded_corpus() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/screens");
+        let mut screens: Vec<(String, String)> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| {
+                let path = entry.unwrap().path();
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                (name, std::fs::read_to_string(&path).unwrap())
+            })
+            .collect();
+        screens.sort();
+        for (name, text) in [
+            ("codex cursor", " Allow it?\n › 1. Yes\n   2. No\n"),
+            ("paren options", " Pick one\n 1) red\n 2) blue\n 3) green\n"),
+            ("one option", " Only\n ❯ 1. Yes\n"),
+            ("skipped digit", " Pick\n 1. a\n 3. c\n"),
+            ("input under options", " 1. a\n 2. b\n ────\n ❯ \n"),
+            ("boxed prompt", "╭────╮\n│ > hello │\n╰────╯\n"),
+            (
+                "lasting words",
+                " Edit?\n ❯ 1. Yes\n   2. Yes, allow all edits during this session\n   3. Yes, and don’t ask again\n   4. No\n",
+            ),
+        ] {
+            screens.push((name.to_owned(), text.to_owned()));
+        }
+        let mut out = String::new();
+        for (name, text) in screens {
+            let screen = Screen::parse(&text, None);
+            let options: Vec<String> = screen
+                .options
+                .iter()
+                .map(|c| format!("{}:{}:{}:{}", c.digit, c.label, c.line, c.lasting()))
+                .collect();
+            out.push_str(&format!(
+                "== {name}\noptions {options:?}\nfingerprint {:?}\ndraft {} dialog {:?}\n",
+                screen.fingerprint, screen.draft, screen.dialog
+            ));
+        }
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/harness/screens.txt"
+        );
+        if std::env::var_os("UPDATE_HARNESS_CORPUS").is_some() {
+            std::fs::write(path, &out).unwrap();
+        }
+        assert_eq!(out, std::fs::read_to_string(path).expect("the corpus"));
     }
 }

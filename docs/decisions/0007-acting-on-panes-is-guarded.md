@@ -24,7 +24,7 @@ Answering an agent from the board saves a jump, and closing a finished pane save
 ## Consequences
 
 - A refusal costs a second try; a wrong send would cost an agent's work. The guard picks the first.
-- Options are read for Claude Code's dialogs; another harness gets line replies only, until its dialogs are probed.
+- Options are read by one grammar for every harness, the one Claude Code's dialogs use; the board and the send's re-check share it. A harness that draws its dialogs another way gets line replies only, until a captured dialog gives it its own.
 - Interrupting an agent (sending Esc) stays out until it can be just as explicit.
 
 ## Supersedes
