@@ -20,6 +20,11 @@ impl Harness for Claude {
         self.processes().contains(&name) || is_version(name)
     }
 
+    /// Its status line JSON, which carries the model, the context window and the cost.
+    fn usage(&self, payload: &serde_json::Value) -> Option<super::usage::Usage> {
+        super::usage::status_line(payload)
+    }
+
     /// Any state glyph at the start of the title, which Claude Code and the seat status line set.
     fn title_hint(&self, title: &str, _process: Option<&str>) -> bool {
         crate::pane::title_state(title).is_some()

@@ -53,6 +53,7 @@ pub struct BlockSnap {
 #[derive(Debug, Default, Deserialize)]
 struct Process {
     name: Option<String>,
+    pid: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -81,6 +82,7 @@ pub struct Source {
     pub label: String,
     pub title: String,
     pub process: Option<String>,
+    pub pid: Option<u32>,
     /// Keyed by record id; `""` is the pane's main record.
     pub records: BTreeMap<String, Record>,
     /// An extension's status and its name, used only while the pane has no record of its own.
@@ -96,6 +98,7 @@ impl Source {
             label: block.label,
             title: block.title.unwrap_or_default(),
             process: block.process.name,
+            pid: block.process.pid,
             records: block
                 .records
                 .into_iter()
@@ -118,6 +121,9 @@ pub struct Pane {
     pub title: String,
     /// The foreground process, as in `zsh` or `tmux`.
     pub process: Option<String>,
+    /// Its pid, on its host; for a tmux client, what finds the tmux pane it shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
     pub harness: Option<String>,
     pub state: String,
     pub kind: Option<String>,
@@ -252,6 +258,7 @@ pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
         pane: src.label.clone(),
         title: src.title.clone(),
         process: src.process.clone(),
+        pid: src.pid,
         harness,
         state,
         kind,

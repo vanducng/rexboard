@@ -44,6 +44,9 @@ pub struct Row {
     /// Extension fields, by id (`<extension>.<field>`).
     #[serde(default)]
     pub ext: BTreeMap<String, String>,
+    /// What the agent's last turn used, for a pane on serve's own host; see `rexboard usage`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<crate::harness::usage::Usage>,
 }
 
 /// How old a `working` report can get before a pane that looks idle makes it suspect.
@@ -127,6 +130,7 @@ impl Entry {
             suspect_reason,
             group: self.group(now),
             ext: self.ext.clone(),
+            usage: None,
         }
     }
 }

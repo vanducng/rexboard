@@ -17,7 +17,7 @@ local function block(api, session_id, b)
     label = b.label,
     records = list(status and status.records),
     title = title and title.title,
-    process = { name = fg.name, cwd = fg.cwd },
+    process = { name = fg.name, cwd = fg.cwd, pid = fg.pid },
   }
 end
 

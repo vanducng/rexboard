@@ -282,6 +282,26 @@ Closes a pane with `rex [-S HOST] block close`, as the board's `dd` does. On a t
 
 The pane that runs the board, any pane running `rexboard`, and your own pane are never closed (`REFUSED`, exit 1). Outside tmux your own pane is the one in `REX_BLOCK`. Inside tmux, `REX_BLOCK` is the Rex pane that started the tmux server, not yours, so a pane on this host that runs tmux may be the one you are in, and `close` refuses it from inside tmux; close it from the board or from outside tmux. Rex refusing the close fails with `REX` and Rex's words (`close failed: error: block not found`); an unknown key with `NOT_FOUND`.
 
+## `rexboard usage`
+
+```bash
+rexboard usage claude -- my-status-line   # as Claude Code's statusLine command
+rexboard usage codex                      # from a Codex Stop hook
+```
+
+Keeps what an agent's last turn used, for the board's `MODEL`, `CTX` and `TOK`. The harness runs it from its own per-turn surface with its JSON on stdin, so rexboard never reads a transcript:
+
+| Harness | Runs it from | Reads |
+| --- | --- | --- |
+| `claude` | `statusLine` | `model`, `context_window` (`used_percentage`, `context_window_size`, `total_input_tokens`), `cost.total_cost_usd`, `rate_limits.five_hour` |
+| `grok` | its status line command | the same fields, as far as grok sends them (`model`, `context_window.used_percentage`) |
+| `codex` | the `Stop` hook | `model`, then the last `token_count` event in the last 64 KiB of `transcript_path`: CTX as Codex's footer counts it, `(total_tokens - 12000) / (model_context_window - 12000)`, and TOK as `last_token_usage.input_tokens` |
+| `pi` | its extension, at a turn's end | `{"model", "context": ctx.getContextUsage(), "cost"}` |
+
+It keeps one small file per pane in `usage/` in the state dir, named for the pane: `REX_BLOCK` in a plain Rex pane, or the tmux socket and `TMUX_PANE` inside tmux, where `REX_BLOCK` names the pane that started the tmux server. Serve reads those files; one older than 10 minutes is ignored. Figures a harness does not report stay blank, never zero, and a cost of 0 (a proxy or a subscription) is blank too.
+
+It prints nothing itself. `-- CMD …` runs your own status line command with the same JSON and passes its output and exit code through, so the status line looks as it did. A payload it cannot read, or a pane it cannot name, keeps nothing and still runs `CMD`: it never breaks the status line it runs in. An unknown harness fails with `USAGE` (exit 2).
+
 ## `rexboard views`
 
 ```bash

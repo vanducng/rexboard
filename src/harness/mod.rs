@@ -7,6 +7,7 @@ mod codex;
 pub mod dialog;
 mod grok;
 mod pi;
+pub mod usage;
 
 pub trait Harness: Sync {
     /// The wire id: the Rex record `app` its hooks write. Never renamed.
@@ -36,10 +37,24 @@ pub trait Harness: Sync {
     fn title_hint(&self, _title: &str, _process: Option<&str>) -> bool {
         false
     }
+
+    /// What the last turn used, from the JSON the harness hands `rexboard usage`; None when it
+    /// says nothing rexboard reads.
+    fn usage(&self, _payload: &serde_json::Value) -> Option<usage::Usage> {
+        None
+    }
 }
 
 /// In title order: Claude's glyph is checked before Codex's title.
 pub static BUILTIN: &[&dyn Harness] = &[&claude::Claude, &codex::Codex, &pi::Pi, &grok::Grok];
+
+/// The built-in harness with this wire id or display name.
+pub fn by_name(name: &str) -> Option<&'static dyn Harness> {
+    BUILTIN
+        .iter()
+        .copied()
+        .find(|h| h.id() == name || h.name() == name)
+}
 
 /// The display name for a wire id; an id rexboard does not know shows as it is.
 pub fn display(id: &str) -> &str {

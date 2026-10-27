@@ -3217,3 +3217,114 @@ fn hosts_says_each_hosts_state_rows_and_why_it_is_down() {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }
+
+#[test]
+fn usage_keeps_the_last_turn_by_pane_and_passes_the_json_on() {
+    let serve = Serve::new();
+    let line = std::fs::read_to_string(fixture("harness/usage/claude-statusline.json")).unwrap();
+    let usage = |name: &str| serve.file(&format!("usage/{name}.json"));
+    serve
+        .cmd()
+        .env_remove("TMUX")
+        .env("REX_BLOCK", "block:01a1")
+        .args(["usage", "claude"])
+        .write_stdin(line.clone())
+        .assert()
+        .success()
+        .stdout("");
+    let kept: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(usage("block-01a1")).unwrap()).unwrap();
+    assert_eq!(kept["key"], "block:01a1");
+    assert_eq!(kept["harness"], "claude-code");
+    assert_eq!(kept["model"], "Opus 5.5");
+    assert_eq!(kept["ctx_pct"], 7);
+    assert_eq!(kept["tok"], 67910);
+    serve
+        .cmd()
+        .env("TMUX", "/tmp/tmux-501/seats,1234,0")
+        .env("TMUX_PANE", "%7")
+        .env("REX_BLOCK", "block:the-servers-pane")
+        .args(["usage", "claude-code", "--", "cat"])
+        .write_stdin(line.clone())
+        .assert()
+        .success()
+        .stdout(line.clone());
+    assert!(
+        usage("tmux-seats--7").exists(),
+        "inside tmux, keyed by its pane"
+    );
+    assert!(!usage("block-the-servers-pane").exists());
+    serve
+        .cmd()
+        .env_remove("TMUX")
+        .env("REX_BLOCK", "block:01a2")
+        .args([
+            "usage",
+            "codex",
+            "--",
+            "sh",
+            "-c",
+            "cat >/dev/null; echo mine; exit 3",
+        ])
+        .write_stdin("not json")
+        .assert()
+        .code(3)
+        .stdout("mine\n");
+    assert!(
+        !usage("block-01a2").exists(),
+        "nothing readable, nothing kept"
+    );
+    serve
+        .cmd()
+        .args(["usage", "nope"])
+        .write_stdin("{}")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "harnesses: claude, codex, pi, grok",
+        ));
+}
+
+#[test]
+fn serve_puts_a_local_panes_usage_on_its_row_until_it_goes_stale() {
+    let serve = Serve::new();
+    serve.rows(&[]);
+    let keep = |key: &str, ts: &str| {
+        let dir = serve.file("usage");
+        std::fs::create_dir_all(&dir).unwrap();
+        let name = key.replace(':', "-");
+        std::fs::write(
+            dir.join(format!("{name}.json")),
+            serde_json::json!({
+                "key": key, "ts": ts, "harness": "claude-code",
+                "model": "Opus 5.5", "ctx_pct": 82, "tok": 820000,
+            })
+            .to_string(),
+        )
+        .unwrap();
+    };
+    let now = chrono_now();
+    keep("block:api-seat-a", &now);
+    keep("block:web-seat-b", &now);
+    eventually_within("the local pane's usage", 10, || {
+        row(&serve.rows(&[]), SEAT)["usage"]
+            == serde_json::json!({ "model": "Opus 5.5", "ctx_pct": 82, "tok": 820000 })
+    });
+    let rows = serve.rows(&[]);
+    assert!(
+        row(&rows, "mini/block:web-seat-b").get("usage").is_none(),
+        "a file on this host says nothing of mini's panes"
+    );
+    keep("block:api-seat-a", "2020-01-01T00:00:00.000Z");
+    eventually_within("a stale file to blank it", 10, || {
+        row(&serve.rows(&[]), SEAT).get("usage").is_none()
+    });
+}
+
+fn chrono_now() -> String {
+    let out = std::process::Command::new("date")
+        .args(["-u", "+%Y-%m-%dT%H:%M:%S.000Z"])
+        .output()
+        .unwrap();
+    String::from_utf8(out.stdout).unwrap().trim().to_owned()
+}
