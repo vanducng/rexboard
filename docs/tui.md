@@ -41,7 +41,7 @@ The board is built to live in a narrow column, so the narrow layout is the main 
   | `TOK` | How big was its last request? | The prompt side of the last model request, cache hits included: `950`, `68k`, `1.0M` |
   | `COST` | What has it cost? | The harness's own estimate for the session, at list price: `$4.20`, `$123` |
   | `5H` | How much of the quota is gone? | Percent of the five-hour quota used, where the plan has one; coloured as `CTX` |
-  | `MSG` | What did it say? | The agent's own message, its first line. Blank when there is none, and for a hook's filler (`Done`, `Working`, `Allow <tool>?`); the turn card has the title. See [Agent status](agent-status.md) |
+  | `MSG` | What did it say? | The agent's own message, its first line, with its inline markdown drawn (see [Markdown](#markdown)) and any heading, quote, list or fence marker it starts with dropped. Blank when there is none, and for a hook's filler (`Done`, `Working`, `Allow <tool>?`); the turn card has the title. See [Agent status](agent-status.md) |
 
   What a row shows beyond its columns:
 
@@ -208,6 +208,10 @@ Reading a card does not mark a row seen. `m` does, and so does `n` or `tab` off 
 With `"icons": "nerd"` in `tui.json`, or `REXBOARD_ICONS=nerd` for one run, the card's facts take a Nerd Font glyph in place of each word label: the host, the harness's own mark (Claude, Codex, OpenCode, Gemini and pi each have one, any other harness a robot), the turn, the model, ctx, cost and 5h, the title, and how the status arrived (native, bridge or inferred). `where` leads with the session's mark and gives the window and the block their own: `<session> api › <window> main › <block> seat-a`. An extension's group takes a package mark, and its name moves into the value: `<package> session-prefix · project api`. `REXBOARD_ICONS=text` turns them off for a run; the environment wins, then `tui.json`, then words. Any other value is words.
 
 Nerd mode needs a Nerd Font **Mono** variant from Nerd Fonts **3.5.0** or later: the Claude, OpenAI, robot and inferred marks are new in 3.5.0, and a non-Mono font draws glyphs wider than the one cell the board gives them. To check, print the host mark and see that it takes one cell between the bars: `printf '|\xee\xad\x90|\n'`. The board never guesses the font. Column headers, the bar, the list and every other screen keep their words in both modes, and the state glyphs are the same. Every glyph is pinned by its Nerd Fonts name and code point in `src/tui/icons.rs`, each a single code point in the Basic Multilingual Plane, one cell wide.
+
+### Markdown
+
+`MSG` and the card's message draw an agent's inline markdown: `**bold**`, `__bold__` and `` `code` `` in the `strong` role, and `[text](url)` as its text. The markers go, and the cut and the wrap count what shows, not the markers. Italics stay as written, so `snake_case` and `2*3*4` are unchanged, and an unmatched marker shows as typed. The card keeps each line as the agent wrote it otherwise, block markers included; lists, headings, tables and code blocks are not laid out. Control and escape sequences are removed first. Each report is mapped once, not on every frame. `rexboard ls --json`, `rexboard show` and what `yy` copies keep the raw text.
 
 ## Full view
 
