@@ -505,6 +505,77 @@ mod tests {
     }
 
     #[test]
+    fn nested_items_keep_their_depth_numbers_keep_one_edge_and_tables_align() {
+        assert_eq!(
+            laid(
+                &[
+                    "- parent item",
+                    "  - child item",
+                    "    - grandchild",
+                    "- next parent"
+                ],
+                40
+            ),
+            [
+                "   - parent item",
+                "     - child item",
+                "       - grandchild",
+                "   - next parent",
+            ]
+        );
+        assert_eq!(
+            laid(
+                &[
+                    "1. one",
+                    "   - sub of one that wraps under its own text",
+                    "2. two"
+                ],
+                40
+            ),
+            [
+                "   1. one",
+                "      - sub of one that wraps under its",
+                "        own text",
+                "   2. two",
+            ]
+        );
+        assert_eq!(
+            laid(
+                &["8. eight", "9. nine wraps under its text here", "10. ten"],
+                30
+            ),
+            [
+                "    8. eight",
+                "    9. nine wraps under its",
+                "       text here",
+                "   10. ten",
+            ]
+        );
+        assert_eq!(
+            laid(
+                &[
+                    "| crate | before | after |",
+                    "|---|:-:|---|",
+                    "| **rexboard** | 0.15 | 0.16.0 |",
+                    "| 修复 | 1 | 2 |"
+                ],
+                80
+            ),
+            [
+                "   | crate    | before | after  |",
+                "   | rexboard | 0.15   | 0.16.0 |",
+                "   | 修复     | 1      | 2      |",
+            ],
+            "columns pad to their widest cell as it shows"
+        );
+        let header = &crate::tui::markdown::card(&["| a | b |", "|---|---|", "| c | d |"])[0];
+        assert!(
+            matches!(header, Block::Cut(runs, false) if runs.iter().any(|(t, s)| *s && t.contains('a'))),
+            "the row above the separator is strong: {header:?}"
+        );
+    }
+
+    #[test]
     fn harness_shows_its_longest_word_whole_at_80_140_and_200() {
         for (view, width) in [
             ("status", 80),

@@ -20,7 +20,6 @@ The board shows about 40 rows that must be read at a glance, in terminals with d
 
 - A new screen picks a role, not a colour, and stays consistent.
 - A change of look shows as a diff in the style snapshot test.
-- Not built yet: aligning a table's columns. The card draws inline markdown, a heading as `strong` text, lists and quotes that hang, and code and table rows cut at its edge.
 
 ## Supersedes
 

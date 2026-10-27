@@ -2,6 +2,8 @@
 //! `**bold**`, `__bold__` and `` `code` `` are strong, `[text](url)` is its text, and the markers
 //! go. Italics stay as written, so `snake_case` and `2*3*4` read as they are.
 
+use unicode_width::UnicodeWidthStr;
+
 /// A run of text, and whether it takes the strong role.
 pub type Run = (String, bool);
 
@@ -163,7 +165,9 @@ pub enum Block {
 pub fn card(lines: &[&str]) -> Vec<Block> {
     let mut blocks = Vec::new();
     let mut code = false;
-    for line in lines {
+    let mut at = 0;
+    while let Some(line) = lines.get(at) {
+        at += 1;
         let block = if fence(line) {
             code = !code;
             continue;
@@ -172,19 +176,17 @@ pub fn card(lines: &[&str]) -> Vec<Block> {
         } else if line.trim().is_empty() {
             Block::Blank
         } else if let Some(text) = heading(line) {
-            let mut runs = Vec::new();
-            for (text, _) in inline(text) {
-                push(&mut runs, &text, true);
+            Block::Text(strong(inline(text)))
+        } else if row(line) {
+            let start = at - 1;
+            while lines.get(at).is_some_and(|line| row(line)) {
+                at += 1;
             }
-            Block::Text(runs)
-        } else if let Some(row) = line.trim_start().strip_prefix('|') {
-            if row.chars().all(|c| "|-: ".contains(c)) {
-                continue;
-            }
-            Block::Cut(inline(line.trim_start()), false)
+            blocks.extend(table(&lines[start..at]));
+            continue;
         } else if let Some(rest) = line.trim_start().strip_prefix('>') {
             Block::Quote(inline(rest.trim_start()))
-        } else if let Some((marker, rest)) = item(line.trim_start()) {
+        } else if let Some((marker, rest)) = item(line) {
             Block::Item(marker.to_owned(), inline(rest))
         } else {
             Block::Text(inline(line.trim_start()))
@@ -197,20 +199,111 @@ pub fn card(lines: &[&str]) -> Vec<Block> {
     if blocks.last() == Some(&Block::Blank) {
         blocks.pop();
     }
+    align_numbers(&mut blocks);
     blocks
 }
 
-/// A list item's marker with its space (`- `, `12. `), and its text.
+fn strong(runs: Vec<Run>) -> Vec<Run> {
+    let mut out = Vec::new();
+    for (text, _) in runs {
+        push(&mut out, &text, true);
+    }
+    out
+}
+
+/// A table row: a line that starts with `|`.
+fn row(line: &str) -> bool {
+    line.trim_start().starts_with('|')
+}
+
+/// A table's rows with their columns padded to each one's widest cell, as it shows; the row
+/// above the `|---|` separator, which goes, is the header and strong.
+fn table(rows: &[&str]) -> Vec<Block> {
+    let separator = |row: &str| row.trim().chars().all(|c| "|-: ".contains(c));
+    let cells: Vec<(Vec<Vec<Run>>, bool)> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| !separator(row))
+        .map(|(n, row)| {
+            let header = rows.get(n + 1).is_some_and(|next| separator(next));
+            let inner = row.trim();
+            let inner = inner.strip_prefix('|').unwrap_or(inner);
+            let inner = inner.strip_suffix('|').unwrap_or(inner);
+            let cells = inner.split('|').map(|cell| inline(cell.trim()));
+            (
+                cells.map(|c| if header { strong(c) } else { c }).collect(),
+                header,
+            )
+        })
+        .collect();
+    let mut widths: Vec<usize> = Vec::new();
+    for (row, _) in &cells {
+        for (n, cell) in row.iter().enumerate() {
+            let width = text(cell).width();
+            match widths.get_mut(n) {
+                Some(widest) => *widest = (*widest).max(width),
+                None => widths.push(width),
+            }
+        }
+    }
+    cells
+        .into_iter()
+        .map(|(row, _)| {
+            let mut runs = vec![("|".to_owned(), false)];
+            for (cell, widest) in row.iter().zip(&widths) {
+                push(&mut runs, " ", false);
+                for (text, strong) in cell {
+                    push(&mut runs, text, *strong);
+                }
+                let pad = widest - text(cell).width();
+                push(&mut runs, &format!("{} |", " ".repeat(pad)), false);
+            }
+            Block::Cut(runs, false)
+        })
+        .collect()
+}
+
+/// A numbered list's numbers right-aligned past 9 (` 9.`, `10.`), so its text keeps one edge.
+fn align_numbers(blocks: &mut [Block]) {
+    let number = |marker: &str| {
+        let bare = marker.trim_start();
+        let digits = bare.len() - bare.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        (digits > 0).then_some((marker.len() - bare.len(), digits))
+    };
+    for list in blocks.split_mut(|block| !matches!(block, Block::Item(..))) {
+        let mut widest = std::collections::BTreeMap::new();
+        for block in list.iter() {
+            if let Block::Item(marker, _) = block
+                && let Some((indent, digits)) = number(marker)
+            {
+                let most = widest.entry(indent).or_insert(0);
+                *most = digits.max(*most);
+            }
+        }
+        for block in list.iter_mut() {
+            if let Block::Item(marker, _) = block
+                && let Some((indent, digits)) = number(marker)
+            {
+                let pad = " ".repeat(widest[&indent] - digits);
+                marker.insert_str(indent, &pad);
+            }
+        }
+    }
+}
+
+/// A list item's marker, with its indent and its space (`- `, `  12. `), and its text.
 fn item(line: &str) -> Option<(&str, &str)> {
-    let digits = line.len() - line.trim_start_matches(|c: char| c.is_ascii_digit()).len();
-    let width = if ["- ", "* ", "+ "].iter().any(|m| line.starts_with(m)) {
+    let bare = line.trim_start();
+    let indent = line.len() - bare.len();
+    let digits = bare.len() - bare.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+    let width = if ["- ", "* ", "+ "].iter().any(|m| bare.starts_with(m)) {
         2
-    } else if digits > 0 && line[digits..].starts_with(". ") {
+    } else if digits > 0 && bare[digits..].starts_with(". ") {
         digits + 2
     } else {
         return None;
     };
-    Some(line.split_at(width))
+    Some(line.split_at(indent + width))
 }
 
 /// A heading's text: what follows its `#`s and a space.
@@ -401,7 +494,7 @@ mod tests {
                 "[x] is code",
                 "code \"    let **x** = 1;\"",
                 "code \"\"",
-                "row | a | [b] |",
+                "row | [a] | [b] |",
             ],
             "blank runs are one, none at either end; fences and the table separator go"
         );

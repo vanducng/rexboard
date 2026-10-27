@@ -937,7 +937,7 @@
 {Reset/Reset/NONE}   > a quote long enough to wrap keeps its marker on every row it takes, so it  
 {Reset/Reset/NONE}   > reads as a quote all the way down                                          
 {Reset/Reset/NONE}         let total: u64 = rows.iter().map(|row| row.tokens).sum(); // a code li{Reset/Reset/DIM}…
-{Reset/Reset/NONE}   | crate | before | after |                                                   
+{Reset/Reset/NONE}   | {Reset/Reset/BOLD}crate{Reset/Reset/NONE}    | {Reset/Reset/BOLD}before{Reset/Reset/NONE} | {Reset/Reset/BOLD}after{Reset/Reset/NONE}  |                                               
 {Reset/Reset/NONE}   | {Reset/Reset/BOLD}rexboard{Reset/Reset/NONE} | 0.15.0 | 0.16.0 |                                               
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › claude                                                    
@@ -982,7 +982,7 @@
 {Reset/Reset/NONE}   12. a numbered one, which hangs four cells in                                                                                            
 {Reset/Reset/NONE}   > a quote long enough to wrap keeps its marker on every row it takes, so it reads as a quote all the way down                            
 {Reset/Reset/NONE}         let total: u64 = rows.iter().map(|row| row.tokens).sum(); // a code line long enough to reach the card's edge                      
-{Reset/Reset/NONE}   | crate | before | after |                                                                                                               
+{Reset/Reset/NONE}   | {Reset/Reset/BOLD}crate{Reset/Reset/NONE}    | {Reset/Reset/BOLD}before{Reset/Reset/NONE} | {Reset/Reset/BOLD}after{Reset/Reset/NONE}  |                                                                                                           
 {Reset/Reset/NONE}   | {Reset/Reset/BOLD}rexboard{Reset/Reset/NONE} | 0.15.0 | 0.16.0 |                                                                                                           
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › claude                                                                                                                
