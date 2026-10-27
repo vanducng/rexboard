@@ -132,7 +132,7 @@ A missing value is `null`. `ids` is `[]` when empty.
 | `status` | `session_id`, `block_id`, `record_id`, `record` | A pane reported a status. `record` is Rex's record (`state`, `kind`, `msg`, `app`, `effective_app`, `owner`, `updated_at`). `record_id` is `""` or `null` for the pane's main record, else the sub-record's id, such as a Claude subagent |
 | `status_removed` | `session_id`, `block_id`, `ids`, `reason` | Status records were cleared |
 | `title` | `session_id`, `block_id`, `title` | The terminal title changed |
-| `process` | `session_id`, `block_id`, `name`, `cwd` | The foreground process changed |
+| `process` | `session_id`, `block_id`, `name`, `cwd`, `pid` | The foreground process changed |
 | `child_exited` | `session_id`, `block_id`, `exit_code` | The pane's process exited |
 | `block_created` | `session_id`, `window_id`, `block` | A terminal pane opened. `block` has the same shape as a block in `snapshot` |
 | `block_closed` | `session_id`, `block_id` | A pane closed |
