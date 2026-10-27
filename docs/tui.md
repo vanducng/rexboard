@@ -17,9 +17,11 @@ The board is built to live in a narrow column, so the narrow layout is the main 
   | 60-99 | adds `HARNESS` and `HOST` |
   | 100-131 | adds `STATE`, and the window in `WHERE`: `session › window › block` |
   | 132-139 | splits `WHERE` into `SESSION`, `WINDOW` and `BLOCK` |
-  | 140 and up | adds `TURN` |
+  | 140 and up | adds `TURN`, and `MODEL` and `CTX` while some row reports what its turn used; `TOK`, `COST` and `5H` too when `tui.json` asks for them. Below 160, while they show, `WHERE` stays one column so `MSG` keeps its room |
 
   The list is as wide as the board at every width (the turn card sits under it), and `pick` uses the same columns.
+
+  The usage columns are for panes on serve's own host whose harness runs `rexboard usage`. A pane keeps its last turn's figures while it lives, however long it idles, since a harness writes only when it works. A figure the harness does not report is `-`, never `0`. `TOK`, `COST` and `5H` are off until `tui.json` names them: `"columns": ["tok", "cost", "5h"]` (see [Turn card](#turn-card) for where the file lives). They keep the table's order whatever the list's, and any other name is ignored. From 160 columns `MODEL` widens to the longest model name, up to 20. The figures are right-aligned, so their digits line up.
 
   Each column answers one question:
 
@@ -34,6 +36,11 @@ The board is built to live in a narrow column, so the narrow layout is the main 
   | `SESSION` | Which session? | The Rex session |
   | `WINDOW` | Which window? | The Rex window (a tab in the Rex app) |
   | `BLOCK` | Which pane? | The block's label |
+  | `MODEL` | Which model? | The model the harness names, from [`rexboard usage`](cli.md#rexboard-usage) |
+  | `CTX` | How full is its context? | Percent of the context window in use: yellow from 70%, red from 85% |
+  | `TOK` | How big was its last request? | The prompt side of the last model request, cache hits included: `950`, `68k`, `1.0M` |
+  | `COST` | What has it cost? | The harness's own estimate for the session, at list price: `$4.20`, `$123` |
+  | `5H` | How much of the quota is gone? | Percent of the five-hour quota used, where the plan has one; coloured as `CTX` |
   | `MSG` | What did it say? | The agent's own message, its first line. Blank when there is none, and for a hook's filler (`Done`, `Working`, `Allow <tool>?`); the turn card has the title. See [Agent status](agent-status.md) |
 
   What a row shows beyond its columns:
@@ -102,7 +109,7 @@ A view is a way of grouping the rows plus a sort. The view and sort last for the
 | `host` | One per host (`LOCAL`, `MINI`), a to z | The `status` view's order |
 | One per extension field (`rig`, `project`) | One per value (`API`, `WEB`), a to z, with `-` (no value) last | The `status` view's order |
 
-`o` and a column's letter sorts by that column inside each group: `s` state, `a` age, `t` turn, `h` harness, `o` host, `w` where, `e` session, `n` window, `b` block, `m` msg. An extension field takes the first letter of its name that no other column has (`rig` sorts with `r`, `project` with `p`). The header underlines each letter. `w` sorts by the whole `session › window › block`, and `e`, `n` and `b` by one part, whether or not `WHERE` is split. `o t` sorts by turn even when the `TURN` column is not drawn.
+`o` and a column's letter sorts by that column inside each group: `s` state, `a` age, `t` turn, `h` harness, `o` host, `w` where, `e` session, `n` window, `b` block, `d` model, `x` ctx, `k` tok, `c` cost, `5` 5h, `m` msg. The usage letters sort only while their column shows. An extension field takes the first letter of its name that no other column has (`rig` sorts with `r`, `project` with `p`). The header underlines each letter. `w` sorts by the whole `session › window › block`, and `e`, `n` and `b` by one part, whether or not `WHERE` is split. `o t` sorts by turn even when the `TURN` column is not drawn.
 
 Sorting works like a table header: the first press sorts, the same letter again flips it, and a third press, or `esc`, clears it. The first press sorts `AGE` and `TURN` longest first (`↓`), `STATE` most urgent first (blocked, error, done, working, idle; `↑`) and the text columns a to z (`↑`). A row with no value (no status record to date it, no finished turn) sorts last either way. In the `status` view, `NEEDS YOU` keeps its blocked rows first under any sort. In the `host` view rows leave out `@HOST`, since their group names the host.
 
@@ -183,7 +190,7 @@ The card is the selected row in full, under the list, as wide as the board:
 3. **The ask or the body:** the message's other lines, wrapped, whole.
 4. A failed jump's reason, and `may be stale:` for a suspect row.
 5. The pane's tail, when it has been read, newest line at the bottom.
-6. **The facts**, after one blank line, at the foot of the card: each once, under a dim label, in aligned columns. First `where` (`session › window › block`), which tells two rows of the same name apart, then `host`, `harness` and `turn` (how long the last turn ran), then each extension's fields on the row, then `title` and `source`. When the card is wide, the short facts share a row, up to three; narrow, each takes its own. `where` gives way from its session and window, cut in the middle, and never cuts the block's name while it fits at all.
+6. **The facts**, after one blank line, at the foot of the card: each once, under a dim label, in aligned columns. First `where` (`session › window › block`), which tells two rows of the same name apart, then `host`, `harness` and `turn` (how long the last turn ran), then `model` and `ctx` (`88% · 176k of 200k`: the share, then the last request's tokens of the window) when the row reports them, and `cost` and `5h` when `tui.json` asks for those columns, then each extension's fields on the row, then `title` and `source`. When the card is wide, the short facts share a row, up to three; narrow, each takes its own. `where` gives way from its session and window, cut in the middle, and never cuts the block's name while it fits at all.
 7. **An extension's row** starts with the extension's name, dim, then each field's name, dim, and its value: `session-prefix project api`, or `lane desk` for a lone field named like its extension. The label column is as wide as the built-in labels, so a longer extension name runs past it and widens only its own row.
 
 The card keeps one height for every row, so the list holds still while you move through it. Text longer than the card scrolls under the bar: a dim `↓ 12 more · ctrl-e` closes the card while there is more below, and `↑ 3 above · ctrl-y` opens it once it has scrolled, and `ctrl-e` and `ctrl-y` move it a line. A card opens at the top of its text. A blocked row's tail shows only the dialog, from the rule above it (with no dialog on screen, as much of the tail as fits), and its card opens scrolled to the dialog's last line, so the options show with as much of the dialog above them as fits; `↑` says when the dialog starts higher, and the facts sit below it. A row's tail otherwise takes the rows its message and facts leave.
@@ -194,11 +201,11 @@ The card is 40% of the body, and at least 8 rows, or what `"card_height"` in `tu
 
 Reading a card does not mark a row seen. `m` does, and so does `n` or `tab` off a `done` row whose card has shown for at least a second. The tail of a blocked row is read by itself once its card has shown for 300 ms, once per report, so the ask can be checked against the screen; moving through rows reads none.
 
-`c`'s choice lives in `tui.json` beside serve's `state.json` (`~/.local/state/rexboard/tui.json`, or under `XDG_STATE_HOME`), as `detail_hidden` (missing means shown), next to `motion` (see [Style](#style)), `icons` (see [Icons](#icons)) and `card_height`, which `c` keeps as they were. The file is read when the board starts and written on each `c`. The side pane's old width key is ignored.
+`c`'s choice lives in `tui.json` beside serve's `state.json` (`~/.local/state/rexboard/tui.json`, or under `XDG_STATE_HOME`), as `detail_hidden` (missing means shown), next to `motion` (see [Style](#style)), `icons` (see [Icons](#icons)), `card_height` and `columns` (see [Layout](#layout)), which `c` keeps as they were. The file is read when the board starts and written on each `c`. The side pane's old width key is ignored.
 
 ### Icons
 
-With `"icons": "nerd"` in `tui.json`, or `REXBOARD_ICONS=nerd` for one run, the card's facts take a Nerd Font glyph in place of each word label: the host, the harness's own mark (Claude, Codex, OpenCode, Gemini and pi each have one, any other harness a robot), the turn, the title, and how the status arrived (native, bridge or inferred). `where` leads with the session's mark and gives the window and the block their own: `<session> api › <window> main › <block> seat-a`. An extension's group takes a package mark, and its name moves into the value: `<package> session-prefix · project api`. `REXBOARD_ICONS=text` turns them off for a run; the environment wins, then `tui.json`, then words. Any other value is words.
+With `"icons": "nerd"` in `tui.json`, or `REXBOARD_ICONS=nerd` for one run, the card's facts take a Nerd Font glyph in place of each word label: the host, the harness's own mark (Claude, Codex, OpenCode, Gemini and pi each have one, any other harness a robot), the turn, the model, ctx, cost and 5h, the title, and how the status arrived (native, bridge or inferred). `where` leads with the session's mark and gives the window and the block their own: `<session> api › <window> main › <block> seat-a`. An extension's group takes a package mark, and its name moves into the value: `<package> session-prefix · project api`. `REXBOARD_ICONS=text` turns them off for a run; the environment wins, then `tui.json`, then words. Any other value is words.
 
 Nerd mode needs a Nerd Font **Mono** variant from Nerd Fonts **3.5.0** or later: the Claude, OpenAI, robot and inferred marks are new in 3.5.0, and a non-Mono font draws glyphs wider than the one cell the board gives them. To check, print the host mark and see that it takes one cell between the bars: `printf '|\xee\xad\x90|\n'`. The board never guesses the font. Column headers, the bar, the list and every other screen keep their words in both modes, and the state glyphs are the same. Every glyph is pinned by its Nerd Fonts name and code point in `src/tui/icons.rs`, each a single code point in the Basic Multilingual Plane, one cell wide.
 

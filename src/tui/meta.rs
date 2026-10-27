@@ -5,11 +5,12 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use super::app::App;
+use super::columns::{Col, opted};
 use super::icons;
 use super::theme;
 use crate::board::Row;
 use crate::client::Field;
-use crate::output::{SEP, clean, fit, harness, labels, path, span};
+use crate::output::{SEP, clean, context, dollars, fit, harness, labels, path, span};
 use crate::pane::bare_title;
 
 /// A fact the card states. Its label is one token: a word, or with `"icons": "nerd"` a glyph.
@@ -18,6 +19,10 @@ pub enum Fact {
     Host,
     Harness,
     Turn,
+    Model,
+    Ctx,
+    Cost,
+    Quota,
     Title,
     Source,
     Where,
@@ -30,6 +35,10 @@ impl Fact {
                 Fact::Host => icons::HOST.glyph,
                 Fact::Harness => icons::harness(row.pane.harness.as_deref()).glyph,
                 Fact::Turn => icons::TURN.glyph,
+                Fact::Model => icons::MODEL.glyph,
+                Fact::Ctx => icons::CTX.glyph,
+                Fact::Cost => icons::COST.glyph,
+                Fact::Quota => icons::QUOTA.glyph,
                 Fact::Title => icons::TITLE.glyph,
                 Fact::Source => icons::source(&row.pane.source).map_or("source", |i| i.glyph),
                 // The session's mark leads `where`, whose window and block carry their own.
@@ -40,6 +49,10 @@ impl Fact {
             Fact::Host => "host",
             Fact::Harness => "harness",
             Fact::Turn => "turn",
+            Fact::Model => "model",
+            Fact::Ctx => "ctx",
+            Fact::Cost => "cost",
+            Fact::Quota => "5h",
             Fact::Title => "title",
             Fact::Source => "source",
             Fact::Where => "where",
@@ -56,6 +69,7 @@ const GAP: usize = 3;
 /// The facts for `row` in `width` columns.
 pub fn lines(app: &App, row: &Row, width: usize) -> Vec<Line<'static>> {
     let title = bare_title(&row.pane.title);
+    let usage = row.usage.as_ref();
     // How the agent runs, then what the pane calls itself: each set starts its own row.
     let labelled = |facts: Vec<Option<(Fact, String)>>| -> Vec<(&'static str, String)> {
         facts
@@ -68,6 +82,18 @@ pub fn lines(app: &App, row: &Row, width: usize) -> Vec<Line<'static>> {
         Some((Fact::Host, row.pane.host.clone())),
         Some((Fact::Harness, harness(row))),
         row.last_turn.map(|secs| (Fact::Turn, span(secs))),
+        usage
+            .and_then(|u| u.model.clone())
+            .map(|m| (Fact::Model, clean(&m))),
+        usage.and_then(context).map(|c| (Fact::Ctx, c)),
+        usage
+            .and_then(|u| u.cost_usd)
+            .filter(|_| opted(&app.columns, Col::Cost))
+            .map(|c| (Fact::Cost, dollars(c))),
+        usage
+            .and_then(|u| u.quota_5h)
+            .filter(|_| opted(&app.columns, Col::Quota))
+            .map(|p| (Fact::Quota, format!("{p}%"))),
     ]);
     let names = labelled(vec![
         (!title.is_empty()).then(|| (Fact::Title, clean(title))),

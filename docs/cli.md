@@ -60,6 +60,7 @@ In a terminal each line fits its width: `WHAT` is cut first, then `WHERE` (a lon
 | `pane` | string | Block (pane) label |
 | `title` | string | Terminal title, `""` when none |
 | `process` | string or null | The pane's foreground process, as in `zsh`, `tmux`, or a version such as `2.1.310` (Claude Code runs under its version number) |
+| `pid` | integer or null | That process's pid on its host |
 | `harness` | string or null | `effective_app` (else `app`) of the record, else the foreground process (`codex`, `pi`; `claude`, or a version string like `2.1.310`, is `claude-code`), else `claude-code` for a title that starts with a Claude state glyph, else `codex` for a tmux pane titled `DIR | MODEL` (exactly one ` | `, a `DIR` with no spaces, a `MODEL` of letters, digits, `.` and `-` with at least one letter and one digit) |
 | `state` | string | `blocked`, `error`, `done`, `working` or `idle` from the record; with no record, from the title glyph (`✳ ` is `idle`, a braille spinner or `◐`/`◑` is `working`), else `unknown` |
 | `kind` | string or null | The record's `kind`, such as `permission` |
@@ -77,6 +78,7 @@ In a terminal each line fits its width: `WHAT` is cut first, then `WHERE` (a lon
 | `suspect_reason` | string or null | Why, as in `reported working at 14:02; the title shows idle`. A report a day old or more gives its date: `reported working at Oct 24 14:02; zsh is back in front` |
 | `group` | string | `needs_you` (`blocked`, `error`, unseen `done`), `working`, `quiet` (`idle`, seen `done`), or `unreported` (`source` is `inferred`, `state` is `unknown`, `stale`, or `suspect`) |
 | `ext` | object | Fields from [extensions](extensions.md), by id: `{"session-prefix.project": "api"}` |
+| `usage` | object or null | What the agent's last turn used, for a pane on serve's own host whose harness runs [`rexboard usage`](#rexboard-usage); `null` otherwise. It stays while the pane lives, at any age. Only the figures the harness reported: `model` (string), `ctx_pct` (0-100), `ctx_window` and `tok` (tokens), `cost_usd` (number), `quota_5h` (0-100): `{"model": "Opus 5.5", "ctx_pct": 82, "tok": 820000}`. `ls --direct` has no serve, so it is always `null` there |
 
 The pane's main record is the one with no `id`; if every record has one, the most urgent wins.
 
@@ -130,7 +132,7 @@ A missing value is `null`. `ids` is `[]` when empty.
 | `status` | `session_id`, `block_id`, `record_id`, `record` | A pane reported a status. `record` is Rex's record (`state`, `kind`, `msg`, `app`, `effective_app`, `owner`, `updated_at`). `record_id` is `""` or `null` for the pane's main record, else the sub-record's id, such as a Claude subagent |
 | `status_removed` | `session_id`, `block_id`, `ids`, `reason` | Status records were cleared |
 | `title` | `session_id`, `block_id`, `title` | The terminal title changed |
-| `process` | `session_id`, `block_id`, `name`, `cwd` | The foreground process changed |
+| `process` | `session_id`, `block_id`, `name`, `cwd`, `pid` | The foreground process changed |
 | `child_exited` | `session_id`, `block_id`, `exit_code` | The pane's process exited |
 | `block_created` | `session_id`, `window_id`, `block` | A terminal pane opened. `block` has the same shape as a block in `snapshot` |
 | `block_closed` | `session_id`, `block_id` | A pane closed |
@@ -229,7 +231,7 @@ rexboard show mini/block:web-seat-b            # what the board's card says
 rexboard show mini/block:web-seat-b --tail 20  # and the pane's last 20 lines
 ```
 
-Everything the board's card says about a pane, by the `key` from `ls --json`, plain shells included, in the card's order: the bar (`blocked · permission · seat-b · waiting 2m`), the message in full, the tail with `│` before each line, then where, host, harness, last turn, extension fields, title, source and key. `--tail N` reads the pane's last N lines (at most 200) the way the card does: the end of its scrollback through `tail.lua`, plain text, within 3 seconds. With `--json`, the pane as `ls --json` has it, plus `where` (`session › window › block`); with `--tail`, `tail`, an array of lines; and what the pane shows now, read the way [`answer`](#rexboard-answer) reads it: `dialog`, a short id of the dialog or input line on screen (`null` with neither), and `options`, the dialog's options, each with whether it grants something for later. A dialog's id is its lines, so the same dialog keeps it through a second report; an input line's also takes the row's `updated_at`, since the same empty prompt comes back every turn. When the pane cannot be read (its host is down, or it does not answer within 3 seconds), the row still prints, with `dialog` `null`, `options` `[]` and the reason in `screen_error`:
+Everything the board's card says about a pane, by the `key` from `ls --json`, plain shells included, in the card's order: the bar (`blocked · permission · seat-b · waiting 2m`), the message in full, the tail with `│` before each line, then where, host, harness, last turn, model and ctx (when its harness reports them; `ctx 88% · 176k of 200k`), cost and 5h (when `tui.json` asks for those columns), extension fields, title, source and key. `--tail N` reads the pane's last N lines (at most 200) the way the card does: the end of its scrollback through `tail.lua`, plain text, within 3 seconds. With `--json`, the pane as `ls --json` has it, plus `where` (`session › window › block`); with `--tail`, `tail`, an array of lines; and what the pane shows now, read the way [`answer`](#rexboard-answer) reads it: `dialog`, a short id of the dialog or input line on screen (`null` with neither), and `options`, the dialog's options, each with whether it grants something for later. A dialog's id is its lines, so the same dialog keeps it through a second report; an input line's also takes the row's `updated_at`, since the same empty prompt comes back every turn. When the pane cannot be read (its host is down, or it does not answer within 3 seconds), the row still prints, with `dialog` `null`, `options` `[]` and the reason in `screen_error`:
 
 ```json
 {"key":"mini/block:web-seat-b","host":"mini","session":"web","tab":"main","pane":"seat-b","state":"blocked","kind":"permission","msg":"Bash wants to run: cargo test","source":"native","seen":false,"group":"needs_you","last_turn":372,"ext":{},"where":"web › main › seat-b","tail":[" Do you want to proceed?"," ❯ 1. Yes","   2. Yes, and don't ask again for cargo test"],"dialog":"3f9a1c07be42","options":[{"digit":1,"label":"Yes","lasting":false},{"digit":2,"label":"Yes, and don't ask again for cargo test","lasting":true}]}
@@ -281,6 +283,26 @@ Closes a pane with `rex [-S HOST] block close`, as the board's `dd` does. On a t
 ```
 
 The pane that runs the board, any pane running `rexboard`, and your own pane are never closed (`REFUSED`, exit 1). Outside tmux your own pane is the one in `REX_BLOCK`. Inside tmux, `REX_BLOCK` is the Rex pane that started the tmux server, not yours, so a pane on this host that runs tmux may be the one you are in, and `close` refuses it from inside tmux; close it from the board or from outside tmux. Rex refusing the close fails with `REX` and Rex's words (`close failed: error: block not found`); an unknown key with `NOT_FOUND`.
+
+## `rexboard usage`
+
+```bash
+rexboard usage claude -- my-status-line   # as Claude Code's statusLine command
+rexboard usage codex                      # from a Codex Stop hook
+```
+
+Keeps what an agent's last turn used, for the board's `MODEL` and `CTX` (and `TOK`, `COST` and `5H` when `tui.json` asks for them; see [the board](tui.md#layout)) and the `usage` field of `ls --json` and `show --json`. The harness runs it from its own per-turn surface with its JSON on stdin, so rexboard never reads a transcript:
+
+| Harness | Runs it from | Reads |
+| --- | --- | --- |
+| `claude` | `statusLine` | `model`, `context_window` (`used_percentage`, `context_window_size`, `total_input_tokens`), `cost.total_cost_usd`, `rate_limits.five_hour` |
+| `grok` | its status line command | the same fields, as far as grok sends them (`model`, `context_window.used_percentage`) |
+| `codex` | the `Stop` hook | `model`, then the last `token_count` event in the last 64 KiB of `transcript_path`: CTX as Codex's footer counts it, `(total_tokens - 12000) / (model_context_window - 12000)`, and TOK as `last_token_usage.input_tokens` |
+| `pi` | its extension, at a turn's end | `{"model", "context": ctx.getContextUsage(), "usage", "cost"}`, where `usage` is the last assistant message's: TOK is its `input + cacheRead + cacheWrite`, the prompt side, since the context's `tokens` counts the reply too |
+
+It keeps one small file per pane in `usage/` in the state dir, named for the pane: `REX_BLOCK` in a plain Rex pane, or inside tmux the tmux socket, server pid and `TMUX_PANE`, where `REX_BLOCK` names the pane that started the tmux server. Serve reads a file again only when it changes, and keeps a pane's figures while the pane lives, at any age: a harness writes only when it works. A file that no pane on this host names (a Rex pane, or any pane on a tmux server a local tmux client talks to) is removed once it is 10 minutes old (Rex never reuses a block id, and a restarted tmux server has a new pid). Figures a harness does not report stay blank, never zero, and so do a token count of 0 and a cost of 0 (before the first request, or a proxy or a subscription).
+
+It prints nothing itself. `-- CMD …` runs your own status line command with the same JSON and passes its output and exit code through, so the status line looks as it did. A payload it cannot read, or a pane it cannot name, keeps nothing and still runs `CMD`: it never breaks the status line it runs in. An unknown harness fails with `USAGE` (exit 2).
 
 ## `rexboard views`
 

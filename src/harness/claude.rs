@@ -7,6 +7,10 @@ impl Harness for Claude {
         "claude-code"
     }
 
+    fn name(&self) -> &'static str {
+        "claude"
+    }
+
     fn processes(&self) -> &'static [&'static str] {
         &["claude"]
     }
@@ -14,6 +18,11 @@ impl Harness for Claude {
     /// Claude Code's binary is named for its version, as in `2.1.310`.
     fn is_process(&self, name: &str) -> bool {
         self.processes().contains(&name) || is_version(name)
+    }
+
+    /// Its status line JSON, which carries the model, the context window and the cost.
+    fn usage(&self, payload: &serde_json::Value) -> Option<super::usage::Usage> {
+        super::usage::status_line(payload)
     }
 
     /// Any state glyph at the start of the title, which Claude Code and the seat status line set.

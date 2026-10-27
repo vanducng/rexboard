@@ -44,6 +44,9 @@ pub struct Row {
     /// Extension fields, by id (`<extension>.<field>`).
     #[serde(default)]
     pub ext: BTreeMap<String, String>,
+    /// What the agent's last turn used, for a pane on serve's own host; see `rexboard usage`.
+    #[serde(default)]
+    pub usage: Option<crate::harness::usage::Usage>,
 }
 
 /// How old a `working` report can get before a pane that looks idle makes it suspect.
@@ -127,6 +130,7 @@ impl Entry {
             suspect_reason,
             group: self.group(now),
             ext: self.ext.clone(),
+            usage: None,
         }
     }
 }
@@ -230,8 +234,14 @@ impl Board {
             } => Ok(self.change(host, block_id, now, |src| {
                 src.title = title.clone().unwrap_or_default();
             })),
-            Event::Process { block_id, name, .. } => Ok(self.change(host, block_id, now, |src| {
+            Event::Process {
+                block_id,
+                name,
+                pid,
+                ..
+            } => Ok(self.change(host, block_id, now, |src| {
                 src.process.clone_from(name);
+                src.pid = *pid;
             })),
             Event::BlockCreated {
                 session_id,
@@ -800,6 +810,31 @@ mod tests {
         let b = row(&board, "block:b");
         assert_eq!(b.since, stamp(at(25)));
         assert!(!b.seen);
+    }
+
+    #[test]
+    fn a_process_change_brings_its_own_pid() {
+        let mut board = Board::default();
+        let mut seat = block("block:seat", "working", "2026-01-01T00:00:00Z");
+        seat["process"] = json!({ "name": "zsh", "pid": 10 });
+        board
+            .apply("mini", &snapshot(json!([seat])), at(0))
+            .unwrap();
+        let pid = |board: &Board| row(board, "block:seat").pane.pid;
+        assert_eq!(pid(&board), Some(10));
+        let changed = |pid: Value| {
+            json!({ "v": 1, "type": "process", "session_id": "session:api",
+                "block_id": "block:seat", "name": "tmux", "pid": pid })
+            .to_string()
+        };
+        board
+            .apply("mini", &line(&changed(json!(20))), at(1))
+            .unwrap();
+        assert_eq!(pid(&board), Some(20), "the tmux client's, not the shell's");
+        board
+            .apply("mini", &line(&changed(Value::Null)), at(2))
+            .unwrap();
+        assert_eq!(pid(&board), None, "none is none, not the last one");
     }
 
     #[test]

@@ -451,7 +451,8 @@ fn ls_json_adds_board_fields() {
     assert_eq!(by_block(&panes, "block:api-seat-a")["group"], "unreported");
     assert_eq!(codex["process"], "codex");
     assert_eq!(claude["ext"], serde_json::json!({}), "no extension enabled");
-    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 27));
+    assert_eq!(claude["usage"], serde_json::Value::Null, "no usage file");
+    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 29));
 }
 
 /// A status line for the fixture's idle seat on `host`, sent after the recorded stream ends.
@@ -3216,4 +3217,113 @@ fn hosts_says_each_hosts_state_rows_and_why_it_is_down() {
         assert!(std::time::Instant::now() < deadline, "{hosts}");
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+}
+
+#[test]
+fn usage_keeps_the_last_turn_by_pane_and_passes_the_json_on() {
+    let serve = Serve::new();
+    let line = std::fs::read_to_string(fixture("harness/usage/claude-statusline.json")).unwrap();
+    let usage = |name: &str| serve.file(&format!("usage/{name}.json"));
+    serve
+        .cmd()
+        .env_remove("TMUX")
+        .env("REX_BLOCK", "block:01a1")
+        .args(["usage", "claude"])
+        .write_stdin(line.clone())
+        .assert()
+        .success()
+        .stdout("");
+    let kept: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(usage("block-01a1")).unwrap()).unwrap();
+    assert_eq!(kept["key"], "block:01a1");
+    assert_eq!(kept["harness"], "claude-code");
+    assert_eq!(kept["model"], "Opus 5.5");
+    assert_eq!(kept["ctx_pct"], 7);
+    assert_eq!(kept["tok"], 67910);
+    serve
+        .cmd()
+        .env("TMUX", "/tmp/tmux-501/seats,1234,0")
+        .env("TMUX_PANE", "%7")
+        .env("REX_BLOCK", "block:the-servers-pane")
+        .args(["usage", "claude-code", "--", "cat"])
+        .write_stdin(line.clone())
+        .assert()
+        .success()
+        .stdout(line.clone());
+    assert!(
+        usage("tmux-seats-1234--7").exists(),
+        "inside tmux, keyed by its server and pane"
+    );
+    assert!(!usage("block-the-servers-pane").exists());
+    serve
+        .cmd()
+        .env_remove("TMUX")
+        .env("REX_BLOCK", "block:01a2")
+        .args([
+            "usage",
+            "codex",
+            "--",
+            "sh",
+            "-c",
+            "cat >/dev/null; echo mine; exit 3",
+        ])
+        .write_stdin("not json")
+        .assert()
+        .code(3)
+        .stdout("mine\n");
+    assert!(
+        !usage("block-01a2").exists(),
+        "nothing readable, nothing kept"
+    );
+    serve
+        .cmd()
+        .args(["usage", "nope"])
+        .write_stdin("{}")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "harnesses: claude, codex, pi, grok",
+        ));
+}
+
+#[test]
+fn serve_keeps_a_local_panes_usage_while_it_lives_and_removes_a_gone_panes_file() {
+    let serve = Serve::new();
+    serve.rows(&[]);
+    let dir = serve.file("usage");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = |key: &str| dir.join(format!("{}.json", key.replace(':', "-")));
+    let half_hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(30 * 60);
+    let keep = |key: &str| {
+        std::fs::write(
+            path(key),
+            serde_json::json!({
+                "key": key, "ts": "2020-01-01T00:00:00.000Z", "harness": "claude-code",
+                "model": "Opus 5.5", "ctx_pct": 82, "tok": 820000,
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(path(key))
+            .unwrap()
+            .set_modified(half_hour_ago)
+            .unwrap();
+    };
+    keep("block:api-seat-a");
+    keep("block:web-seat-b");
+    keep("block:closed-pane");
+    eventually_within("the local pane's usage, idle half an hour", 10, || {
+        row(&serve.rows(&[]), SEAT)["usage"]
+            == serde_json::json!({ "model": "Opus 5.5", "ctx_pct": 82, "tok": 820000 })
+    });
+    assert!(
+        row(&serve.rows(&[]), "mini/block:web-seat-b")["usage"].is_null(),
+        "a file on this host says nothing of mini's panes"
+    );
+    eventually_within("the files no local pane names to go", 10, || {
+        !path("block:closed-pane").exists() && !path("block:web-seat-b").exists()
+    });
+    assert!(path("block:api-seat-a").exists(), "a live pane's stays");
 }

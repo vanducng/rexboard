@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 use super::theme;
 use crate::board::Row;
 use crate::client::Field;
+use crate::harness::usage::Usage;
 use crate::output::{
     clean, fit, harness, in_state, labels, name, path, span, squeeze, state_word, turn_msg,
 };
@@ -46,6 +47,11 @@ pub enum Col {
     Session,
     Window,
     Block,
+    Model,
+    Ctx,
+    Tok,
+    Cost,
+    Quota,
     Msg,
     /// An extension field, by its id (`<extension>.<field>`).
     Field(&'static str),
@@ -57,12 +63,17 @@ pub enum Tone {
     State,
     Soft,
     Dim,
+    /// How full the row's context window or quota is, which `cells` puts in for each row: warn,
+    /// then alert.
+    Fill(Option<u8>),
 }
 
 #[derive(Clone, Copy)]
 enum Width {
     /// This many columns, the gap after it included.
     Fixed(usize),
+    /// The longest model name on the board, within MODEL_MIN and MODEL_MAX.
+    Model,
     /// A share of what the fixed columns leave: WHERE's, one of its three parts, or MSG's.
     Where,
     Part(usize),
@@ -78,6 +89,49 @@ const FIELDS_ALL: u16 = 160;
 /// A field column's width, the gap after it included.
 const FIELD_WIDTH: usize = 12;
 const ALWAYS: RangeInclusive<u16> = 0..=u16::MAX;
+/// MODEL and CTX show from this width, and only while some row reports its usage; TOK, COST
+/// and 5H too when tui.json's `columns` names them.
+pub const USAGE_FROM: u16 = 140;
+/// Below this width WHERE stays one column while usage columns show, so MSG keeps its room;
+/// from it MODEL grows to its longest value.
+const USAGE_WIDE: u16 = 160;
+/// MODEL's width, the gap after it included: below USAGE_WIDE always the least.
+const MODEL_MIN: usize = 13;
+const MODEL_MAX: usize = 21;
+pub const USAGE: [Col; 5] = [Col::Model, Col::Ctx, Col::Tok, Col::Cost, Col::Quota];
+pub const USAGE_SHOWN: [Col; 2] = [Col::Model, Col::Ctx];
+
+pub fn is_usage(id: Col) -> bool {
+    USAGE.contains(&id)
+}
+
+/// Whether tui.json's `columns` names the opt-in column `id`; unknown names are ignored.
+pub fn opted(names: &[String], id: Col) -> bool {
+    let name = match id {
+        Col::Tok => "tok",
+        Col::Cost => "cost",
+        Col::Quota => "5h",
+        _ => return false,
+    };
+    names.iter().any(|n| n == name)
+}
+
+/// Figures read best right-aligned, so their digits line up.
+fn right(id: Col) -> bool {
+    matches!(id, Col::Ctx | Col::Tok | Col::Cost | Col::Quota)
+}
+
+fn align_right(fitted: &str) -> String {
+    let text = fitted.trim_end();
+    format!("{}{text}", " ".repeat(fitted.len() - text.len()))
+}
+
+/// The usage columns a list shows, and the widest model name among its rows.
+#[derive(Debug, Default, PartialEq)]
+pub struct UsageShown {
+    pub cols: Vec<Col>,
+    pub model: usize,
+}
 
 /// A sort's direction: `Up` is a to z, newest or shortest first, and for STATE most urgent first.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -138,8 +192,9 @@ const fn column(
 }
 
 /// Every column, left to right. Sort letters, after `o`: s state, a age, t turn, h harness, o host,
-/// w where, e session, n window, b block, m msg.
-pub const COLUMNS: [Column; 11] = [
+/// w where, e session, n window, b block, d model, x ctx, k tok, c cost, 5 5h, m msg. The usage
+/// letters are rare first letters, so an extension field keeps its own.
+pub const COLUMNS: [Column; 16] = [
     column(
         Col::Glyph,
         "",
@@ -199,7 +254,7 @@ pub const COLUMNS: [Column; 11] = [
         "WHERE",
         Some('w'),
         Dir::Up,
-        0..=SPLIT - 1,
+        ALWAYS,
         Width::Where,
         Tone::Soft,
     ),
@@ -208,7 +263,7 @@ pub const COLUMNS: [Column; 11] = [
         "SESSION",
         Some('e'),
         Dir::Up,
-        SPLIT..=u16::MAX,
+        ALWAYS,
         Width::Part(0),
         Tone::Soft,
     ),
@@ -217,7 +272,7 @@ pub const COLUMNS: [Column; 11] = [
         "WINDOW",
         Some('n'),
         Dir::Up,
-        SPLIT..=u16::MAX,
+        ALWAYS,
         Width::Part(1),
         Tone::Soft,
     ),
@@ -226,9 +281,54 @@ pub const COLUMNS: [Column; 11] = [
         "BLOCK",
         Some('b'),
         Dir::Up,
-        SPLIT..=u16::MAX,
+        ALWAYS,
         Width::Part(2),
         Tone::Soft,
+    ),
+    column(
+        Col::Model,
+        "MODEL",
+        Some('d'),
+        Dir::Up,
+        USAGE_FROM..=u16::MAX,
+        Width::Model,
+        Tone::Soft,
+    ),
+    column(
+        Col::Ctx,
+        "CTX",
+        Some('x'),
+        Dir::Down,
+        USAGE_FROM..=u16::MAX,
+        Width::Fixed(5),
+        Tone::Fill(None),
+    ),
+    column(
+        Col::Tok,
+        "TOK",
+        Some('k'),
+        Dir::Down,
+        USAGE_FROM..=u16::MAX,
+        Width::Fixed(6),
+        Tone::Soft,
+    ),
+    column(
+        Col::Cost,
+        "COST",
+        Some('c'),
+        Dir::Down,
+        USAGE_FROM..=u16::MAX,
+        Width::Fixed(7),
+        Tone::Soft,
+    ),
+    column(
+        Col::Quota,
+        "5H",
+        Some('5'),
+        Dir::Down,
+        USAGE_FROM..=u16::MAX,
+        Width::Fixed(5),
+        Tone::Fill(None),
     ),
     column(
         Col::Msg,
@@ -334,6 +434,14 @@ fn sort_key(id: Col, row: &Row) -> Option<SortKey> {
         Col::Session => text(&row.pane.session),
         Col::Window => text(&row.pane.tab),
         Col::Block => text(&name(row)),
+        Col::Model => row.usage.as_ref()?.model.as_deref().and_then(text),
+        Col::Ctx => Some(SortKey::Num(row.usage.as_ref()?.ctx_pct?.into())),
+        Col::Tok => Some(SortKey::Num(row.usage.as_ref()?.tok?.try_into().ok()?)),
+        // Cents, which order the same as dollars.
+        Col::Cost => Some(SortKey::Num(
+            (row.usage.as_ref()?.cost_usd? * 100.0).round() as i64,
+        )),
+        Col::Quota => Some(SortKey::Num(row.usage.as_ref()?.quota_5h?.into())),
         Col::Msg => text(turn_msg(row)),
         Col::Field(id) => row.ext.get(id).and_then(|value| text(value)),
     }
@@ -350,6 +458,14 @@ pub fn compare(a: &Row, b: &Row, (id, dir): Sort) -> Ordering {
     }
 }
 
+/// A usage figure, or `-` when the row has none: blank is blank, never zero.
+fn usage(row: &Row, figure: impl Fn(&Usage) -> Option<String>) -> String {
+    row.usage
+        .as_ref()
+        .and_then(figure)
+        .unwrap_or_else(|| "-".to_owned())
+}
+
 /// The columns a board `board` columns wide shows in a list `list` columns wide, each with its
 /// width.
 pub struct Columns {
@@ -359,34 +475,54 @@ pub struct Columns {
 
 impl Columns {
     /// `fields` are the extension field columns to show after HOST, in order; from FIELDS_FROM
-    /// columns, and only the first two below FIELDS_ALL.
+    /// columns, and only the first two below FIELDS_ALL. No usage columns.
+    #[cfg(test)]
     pub fn new(board: u16, list: usize, fields: &[&'static Column]) -> Columns {
+        Self::with_usage(board, list, fields, &UsageShown::default())
+    }
+
+    /// As `new`, with the usage columns `usage` names (MODEL, CTX, TOK, COST, 5H).
+    pub fn with_usage(
+        board: u16,
+        list: usize,
+        fields: &[&'static Column],
+        usage: &UsageShown,
+    ) -> Columns {
         let tier = tier(board);
         let fields = match board {
             ..FIELDS_FROM => &[][..],
             FIELDS_FROM..FIELDS_ALL => &fields[..fields.len().min(2)],
             _ => fields,
         };
+        let split = board >= SPLIT && (usage.cols.is_empty() || board >= USAGE_WIDE);
         let mut shown: Vec<&'static Column> = COLUMNS
             .iter()
-            .filter(|c| c.boards.contains(&board))
+            .filter(|c| match c.id {
+                Col::Where => !split,
+                Col::Session | Col::Window | Col::Block => split,
+                id => c.boards.contains(&board) && (!is_usage(id) || usage.cols.contains(&id)),
+            })
             .collect();
         if let Some(host) = shown.iter().position(|c| c.id == Col::Host) {
             shown.splice(host + 1..host + 1, fields.iter().copied());
         }
-        let lead: usize = shown
-            .iter()
-            .map(|c| match c.width {
-                Width::Fixed(n) => n,
-                _ => 0,
-            })
-            .sum();
+        let model = if board >= USAGE_WIDE {
+            (usage.model + 1).clamp(MODEL_MIN, MODEL_MAX)
+        } else {
+            MODEL_MIN
+        };
+        let fixed = |c: &Column| match c.width {
+            Width::Fixed(n) => Some(n),
+            Width::Model => Some(model),
+            _ => None,
+        };
+        let lead: usize = shown.iter().filter_map(|c| fixed(c)).sum();
         let rest = list.saturating_sub(lead);
         // WHERE names the row, so from 100 it keeps v0.1's width (5/9 of what v0.1 left, which
         // was 2 more before STATE widened); once split its parts take two thirds, and from 140
         // TURN's room comes out of MSG.
-        let place = match (tier, board) {
-            (_, SPLIT..) => rest * 2 / 3,
+        let place = match (tier, split) {
+            (_, true) => rest * 2 / 3,
             (Tier::Wide, _) => ((rest + 2) * 5 / 9).min(rest),
             _ => rest * 9 / 20,
         };
@@ -394,7 +530,7 @@ impl Columns {
             .into_iter()
             .map(|c| {
                 let width = match c.width {
-                    Width::Fixed(n) => n,
+                    Width::Fixed(_) | Width::Model => fixed(c).unwrap_or_default(),
                     Width::Where => place,
                     Width::Part(2) => place - 2 * (place / 3),
                     Width::Part(_) => place / 3,
@@ -452,10 +588,27 @@ impl Columns {
                     Col::Session => squeeze(&clean(&row.pane.session), width.saturating_sub(1)),
                     Col::Window => squeeze(&clean(&row.pane.tab), width.saturating_sub(1)),
                     Col::Block => squeeze(place, width.saturating_sub(1)),
+                    Col::Model => usage(row, |u| u.model.clone()),
+                    Col::Ctx => usage(row, |u| u.ctx_pct.map(|p| format!("{p}%"))),
+                    Col::Tok => usage(row, |u| u.tok.map(crate::output::tokens)),
+                    Col::Cost => usage(row, |u| u.cost_usd.map(crate::output::dollars)),
+                    Col::Quota => usage(row, |u| u.quota_5h.map(|p| format!("{p}%"))),
                     Col::Msg => return (fit(turn_msg(row), *width), c.tone),
                     Col::Field(id) => row.ext.get(id).cloned().unwrap_or_else(|| "-".to_owned()),
                 };
-                (fit(&text, width.saturating_sub(1)) + " ", c.tone)
+                let figure = |f: fn(&Usage) -> Option<u8>| row.usage.as_ref().and_then(f);
+                let tone = match c.id {
+                    Col::Ctx => Tone::Fill(figure(|u| u.ctx_pct)),
+                    Col::Quota => Tone::Fill(figure(|u| u.quota_5h)),
+                    _ => c.tone,
+                };
+                let fitted = fit(&text, width.saturating_sub(1));
+                let fitted = if right(c.id) {
+                    align_right(&fitted)
+                } else {
+                    fitted
+                };
+                (fitted + " ", tone)
             })
             .collect()
     }
@@ -473,9 +626,14 @@ impl Columns {
         } else {
             width.saturating_sub(1)
         };
+        // A right-aligned name has its own room before it.
+        let pad = room.saturating_sub(column.header.len());
+        if right(id) && pad > 0 {
+            return Some((start + pad - 1, id, dir.arrow()));
+        }
         let gap = at > 0 && {
             let (before, before_width) = self.cols[at - 1];
-            before.header.len() + 1 < before_width
+            !right(before.id) && before.header.len() + 1 < before_width
         };
         if !gap && column.header.len() < room {
             Some((start + column.header.len(), id, dir.arrow()))
@@ -493,12 +651,15 @@ impl Columns {
             .map(|(c, width)| {
                 let text = match c.id {
                     Col::Msg => fit(c.header, *width),
+                    id if right(id) => align_right(&fit(c.header, width.saturating_sub(1))) + " ",
                     _ => fit(c.header, width.saturating_sub(1)) + " ",
                 };
+                let name = text.trim_start();
                 let underline = c
                     .letter
                     .and_then(|letter| c.header.find(letter.to_ascii_uppercase()))
-                    .filter(|_| text.starts_with(c.header));
+                    .filter(|_| name.starts_with(c.header))
+                    .map(|at| at + text.len() - name.len());
                 HeaderCell { text, underline }
             })
             .collect();

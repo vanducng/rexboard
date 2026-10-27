@@ -37,6 +37,8 @@ pub enum Event {
         block_id: String,
         name: Option<String>,
         cwd: Option<String>,
+        #[serde(default)]
+        pid: Option<u32>,
     },
     ChildExited {
         session_id: String,

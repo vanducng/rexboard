@@ -3,6 +3,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TrySendError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -15,6 +16,7 @@ use crate::error::{Error, Result};
 use crate::event::Event;
 use crate::extension::runner::Report;
 use crate::extension::running::Running;
+use crate::harness::usage::{self, Usage};
 use crate::state::{self, Lock, Paths, Record};
 use crate::{interrupted, rex, stop_on_signals};
 
@@ -77,6 +79,8 @@ enum Request {
 enum Msg {
     Host(HostId, HostEvent),
     Ext(Report),
+    /// Each local row's usage, by row key, as the usage files say now.
+    Usage(BTreeMap<String, Usage>),
     Hosts(Vec<String>),
     Request(Request, SyncSender<String>),
 }
@@ -237,6 +241,68 @@ struct Reducer {
     rows_due: Option<Instant>,
     save_due: Option<Instant>,
     extensions: Running,
+    usage: BTreeMap<String, Usage>,
+    /// The local rows the usage watcher joins its files to.
+    usage_panes: Arc<Mutex<Option<Vec<UsagePane>>>>,
+}
+
+/// A row on serve's own host: its usage file is named for its block, or for the tmux pane its
+/// tmux client shows.
+#[derive(Clone)]
+struct UsagePane {
+    row: String,
+    block: String,
+    tmux_client: Option<u32>,
+}
+
+/// How often the usage files and tmux clients are read again.
+const USAGE_EVERY: Duration = Duration::from_secs(2);
+
+/// Reads the usage files off the reducer's thread, since joining a tmux seat runs `ps` and
+/// `tmux`, and sends each local row's usage whenever it is read. `panes` is None until this
+/// host's first snapshot, and while it is, no file is removed.
+fn watch_usage(
+    state: std::path::PathBuf,
+    panes: Arc<Mutex<Option<Vec<UsagePane>>>>,
+    tx: Sender<Msg>,
+) {
+    thread::spawn(move || {
+        let mut files = usage::Files::default();
+        loop {
+            thread::sleep(USAGE_EVERY);
+            let known = panes.lock().unwrap_or_else(PoisonError::into_inner).clone();
+            let panes = known.clone().unwrap_or_default();
+            let pids: Vec<u32> = panes.iter().filter_map(|p| p.tmux_client).collect();
+            let asked = !pids.is_empty() && usage::any_tmux(&state);
+            let tmux = if asked {
+                usage::tmux_keys(&pids)
+            } else {
+                usage::Tmux::default()
+            };
+            let live: BTreeSet<String> = panes
+                .iter()
+                .map(|p| p.block.clone())
+                .chain(tmux.shown.values().cloned())
+                .chain(tmux.panes.iter().cloned())
+                .collect();
+            // A tmux client that did not answer this time may show a live pane: keep every file.
+            let whole = known.is_some() && (!asked || tmux.shown.len() == pids.len());
+            let kept = files.read(&state, whole.then_some(&live), chrono::Utc::now());
+            let by_row = panes
+                .iter()
+                .filter_map(|pane| {
+                    let key = match pane.tmux_client {
+                        Some(pid) => tmux.shown.get(&pid)?,
+                        None => &pane.block,
+                    };
+                    Some((pane.row.clone(), kept.get(key)?.clone()))
+                })
+                .collect();
+            if tx.send(Msg::Usage(by_row)).is_err() {
+                return;
+            }
+        }
+    });
 }
 
 impl Reducer {
@@ -278,6 +344,8 @@ impl Reducer {
             rows_due: None,
             save_due: None,
             extensions: Running::new(ext_tx),
+            usage: BTreeMap::new(),
+            usage_panes: Arc::default(),
         }
     }
 
@@ -291,6 +359,11 @@ impl Reducer {
         let mut beat = Instant::now();
         let mut rescanned = Instant::now();
         let mut children = Vec::new();
+        watch_usage(
+            paths.dir.clone(),
+            Arc::clone(&self.usage_panes),
+            self.tx.clone(),
+        );
         while !interrupted() {
             let now = Instant::now();
             if self.rows_due.is_some_and(|due| now >= due) {
@@ -321,6 +394,11 @@ impl Reducer {
                 }
                 let line = json!({ "v": VERSION, "heartbeat": true }).to_string();
                 self.subscribers.heartbeat(&line);
+                *self
+                    .usage_panes
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) =
+                    self.restored.contains("local").then(|| self.local_panes());
                 let pids: Vec<i32> = self
                     .collectors
                     .values()
@@ -352,6 +430,12 @@ impl Reducer {
             match msg {
                 Msg::Host(host, event) => self.host_event(&host, &event, paths),
                 Msg::Ext(report) => self.ext_report(report, paths),
+                Msg::Usage(usage) => {
+                    if usage != self.usage {
+                        self.usage = usage;
+                        self.rows_changed();
+                    }
+                }
                 Msg::Hosts(labels) => self.set_hosts(&labels),
                 Msg::Request(Request::Stop, reply) => {
                     offer(&reply, &json!({ "v": VERSION, "ok": true }).to_string());
@@ -546,10 +630,31 @@ impl Reducer {
             || self.started.elapsed() >= READY_WITHIN
     }
 
+    /// The rows on serve's own host, for the usage watcher.
+    fn local_panes(&self) -> Vec<UsagePane> {
+        self.board
+            .rows(chrono::Utc::now())
+            .into_iter()
+            .filter(|row| row.pane.host == "local")
+            .map(|row| UsagePane {
+                tmux_client: row
+                    .pane
+                    .pid
+                    .filter(|_| row.pane.process.as_deref() == Some("tmux")),
+                block: row.pane.block_id,
+                row: row.key,
+            })
+            .collect()
+    }
+
     fn rows_line(&self) -> Value {
+        let mut rows = self.board.rows(chrono::Utc::now());
+        for row in &mut rows {
+            row.usage = self.usage.get(&row.key).cloned();
+        }
         json!({
             "v": VERSION,
-            "rows": self.board.rows(chrono::Utc::now()),
+            "rows": rows,
             "hosts": self.hosts,
             "host_errors": self.host_errors,
             "extensions": self.extensions.states,

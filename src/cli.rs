@@ -51,6 +51,17 @@ pub enum Command {
         #[arg(long)]
         yes: bool,
     },
+    /// Keep what an agent's last turn used (model, context, tokens) for the board: run by the
+    /// harness's status line or hook, with its JSON on stdin. Prints nothing itself.
+    Usage {
+        /// The harness that sends the JSON: claude, codex, pi or grok.
+        #[arg(value_name = "HARNESS")]
+        harness: String,
+        /// Your own status line command, run with the same JSON; its output and exit code pass
+        /// through.
+        #[arg(last = true, value_name = "CMD")]
+        then: Vec<String>,
+    },
     /// List the views `ls --view` and the board's `v` take, and what each groups by.
     Views,
     /// List the hosts serve watches: each one's state, agent rows and last error.

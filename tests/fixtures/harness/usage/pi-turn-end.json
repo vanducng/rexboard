@@ -1,0 +1,1 @@
+{"model":"claude-sonnet-5-5","context":{"tokens":27111,"contextWindow":200000,"percent":13.6},"usage":{"input":25927,"output":32,"cacheRead":1152,"cacheWrite":0,"totalTokens":27111},"cost":0}

@@ -89,14 +89,14 @@ pub fn table(rows: &[Row], now: DateTime<Utc>, width: Option<usize>) -> String {
     out
 }
 
-/// The short harness name the board and `ls` show: `claude` for claude-code, and a `?` when it
-/// is read from the title because the pane has no status record.
+/// The short harness name the board and `ls` show (`claude` for claude-code, `grok` for
+/// grok-build), and a `?` when it is read from the title because the pane has no status record.
 pub fn harness(row: &Row) -> String {
-    let name = match row.pane.harness.as_deref() {
-        Some("claude-code") => "claude",
-        Some(other) => other,
-        None => "-",
-    };
+    let name = row
+        .pane
+        .harness
+        .as_deref()
+        .map_or("-", crate::harness::display);
     if row.pane.source == "inferred" && row.pane.harness.is_some() {
         format!("{name}?")
     } else {
@@ -428,6 +428,40 @@ pub fn age(at: &str, now: DateTime<Utc>) -> String {
 }
 
 /// A length of time, in the two largest units past an hour: `30s`, `12m`, `5h43m`, `3d0h`.
+/// A token count in four characters or fewer: `950`, `82k`, `820k`, `1.2M`.
+pub fn tokens(n: u64) -> String {
+    match n {
+        0..1000 => n.to_string(),
+        1000..999_500 => format!("{}k", (n + 500) / 1000),
+        _ => format!("{:.1}M", n as f64 / 1e6),
+    }
+}
+
+/// How full a pane's context is, as much as its harness reported: `88% · 176k of 200k`.
+pub fn context(usage: &crate::harness::usage::Usage) -> Option<String> {
+    let size = match (usage.tok, usage.ctx_window) {
+        (Some(tok), Some(window)) => Some(format!("{} of {}", tokens(tok), tokens(window))),
+        (Some(tok), None) => Some(tokens(tok)),
+        _ => None,
+    };
+    let parts: Vec<String> = usage
+        .ctx_pct
+        .map(|p| format!("{p}%"))
+        .into_iter()
+        .chain(size)
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+/// Cents while they fit in a 6-column cell, then whole dollars.
+pub fn dollars(usd: f64) -> String {
+    if usd < 99.995 {
+        format!("${usd:.2}")
+    } else {
+        format!("${usd:.0}")
+    }
+}
+
 pub fn span(secs: i64) -> String {
     let secs = secs.max(0);
     match secs {

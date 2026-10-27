@@ -2,7 +2,7 @@ pub(crate) mod answer;
 mod app;
 pub(crate) mod card;
 mod clipboard;
-mod columns;
+pub(crate) mod columns;
 mod effects;
 mod full;
 mod icons;
@@ -41,17 +41,23 @@ use effects::{Msg, act, apply, listen, tui_json};
 pub(crate) use effects::{screen as read_screen, tail};
 use screen::Screen;
 
+/// tui.json, or the defaults.
+pub(crate) fn prefs() -> prefs::Prefs {
+    tui_json()
+        .map(|path| prefs::load(&path))
+        .unwrap_or_default()
+}
+
 /// The board as tui.json, the environment and the pane it runs in set it up.
 fn start_app(pick: bool) -> App {
     let mut app = App::default();
     app.pick = pick;
-    let prefs = tui_json()
-        .map(|path| prefs::load(&path))
-        .unwrap_or_default();
+    let prefs = prefs();
     app.hidden = prefs.detail_hidden;
     app.motion = prefs.motion;
     app.icons = prefs.icons;
     app.card_height = prefs.card_height;
+    app.columns = prefs.columns;
     app.nerd = match std::env::var("REXBOARD_ICONS").as_deref() {
         Ok("nerd") => true,
         Ok("text") => false,

@@ -106,20 +106,51 @@ impl App {
 
     /// The column a sort letter names: a built-in one, or a field's.
     pub(super) fn column_by_letter(&self, letter: char) -> Option<&'static Column> {
-        by_letter(letter).or_else(|| {
-            let (field, _) = self.fields.iter().find(|(_, l)| *l == Some(letter))?;
-            Some(field_column(field, Some(letter)))
-        })
+        self.builtin_columns()
+            .find(|c| c.letter == Some(letter))
+            .or_else(|| {
+                let (field, _) = self.fields.iter().find(|(_, l)| *l == Some(letter))?;
+                Some(field_column(field, Some(letter)))
+            })
     }
 
     /// The sort letters `o` takes, built-in then the fields'.
     pub fn sort_letters(&self) -> Vec<String> {
-        crate::tui::columns::COLUMNS
-            .iter()
+        self.builtin_columns()
             .filter_map(|c| c.letter)
             .chain(self.fields.iter().filter_map(|(_, l)| *l))
             .map(String::from)
             .collect()
+    }
+
+    /// The built-in columns `o` can sort by: the usage ones only while they show.
+    pub fn builtin_columns(&self) -> impl Iterator<Item = &'static Column> {
+        let usage = self.usage_columns().cols;
+        crate::tui::columns::COLUMNS
+            .iter()
+            .filter(move |c| !crate::tui::columns::is_usage(c.id) || usage.contains(&c.id))
+    }
+
+    /// The usage columns the list shows: none until some row reports what its turn used, then
+    /// MODEL and CTX, and TOK, COST and 5H when tui.json's `columns` names them.
+    pub fn usage_columns(&self) -> UsageShown {
+        use crate::tui::columns::{USAGE, USAGE_SHOWN, opted};
+        let models: Vec<&str> = self
+            .rows
+            .iter()
+            .filter_map(|row| row.usage.as_ref())
+            .map(|usage| usage.model.as_deref().unwrap_or_default())
+            .collect();
+        if models.is_empty() {
+            return UsageShown::default();
+        }
+        UsageShown {
+            cols: USAGE
+                .into_iter()
+                .filter(|c| USAGE_SHOWN.contains(c) || opted(&self.columns, *c))
+                .collect(),
+            model: models.iter().map(|m| m.width()).max().unwrap_or_default(),
+        }
     }
 
     /// The columns of the fields, but for the one the view groups by, whose group header says it.

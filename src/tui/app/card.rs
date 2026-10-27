@@ -15,6 +15,7 @@ impl App {
             motion: self.motion,
             icons: self.icons,
             card_height: self.card_height,
+            columns: self.columns.clone(),
         }
     }
 

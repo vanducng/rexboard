@@ -19,6 +19,10 @@ pub const TITLE: Icon = icon("cod-note", "\u{eb26}");
 pub const SESSION: Icon = icon("cod-layers", "\u{ebd2}");
 pub const WINDOW: Icon = icon("cod-window", "\u{eb7f}");
 pub const BLOCK: Icon = icon("cod-split_horizontal", "\u{eb56}");
+pub const MODEL: Icon = icon("fa-microchip", "\u{f2db}");
+pub const CTX: Icon = icon("fa-tachometer", "\u{f0e4}");
+pub const COST: Icon = icon("fa-dollar", "\u{f155}");
+pub const QUOTA: Icon = icon("fa-pie_chart", "\u{f200}");
 /// An extension that declares no icon of its own.
 pub const EXTENSION: Icon = icon("oct-package", "\u{f487}");
 
@@ -56,9 +60,9 @@ pub fn source(source: &str) -> Option<Icon> {
 }
 
 #[cfg(test)]
-pub const ALL: [Icon; 16] = [
-    HOST, TURN, TITLE, SESSION, WINDOW, BLOCK, EXTENSION, CLAUDE, CODEX, OPENCODE, GEMINI, PI,
-    ROBOT, NATIVE, BRIDGE, INFERRED,
+pub const ALL: [Icon; 20] = [
+    HOST, TURN, TITLE, SESSION, WINDOW, BLOCK, MODEL, CTX, COST, QUOTA, EXTENSION, CLAUDE, CODEX,
+    OPENCODE, GEMINI, PI, ROBOT, NATIVE, BRIDGE, INFERRED,
 ];
 
 #[cfg(test)]

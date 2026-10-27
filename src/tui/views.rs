@@ -66,8 +66,7 @@ fn value(key: Key, row: &Row) -> Bucket {
     match key {
         Key::Status => Bucket::Status(row.group),
         Key::Harness => Bucket::Value(match row.pane.harness.as_deref() {
-            Some("claude-code") => "claude".to_owned(),
-            Some(name) if !name.is_empty() => name.to_owned(),
+            Some(name) if !name.is_empty() => crate::harness::display(name).to_owned(),
             _ => "?".to_owned(),
         }),
         Key::Host => Bucket::Value(row.pane.host.clone()),
@@ -367,6 +366,13 @@ mod tests {
     fn every_sort_letter_sorts_then_flips_then_clears() {
         use crate::tui::columns::COLUMNS;
         let mut app = app();
+        app.rows[0].usage = Some(crate::harness::usage::Usage {
+            ctx_pct: Some(7),
+            ..Default::default()
+        });
+        sort(&mut app, 'c');
+        assert_eq!(app.sort, None, "COST sorts only once tui.json asks for it");
+        app.columns = vec!["tok".into(), "cost".into(), "5h".into()];
         for column in COLUMNS.iter().filter(|c| c.letter.is_some()) {
             let letter = column.letter.unwrap();
             let press_it = |app: &mut App| sort(app, letter);

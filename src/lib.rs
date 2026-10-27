@@ -72,6 +72,7 @@ pub fn execute(cli: &Cli) -> Result<()> {
         Command::Show { key, tail } => show::show(key, *tail, cli.json),
         Command::Answer(args) => act::answer(args, cli.json),
         Command::Close { key, yes } => act::close(key, *yes, cli.json),
+        Command::Usage { harness, then } => harness::usage::run(harness, then),
         Command::Views => show::views(cli.json),
         Command::Hosts => show::hosts(cli.json),
         Command::Jump { target } => jump::jump(target, cli.json),

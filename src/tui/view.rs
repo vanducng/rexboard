@@ -166,8 +166,7 @@ fn fixed_height(app: &App, body: Rect) -> u16 {
 fn prefix_keys(app: &App, prefix: char, width: usize) -> Line<'static> {
     let pairs: Vec<(String, String)> = if prefix == 'o' {
         let fields = app.field_columns();
-        crate::tui::columns::COLUMNS
-            .iter()
+        app.builtin_columns()
             .chain(fields.iter().copied())
             .filter_map(|c| Some((c.letter?.to_string(), c.header.to_lowercase())))
             .collect()
@@ -378,7 +377,12 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
         return;
     }
     let width = usize::from(area.width);
-    let columns = Columns::new(board.width, width, &app.field_columns());
+    let columns = Columns::with_usage(
+        board.width,
+        width,
+        &app.field_columns(),
+        &app.usage_columns(),
+    );
     let area = if board.height >= HEADED {
         let [top, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
         frame.render_widget(Paragraph::new(column_header(&columns, app.sort)), top);
@@ -574,6 +578,7 @@ fn row_line(
                 Tone::State => theme::state(row),
                 Tone::Soft => soft,
                 Tone::Dim => theme::quiet(),
+                Tone::Fill(pct) => pct.and_then(theme::fill).unwrap_or(soft),
             };
             Span::styled(text, style)
         })
@@ -711,6 +716,160 @@ mod tests {
     use crate::tui::app::testkit::*;
 
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn usage_shows_model_and_ctx_from_140_the_rest_when_asked_and_the_card_says_it() {
+        use crate::harness::usage::Usage;
+        let mut app = fuller();
+        let plain = render(&app, 160, 30);
+        assert!(
+            !plain.contains("MODEL"),
+            "no row reports usage, no columns:\n{plain}"
+        );
+        let key = app.current().unwrap().key.clone();
+        let mut rows = app.rows.clone();
+        for row in &mut rows {
+            if row.key == key {
+                row.usage = Some(Usage {
+                    model: Some("Opus 5.5".into()),
+                    ctx_pct: Some(88),
+                    ctx_window: Some(200_000),
+                    tok: Some(176_000),
+                    cost_usd: Some(4.2),
+                    quota_5h: Some(12),
+                });
+            }
+        }
+        app.set_rows(rows, app.hosts.clone());
+        let wide = render(&app, 160, 30);
+        let header = wide.lines().find(|l| l.contains("HARNESS")).unwrap();
+        assert!(header.contains("MODEL") && header.contains("CTX"), "{wide}");
+        for opt_in in ["TOK", "COST", "5H"] {
+            assert!(
+                !header.contains(opt_in),
+                "{opt_in} waits for tui.json: {header}"
+            );
+        }
+        let line = wide.lines().find(|l| l.contains("Opus 5.5")).expect(&wide);
+        assert!(line.contains("88%") && !line.contains("176k"), "{line}");
+        assert_eq!(
+            header.find("CTX").unwrap() + 3,
+            line.find("88%").unwrap() + 3,
+            "figures are right-aligned under a right-aligned name:\n{header}\n{line}"
+        );
+        assert!(
+            wide.lines()
+                .filter(|l| l.contains("claude") && !l.contains("Opus"))
+                .all(|l| l.contains(" -  ")),
+            "a row with no usage shows -, not 0:\n{wide}"
+        );
+        let card = card_of(&wide);
+        let fact = |card: &[String], label: &str, value: &str| {
+            card.iter()
+                .any(|l| l.contains(&format!("{label} ")) && l.contains(value))
+        };
+        assert!(fact(&card, "model", "Opus 5.5"), "{card:#?}");
+        assert!(fact(&card, "ctx", "88% · 176k of 200k"), "{card:#?}");
+        assert!(
+            !card
+                .iter()
+                .any(|l| l.contains("cost") || l.contains("$4.20")),
+            "{card:#?}"
+        );
+        assert!(
+            !render(&app, 130, 30).lines().any(|l| l.contains("MODEL")),
+            "below 140, no room"
+        );
+        app.columns = vec!["5h".into(), "cost".into(), "tok".into(), "later".into()];
+        let opted = render(&app, 160, 30);
+        let header = opted.lines().find(|l| l.contains("HARNESS")).unwrap();
+        let at = |name: &str| header.find(name).unwrap();
+        assert!(
+            at("CTX") < at("TOK") && at("TOK") < at("COST") && at("COST") < at("5H"),
+            "in the table's order, whatever tui.json's: {header}"
+        );
+        let line = opted.lines().find(|l| l.contains("Opus 5.5")).unwrap();
+        assert!(
+            line.contains("176k") && line.contains("$4.20") && line.contains("12%"),
+            "{line}"
+        );
+        assert_eq!(
+            at("COST") + 4,
+            line.find("$4.20").unwrap() + 5,
+            "{header}\n{line}"
+        );
+        let card = card_of(&opted);
+        assert!(
+            fact(&card, "cost", "$4.20") && fact(&card, "5h", "12%"),
+            "{card:#?}"
+        );
+        let mut sorted = |sort: Sort| {
+            app.sort = Some(sort);
+            let text = render(&app, 160, 30);
+            text.lines()
+                .find(|l| l.contains("HARNESS"))
+                .unwrap()
+                .to_owned()
+        };
+        let header = sorted((Col::Ctx, crate::tui::columns::Dir::Down));
+        assert!(header.contains(" ↓CTX "), "in its own room: {header}");
+        let header = sorted((Col::Msg, crate::tui::columns::Dir::Up));
+        assert!(header.contains(" 5H MSG↑"), "never joins 5H: {header}");
+        app.sort = None;
+        let columns = Columns::with_usage(160, 160, &[], &app.usage_columns());
+        let cells = columns.cells(app.current().unwrap(), "", Utc::now());
+        let tone = |want: &str| cells.iter().find(|(t, _)| t.trim() == want).unwrap().1;
+        assert_eq!(tone("88%"), Tone::Fill(Some(88)));
+        assert_eq!(
+            tone("12%"),
+            Tone::Fill(Some(12)),
+            "5H fills by its own figure"
+        );
+    }
+
+    #[test]
+    fn below_160_usage_keeps_where_whole_so_msg_keeps_its_room_and_from_160_model_grows() {
+        use crate::tui::columns::UsageShown;
+        let usage = |model: usize| UsageShown {
+            cols: vec![Col::Model, Col::Ctx],
+            model,
+        };
+        let plain = Columns::new(140, 140, &[]);
+        let with = Columns::with_usage(140, 140, &[], &usage(8));
+        assert!(plain.has(Col::Session) && with.has(Col::Where) && !with.has(Col::Session));
+        assert!(
+            with.width(Col::Msg) >= plain.width(Col::Msg),
+            "MSG at 140: {} with usage, {} without",
+            with.width(Col::Msg),
+            plain.width(Col::Msg)
+        );
+        assert!(Columns::with_usage(160, 160, &[], &usage(8)).has(Col::Session));
+        let model = |board: u16, longest: usize| {
+            Columns::with_usage(board, usize::from(board), &[], &usage(longest)).width(Col::Model)
+        };
+        assert_eq!(model(150, 17), 13, "below 160 MODEL keeps its least");
+        assert_eq!(model(160, 8), 13);
+        assert_eq!(model(160, 17), 18, "claude-sonnet-5-5 whole");
+        assert_eq!(model(200, 40), 21, "and no more than 20");
+    }
+
+    #[test]
+    fn a_context_warns_from_70_and_alerts_from_85() {
+        assert_eq!(theme::fill(69), None);
+        assert_eq!(
+            theme::fill(70),
+            Some(Style::new().fg(ratatui::style::Color::Yellow))
+        );
+        assert_eq!(theme::fill(85), Some(theme::alert()));
+        assert_eq!(crate::output::tokens(950), "950");
+        assert_eq!(crate::output::tokens(67_910), "68k");
+        assert_eq!(crate::output::tokens(820_000), "820k");
+        assert_eq!(crate::output::tokens(1_000_000), "1.0M");
+        assert_eq!(crate::output::dollars(0.004), "$0.00");
+        assert_eq!(crate::output::dollars(99.99), "$99.99");
+        assert_eq!(crate::output::dollars(99.996), "$100");
+        assert_eq!(crate::output::dollars(1234.5), "$1234");
+    }
 
     use crate::tui::app::{App, Effect, Spot};
 
