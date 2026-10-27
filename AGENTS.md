@@ -11,7 +11,7 @@ Follow [CONTRIBUTING.md](CONTRIBUTING.md) and the records in [docs/decisions](do
 - `src/lib.rs` dispatches commands. `src/main.rs` only parses and reports errors.
 - `src/cli.rs` is the clap surface. `src/error.rs` holds the error type and prints it, as JSON with `--json`.
 - `install.sh` installs a release.
-- `scripts/record-demo.sh [SCENE...]` records the README demo (`docs/assets/demo.cast` and `demo.gif`) and the feature casts (`docs/assets/casts/`), each on its own private, throwaway Rex server. Re-record with it rather than by hand, so a cast never sees real panes.
+- `scripts/record-demo.sh` records the README demo (`docs/assets/demo.cast` and `demo.gif`) on a private, throwaway Rex server. Re-record with it rather than by hand, so the cast never sees real panes.
 - `tests/cli.rs` runs the binary.
 
 ## Checks

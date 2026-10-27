@@ -23,4 +23,4 @@ Three tests read files you may edit:
 - The extension contract test parses the `json request` and `json response` blocks in [Extensions](extensions.md), so keep them valid.
 - Answer mode's screen tests read recorded, scrubbed Claude Code screens from `tests/fixtures/screens/`.
 
-`scripts/record-demo.sh` records the README demo and the feature casts in `docs/assets/casts/`, each scene on its own private, throwaway Rex server, and refuses to run against yours. Name scenes to record only those (`scripts/record-demo.sh card cli`). After a change the board shows, re-record the scenes it appears in.
+`scripts/record-demo.sh` records the README demo on a private, throwaway Rex server, and refuses to run against yours. The README has only this one recording, so it stays true as the board changes; re-record it when the board looks different.

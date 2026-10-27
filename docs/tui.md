@@ -1,6 +1,6 @@
 # TUI
 
-`rexboard` with no command in a terminal, or `rexboard board`, opens the board. It is a client of `rexboard serve`: it subscribes to serve's rows, and marking a row seen goes through serve too, so every board and `ls` share one `seen`.
+`rexboard` with no command in a terminal, or `rexboard board`, opens the board. It is a client of `rexboard serve`: it subscribes to serve's rows, and marking a row seen goes through serve too, so every board and `ls` share one `seen`. The board only reads Rex, except to jump to a pane and to answer or close one ([what it writes](system-architecture.md)).
 
 The board is built to live in a narrow column, so the narrow layout is the main one.
 

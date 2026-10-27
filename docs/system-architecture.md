@@ -1,6 +1,6 @@
 # System architecture
 
-rexboard reads Rex, remembers what Rex does not, and shows it. It writes to Rex in three places only, each on one pane you chose: a jump focuses the pane and asks the Rex app to show its session; an answer from the board ([Answer mode](tui.md#answer-mode)) checks the pane, then sends it a digit, or a line and Enter; a close from the board (`dd`) closes the pane.
+rexboard reads Rex, remembers what Rex does not, and shows it. It writes to Rex in three places only, each on one pane you chose: a jump focuses the pane and asks the Rex app to show its session; an answer, from the board ([Answer mode](tui.md#answer-mode)) or `rexboard answer`, checks the pane, then sends it a digit, or a line and Enter; a close, from the board (`dd`) or `rexboard close`, closes the pane.
 
 <img alt="rexboard architecture: rexboard is one Rust binary and Rex runs its Lua scripts. On local (this Mac) and mini, rex do runs observer.lua, which streams NDJSON to rexboard serve; serve keeps state on disk and answers the CLI (ls, watch, seen) and the ratatui board over a unix socket. Two things write to Rex. A jump runs jump.lua: session.focus_block on the pane's host, then client.perform session.select on the Rex app. An answer from the board runs send.lua: it checks the pane, then sends one key or a paste and Enter with block.event" src="assets/architecture.svg" width="100%">
 
