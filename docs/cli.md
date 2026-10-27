@@ -64,7 +64,7 @@ In a terminal each line fits its width: `WHAT` is cut first, then `WHERE` (a lon
 | `harness` | string or null | `effective_app` (else `app`) of the record, else the foreground process (`codex`, `pi`; `claude`, or a version string like `2.1.310`, is `claude-code`), else `claude-code` for a title that starts with a Claude state glyph, else `codex` for a tmux pane titled `DIR | MODEL` (exactly one ` | `, a `DIR` with no spaces, a `MODEL` of letters, digits, `.` and `-` with at least one letter and one digit) |
 | `state` | string | `blocked`, `error`, `done`, `working` or `idle` from the record; with no record, from the title glyph (`✳ ` is `idle`, a braille spinner or `◐`/`◑` is `working`), else `unknown` |
 | `kind` | string or null | The record's `kind`, such as `permission` |
-| `msg` | string or null | The record's message |
+| `msg` | string or null | The record's message, ` ⏎ ` between lines; from `rexboard hook`, an empty line between paragraphs and each line's leading spaces kept |
 | `updated_at` | string or null | RFC 3339 time Rex received the record. It changes on every report, not only on a state change |
 | `source` | string | `native`: the agent in the pane reports its own status. `bridge`: the record came through tmux (tmux wrote it, or is the pane's foreground process). `inferred`: no record, state read from the title. An extension's name: no record, and that extension gave the row a fallback status. See [Agent status](agent-status.md) |
 | `children` | object | Counts by state of the pane's other records, such as Claude subagents: `{"working": 1}` |
@@ -330,7 +330,7 @@ Tells Rex an agent's status from one of its hooks. The hooks `rexboard hooks ins
 | `StopFailure` | `error`, the message so far, else the error |
 | `SessionEnd` | clears the status |
 
-Any other event changes nothing. A message goes on one line, ` ⏎ ` for each line break, cut to Rex's 2048 bytes and to 4096 for the whole sequence. `EVENT` names the event for JSON that has no `hook_event_name`. On Codex's `Stop` it also keeps the turn's usage, as [`rexboard usage codex`](#rexboard-usage) does.
+Any other event changes nothing. A message goes on one line, ` ⏎ ` for each line break, cut to Rex's 2048 bytes and to 4096 for the whole sequence. A run of blank lines leaves one empty line (` ⏎  ⏎ `), so paragraphs survive, with none at the start or end. A line keeps its leading spaces, for code, with a leading tab as four; trailing spaces go, and any other control character is a space. So since 0.16 a `msg` in `ls --json`, `watch` and `show` can carry empty lines and indentation; its first line with words is the same as before. `EVENT` names the event for JSON that has no `hook_event_name`. On Codex's `Stop` it also keeps the turn's usage, as [`rexboard usage codex`](#rexboard-usage) does.
 
 It prints nothing and exits 0 whatever happens, an unknown harness or an argument this build does not know included, since exit 2 is the code that blocks a Claude Code agent. Such an error is said on stderr and noted in `REXBOARD_HOOK_LOG`. `REXBOARD_HOOK_LOG=FILE` appends one line per call: the event, which of `TMUX`, `TMUX_PANE` and `REX_BLOCK` were set, the pane found, and what it did. It never logs the hook's text.
 
