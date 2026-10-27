@@ -262,10 +262,11 @@ const USAGE_EVERY: Duration = Duration::from_secs(2);
 /// `tmux`, and sends each local row's usage whenever it is read.
 fn watch_usage(state: std::path::PathBuf, panes: Arc<Mutex<Vec<UsagePane>>>, tx: Sender<Msg>) {
     thread::spawn(move || {
+        let mut files = usage::Files::default();
         loop {
             thread::sleep(USAGE_EVERY);
             let panes = panes.lock().unwrap_or_else(PoisonError::into_inner).clone();
-            let kept = usage::read_all(&state, chrono::Utc::now());
+            let kept = files.read(&state, chrono::Utc::now());
             let pids: Vec<u32> = panes.iter().filter_map(|p| p.tmux_client).collect();
             let tmux = if pids.is_empty() || !kept.keys().any(|k| k.starts_with("tmux:")) {
                 BTreeMap::new()

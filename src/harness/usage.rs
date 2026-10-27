@@ -3,10 +3,11 @@
 //! hook, a pi extension) hands it to `rexboard usage`, which keeps it in a small file per pane;
 //! serve reads those files and never a transcript.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -95,8 +96,11 @@ pub fn status_line(p: &serde_json::Value) -> Option<Usage> {
             .map(str::to_owned),
         ctx_pct: percent(&ctx["used_percentage"]),
         ctx_window: ctx["context_window_size"].as_u64(),
-        tok: ctx["total_input_tokens"].as_u64(),
-        cost_usd: p["cost"]["total_cost_usd"].as_f64(),
+        // Before the first request a session reports 0 tokens and a cost of 0: nothing yet.
+        tok: ctx["total_input_tokens"].as_u64().filter(|tok| *tok > 0),
+        cost_usd: p["cost"]["total_cost_usd"]
+            .as_f64()
+            .filter(|cost| *cost > 0.0),
         quota_5h: percent(&p["rate_limits"]["five_hour"]["used_percentage"]),
     };
     (!usage.is_empty()).then_some(usage)
@@ -179,23 +183,59 @@ pub fn write(
     std::fs::rename(tmp, path)
 }
 
-/// Every pane's usage that is not stale at `now`, by its key. A file that cannot be read is
-/// skipped: a writer may be halfway through, and the next scan sees it whole.
-pub fn read_all(state: &Path, now: DateTime<Utc>) -> BTreeMap<String, Usage> {
-    let Ok(entries) = std::fs::read_dir(dir(state)) else {
-        return BTreeMap::new();
-    };
-    entries
-        .filter_map(|entry| {
-            let path = entry.ok()?.path();
-            if path.extension()? != "json" {
-                return None;
+/// What one file held: its pane's key, when it was written, and the usage.
+type Kept = Option<(String, DateTime<chrono::FixedOffset>, Usage)>;
+
+/// serve's view of `usage/`: each file's modified time and what it held, so a scan reads only
+/// the files that changed since the last one.
+#[derive(Default)]
+pub struct Files {
+    seen: HashMap<PathBuf, (SystemTime, Kept)>,
+}
+
+impl Files {
+    /// Every pane's usage that is not stale at `now`, by its key. A file untouched for longer
+    /// than STALE_AFTER is removed: Rex never reuses a block id, so its pane is gone or quiet,
+    /// and either way it says nothing. A file that cannot be read is skipped until it changes.
+    pub fn read(&mut self, state: &Path, now: DateTime<Utc>) -> BTreeMap<String, Usage> {
+        let mut seen = HashMap::new();
+        let mut kept = BTreeMap::new();
+        for entry in std::fs::read_dir(dir(state))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            let path = entry.path();
+            let Ok(modified) = entry.metadata().and_then(|m| m.modified()) else {
+                continue;
+            };
+            if now.signed_duration_since(DateTime::<Utc>::from(modified)) > STALE_AFTER {
+                let _ = std::fs::remove_file(&path);
+                continue;
             }
-            let sidecar: Sidecar = serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
-            let ts = DateTime::parse_from_rfc3339(&sidecar.ts).ok()?;
-            (now.signed_duration_since(ts) <= STALE_AFTER).then_some((sidecar.key, sidecar.usage))
-        })
-        .collect()
+            if path.extension().is_none_or(|ext| ext != "json") {
+                continue;
+            }
+            let held = match self.seen.remove(&path) {
+                Some((at, held)) if at == modified => held,
+                _ => read_one(&path),
+            };
+            if let Some((key, ts, usage)) = &held
+                && now.signed_duration_since(*ts) <= STALE_AFTER
+            {
+                kept.insert(key.clone(), usage.clone());
+            }
+            seen.insert(path, (modified, held));
+        }
+        self.seen = seen;
+        kept
+    }
+}
+
+fn read_one(path: &Path) -> Kept {
+    let sidecar: Sidecar = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    let ts = DateTime::parse_from_rfc3339(&sidecar.ts).ok()?;
+    Some((sidecar.key, ts, sidecar.usage))
 }
 
 /// Each tmux client's pid with the `tmux:<socket>:<pane>` key of the pane it shows: what a
@@ -307,6 +347,15 @@ mod tests {
             "what grok does not report stays blank"
         );
         assert_eq!(parse("claude", &serde_json::json!({ "cwd": "/x" })), None);
+        assert_eq!(
+            parse("claude", &fixture("claude-statusline-start.json")),
+            Some(Usage {
+                model: Some("Opus 5.5".into()),
+                ctx_window: Some(1_000_000),
+                ..Usage::default()
+            }),
+            "before the first request: 0 tokens and a cost of 0 are blank, not 0"
+        );
     }
 
     #[test]
@@ -315,9 +364,11 @@ mod tests {
             parse("pi", &fixture("pi-turn-end.json")),
             Some(Usage {
                 model: Some("claude-sonnet-5-5".into()),
-                ctx_pct: Some(23),
+                ctx_pct: Some(14),
                 ctx_window: Some(200_000),
-                tok: Some(45210),
+                // input 25927 + cacheRead 1152 + cacheWrite 0; not the context's 27111, which
+                // counts the reply's 32 too.
+                tok: Some(27079),
                 cost_usd: None,
                 quota_5h: None,
             })
@@ -416,13 +467,80 @@ mod tests {
         )
         .unwrap();
         std::fs::write(dir.path().join("usage/broken.json"), "{").unwrap();
-        let read = read_all(dir.path(), now);
+        let mut files = Files::default();
+        let read = files.read(dir.path(), now);
         assert_eq!(read.len(), 1, "{read:?}");
         assert_eq!(read["tmux:default:%3"], usage);
+        assert_eq!(
+            files.read(dir.path(), now),
+            read,
+            "unchanged files read the same"
+        );
         let file = std::fs::read_to_string(dir.path().join("usage/tmux-default--3.json")).unwrap();
         assert!(
             !file.contains("cost_usd"),
             "a figure not reported is left out: {file}"
+        );
+    }
+
+    #[test]
+    fn a_scan_rereads_only_a_changed_file_and_removes_one_long_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = Utc::now();
+        let usage = |pct| Usage {
+            ctx_pct: Some(pct),
+            ..Usage::default()
+        };
+        write(dir.path(), "block:live", "claude-code", &usage(7), now).unwrap();
+        write(dir.path(), "block:gone", "claude-code", &usage(9), now).unwrap();
+        let usage_dir = dir.path().join("usage");
+        std::fs::write(usage_dir.join("left.json.4242"), "{").unwrap();
+        let age = |name: &str, by: chrono::Duration| {
+            let at = SystemTime::from(now - by);
+            std::fs::File::options()
+                .write(true)
+                .open(usage_dir.join(name))
+                .unwrap()
+                .set_modified(at)
+                .unwrap();
+        };
+        let mut files = Files::default();
+        assert_eq!(files.read(dir.path(), now).len(), 2);
+        // Same modified time, new bytes: the scan keeps what it read.
+        let live = usage_dir.join("block-live.json");
+        let modified = std::fs::metadata(&live).unwrap().modified().unwrap();
+        std::fs::write(
+            &live,
+            std::fs::read_to_string(&live).unwrap().replace("7", "8"),
+        )
+        .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&live)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        assert_eq!(files.read(dir.path(), now)["block:live"], usage(7));
+        write(dir.path(), "block:live", "claude-code", &usage(12), now).unwrap();
+        age("block-live.json", chrono::Duration::seconds(-1));
+        assert_eq!(
+            files.read(dir.path(), now)["block:live"],
+            usage(12),
+            "a rewrite is read"
+        );
+        age("block-gone.json", STALE_AFTER * 2);
+        age("left.json.4242", STALE_AFTER * 2);
+        let read = files.read(dir.path(), now);
+        assert_eq!(read.keys().collect::<Vec<_>>(), ["block:live"]);
+        let mut left: Vec<_> = std::fs::read_dir(&usage_dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            ["block-live.json"],
+            "the old file and the stray temp file are gone"
         );
     }
 }
