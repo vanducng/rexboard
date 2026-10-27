@@ -1,0 +1,530 @@
+//! The inline markdown an agent's message carries, as runs of text in the plain or strong role:
+//! `**bold**`, `__bold__` and `` `code` `` are strong, `[text](url)` is its text, and the markers
+//! go. Italics stay as written, so `snake_case` and `2*3*4` read as they are.
+
+/// A run of text, and whether it takes the strong role.
+pub type Run = (String, bool);
+
+/// One line's inline markdown. `text` is already free of control and escape sequences.
+pub fn inline(text: &str) -> Vec<Run> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut runs = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '`' {
+            let ticks = chars[i..].iter().take_while(|&&t| t == '`').count();
+            if let Some(end) = ticks_at(&chars, i + ticks, ticks) {
+                push(
+                    &mut runs,
+                    &chars[i + ticks..end].iter().collect::<String>(),
+                    true,
+                );
+                i = end + ticks;
+                continue;
+            }
+            push(&mut runs, &"`".repeat(ticks), false);
+            i += ticks;
+            continue;
+        }
+        if (c == '*' || c == '_')
+            && chars.get(i + 1) == Some(&c)
+            && opens(&chars, i, c)
+            && let Some(end) = closes(&chars, i + 2, c)
+        {
+            let inner: String = chars[i + 2..end].iter().collect();
+            for (text, _) in inline(&inner) {
+                push(&mut runs, &text, true);
+            }
+            i = end + 2;
+            continue;
+        }
+        if c == '['
+            && let Some(close) = (i + 1..chars.len()).find(|&j| chars[j] == ']')
+            && chars.get(close + 1) == Some(&'(')
+            && let Some(paren) = closing_paren(&chars, close + 2)
+        {
+            for (text, strong) in inline(&chars[i + 1..close].iter().collect::<String>()) {
+                push(&mut runs, &text, strong);
+            }
+            i = paren + 1;
+            continue;
+        }
+        push(&mut runs, &c.to_string(), false);
+        i += 1;
+    }
+    runs
+}
+
+fn push(runs: &mut Vec<Run>, text: &str, strong: bool) {
+    match runs.last_mut() {
+        Some((last, was)) if *was == strong => last.push_str(text),
+        _ if text.is_empty() => {}
+        _ => runs.push((text.to_owned(), strong)),
+    }
+}
+
+/// The `)` that closes a link's URL from `from` on, past any balanced pair inside it
+/// (`https://w.test/Foo_(bar)`).
+fn closing_paren(chars: &[char], from: usize) -> Option<usize> {
+    let mut depth = 0;
+    (from..chars.len()).find(|&j| match chars[j] {
+        '(' => {
+            depth += 1;
+            false
+        }
+        ')' if depth > 0 => {
+            depth -= 1;
+            false
+        }
+        c => c == ')',
+    })
+}
+
+/// Where a run of exactly `n` backticks starts, from `from` on.
+fn ticks_at(chars: &[char], from: usize, n: usize) -> Option<usize> {
+    let mut j = from;
+    while j < chars.len() {
+        let run = chars[j..].iter().take_while(|&&t| t == '`').count();
+        if run == n {
+            return Some(j);
+        }
+        j += run.max(1);
+    }
+    None
+}
+
+/// A pair of `c` at `i` that can open: not followed by a space, and for `__` not inside a word.
+fn opens(chars: &[char], i: usize, c: char) -> bool {
+    let next = chars.get(i + 2).is_some_and(|n| !n.is_whitespace());
+    next && !(c == '_' && i > 0 && chars[i - 1].is_alphanumeric())
+}
+
+/// The pair of `c` that closes one opened before `from`: not after a space, and for `__` not
+/// inside a word.
+fn closes(chars: &[char], from: usize, c: char) -> Option<usize> {
+    (from + 1..chars.len().saturating_sub(1)).find(|&j| {
+        chars[j] == c
+            && chars[j + 1] == c
+            && !chars[j - 1].is_whitespace()
+            && !(c == '_' && chars.get(j + 2).is_some_and(|n| n.is_alphanumeric()))
+    })
+}
+
+/// What MSG shows of a row's message: its line as runs, or none for a hook's filler (`Done`,
+/// `Allow Bash?`). The board draws it and sorts by it.
+pub fn msg(row: &crate::board::Row) -> Vec<Run> {
+    if crate::output::turn_msg(row).is_empty() {
+        return Vec::new();
+    }
+    let msg = crate::output::clean(row.pane.msg.as_deref().unwrap_or_default());
+    msg_line(&lines(&msg))
+}
+
+/// A cleaned message's lines, trimmed, the blank ones left out.
+pub fn lines(msg: &str) -> Vec<&str> {
+    msg.split(crate::output::BREAK)
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+/// The text of `runs`, as it shows.
+pub fn text(runs: &[Run]) -> String {
+    runs.iter().map(|(text, _)| text.as_str()).collect()
+}
+
+/// MSG's line among the message's: the first with words that is not a heading, else the first
+/// heading. A fence line is never one.
+pub fn msg_line(lines: &[&str]) -> Vec<Run> {
+    let worded = |line: &&&str| !fence(line) && !unblock(line).is_empty();
+    let line = lines
+        .iter()
+        .filter(worded)
+        .find(|line| heading(line).is_none())
+        .or_else(|| lines.iter().find(worded));
+    line.map_or_else(Vec::new, |line| inline(unblock(line)))
+}
+
+/// A card line: a heading's text all strong, without its `#`s; a fence line, with its info
+/// string, not at all; any other line as written, list and quote markers kept.
+pub fn card_line(line: &str) -> Option<Vec<Run>> {
+    if fence(line) {
+        return None;
+    }
+    let Some(text) = heading(line) else {
+        return Some(inline(line));
+    };
+    let mut runs = Vec::new();
+    for (text, _) in inline(text) {
+        push(&mut runs, &text, true);
+    }
+    Some(runs)
+}
+
+/// A heading's text: what follows its `#`s and a space.
+fn heading(line: &str) -> Option<&str> {
+    let line = line.trim_start();
+    let hashes = line.len() - line.trim_start_matches('#').len();
+    (hashes > 0 && line[hashes..].starts_with(' ')).then(|| line[hashes..].trim_start())
+}
+
+/// A code fence's line: three backticks and an info string, not code that closes on the line.
+fn fence(line: &str) -> bool {
+    line.trim_start()
+        .strip_prefix("```")
+        .is_some_and(|rest| !rest.contains("```"))
+}
+
+/// A line without the block markers it leads with: a heading's `#`s, a quote's `>`, and a list's
+/// `-`, `*`, `+` or `1.`.
+pub fn unblock(line: &str) -> &str {
+    let mut line = line.trim_start();
+    loop {
+        let digits = line.len() - line.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        let rest = if let Some(text) = heading(line) {
+            Some(text)
+        } else if let Some(rest) = line.strip_prefix('>') {
+            Some(rest)
+        } else if let Some(rest) = ["- ", "* ", "+ "].iter().find_map(|m| line.strip_prefix(m)) {
+            Some(rest)
+        } else if digits > 0 && line[digits..].starts_with(". ") {
+            Some(&line[digits + 1..])
+        } else {
+            None
+        };
+        match rest {
+            Some(rest) => line = rest.trim_start(),
+            None => return line,
+        }
+    }
+}
+
+/// `lines` (the runs' text cut, wrapped or padded) as runs again, each char in the role of the
+/// char it came from; a char with none (`…`, padding) is plain.
+pub fn restyle(lines: &[String], runs: &[Run]) -> Vec<Vec<Run>> {
+    let mut from = runs
+        .iter()
+        .flat_map(|(text, strong)| text.chars().map(move |c| (c, *strong)))
+        .peekable();
+    lines
+        .iter()
+        .map(|line| {
+            let mut out = Vec::new();
+            for c in line.chars() {
+                if !c.is_whitespace() {
+                    while from.next_if(|(s, _)| s.is_whitespace()).is_some() {}
+                }
+                let strong = from
+                    .next_if(|(s, _)| *s == c || s.is_whitespace() && c.is_whitespace())
+                    .is_some_and(|(_, strong)| strong);
+                push(&mut out, &c.to_string(), strong);
+            }
+            out
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use unicode_width::UnicodeWidthStr;
+
+    /// Runs drawn as text, strong ones in `[…]`.
+    fn drawn(runs: &[Run]) -> String {
+        runs.iter()
+            .map(|(text, strong)| {
+                if *strong {
+                    format!("[{text}]")
+                } else {
+                    text.clone()
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn inline_markdown_maps_to_the_strong_role_and_loses_its_markers() {
+        for (text, want) in [
+            ("**Tests pass**: 12 passed", "[Tests pass]: 12 passed"),
+            ("__done__ now", "[done] now"),
+            ("ran `cargo test` twice", "ran [cargo test] twice"),
+            ("``a ` b`` c", "[a ` b] c"),
+            ("see [the PR](https://x.test/pr/31)", "see the PR"),
+            ("[run `make`](https://x.test)", "run [make]"),
+            ("[Foo](https://w.test/Foo_(bar)) after", "Foo after"),
+            (
+                "[open](https://w.test/a(b) tail",
+                "[open](https://w.test/a(b) tail",
+            ),
+            (
+                "**bold with `code` and [a link](u)**",
+                "[bold with code and a link]",
+            ),
+            ("**unclosed bold", "**unclosed bold"),
+            ("a `stray tick", "a `stray tick"),
+            ("[not a link] (x)", "[not a link] (x)"),
+            ("** spaced **", "** spaced **"),
+            (
+                "snake_case and __init__.py and a__b__c",
+                "snake_case and [init].py and a__b__c",
+            ),
+            (
+                "2*3*4 and *italic* and _italic_",
+                "2*3*4 and *italic* and _italic_",
+            ),
+            (
+                "https://x.test/a__b__c?q=1*2",
+                "https://x.test/a__b__c?q=1*2",
+            ),
+            ("修复 **解析器** 🙂", "修复 [解析器] 🙂"),
+        ] {
+            assert_eq!(drawn(&inline(text)), want, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_line_loses_the_block_markers_it_leads_with() {
+        for (line, want) in [
+            ("## Summary", "Summary"),
+            ("- item", "item"),
+            ("* item", "item"),
+            ("> - quoted item", "quoted item"),
+            ("12. step", "step"),
+            ("```x``` stays", "```x``` stays"),
+            ("#123 fixed", "#123 fixed"),
+            ("-1 degrees", "-1 degrees"),
+            ("3.5 shipped", "3.5 shipped"),
+            ("*italic* stays", "*italic* stays"),
+        ] {
+            assert_eq!(unblock(line), want, "{line}");
+        }
+    }
+
+    #[test]
+    fn msg_takes_the_first_line_with_words_that_is_not_a_heading() {
+        for (lines, want) in [
+            (
+                &["## Summary", "**Tests pass**: 12", "- more"][..],
+                "[Tests pass]: 12",
+            ),
+            (&["# Title", "```rust", "> quoted **bit**"], "quoted [bit]"),
+            (&["## Only a heading"], "Only a heading"),
+            (&["```sh", "## Plan"], "Plan"),
+            (&["```sh"], ""),
+            (&["`a` first", "## later"], "[a] first"),
+        ] {
+            assert_eq!(drawn(&msg_line(lines)), want, "{lines:?}");
+        }
+    }
+
+    #[test]
+    fn the_card_drops_heading_marks_and_fences_and_keeps_list_and_quote_marks() {
+        let card = |line: &str| card_line(line).map(|runs| drawn(&runs));
+        assert_eq!(card("## The **plan**").as_deref(), Some("[The plan]"));
+        assert_eq!(card("```rust"), None);
+        assert_eq!(card("```"), None);
+        assert_eq!(card("```x``` is code").as_deref(), Some("[x] is code"));
+        assert_eq!(card("- a **b**").as_deref(), Some("- a [b]"));
+        assert_eq!(card("1. one").as_deref(), Some("1. one"));
+        assert_eq!(card("> quote").as_deref(), Some("> quote"));
+        assert_eq!(card("#123 fixed").as_deref(), Some("#123 fixed"));
+    }
+
+    #[test]
+    fn cut_or_wrapped_text_keeps_each_chars_role() {
+        let runs = inline("ok **two words** and `修复` end");
+        let cut = crate::output::fit("ok two words and 修复 end", 13);
+        assert_eq!(cut.width(), 13);
+        assert_eq!(drawn(&restyle(&[cut], &runs)[0]), "ok [two words]…");
+        let wrapped = [
+            "ok two".to_owned(),
+            "words and 修复".to_owned(),
+            "end".to_owned(),
+        ];
+        let lines: Vec<String> = restyle(&wrapped, &runs).iter().map(|l| drawn(l)).collect();
+        assert_eq!(lines, ["ok [two]", "[words] and [修复]", "end"]);
+    }
+}
+
+#[cfg(test)]
+mod board_tests {
+    use chrono::{DateTime, Utc};
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::style::Modifier;
+
+    use crate::tui::app::testkit::*;
+    use crate::tui::app::{App, Effect, Spot};
+
+    const MSG: &str = "## Summary ⏎ **Tests pass**: ran `cargo test` on [the PR](https://x.test/31) \
+                       ⏎ - next: **merge** it ⏎ ```sh ⏎ \x1b[31mred\x1b[0m snake_case 修复 **解析器**";
+
+    fn board() -> App {
+        let mut app = app();
+        let mut rows = rows();
+        rows[1].pane.msg = Some(MSG.into());
+        app.set_rows(rows, hosts());
+        app.selected = Some(Spot::Row("local/claude".into()));
+        app
+    }
+
+    /// Each line of the screen, with whether the cells of `word` on it are bold.
+    fn screen(app: &App, width: u16) -> Vec<(String, Vec<(usize, bool)>)> {
+        let now = DateTime::parse_from_rfc3339("2026-01-01T05:43:00Z").unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
+        terminal
+            .draw(|frame| crate::tui::view::draw(frame, app, now.with_timezone(&Utc)))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..30)
+            .map(|y| {
+                let cells: Vec<_> = (0..width).map(|x| &buffer[(x, y)]).collect();
+                let text: String = cells.iter().map(|c| c.symbol()).collect();
+                let bold = cells
+                    .iter()
+                    .enumerate()
+                    .map(|(x, c)| (x, c.modifier.contains(Modifier::BOLD)))
+                    .collect();
+                (text.trim_end().to_owned(), bold)
+            })
+            .collect()
+    }
+
+    fn bold(line: &(String, Vec<(usize, bool)>), word: &str) -> bool {
+        let at = line.0[..line.0.find(word).unwrap()].chars().count();
+        (at..at + word.chars().count()).all(|x| line.1[x].1)
+    }
+
+    #[test]
+    fn msg_and_the_card_show_inline_markdown_and_the_copy_stays_raw() {
+        let mut app = board();
+        let lines = screen(&app, 200);
+        let row = lines.iter().find(|l| l.0.contains("✓")).unwrap();
+        assert!(
+            row.0.ends_with("Tests pass: ran cargo test on the PR"),
+            "MSG takes the line under the heading, without markers: {}",
+            row.0
+        );
+        assert!(bold(row, "Tests pass") && bold(row, "cargo test") && !bold(row, "ran"));
+        let card: Vec<_> = lines
+            .iter()
+            .skip_while(|l| !l.0.starts_with("━━"))
+            .collect();
+        let at = |text: &str| *card.iter().find(|l| l.0.contains(text)).unwrap();
+        assert_eq!(
+            at("Summary").0,
+            " Summary",
+            "the heading is the headline, without #"
+        );
+        assert!(bold(at("Summary"), "Summary"));
+        assert_eq!(
+            at("Tests pass").0,
+            "   Tests pass: ran cargo test on the PR"
+        );
+        assert!(
+            !card
+                .iter()
+                .any(|l| l.0.contains("```") || l.0.trim() == "sh"),
+            "no fence"
+        );
+        assert_eq!(
+            at("next").0,
+            "   - next: merge it",
+            "the card keeps block markers"
+        );
+        assert!(bold(at("next"), "merge") && !bold(at("next"), "next"));
+        // A wide character's second cell reads as a space in the test buffer.
+        assert_eq!(
+            at("snake_case").0,
+            "   red snake_case 修 复  解 析 器",
+            "the escape is gone before mapping"
+        );
+        let line = at("snake_case");
+        assert!(bold(line, "解") && bold(line, "器") && !bold(line, "修") && !bold(line, "snake"));
+        assert!(matches!(
+            typed(&mut app, "yy").pop().flatten(),
+            Some(Effect::Copy { text, .. })
+                if text == crate::output::clean(MSG) && text.starts_with("## Summary ⏎ **Tests pass**: ran `")
+        ));
+    }
+
+    #[test]
+    fn msg_is_cut_by_what_shows_not_by_its_markers() {
+        let lines = screen(&board(), 80);
+        let row = lines.iter().find(|l| l.0.contains("✓")).unwrap();
+        assert!(
+            row.0.ends_with("Tests pass: ran cargo test on …"),
+            "{}",
+            row.0
+        );
+        assert!(bold(row, "Tests pass") && !bold(row, "…"));
+    }
+
+    /// The keys of the rows the list shows, in order.
+    fn listed(app: &App) -> Vec<String> {
+        app.items()
+            .into_iter()
+            .filter_map(|item| match item {
+                crate::tui::app::Item::Row(i) => Some(app.rows[i].key.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn sorting_by_msg_orders_rows_by_what_msg_shows() {
+        let mut app = App::default();
+        let mut rows = Vec::new();
+        for (key, msg) in [
+            ("local/zebra", "## Summary ⏎ Zebra done"),
+            ("local/zeta", "**Zeta** done"),
+            ("local/alpha", "Alpha done"),
+        ] {
+            let mut row = row(key, "idle", "quiet", true);
+            row.pane.msg = Some(msg.into());
+            rows.push(row);
+        }
+        app.set_rows(rows, hosts());
+        press(&mut app, ratatui::crossterm::event::KeyCode::Char('v'));
+        sort(&mut app, 'm');
+        assert_eq!(
+            listed(&app),
+            ["local/alpha", "local/zebra", "local/zeta"],
+            "raw, `## summary` and `**zeta**` would sort first"
+        );
+    }
+
+    #[test]
+    fn the_filter_matches_a_phrase_as_it_shows_and_as_it_was_sent() {
+        for (typed, kept) in [
+            ("cargo test on", true),
+            ("on the pr", true),
+            ("next: merge", true),
+            ("`cargo test`", true),
+            ("x.test/31", true),
+            ("cargo test off", false),
+        ] {
+            let mut app = board();
+            press(&mut app, ratatui::crossterm::event::KeyCode::Char('/'));
+            for c in typed.chars() {
+                press(&mut app, ratatui::crossterm::event::KeyCode::Char(c));
+            }
+            assert_eq!(listed(&app) == ["local/claude"], kept, "/{typed}");
+        }
+    }
+
+    #[test]
+    fn a_report_is_mapped_once_and_again_when_it_changes() {
+        let mut app = board();
+        let row = app.rows[1].clone();
+        let first = app.marked(&row);
+        assert!(std::rc::Rc::ptr_eq(&first, &app.marked(&row)), "kept");
+        let mut rows = app.rows.clone();
+        rows[1].pane.updated_at = Some("2026-01-01T00:01:00Z".into());
+        rows[1].pane.msg = Some("**new**".into());
+        app.set_rows(rows, hosts());
+        let second = app.marked(&app.rows[1].clone());
+        assert_eq!(second.msg, [("new".to_owned(), true)]);
+    }
+}

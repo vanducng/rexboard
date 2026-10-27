@@ -7,6 +7,7 @@ mod effects;
 mod full;
 pub(crate) mod icons;
 mod keys;
+mod markdown;
 mod meta;
 mod prefs;
 pub(crate) mod query;

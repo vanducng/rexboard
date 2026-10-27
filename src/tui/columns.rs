@@ -8,13 +8,12 @@ use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
 
+use super::markdown::{self, Run};
 use super::theme;
 use crate::board::Row;
 use crate::client::Field;
 use crate::harness::usage::Usage;
-use crate::output::{
-    clean, fit, harness, in_state, labels, name, path, span, squeeze, state_word, turn_msg,
-};
+use crate::output::{clean, fit, harness, in_state, labels, name, path, span, squeeze, state_word};
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
 pub enum Tier {
@@ -66,6 +65,8 @@ pub enum Tone {
     /// How full the row's context window or quota is, which `cells` puts in for each row: warn,
     /// then alert.
     Fill(Option<u8>),
+    /// Markdown's strong text in MSG.
+    Strong,
 }
 
 #[derive(Clone, Copy)]
@@ -442,7 +443,7 @@ fn sort_key(id: Col, row: &Row) -> Option<SortKey> {
             (row.usage.as_ref()?.cost_usd? * 100.0).round() as i64,
         )),
         Col::Quota => Some(SortKey::Num(row.usage.as_ref()?.quota_5h?.into())),
-        Col::Msg => text(turn_msg(row)),
+        Col::Msg => text(&markdown::text(&markdown::msg(row))),
         Col::Field(id) => row.ext.get(id).and_then(|value| text(value)),
     }
 }
@@ -597,10 +598,18 @@ impl Columns {
 
     /// One row's cells, each fitted to its column. `place` is its WHERE, or its BLOCK once WHERE
     /// splits; a long session, window or block keeps both its ends.
-    pub fn cells(&self, row: &Row, place: &str, now: DateTime<Utc>) -> Vec<(String, Tone)> {
+    /// One row's cells, each fitted to its column; `msg` is its MSG as markdown runs, cut by what
+    /// shows, so a strong run is a cell of its own.
+    pub fn cells(
+        &self,
+        row: &Row,
+        place: &str,
+        msg: &[Run],
+        now: DateTime<Utc>,
+    ) -> Vec<(String, Tone)> {
         self.cols
             .iter()
-            .map(|(c, width)| {
+            .flat_map(|(c, width)| {
                 let text = match c.id {
                     Col::Glyph => theme::glyph(row, now).to_owned(),
                     Col::State => state(row),
@@ -617,7 +626,16 @@ impl Columns {
                     Col::Tok => usage(row, |u| u.tok.map(crate::output::tokens)),
                     Col::Cost => usage(row, |u| u.cost_usd.map(crate::output::dollars)),
                     Col::Quota => usage(row, |u| u.quota_5h.map(|p| format!("{p}%"))),
-                    Col::Msg => return (fit(turn_msg(row), *width), c.tone),
+                    Col::Msg => {
+                        let shown: String = msg.iter().map(|(text, _)| text.as_str()).collect();
+                        let cut = markdown::restyle(&[fit(&shown, *width)], msg);
+                        return cut[0]
+                            .iter()
+                            .map(|(text, strong)| {
+                                (text.clone(), if *strong { Tone::Strong } else { c.tone })
+                            })
+                            .collect();
+                    }
                     Col::Field(id) => row.ext.get(id).cloned().unwrap_or_else(|| "-".to_owned()),
                 };
                 let figure = |f: fn(&Usage) -> Option<u8>| row.usage.as_ref().and_then(f);
@@ -632,7 +650,7 @@ impl Columns {
                 } else {
                     fitted
                 };
-                (fitted + " ", tone)
+                vec![(fitted + " ", tone)]
             })
             .collect()
     }

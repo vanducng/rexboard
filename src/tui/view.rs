@@ -594,7 +594,7 @@ fn row_line(
         theme::plain()
     };
     let mut spans: Vec<Span> = columns
-        .cells(row, place, now)
+        .cells(row, place, &app.marked(row).msg, now)
         .into_iter()
         .map(|(text, tone)| {
             let style = match tone {
@@ -602,6 +602,7 @@ fn row_line(
                 Tone::Soft => soft,
                 Tone::Dim => theme::quiet(),
                 Tone::Fill(pct) => pct.and_then(theme::fill).unwrap_or(soft),
+                Tone::Strong => soft.patch(theme::strong()),
             };
             Span::styled(text, style)
         })
@@ -840,7 +841,7 @@ mod tests {
         assert!(header.contains(" 5H MSG↑"), "never joins 5H: {header}");
         app.sort = None;
         let columns = Columns::with_usage(160, 160, &[], &app.usage_columns());
-        let cells = columns.cells(app.current().unwrap(), "", Utc::now());
+        let cells = columns.cells(app.current().unwrap(), "", &[], Utc::now());
         let tone = |want: &str| cells.iter().find(|(t, _)| t.trim() == want).unwrap().1;
         assert_eq!(tone("88%"), Tone::Fill(Some(88)));
         assert_eq!(
@@ -1819,6 +1820,19 @@ mod tests {
                     screens.push((name.leak(), app, width, 40));
                 }
             }
+        }
+        for (name, width) in [("markdown 80", 80), ("markdown 140", 140)] {
+            let mut marked = fuller();
+            let mut rows = marked.rows.clone();
+            let row = rows.iter_mut().find(|r| r.key == "local/claude").unwrap();
+            row.pane.msg = Some(
+                "## Summary ⏎ **Tests pass**: ran `cargo test` on [the PR](https://x.test/31) ⏎ \
+                 - next: **merge** it, then `make release` ⏎ ```sh ⏎ snake_case and 2*3*4 stay"
+                    .into(),
+            );
+            marked.set_rows(rows, hosts());
+            marked.selected = Some(Spot::Row("local/claude".into()));
+            screens.push((name, marked, width, 30));
         }
         let mut status = fuller();
         press(&mut status, KeyCode::Char('f'));

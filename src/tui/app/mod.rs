@@ -10,6 +10,7 @@ use super::answer::{Answer, Step};
 use super::columns::{Col, Column, Columns, Sort, UsageShown, field_column, free_letter};
 use super::full::Full;
 use super::keys::{self, Act, K};
+use super::markdown::{self, Run, card_line};
 use super::screen::Screen;
 use super::status::Status;
 use super::views::{Bucket, Key, View, arrange, bucket, views};
@@ -151,6 +152,17 @@ pub struct CardDrawn {
     pub last: usize,
 }
 
+/// A row's message mapped as inline markdown: MSG's one line, and the card's lines.
+pub struct Marked {
+    pub msg: Vec<Run>,
+    pub lines: Vec<Vec<Run>>,
+    /// The whole message as it shows, markers gone, for `/` to match.
+    pub plain: String,
+}
+
+/// What a mapping is kept against: the report's time and its text.
+type Report = (Option<String>, Option<String>);
+
 #[derive(Default)]
 pub struct App {
     /// Agent rows in board order, as serve sends them.
@@ -186,6 +198,8 @@ pub struct App {
     pub drawn: std::cell::Cell<(u16, usize, usize)>,
     /// Whether the list was drawn with blank rows between its groups, which it is while they fit.
     pub spaced: std::cell::Cell<bool>,
+    /// Each row's message as inline markdown, by key, with the report it was mapped from.
+    marked: std::cell::RefCell<BTreeMap<String, (Report, std::rc::Rc<Marked>)>>,
     pub folded: BTreeSet<Bucket>,
     pub peek: Option<Peek>,
     /// The `?` key table is open in the card.
@@ -244,6 +258,33 @@ pub struct App {
 impl App {
     /// New rows from serve. The selection follows its key; a row that newly needs you opens
     /// NEEDS YOU if it was folded.
+    /// A row's message as inline markdown, mapped once per report rather than on every frame.
+    pub fn marked(&self, row: &Row) -> std::rc::Rc<Marked> {
+        let report = (row.pane.updated_at.clone(), row.pane.msg.clone());
+        let mut memo = self.marked.borrow_mut();
+        if let Some((seen, marked)) = memo.get(&row.key)
+            && *seen == report
+        {
+            return marked.clone();
+        }
+        let msg = clean(row.pane.msg.as_deref().unwrap_or_default());
+        let lines: Vec<Vec<Run>> = markdown::lines(&msg)
+            .into_iter()
+            .filter_map(card_line)
+            .collect();
+        let marked = std::rc::Rc::new(Marked {
+            msg: markdown::msg(row),
+            plain: lines
+                .iter()
+                .map(|line| markdown::text(line))
+                .collect::<Vec<_>>()
+                .join(" "),
+            lines,
+        });
+        memo.insert(row.key.clone(), (report, marked.clone()));
+        marked
+    }
+
     pub fn set_rows(&mut self, all: Vec<Row>, hosts: BTreeMap<String, String>) {
         let viewed = self
             .full
@@ -252,6 +293,10 @@ impl App {
             .map(crate::output::name);
         self.panes = all.len();
         self.rows = all.into_iter().filter(|row| row.pane.is_agent()).collect();
+        let keys: BTreeSet<&str> = self.rows.iter().map(|row| row.key.as_str()).collect();
+        self.marked
+            .get_mut()
+            .retain(|key, _| keys.contains(key.as_str()));
         self.hosts = hosts;
         self.link = Link::Up;
         let needs: BTreeSet<String> = self

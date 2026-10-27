@@ -7,11 +7,12 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, CardDrawn, Peek, Spot};
+use super::markdown::{Run, restyle};
 use super::screen::Screen;
 use super::theme;
 use super::view::key_rows;
 use crate::board::Row;
-use crate::output::{BREAK, age, chop, clean, fit, in_state, name, path, state_word};
+use crate::output::{age, chop, clean, fit, in_state, name, path, state_word};
 use crate::pane::bare_title;
 
 /// Text wraps at this width however wide the board, so a line stays readable.
@@ -48,8 +49,8 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
     let right = sent.map(str::to_owned).or_else(|| fresh(row, peek, now));
     let bar = bar(row, right, now, width, false);
     let mut lines = Vec::new();
-    let msg = clean(row.pane.msg.as_deref().unwrap_or_default());
-    let mut segments = msg.split(BREAK).map(str::trim).filter(|s| !s.is_empty());
+    let marked = app.marked(row);
+    let mut segments = marked.lines.iter();
     match segments.next() {
         None if row.pane.source == "inferred" => {
             lines.push(Line::styled(" no status from this pane", theme::strong()));
@@ -59,10 +60,14 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
             ));
         }
         headline => {
-            let headline = headline.unwrap_or(if title.is_empty() { "-" } else { title });
-            lines.extend(indented(headline, " ", text, theme::strong()));
+            let title = [(
+                (if title.is_empty() { "-" } else { title }).to_owned(),
+                false,
+            )];
+            let headline = headline.map_or(&title[..], Vec::as_slice);
+            lines.extend(marked_lines(headline, " ", text, theme::strong()));
             for segment in segments {
-                lines.extend(indented(segment, "   ", text, theme::plain()));
+                lines.extend(marked_lines(segment, "   ", text, theme::plain()));
             }
         }
     }
@@ -275,11 +280,32 @@ fn fresh(row: &Row, peek: Option<&Peek>, now: DateTime<Utc>) -> Option<String> {
 /// `text` wrapped to `width` after `lead`, the lines past the first under it; a word longer than
 /// the line is cut into pieces, so nothing runs off the card.
 fn indented(text: &str, lead: &str, width: usize, style: Style) -> Vec<Line<'static>> {
+    marked_lines(&[(text.to_owned(), false)], lead, width, style)
+}
+
+/// As `indented`, with markdown's strong runs in the strong role.
+fn marked_lines(runs: &[Run], lead: &str, width: usize, style: Style) -> Vec<Line<'static>> {
     let room = width.saturating_sub(lead.width()).max(1);
-    wrap(text, room)
+    let text: String = runs.iter().map(|(text, _)| text.as_str()).collect();
+    let rows: Vec<String> = wrap(&text, room)
         .into_iter()
         .flat_map(|line| chop(&line, room))
-        .map(|line| Line::styled(format!("{lead}{line}"), style))
+        .collect();
+    restyle(&rows, runs)
+        .into_iter()
+        .map(|row| {
+            let spans = row.into_iter().map(|(text, strong)| {
+                Span::styled(
+                    text,
+                    if strong {
+                        style.patch(theme::strong())
+                    } else {
+                        style
+                    },
+                )
+            });
+            Line::from_iter(std::iter::once(Span::styled(lead.to_owned(), style)).chain(spans))
+        })
         .collect()
 }
 
