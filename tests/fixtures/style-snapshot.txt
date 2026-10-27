@@ -854,14 +854,14 @@
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/DIM}━━{Green/Reset/BOLD} ✓ done · claude · ended 5h43m ago {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{Reset/Reset/BOLD} ## Tests pass: ran cargo test on the PR{Reset/Reset/NONE}                                        
+{Reset/Reset/BOLD} Summary{Reset/Reset/NONE}                                                                        
+{Reset/Reset/NONE}   {Reset/Reset/BOLD}Tests pass{Reset/Reset/NONE}: ran {Reset/Reset/BOLD}cargo test{Reset/Reset/NONE} on the PR                                         
 {Reset/Reset/NONE}   - next: {Reset/Reset/BOLD}merge{Reset/Reset/NONE} it, then {Reset/Reset/BOLD}make release{Reset/Reset/NONE}                                          
 {Reset/Reset/NONE}   snake_case and 2*3*4 stay                                                    
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › claude                                                    
 {Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local          {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}claude title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                          
-{Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump{Reset/Reset/NONE}          {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == markdown 140
@@ -885,14 +885,14 @@
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/DIM}━━{Green/Reset/BOLD} ✓ done · claude · ended 5h43m ago {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{Reset/Reset/BOLD} ## Tests pass: ran cargo test on the PR{Reset/Reset/NONE}                                                                                                    
+{Reset/Reset/BOLD} Summary{Reset/Reset/NONE}                                                                                                                                    
+{Reset/Reset/NONE}   {Reset/Reset/BOLD}Tests pass{Reset/Reset/NONE}: ran {Reset/Reset/BOLD}cargo test{Reset/Reset/NONE} on the PR                                                                                                     
 {Reset/Reset/NONE}   - next: {Reset/Reset/BOLD}merge{Reset/Reset/NONE} it, then {Reset/Reset/BOLD}make release{Reset/Reset/NONE}                                                                                                      
 {Reset/Reset/NONE}   snake_case and 2*3*4 stay                                                                                                                
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › claude                                                                                                                
 {Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local          {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                      
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}claude title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                                      
-{Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                   {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == f picker 80

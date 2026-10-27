@@ -1826,8 +1826,8 @@ mod tests {
             let mut rows = marked.rows.clone();
             let row = rows.iter_mut().find(|r| r.key == "local/claude").unwrap();
             row.pane.msg = Some(
-                "## **Tests pass**: ran `cargo test` on [the PR](https://x.test/31) ⏎ \
-                 - next: **merge** it, then `make release` ⏎ snake_case and 2*3*4 stay"
+                "## Summary ⏎ **Tests pass**: ran `cargo test` on [the PR](https://x.test/31) ⏎ \
+                 - next: **merge** it, then `make release` ⏎ ```sh ⏎ snake_case and 2*3*4 stay"
                     .into(),
             );
             marked.set_rows(rows, hosts());

@@ -10,7 +10,7 @@ use super::answer::{Answer, Step};
 use super::columns::{Col, Column, Columns, Sort, UsageShown, field_column, free_letter};
 use super::full::Full;
 use super::keys::{self, Act, K};
-use super::markdown::{Run, inline, unblock};
+use super::markdown::{Run, card_line, msg_line};
 use super::screen::Screen;
 use super::status::Status;
 use super::views::{Bucket, Key, View, arrange, bucket, views};
@@ -266,14 +266,16 @@ impl App {
             return marked.clone();
         }
         let msg = clean(row.pane.msg.as_deref().unwrap_or_default());
+        let lines: Vec<&str> = msg
+            .split(crate::output::BREAK)
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect();
+        // A hook's filler (`Done`, `Allow Bash?`) leaves MSG blank.
+        let filler = crate::output::turn_msg(row).is_empty();
         let marked = std::rc::Rc::new(Marked {
-            msg: inline(unblock(&clean(crate::output::turn_msg(row)))),
-            lines: msg
-                .split(crate::output::BREAK)
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .map(inline)
-                .collect(),
+            msg: if filler { Vec::new() } else { msg_line(&lines) },
+            lines: lines.iter().filter_map(|line| card_line(line)).collect(),
         });
         memo.insert(row.key.clone(), (report, marked.clone()));
         marked

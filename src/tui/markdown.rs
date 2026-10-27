@@ -94,17 +94,56 @@ fn closes(chars: &[char], from: usize, c: char) -> Option<usize> {
     })
 }
 
-/// A line without the block markers it leads with: a heading's `#`s, a quote's `>`, a list's
-/// `-`, `*`, `+` or `1.`, and a code fence.
+/// MSG's line among the message's: the first with words that is not a heading, else the first
+/// heading. A fence line is never one.
+pub fn msg_line(lines: &[&str]) -> Vec<Run> {
+    let worded = |line: &&&str| !fence(line) && !unblock(line).is_empty();
+    let line = lines
+        .iter()
+        .filter(worded)
+        .find(|line| heading(line).is_none())
+        .or_else(|| lines.iter().find(worded));
+    line.map_or_else(Vec::new, |line| inline(unblock(line)))
+}
+
+/// A card line: a heading's text all strong, without its `#`s; a fence line, with its info
+/// string, not at all; any other line as written, list and quote markers kept.
+pub fn card_line(line: &str) -> Option<Vec<Run>> {
+    if fence(line) {
+        return None;
+    }
+    let Some(text) = heading(line) else {
+        return Some(inline(line));
+    };
+    let mut runs = Vec::new();
+    for (text, _) in inline(text) {
+        push(&mut runs, &text, true);
+    }
+    Some(runs)
+}
+
+/// A heading's text: what follows its `#`s and a space.
+fn heading(line: &str) -> Option<&str> {
+    let line = line.trim_start();
+    let hashes = line.len() - line.trim_start_matches('#').len();
+    (hashes > 0 && line[hashes..].starts_with(' ')).then(|| line[hashes..].trim_start())
+}
+
+/// A code fence's line: three backticks and an info string, not code that closes on the line.
+fn fence(line: &str) -> bool {
+    line.trim_start()
+        .strip_prefix("```")
+        .is_some_and(|rest| !rest.contains("```"))
+}
+
+/// A line without the block markers it leads with: a heading's `#`s, a quote's `>`, and a list's
+/// `-`, `*`, `+` or `1.`.
 pub fn unblock(line: &str) -> &str {
     let mut line = line.trim_start();
     loop {
-        let hashes = line.len() - line.trim_start_matches('#').len();
         let digits = line.len() - line.trim_start_matches(|c: char| c.is_ascii_digit()).len();
-        let rest = if let Some(rest) = line.strip_prefix("```") {
-            Some(rest)
-        } else if hashes > 0 && line[hashes..].starts_with(' ') {
-            Some(&line[hashes..])
+        let rest = if let Some(text) = heading(line) {
+            Some(text)
         } else if let Some(rest) = line.strip_prefix('>') {
             Some(rest)
         } else if let Some(rest) = ["- ", "* ", "+ "].iter().find_map(|m| line.strip_prefix(m)) {
@@ -207,7 +246,7 @@ mod tests {
             ("* item", "item"),
             ("> - quoted item", "quoted item"),
             ("12. step", "step"),
-            ("```rust", "rust"),
+            ("```x``` stays", "```x``` stays"),
             ("#123 fixed", "#123 fixed"),
             ("-1 degrees", "-1 degrees"),
             ("3.5 shipped", "3.5 shipped"),
@@ -215,6 +254,36 @@ mod tests {
         ] {
             assert_eq!(unblock(line), want, "{line}");
         }
+    }
+
+    #[test]
+    fn msg_takes_the_first_line_with_words_that_is_not_a_heading() {
+        for (lines, want) in [
+            (
+                &["## Summary", "**Tests pass**: 12", "- more"][..],
+                "[Tests pass]: 12",
+            ),
+            (&["# Title", "```rust", "> quoted **bit**"], "quoted [bit]"),
+            (&["## Only a heading"], "Only a heading"),
+            (&["```sh", "## Plan"], "Plan"),
+            (&["```sh"], ""),
+            (&["`a` first", "## later"], "[a] first"),
+        ] {
+            assert_eq!(drawn(&msg_line(lines)), want, "{lines:?}");
+        }
+    }
+
+    #[test]
+    fn the_card_drops_heading_marks_and_fences_and_keeps_list_and_quote_marks() {
+        let card = |line: &str| card_line(line).map(|runs| drawn(&runs));
+        assert_eq!(card("## The **plan**").as_deref(), Some("[The plan]"));
+        assert_eq!(card("```rust"), None);
+        assert_eq!(card("```"), None);
+        assert_eq!(card("```x``` is code").as_deref(), Some("[x] is code"));
+        assert_eq!(card("- a **b**").as_deref(), Some("- a [b]"));
+        assert_eq!(card("1. one").as_deref(), Some("1. one"));
+        assert_eq!(card("> quote").as_deref(), Some("> quote"));
+        assert_eq!(card("#123 fixed").as_deref(), Some("#123 fixed"));
     }
 
     #[test]
@@ -243,8 +312,8 @@ mod board_tests {
     use crate::tui::app::testkit::*;
     use crate::tui::app::{App, Effect, Spot};
 
-    const MSG: &str = "## **Tests pass**: ran `cargo test` on [the PR](https://x.test/31) \
-                       ⏎ - next: **merge** it ⏎ \x1b[31mred\x1b[0m snake_case 修复 **解析器**";
+    const MSG: &str = "## Summary ⏎ **Tests pass**: ran `cargo test` on [the PR](https://x.test/31) \
+                       ⏎ - next: **merge** it ⏎ ```sh ⏎ \x1b[31mred\x1b[0m snake_case 修复 **解析器**";
 
     fn board() -> App {
         let mut app = app();
@@ -289,7 +358,7 @@ mod board_tests {
         let row = lines.iter().find(|l| l.0.contains("✓")).unwrap();
         assert!(
             row.0.ends_with("Tests pass: ran cargo test on the PR"),
-            "MSG drops the heading and the markers: {}",
+            "MSG takes the line under the heading, without markers: {}",
             row.0
         );
         assert!(bold(row, "Tests pass") && bold(row, "cargo test") && !bold(row, "ran"));
@@ -299,8 +368,20 @@ mod board_tests {
             .collect();
         let at = |text: &str| *card.iter().find(|l| l.0.contains(text)).unwrap();
         assert_eq!(
+            at("Summary").0,
+            " Summary",
+            "the heading is the headline, without #"
+        );
+        assert!(bold(at("Summary"), "Summary"));
+        assert_eq!(
             at("Tests pass").0,
-            " ## Tests pass: ran cargo test on the PR"
+            "   Tests pass: ran cargo test on the PR"
+        );
+        assert!(
+            !card
+                .iter()
+                .any(|l| l.0.contains("```") || l.0.trim() == "sh"),
+            "no fence"
         );
         assert_eq!(
             at("next").0,
@@ -319,7 +400,7 @@ mod board_tests {
         assert!(matches!(
             typed(&mut app, "yy").pop().flatten(),
             Some(Effect::Copy { text, .. })
-                if text == crate::output::clean(MSG) && text.starts_with("## **Tests pass**: ran `")
+                if text == crate::output::clean(MSG) && text.starts_with("## Summary ⏎ **Tests pass**: ran `")
         ));
     }
 
