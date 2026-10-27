@@ -89,14 +89,14 @@ pub fn table(rows: &[Row], now: DateTime<Utc>, width: Option<usize>) -> String {
     out
 }
 
-/// The short harness name the board and `ls` show: `claude` for claude-code, and a `?` when it
-/// is read from the title because the pane has no status record.
+/// The short harness name the board and `ls` show (`claude` for claude-code, `grok` for
+/// grok-build), and a `?` when it is read from the title because the pane has no status record.
 pub fn harness(row: &Row) -> String {
-    let name = match row.pane.harness.as_deref() {
-        Some("claude-code") => "claude",
-        Some(other) => other,
-        None => "-",
-    };
+    let name = row
+        .pane
+        .harness
+        .as_deref()
+        .map_or("-", crate::harness::display);
     if row.pane.source == "inferred" && row.pane.harness.is_some() {
         format!("{name}?")
     } else {

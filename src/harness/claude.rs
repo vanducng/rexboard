@@ -7,6 +7,10 @@ impl Harness for Claude {
         "claude-code"
     }
 
+    fn name(&self) -> &'static str {
+        "claude"
+    }
+
     fn processes(&self) -> &'static [&'static str] {
         &["claude"]
     }

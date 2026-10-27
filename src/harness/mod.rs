@@ -12,6 +12,11 @@ pub trait Harness: Sync {
     /// The wire id: the Rex record `app` its hooks write. Never renamed.
     fn id(&self) -> &'static str;
 
+    /// What the board and `ls` call it: short, for the HARNESS column.
+    fn name(&self) -> &'static str {
+        self.id()
+    }
+
     /// Process names that mean this harness is in front.
     fn processes(&self) -> &'static [&'static str] {
         &[]
@@ -35,6 +40,14 @@ pub trait Harness: Sync {
 
 /// In title order: Claude's glyph is checked before Codex's title.
 pub static BUILTIN: &[&dyn Harness] = &[&claude::Claude, &codex::Codex, &pi::Pi, &grok::Grok];
+
+/// The display name for a wire id; an id rexboard does not know shows as it is.
+pub fn display(id: &str) -> &str {
+    BUILTIN
+        .iter()
+        .find(|h| h.id() == id)
+        .map_or(id, |h| h.name())
+}
 
 /// The process names an agent runs as, besides Claude Code's binary named for its version.
 pub fn processes() -> Vec<&'static str> {
@@ -64,4 +77,17 @@ pub fn name_of(app: Option<String>, process: Option<&str>, title: &str) -> Optio
     };
     app.or_else(|| process.and_then(|p| find(&|h| h.is_process(p))))
         .or_else(|| find(&|h| h.title_hint(title, process)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_harness_shows_its_short_name_and_an_unknown_one_its_id() {
+        assert_eq!(display("claude-code"), "claude");
+        assert_eq!(display("grok-build"), "grok");
+        assert_eq!(display("codex"), "codex");
+        assert_eq!(display("opencode"), "opencode");
+    }
 }

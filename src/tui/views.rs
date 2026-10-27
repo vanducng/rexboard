@@ -66,8 +66,7 @@ fn value(key: Key, row: &Row) -> Bucket {
     match key {
         Key::Status => Bucket::Status(row.group),
         Key::Harness => Bucket::Value(match row.pane.harness.as_deref() {
-            Some("claude-code") => "claude".to_owned(),
-            Some(name) if !name.is_empty() => name.to_owned(),
+            Some(name) if !name.is_empty() => crate::harness::display(name).to_owned(),
             _ => "?".to_owned(),
         }),
         Key::Host => Bucket::Value(row.pane.host.clone()),
