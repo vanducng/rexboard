@@ -377,7 +377,12 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
         return;
     }
     let width = usize::from(area.width);
-    let columns = Columns::with_usage(board.width, width, &app.field_columns(), app.has_usage());
+    let columns = Columns::with_usage(
+        board.width,
+        width,
+        &app.field_columns(),
+        &app.usage_columns(),
+    );
     let area = if board.height >= HEADED {
         let [top, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
         frame.render_widget(Paragraph::new(column_header(&columns, app.sort)), top);
@@ -573,12 +578,7 @@ fn row_line(
                 Tone::State => theme::state(row),
                 Tone::Soft => soft,
                 Tone::Dim => theme::quiet(),
-                Tone::Fill => row
-                    .usage
-                    .as_ref()
-                    .and_then(|u| u.ctx_pct)
-                    .and_then(theme::fill)
-                    .unwrap_or(soft),
+                Tone::Fill(pct) => pct.and_then(theme::fill).unwrap_or(soft),
             };
             Span::styled(text, style)
         })
@@ -718,7 +718,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
-    fn usage_shows_as_model_ctx_and_tok_from_140_columns_and_in_the_card() {
+    fn usage_shows_model_ctx_and_tok_from_140_columns_cost_and_5h_when_asked_and_in_the_card() {
         use crate::harness::usage::Usage;
         let mut app = fuller();
         let plain = render(&app, 160, 30);
@@ -734,6 +734,8 @@ mod tests {
                     model: Some("Opus 5.5".into()),
                     ctx_pct: Some(88),
                     tok: Some(820_000),
+                    cost_usd: Some(4.2),
+                    quota_5h: Some(12),
                     ..Usage::default()
                 });
             }
@@ -771,6 +773,28 @@ mod tests {
             !render(&app, 130, 30).lines().any(|l| l.contains("MODEL")),
             "below 140, no room"
         );
+        assert!(
+            !header.contains("COST") && !header.contains("5H"),
+            "COST and 5H wait for tui.json: {header}"
+        );
+        app.columns = vec!["5h".into(), "cost".into(), "later".into()];
+        let opted = render(&app, 160, 30);
+        let header = opted.lines().find(|l| l.contains("HARNESS")).unwrap();
+        assert!(
+            header.find("TOK") < header.find("COST") && header.find("COST") < header.find("5H"),
+            "in the table's order, whatever tui.json's: {header}"
+        );
+        let line = opted.lines().find(|l| l.contains("Opus 5.5")).unwrap();
+        assert!(line.contains("$4.20") && line.contains("12%"), "{line}");
+        let columns = Columns::with_usage(160, 160, &[], &app.usage_columns());
+        let cells = columns.cells(app.current().unwrap(), "", Utc::now());
+        let tone = |want: &str| cells.iter().find(|(t, _)| t.trim() == want).unwrap().1;
+        assert_eq!(tone("88%"), Tone::Fill(Some(88)));
+        assert_eq!(
+            tone("12%"),
+            Tone::Fill(Some(12)),
+            "5H fills by its own figure"
+        );
     }
 
     #[test]
@@ -785,6 +809,10 @@ mod tests {
         assert_eq!(crate::output::tokens(67_910), "68k");
         assert_eq!(crate::output::tokens(820_000), "820k");
         assert_eq!(crate::output::tokens(1_000_000), "1.0M");
+        assert_eq!(crate::output::dollars(0.004), "$0.00");
+        assert_eq!(crate::output::dollars(99.99), "$99.99");
+        assert_eq!(crate::output::dollars(99.996), "$100");
+        assert_eq!(crate::output::dollars(1234.5), "$1234");
     }
 
     use crate::tui::app::{App, Effect, Spot};

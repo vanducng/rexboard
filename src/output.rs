@@ -437,6 +437,15 @@ pub fn tokens(n: u64) -> String {
     }
 }
 
+/// Cents while they fit in a 6-column cell, then whole dollars.
+pub fn dollars(usd: f64) -> String {
+    if usd < 99.995 {
+        format!("${usd:.2}")
+    } else {
+        format!("${usd:.0}")
+    }
+}
+
 pub fn span(secs: i64) -> String {
     let secs = secs.max(0);
     match secs {

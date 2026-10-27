@@ -106,8 +106,8 @@ impl App {
 
     /// The column a sort letter names: a built-in one, or a field's.
     pub(super) fn column_by_letter(&self, letter: char) -> Option<&'static Column> {
-        by_letter(letter)
-            .filter(|c| self.has_usage() || !crate::tui::columns::is_usage(c.id))
+        self.builtin_columns()
+            .find(|c| c.letter == Some(letter))
             .or_else(|| {
                 let (field, _) = self.fields.iter().find(|(_, l)| *l == Some(letter))?;
                 Some(field_column(field, Some(letter)))
@@ -123,17 +123,27 @@ impl App {
             .collect()
     }
 
-    /// The built-in columns `o` can sort by: MODEL, CTX and TOK only while some row has them.
+    /// The built-in columns `o` can sort by: the usage ones only while they show.
     pub fn builtin_columns(&self) -> impl Iterator<Item = &'static Column> {
-        let usage = self.has_usage();
+        let usage = self.usage_columns();
         crate::tui::columns::COLUMNS
             .iter()
-            .filter(move |c| usage || !crate::tui::columns::is_usage(c.id))
+            .filter(move |c| !crate::tui::columns::is_usage(c.id) || usage.contains(&c.id))
     }
 
-    /// Whether some row reports what its turn used, so the list shows MODEL, CTX and TOK.
-    pub fn has_usage(&self) -> bool {
-        self.rows.iter().any(|row| row.usage.is_some())
+    /// The usage columns the list shows: none until some row reports what its turn used, then
+    /// MODEL, CTX and TOK, and COST and 5H when tui.json's `columns` names them.
+    pub fn usage_columns(&self) -> Vec<Col> {
+        if !self.rows.iter().any(|row| row.usage.is_some()) {
+            return Vec::new();
+        }
+        use crate::tui::columns::{USAGE, USAGE_SHOWN, opt_in};
+        USAGE
+            .into_iter()
+            .filter(|c| {
+                USAGE_SHOWN.contains(c) || self.columns.iter().any(|name| opt_in(name) == Some(*c))
+            })
+            .collect()
     }
 
     /// The columns of the fields, but for the one the view groups by, whose group header says it.

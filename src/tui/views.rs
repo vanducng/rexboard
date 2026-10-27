@@ -370,6 +370,9 @@ mod tests {
             ctx_pct: Some(7),
             ..Default::default()
         });
+        sort(&mut app, 'c');
+        assert_eq!(app.sort, None, "COST sorts only once tui.json asks for it");
+        app.columns = vec!["cost".into(), "5h".into()];
         for column in COLUMNS.iter().filter(|c| c.letter.is_some()) {
             let letter = column.letter.unwrap();
             let press_it = |app: &mut App| sort(app, letter);

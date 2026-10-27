@@ -294,8 +294,12 @@ impl App {
             return;
         }
         if self.height >= HEADED && y == HEADER_ROW {
-            let columns =
-                Columns::with_usage(self.width, list, &self.field_columns(), self.has_usage());
+            let columns = Columns::with_usage(
+                self.width,
+                list,
+                &self.field_columns(),
+                &self.usage_columns(),
+            );
             if let Some(letter) = columns.at(usize::from(x), self.sort).and_then(|c| c.letter) {
                 self.sort_by(letter);
             }

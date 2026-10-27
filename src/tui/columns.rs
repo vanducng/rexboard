@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 use super::theme;
 use crate::board::Row;
 use crate::client::Field;
+use crate::harness::usage::Usage;
 use crate::output::{
     clean, fit, harness, in_state, labels, name, path, span, squeeze, state_word, turn_msg,
 };
@@ -49,6 +50,8 @@ pub enum Col {
     Model,
     Ctx,
     Tok,
+    Cost,
+    Quota,
     Msg,
     /// An extension field, by its id (`<extension>.<field>`).
     Field(&'static str),
@@ -60,8 +63,9 @@ pub enum Tone {
     State,
     Soft,
     Dim,
-    /// How full the row's context window is: warn, then alert.
-    Fill,
+    /// How full the row's context window or quota is, which `cells` puts in for each row: warn,
+    /// then alert.
+    Fill(Option<u8>),
 }
 
 #[derive(Clone, Copy)]
@@ -83,12 +87,23 @@ const FIELDS_ALL: u16 = 160;
 /// A field column's width, the gap after it included.
 const FIELD_WIDTH: usize = 12;
 const ALWAYS: RangeInclusive<u16> = 0..=u16::MAX;
-/// MODEL, CTX and TOK show from this width, and only while some row reports its usage.
+/// MODEL, CTX and TOK show from this width, and only while some row reports its usage; COST
+/// and 5H too when tui.json's `columns` names them.
 pub const USAGE_FROM: u16 = 140;
-const USAGE: [Col; 3] = [Col::Model, Col::Ctx, Col::Tok];
+pub const USAGE: [Col; 5] = [Col::Model, Col::Ctx, Col::Tok, Col::Cost, Col::Quota];
+pub const USAGE_SHOWN: [Col; 3] = [Col::Model, Col::Ctx, Col::Tok];
 
 pub fn is_usage(id: Col) -> bool {
     USAGE.contains(&id)
+}
+
+/// The opt-in column tui.json's `columns` names; any other name is none.
+pub fn opt_in(name: &str) -> Option<Col> {
+    match name {
+        "cost" => Some(Col::Cost),
+        "5h" => Some(Col::Quota),
+        _ => None,
+    }
 }
 
 /// A sort's direction: `Up` is a to z, newest or shortest first, and for STATE most urgent first.
@@ -150,9 +165,9 @@ const fn column(
 }
 
 /// Every column, left to right. Sort letters, after `o`: s state, a age, t turn, h harness, o host,
-/// w where, e session, n window, b block, d model, x ctx, k tok, m msg. The usage letters are rare
-/// first letters, so an extension field keeps its own.
-pub const COLUMNS: [Column; 14] = [
+/// w where, e session, n window, b block, d model, x ctx, k tok, c cost, 5 5h, m msg. The usage
+/// letters are rare first letters, so an extension field keeps its own.
+pub const COLUMNS: [Column; 16] = [
     column(
         Col::Glyph,
         "",
@@ -259,7 +274,7 @@ pub const COLUMNS: [Column; 14] = [
         Dir::Down,
         USAGE_FROM..=u16::MAX,
         Width::Fixed(5),
-        Tone::Fill,
+        Tone::Fill(None),
     ),
     column(
         Col::Tok,
@@ -269,6 +284,24 @@ pub const COLUMNS: [Column; 14] = [
         USAGE_FROM..=u16::MAX,
         Width::Fixed(6),
         Tone::Soft,
+    ),
+    column(
+        Col::Cost,
+        "COST",
+        Some('c'),
+        Dir::Down,
+        USAGE_FROM..=u16::MAX,
+        Width::Fixed(7),
+        Tone::Soft,
+    ),
+    column(
+        Col::Quota,
+        "5H",
+        Some('5'),
+        Dir::Down,
+        USAGE_FROM..=u16::MAX,
+        Width::Fixed(5),
+        Tone::Fill(None),
     ),
     column(
         Col::Msg,
@@ -377,6 +410,11 @@ fn sort_key(id: Col, row: &Row) -> Option<SortKey> {
         Col::Model => row.usage.as_ref()?.model.as_deref().and_then(text),
         Col::Ctx => Some(SortKey::Num(row.usage.as_ref()?.ctx_pct?.into())),
         Col::Tok => Some(SortKey::Num(row.usage.as_ref()?.tok?.try_into().ok()?)),
+        // Cents, which order the same as dollars.
+        Col::Cost => Some(SortKey::Num(
+            (row.usage.as_ref()?.cost_usd? * 100.0).round() as i64,
+        )),
+        Col::Quota => Some(SortKey::Num(row.usage.as_ref()?.quota_5h?.into())),
         Col::Msg => text(turn_msg(row)),
         Col::Field(id) => row.ext.get(id).and_then(|value| text(value)),
     }
@@ -394,7 +432,7 @@ pub fn compare(a: &Row, b: &Row, (id, dir): Sort) -> Ordering {
 }
 
 /// A usage figure, or `-` when the row has none: blank is blank, never zero.
-fn usage(row: &Row, figure: impl Fn(&crate::harness::usage::Usage) -> Option<String>) -> String {
+fn usage(row: &Row, figure: impl Fn(&Usage) -> Option<String>) -> String {
     row.usage
         .as_ref()
         .and_then(figure)
@@ -410,14 +448,19 @@ pub struct Columns {
 
 impl Columns {
     /// `fields` are the extension field columns to show after HOST, in order; from FIELDS_FROM
-    /// columns, and only the first two below FIELDS_ALL. No MODEL, CTX or TOK.
+    /// columns, and only the first two below FIELDS_ALL. No usage columns.
     #[cfg(test)]
     pub fn new(board: u16, list: usize, fields: &[&'static Column]) -> Columns {
-        Self::with_usage(board, list, fields, false)
+        Self::with_usage(board, list, fields, &[])
     }
 
-    /// As `new`, with MODEL, CTX and TOK when `usage`: some row reports what its turn used.
-    pub fn with_usage(board: u16, list: usize, fields: &[&'static Column], usage: bool) -> Columns {
+    /// As `new`, with the usage columns in `usage` (MODEL, CTX, TOK, COST, 5H).
+    pub fn with_usage(
+        board: u16,
+        list: usize,
+        fields: &[&'static Column],
+        usage: &[Col],
+    ) -> Columns {
         let tier = tier(board);
         let fields = match board {
             ..FIELDS_FROM => &[][..],
@@ -426,7 +469,7 @@ impl Columns {
         };
         let mut shown: Vec<&'static Column> = COLUMNS
             .iter()
-            .filter(|c| c.boards.contains(&board) && (usage || !USAGE.contains(&c.id)))
+            .filter(|c| c.boards.contains(&board) && (!is_usage(c.id) || usage.contains(&c.id)))
             .collect();
         if let Some(host) = shown.iter().position(|c| c.id == Col::Host) {
             shown.splice(host + 1..host + 1, fields.iter().copied());
@@ -512,10 +555,18 @@ impl Columns {
                     Col::Model => usage(row, |u| u.model.clone()),
                     Col::Ctx => usage(row, |u| u.ctx_pct.map(|p| format!("{p}%"))),
                     Col::Tok => usage(row, |u| u.tok.map(crate::output::tokens)),
+                    Col::Cost => usage(row, |u| u.cost_usd.map(crate::output::dollars)),
+                    Col::Quota => usage(row, |u| u.quota_5h.map(|p| format!("{p}%"))),
                     Col::Msg => return (fit(turn_msg(row), *width), c.tone),
                     Col::Field(id) => row.ext.get(id).cloned().unwrap_or_else(|| "-".to_owned()),
                 };
-                (fit(&text, width.saturating_sub(1)) + " ", c.tone)
+                let figure = |f: fn(&Usage) -> Option<u8>| row.usage.as_ref().and_then(f);
+                let tone = match c.id {
+                    Col::Ctx => Tone::Fill(figure(|u| u.ctx_pct)),
+                    Col::Quota => Tone::Fill(figure(|u| u.quota_5h)),
+                    _ => c.tone,
+                };
+                (fit(&text, width.saturating_sub(1)) + " ", tone)
             })
             .collect()
     }

@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Prefs {
     /// `c` hid the card; missing is shown. The name is from when the card was a side pane, kept
     /// so an existing choice carries over.
@@ -20,6 +20,25 @@ pub struct Prefs {
         skip_serializing_if = "Option::is_none"
     )]
     pub card_height: Option<CardHeight>,
+    /// The opt-in columns to show, by name (`cost`, `5h`), kept as written so a save keeps a
+    /// name a later build knows.
+    #[serde(
+        default,
+        deserialize_with = "names",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub columns: Vec<String>,
+}
+
+/// Anything but a list of names is none, and keeps the rest of the file.
+fn names<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    Ok(match serde_json::Value::deserialize(d)? {
+        serde_json::Value::Array(items) => items
+            .into_iter()
+            .filter_map(|item| item.as_str().map(str::to_owned))
+            .collect(),
+        _ => Vec::new(),
+    })
 }
 
 /// `"card_height": 12` rows or `"card_height": "40%"` of the board, the same for every row.
@@ -111,6 +130,7 @@ mod tests {
             motion: Motion::Reduced,
             icons: Icons::Nerd,
             card_height: Some(CardHeight::Percent(30)),
+            columns: vec!["cost".into(), "5h".into()],
         };
         save(&path, &kept).unwrap();
         assert_eq!(load(&path), kept);
@@ -127,6 +147,7 @@ mod tests {
                 motion: Motion::Full,
                 icons: Icons::Text,
                 card_height: None,
+                columns: Vec::new(),
             },
             "an unknown motion is full and keeps the rest"
         );
@@ -138,6 +159,7 @@ mod tests {
                 motion: Motion::Reduced,
                 icons: Icons::Text,
                 card_height: None,
+                columns: Vec::new(),
             },
             "unknown icons are words and keep the rest"
         );
@@ -156,6 +178,19 @@ mod tests {
             .unwrap();
             let prefs = load(&path);
             assert_eq!(prefs.card_height, want, "{text}");
+            assert_eq!(prefs.motion, Motion::Reduced, "{text} keeps the rest");
+        }
+        for (text, want) in [
+            (r#"["cost", 5, "later"]"#, vec!["cost", "later"]),
+            (r#""cost""#, vec![]),
+        ] {
+            std::fs::write(
+                &path,
+                format!(r#"{{"columns": {text}, "motion": "reduced"}}"#),
+            )
+            .unwrap();
+            let prefs = load(&path);
+            assert_eq!(prefs.columns, want, "{text}");
             assert_eq!(prefs.motion, Motion::Reduced, "{text} keeps the rest");
         }
         std::fs::write(&path, r#"{"detail": 0.4}"#).unwrap();
