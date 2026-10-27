@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/vanducng/rexboard/compare/v0.12.0...v0.13.0) (2026-10-27)
+
+
+### Features
+
+* **harness:** model and context per agent, from each harness's own turn ([7f15ba5](https://github.com/vanducng/rexboard/commit/7f15ba54aaf459f356116d19d17dc2a53d162cc7))
+
 ## [0.12.0](https://github.com/vanducng/rexboard/compare/v0.11.1...v0.12.0) (2026-10-26)
 
 
