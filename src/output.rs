@@ -428,6 +428,15 @@ pub fn age(at: &str, now: DateTime<Utc>) -> String {
 }
 
 /// A length of time, in the two largest units past an hour: `30s`, `12m`, `5h43m`, `3d0h`.
+/// A token count in four characters or fewer: `950`, `82k`, `820k`, `1.2M`.
+pub fn tokens(n: u64) -> String {
+    match n {
+        0..1000 => n.to_string(),
+        1000..999_500 => format!("{}k", (n + 500) / 1000),
+        _ => format!("{:.1}M", n as f64 / 1e6),
+    }
+}
+
 pub fn span(secs: i64) -> String {
     let secs = secs.max(0);
     match secs {

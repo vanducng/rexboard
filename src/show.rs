@@ -84,6 +84,11 @@ fn text(row: &Row, fields: &[Field], tail: Option<&[String]>) -> String {
         ("harness", harness(row)),
     ];
     facts.extend(row.last_turn.map(|secs| ("turn", span(secs))));
+    if let Some(usage) = &row.usage {
+        facts.extend(usage.model.as_deref().map(|m| ("model", clean(m))));
+        facts.extend(usage.ctx_pct.map(|p| ("ctx", format!("{p}%"))));
+        facts.extend(usage.tok.map(|t| ("tok", crate::output::tokens(t))));
+    }
     for field in fields {
         if let Some(value) = row.ext.get(&field.id) {
             facts.push((field.name.as_str(), clean(value)));

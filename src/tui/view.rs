@@ -166,8 +166,7 @@ fn fixed_height(app: &App, body: Rect) -> u16 {
 fn prefix_keys(app: &App, prefix: char, width: usize) -> Line<'static> {
     let pairs: Vec<(String, String)> = if prefix == 'o' {
         let fields = app.field_columns();
-        crate::tui::columns::COLUMNS
-            .iter()
+        app.builtin_columns()
             .chain(fields.iter().copied())
             .filter_map(|c| Some((c.letter?.to_string(), c.header.to_lowercase())))
             .collect()
@@ -378,7 +377,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
         return;
     }
     let width = usize::from(area.width);
-    let columns = Columns::new(board.width, width, &app.field_columns());
+    let columns = Columns::with_usage(board.width, width, &app.field_columns(), app.has_usage());
     let area = if board.height >= HEADED {
         let [top, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
         frame.render_widget(Paragraph::new(column_header(&columns, app.sort)), top);
@@ -574,6 +573,12 @@ fn row_line(
                 Tone::State => theme::state(row),
                 Tone::Soft => soft,
                 Tone::Dim => theme::quiet(),
+                Tone::Fill => row
+                    .usage
+                    .as_ref()
+                    .and_then(|u| u.ctx_pct)
+                    .and_then(theme::fill)
+                    .unwrap_or(soft),
             };
             Span::styled(text, style)
         })
@@ -711,6 +716,76 @@ mod tests {
     use crate::tui::app::testkit::*;
 
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn usage_shows_as_model_ctx_and_tok_from_140_columns_and_in_the_card() {
+        use crate::harness::usage::Usage;
+        let mut app = fuller();
+        let plain = render(&app, 160, 30);
+        assert!(
+            !plain.contains("MODEL"),
+            "no row reports usage, no columns:\n{plain}"
+        );
+        let key = app.current().unwrap().key.clone();
+        let mut rows = app.rows.clone();
+        for row in &mut rows {
+            if row.key == key {
+                row.usage = Some(Usage {
+                    model: Some("Opus 5.5".into()),
+                    ctx_pct: Some(88),
+                    tok: Some(820_000),
+                    ..Usage::default()
+                });
+            }
+        }
+        app.set_rows(rows, app.hosts.clone());
+        let wide = render(&app, 160, 30);
+        let header = wide.lines().find(|l| l.contains("HARNESS")).unwrap();
+        assert!(
+            header.contains("MODEL") && header.contains("CTX") && header.contains("TOK"),
+            "{wide}"
+        );
+        let line = wide.lines().find(|l| l.contains("Opus 5.5")).expect(&wide);
+        assert!(line.contains("88%") && line.contains("820k"), "{line}");
+        assert!(
+            wide.lines()
+                .filter(|l| l.contains("claude") && !l.contains("Opus"))
+                .all(|l| l.contains(" -  ")),
+            "a row with no usage shows -, not 0:\n{wide}"
+        );
+        let card = card_of(&wide);
+        assert!(
+            card.iter()
+                .any(|l| l.contains("model") && l.contains("Opus 5.5")),
+            "{card:#?}"
+        );
+        assert!(
+            card.iter().any(|l| l.contains("ctx") && l.contains("88%")),
+            "{card:#?}"
+        );
+        assert!(
+            card.iter().any(|l| l.contains("tok") && l.contains("820k")),
+            "{card:#?}"
+        );
+        assert!(
+            !render(&app, 130, 30).lines().any(|l| l.contains("MODEL")),
+            "below 140, no room"
+        );
+    }
+
+    #[test]
+    fn a_context_warns_from_70_and_alerts_from_85() {
+        assert_eq!(theme::fill(69), None);
+        assert_eq!(
+            theme::fill(70),
+            Some(Style::new().fg(ratatui::style::Color::Yellow))
+        );
+        assert_eq!(theme::fill(85), Some(theme::alert()));
+        assert_eq!(crate::output::tokens(950), "950");
+        assert_eq!(crate::output::tokens(67_910), "68k");
+        assert_eq!(crate::output::tokens(820_000), "820k");
+        assert_eq!(crate::output::tokens(1_000_000), "1.0M");
+    }
 
     use crate::tui::app::{App, Effect, Spot};
 

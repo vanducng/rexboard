@@ -106,20 +106,34 @@ impl App {
 
     /// The column a sort letter names: a built-in one, or a field's.
     pub(super) fn column_by_letter(&self, letter: char) -> Option<&'static Column> {
-        by_letter(letter).or_else(|| {
-            let (field, _) = self.fields.iter().find(|(_, l)| *l == Some(letter))?;
-            Some(field_column(field, Some(letter)))
-        })
+        by_letter(letter)
+            .filter(|c| self.has_usage() || !crate::tui::columns::is_usage(c.id))
+            .or_else(|| {
+                let (field, _) = self.fields.iter().find(|(_, l)| *l == Some(letter))?;
+                Some(field_column(field, Some(letter)))
+            })
     }
 
     /// The sort letters `o` takes, built-in then the fields'.
     pub fn sort_letters(&self) -> Vec<String> {
-        crate::tui::columns::COLUMNS
-            .iter()
+        self.builtin_columns()
             .filter_map(|c| c.letter)
             .chain(self.fields.iter().filter_map(|(_, l)| *l))
             .map(String::from)
             .collect()
+    }
+
+    /// The built-in columns `o` can sort by: MODEL, CTX and TOK only while some row has them.
+    pub fn builtin_columns(&self) -> impl Iterator<Item = &'static Column> {
+        let usage = self.has_usage();
+        crate::tui::columns::COLUMNS
+            .iter()
+            .filter(move |c| usage || !crate::tui::columns::is_usage(c.id))
+    }
+
+    /// Whether some row reports what its turn used, so the list shows MODEL, CTX and TOK.
+    pub fn has_usage(&self) -> bool {
+        self.rows.iter().any(|row| row.usage.is_some())
     }
 
     /// The columns of the fields, but for the one the view groups by, whose group header says it.

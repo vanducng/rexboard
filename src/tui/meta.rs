@@ -9,7 +9,7 @@ use super::icons;
 use super::theme;
 use crate::board::Row;
 use crate::client::Field;
-use crate::output::{SEP, clean, fit, harness, labels, path, span};
+use crate::output::{SEP, clean, fit, harness, labels, path, span, tokens};
 use crate::pane::bare_title;
 
 /// A fact the card states. Its label is one token: a word, or with `"icons": "nerd"` a glyph.
@@ -18,6 +18,9 @@ pub enum Fact {
     Host,
     Harness,
     Turn,
+    Model,
+    Ctx,
+    Tok,
     Title,
     Source,
     Where,
@@ -30,6 +33,9 @@ impl Fact {
                 Fact::Host => icons::HOST.glyph,
                 Fact::Harness => icons::harness(row.pane.harness.as_deref()).glyph,
                 Fact::Turn => icons::TURN.glyph,
+                Fact::Model => icons::MODEL.glyph,
+                Fact::Ctx => icons::CTX.glyph,
+                Fact::Tok => icons::TOK.glyph,
                 Fact::Title => icons::TITLE.glyph,
                 Fact::Source => icons::source(&row.pane.source).map_or("source", |i| i.glyph),
                 // The session's mark leads `where`, whose window and block carry their own.
@@ -40,6 +46,9 @@ impl Fact {
             Fact::Host => "host",
             Fact::Harness => "harness",
             Fact::Turn => "turn",
+            Fact::Model => "model",
+            Fact::Ctx => "ctx",
+            Fact::Tok => "tok",
             Fact::Title => "title",
             Fact::Source => "source",
             Fact::Where => "where",
@@ -56,6 +65,7 @@ const GAP: usize = 3;
 /// The facts for `row` in `width` columns.
 pub fn lines(app: &App, row: &Row, width: usize) -> Vec<Line<'static>> {
     let title = bare_title(&row.pane.title);
+    let usage = row.usage.as_ref();
     // How the agent runs, then what the pane calls itself: each set starts its own row.
     let labelled = |facts: Vec<Option<(Fact, String)>>| -> Vec<(&'static str, String)> {
         facts
@@ -68,6 +78,13 @@ pub fn lines(app: &App, row: &Row, width: usize) -> Vec<Line<'static>> {
         Some((Fact::Host, row.pane.host.clone())),
         Some((Fact::Harness, harness(row))),
         row.last_turn.map(|secs| (Fact::Turn, span(secs))),
+        usage
+            .and_then(|u| u.model.clone())
+            .map(|m| (Fact::Model, clean(&m))),
+        usage
+            .and_then(|u| u.ctx_pct)
+            .map(|p| (Fact::Ctx, format!("{p}%"))),
+        usage.and_then(|u| u.tok).map(|t| (Fact::Tok, tokens(t))),
     ]);
     let names = labelled(vec![
         (!title.is_empty()).then(|| (Fact::Title, clean(title))),

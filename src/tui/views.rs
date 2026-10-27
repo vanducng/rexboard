@@ -366,6 +366,10 @@ mod tests {
     fn every_sort_letter_sorts_then_flips_then_clears() {
         use crate::tui::columns::COLUMNS;
         let mut app = app();
+        app.rows[0].usage = Some(crate::harness::usage::Usage {
+            ctx_pct: Some(7),
+            ..Default::default()
+        });
         for column in COLUMNS.iter().filter(|c| c.letter.is_some()) {
             let letter = column.letter.unwrap();
             let press_it = |app: &mut App| sort(app, letter);

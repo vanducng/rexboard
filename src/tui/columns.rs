@@ -46,6 +46,9 @@ pub enum Col {
     Session,
     Window,
     Block,
+    Model,
+    Ctx,
+    Tok,
     Msg,
     /// An extension field, by its id (`<extension>.<field>`).
     Field(&'static str),
@@ -57,6 +60,8 @@ pub enum Tone {
     State,
     Soft,
     Dim,
+    /// How full the row's context window is: warn, then alert.
+    Fill,
 }
 
 #[derive(Clone, Copy)]
@@ -78,6 +83,13 @@ const FIELDS_ALL: u16 = 160;
 /// A field column's width, the gap after it included.
 const FIELD_WIDTH: usize = 12;
 const ALWAYS: RangeInclusive<u16> = 0..=u16::MAX;
+/// MODEL, CTX and TOK show from this width, and only while some row reports its usage.
+pub const USAGE_FROM: u16 = 140;
+const USAGE: [Col; 3] = [Col::Model, Col::Ctx, Col::Tok];
+
+pub fn is_usage(id: Col) -> bool {
+    USAGE.contains(&id)
+}
 
 /// A sort's direction: `Up` is a to z, newest or shortest first, and for STATE most urgent first.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -138,8 +150,9 @@ const fn column(
 }
 
 /// Every column, left to right. Sort letters, after `o`: s state, a age, t turn, h harness, o host,
-/// w where, e session, n window, b block, m msg.
-pub const COLUMNS: [Column; 11] = [
+/// w where, e session, n window, b block, d model, x ctx, k tok, m msg. The usage letters are rare
+/// first letters, so an extension field keeps its own.
+pub const COLUMNS: [Column; 14] = [
     column(
         Col::Glyph,
         "",
@@ -228,6 +241,33 @@ pub const COLUMNS: [Column; 11] = [
         Dir::Up,
         SPLIT..=u16::MAX,
         Width::Part(2),
+        Tone::Soft,
+    ),
+    column(
+        Col::Model,
+        "MODEL",
+        Some('d'),
+        Dir::Up,
+        USAGE_FROM..=u16::MAX,
+        Width::Fixed(13),
+        Tone::Soft,
+    ),
+    column(
+        Col::Ctx,
+        "CTX",
+        Some('x'),
+        Dir::Down,
+        USAGE_FROM..=u16::MAX,
+        Width::Fixed(5),
+        Tone::Fill,
+    ),
+    column(
+        Col::Tok,
+        "TOK",
+        Some('k'),
+        Dir::Down,
+        USAGE_FROM..=u16::MAX,
+        Width::Fixed(6),
         Tone::Soft,
     ),
     column(
@@ -334,6 +374,9 @@ fn sort_key(id: Col, row: &Row) -> Option<SortKey> {
         Col::Session => text(&row.pane.session),
         Col::Window => text(&row.pane.tab),
         Col::Block => text(&name(row)),
+        Col::Model => row.usage.as_ref()?.model.as_deref().and_then(text),
+        Col::Ctx => Some(SortKey::Num(row.usage.as_ref()?.ctx_pct?.into())),
+        Col::Tok => Some(SortKey::Num(row.usage.as_ref()?.tok?.try_into().ok()?)),
         Col::Msg => text(turn_msg(row)),
         Col::Field(id) => row.ext.get(id).and_then(|value| text(value)),
     }
@@ -350,6 +393,14 @@ pub fn compare(a: &Row, b: &Row, (id, dir): Sort) -> Ordering {
     }
 }
 
+/// A usage figure, or `-` when the row has none: blank is blank, never zero.
+fn usage(row: &Row, figure: impl Fn(&crate::harness::usage::Usage) -> Option<String>) -> String {
+    row.usage
+        .as_ref()
+        .and_then(figure)
+        .unwrap_or_else(|| "-".to_owned())
+}
+
 /// The columns a board `board` columns wide shows in a list `list` columns wide, each with its
 /// width.
 pub struct Columns {
@@ -359,8 +410,14 @@ pub struct Columns {
 
 impl Columns {
     /// `fields` are the extension field columns to show after HOST, in order; from FIELDS_FROM
-    /// columns, and only the first two below FIELDS_ALL.
+    /// columns, and only the first two below FIELDS_ALL. No MODEL, CTX or TOK.
+    #[cfg(test)]
     pub fn new(board: u16, list: usize, fields: &[&'static Column]) -> Columns {
+        Self::with_usage(board, list, fields, false)
+    }
+
+    /// As `new`, with MODEL, CTX and TOK when `usage`: some row reports what its turn used.
+    pub fn with_usage(board: u16, list: usize, fields: &[&'static Column], usage: bool) -> Columns {
         let tier = tier(board);
         let fields = match board {
             ..FIELDS_FROM => &[][..],
@@ -369,7 +426,7 @@ impl Columns {
         };
         let mut shown: Vec<&'static Column> = COLUMNS
             .iter()
-            .filter(|c| c.boards.contains(&board))
+            .filter(|c| c.boards.contains(&board) && (usage || !USAGE.contains(&c.id)))
             .collect();
         if let Some(host) = shown.iter().position(|c| c.id == Col::Host) {
             shown.splice(host + 1..host + 1, fields.iter().copied());
@@ -452,6 +509,9 @@ impl Columns {
                     Col::Session => squeeze(&clean(&row.pane.session), width.saturating_sub(1)),
                     Col::Window => squeeze(&clean(&row.pane.tab), width.saturating_sub(1)),
                     Col::Block => squeeze(place, width.saturating_sub(1)),
+                    Col::Model => usage(row, |u| u.model.clone()),
+                    Col::Ctx => usage(row, |u| u.ctx_pct.map(|p| format!("{p}%"))),
+                    Col::Tok => usage(row, |u| u.tok.map(crate::output::tokens)),
                     Col::Msg => return (fit(turn_msg(row), *width), c.tone),
                     Col::Field(id) => row.ext.get(id).cloned().unwrap_or_else(|| "-".to_owned()),
                 };

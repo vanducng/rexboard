@@ -66,6 +66,15 @@ pub fn alert() -> Style {
     Style::new().fg(ALERT)
 }
 
+/// A context window filling up: from 70% warn, from 85% alert; below, nothing to say.
+pub fn fill(pct: u8) -> Option<Style> {
+    match pct {
+        85.. => Some(alert()),
+        70.. => Some(Style::new().fg(WARN)),
+        _ => None,
+    }
+}
+
 /// A passing message, or a jump or an answer on its way.
 pub fn note() -> Style {
     Style::new().fg(ACCENT)
