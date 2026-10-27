@@ -63,7 +63,7 @@
   <rect class="mask" x="948" y="264" width="40" height="14" rx="2"/>
   <text class="elabel" x="950" y="275">ACTS</text>
 
-  <path class="jump" d="M840,320 H504 Q496,320 496,312 V240 Q496,232 488,232 H484" marker-end="url(#architecture-arrow-link)"/>
+  <path class="jump" d="M840,320 H528 Q520,320 520,312 V188 Q520,180 512,180 H484" marker-end="url(#architecture-arrow-link)"/>
   <rect class="mask" x="552" y="313" width="272" height="14" rx="2"/>
   <text class="elabel-jump" x="688" y="324" text-anchor="middle">its host: focus · answer · close</text>
   <line class="jump" x1="840" y1="352" x2="476" y2="352" marker-end="url(#architecture-arrow-link)"/>
