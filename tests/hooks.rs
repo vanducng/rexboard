@@ -319,6 +319,114 @@ fn install_leaves_a_linked_or_unreadable_settings_file_alone() {
     );
 }
 
+/// Every file under `dir`, with its text, so a test can see nothing was written there.
+fn tree(dir: &Path) -> Vec<(String, String)> {
+    let mut files: Vec<(String, String)> = std::fs::read_dir(dir)
+        .unwrap()
+        .flat_map(|entry| {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                tree(&path)
+            } else {
+                vec![(
+                    path.display().to_string(),
+                    std::fs::read_to_string(&path).unwrap(),
+                )]
+            }
+        })
+        .collect();
+    files.sort();
+    files
+}
+
+#[test]
+fn install_refuses_a_linked_pi_extension_and_writes_nothing() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let checkout = home.join("dotfiles");
+    std::fs::create_dir_all(&checkout).unwrap();
+    std::fs::create_dir_all(home.join(".pi/agent/extensions")).unwrap();
+    std::fs::write(checkout.join("rexboard.js"), "// the checkout's copy\n").unwrap();
+    let link = home.join(".pi/agent/extensions/rexboard.js");
+    std::os::unix::fs::symlink(checkout.join("rexboard.js"), &link).unwrap();
+    let before = tree(home);
+    for args in [
+        &["hooks", "status", "--json"][..],
+        &["hooks", "install", "pi", "--dry-run", "--json"],
+        &["hooks", "install", "pi", "--json"],
+    ] {
+        let out = rexboard(home).args(args).output().unwrap();
+        assert!(out.status.success(), "{args:?}");
+        let plans: Value = serde_json::from_slice(&out.stdout).unwrap();
+        let pi = plans["harnesses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["harness"] == "pi")
+            .unwrap();
+        assert_eq!(pi["state"], "symlink", "{args:?}: {pi}");
+        assert_eq!(
+            pi["note"],
+            "~/.pi/agent/extensions/rexboard.js is a link, as a dotfiles checkout makes it: \
+             change it there"
+        );
+    }
+    assert!(link.is_symlink(), "the link is kept");
+    assert_eq!(tree(home), before, "nothing written, no backup");
+}
+
+#[test]
+fn install_refuses_a_linked_harness_directory_and_writes_nothing_through_it() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let checkout = home.join("dotfiles");
+    std::fs::create_dir_all(checkout.join("claude")).unwrap();
+    std::fs::write(checkout.join("claude/settings.json"), "{}\n").unwrap();
+    std::fs::create_dir_all(checkout.join("pi/agent/extensions")).unwrap();
+    std::os::unix::fs::symlink(checkout.join("claude"), home.join(".claude")).unwrap();
+    // As stow folds a package: the link sits above the harness's own directory.
+    std::os::unix::fs::symlink(checkout.join("pi"), home.join(".pi")).unwrap();
+    std::fs::create_dir_all(home.join(".codex")).unwrap();
+    let before = tree(&checkout);
+    let out = rexboard(home)
+        .args(["hooks", "status", "--json"])
+        .output()
+        .unwrap();
+    let status: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let plans = status["harnesses"].as_array().unwrap();
+    let by = |name: &str| plans.iter().find(|p| p["harness"] == name).unwrap().clone();
+    assert_eq!(by("claude")["state"], "symlink");
+    assert!(
+        by("claude")["note"]
+            .as_str()
+            .unwrap()
+            .starts_with("~/.claude is a link"),
+        "status names the link: {}",
+        by("claude")
+    );
+    assert_eq!(by("pi")["state"], "symlink");
+    assert!(
+        by("pi")["note"]
+            .as_str()
+            .unwrap()
+            .starts_with("~/.pi is a link")
+    );
+    assert_eq!(
+        by("codex")["state"],
+        "changes",
+        "a real directory still installs"
+    );
+    let text = rexboard(home).args(["hooks", "install"]).output().unwrap();
+    assert!(text.status.success());
+    let text = String::from_utf8(text.stdout).unwrap();
+    assert!(
+        text.contains("claude symlink") && text.contains("~/.claude is a link"),
+        "{text}"
+    );
+    assert_eq!(tree(&checkout), before, "nothing written into the checkout");
+    assert!(home.join(".codex/hooks.json").exists(), "{text}");
+}
+
 #[test]
 fn replay_sends_each_panes_kept_status_again() {
     let home = tempfile::tempdir().unwrap();

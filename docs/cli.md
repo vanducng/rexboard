@@ -357,7 +357,7 @@ A settings file is merged, never replaced. Hooks that already report to Rex (rex
 
 What `install` leaves alone:
 - a harness whose settings directory is missing (`absent`);
-- a settings file that is a symlink, as a dotfiles checkout makes it (`symlink`): change it at its source;
+- a settings file or pi's `rexboard.js` that is a symlink, or sits in a directory that is one, as a dotfiles checkout makes them (`symlink`): the note names the link, and you change it at its source. Every directory from your home directory down counts (`~/.claude`, or `~/.pi` when stow folds it), or from the harness's own directory when its variable puts it elsewhere;
 - a file that is not valid JSON, or whose `hooks` is not an object: `CONFIG` (exit 1), and nothing is written.
 
 A directory with no settings file yet gets one. With pi's old `rex-status.js` extension still there, the line says so, as pi would report twice.

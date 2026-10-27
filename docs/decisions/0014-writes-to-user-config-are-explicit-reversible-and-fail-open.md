@@ -19,7 +19,6 @@
 
 - A new write into a harness's files follows every bullet here, or comes with a record that says why it cannot.
 - Until `hooks uninstall` ships, the undo is the backup or removing the entries by hand, as [CLI](../cli.md) says.
-- Not built yet: refusing a linked pi extension file or a linked config directory (install writes through them today).
 - Not built yet: `hooks status` saying what a linked file lacks (today it prints `symlink`).
 - The fail-open rule costs the hook its error code: a broken install is found with `hooks status` and the hook log, not by the agent stopping.
 
