@@ -8,9 +8,9 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: #f5f5f5; color: #2d3142; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 3rem 2rem; }
     @media (prefers-color-scheme: dark) { body { background: #2d3142; color: #f5f5f5; } }
-    .frame { max-width: 1080px; width: 100%; }
+    .frame { max-width: 1120px; width: 100%; }
     .diagram-container { width: 100%; overflow-x: auto; }
-    .diagram-container svg { width: 100%; min-width: 1040px; display: block; }
+    .diagram-container svg { width: 100%; min-width: 1080px; display: block; }
     @media print {
       .diagram-container { overflow-x: visible; }
       .diagram-container svg { min-width: 0; }
@@ -21,9 +21,9 @@
   <!-- The source of architecture.svg, which is the diagram element below copied out verbatim; docs/system-architecture.md has the command. -->
   <div class="frame">
     <div class="diagram-container">
-<svg id="architecture" viewBox="0 0 1040 620" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="architecture-title architecture-desc">
+<svg id="architecture" viewBox="0 0 1080 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="architecture-title architecture-desc">
   <title id="architecture-title">rexboard architecture</title>
-  <desc id="architecture-desc">rexboard is one Rust binary; Rex runs its Lua scripts. On each Rex host, local (this Mac) and mini, rex do runs observer.lua, which streams NDJSON to rexboard serve. serve keeps state on disk and answers the ls, watch and seen commands and the ratatui board over a unix socket. Two things write to Rex. A jump runs jump.lua: session.focus_block on the pane's host, then client.perform session.select on the Rex app. An answer from the board runs send.lua: it checks the pane, then sends one key or a paste and Enter with block.event.</desc>
+  <desc id="architecture-desc">Agents report their state to Rex: Claude Code, Codex, pi and grok on their own in a Rex pane, or through a hook inside tmux. On this host and on every host in rex hosts, Rex runs rexboard's observer.lua, which streams NDJSON to rexboard serve. serve keeps one observer per host, one reducer, the harness adapters and state on disk, and runs the extensions, which read rows and give fields. The board, pick and the CLI (ls, watch, show, seen) read serve's rows over its socket. Three things write to Rex, each on one pane you chose, from the board or the CLI: a jump, an answer and a close act on the pane's host, and a jump then asks the Rex app to show the pane.</desc>
   <defs>
     <style>
     #architecture { --paper: #f5f5f5; --ink: #2d3142; --muted: #4f5d75; --soft: #5f6b80; --accent: #eb6c36; --accent-tint: rgba(235,108,54,0.08); --link: #2e5aa8; --box: #ffffff; --wash: rgba(45,49,66,0.03); --wash2: rgba(45,49,66,0.05); --line: rgba(45,49,66,0.30); --zone-fill: rgba(45,49,66,0.02); --zone-stroke: rgba(45,49,66,0.12); }
@@ -51,81 +51,105 @@
     #architecture .head-muted { fill: var(--muted); }
     #architecture .head-link { fill: var(--link); }
   </style>
-    <marker id="architecture-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon class="head-muted" points="0 0, 8 3, 0 6"/></marker>
+    <marker id="architecture-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto-start-reverse"><polygon class="head-muted" points="0 0, 8 3, 0 6"/></marker>
     <marker id="architecture-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon class="head-link" points="0 0, 8 3, 0 6"/></marker>
   </defs>
   <rect class="bg" width="100%" height="100%"/>
-    <rect class="zone" x="32" y="64" width="264" height="448" rx="8"/>
-    <rect class="mask" x="40" y="56" width="216" height="16" rx="2"/>
-    <text class="zlabel" x="48" y="68">REX · RUNS THE LUA SCRIPTS</text>
-    <rect class="zone" x="328" y="64" width="680" height="320" rx="8"/>
-    <rect class="mask" x="336" y="56" width="216" height="16" rx="2"/>
-    <text class="zlabel" x="344" y="68">REXBOARD · ONE RUST BINARY</text>
-    <line class="edge" x1="280" y1="128" x2="360" y2="128" marker-end="url(#architecture-arrow)"/>
-    <rect class="mask" x="292" y="106" width="56" height="14" rx="2"/>
-    <text class="elabel" x="320" y="117" text-anchor="middle">NDJSON</text>
-    <path class="edge" d="M280,240 H312 Q320,240 320,232 V184 Q320,176 328,176 H360" marker-end="url(#architecture-arrow)"/>
-    <line class="edge" x1="480" y1="200" x2="480" y2="256" marker-end="url(#architecture-arrow)"/>
-    <rect class="mask" x="488" y="221" width="40" height="14" rx="2"/>
-    <text class="elabel" x="508" y="232" text-anchor="middle">SAVE</text>
-    <line class="edge" x1="600" y1="120" x2="728" y2="120" marker-end="url(#architecture-arrow)"/>
-    <rect class="mask" x="620" y="98" width="88" height="14" rx="2"/>
-    <text class="elabel" x="664" y="109" text-anchor="middle">UNIX SOCKET</text>
-    <path class="edge" d="M600,152 H680 Q688,152 688,160 V208 Q688,216 696,216 H728" marker-end="url(#architecture-arrow)"/>
-    <line class="edge" x1="852" y1="248" x2="852" y2="296" marker-end="url(#architecture-arrow)"/>
-    <rect class="mask" x="860" y="265" width="48" height="14" rx="2"/>
-    <text class="elabel" x="884" y="276" text-anchor="middle">ENTER</text>
-    <path class="edge" d="M728,312 H648 Q640,312 640,304 V192 Q640,184 632,184 H600" marker-end="url(#architecture-arrow)"/>
-    <rect class="mask" x="648" y="262" width="88" height="14" rx="2"/>
-    <text class="elabel" x="692" y="273" text-anchor="middle">ROWS · SEEN</text>
-    <path class="jump" d="M728,352 H208 Q200,352 200,344 V272" marker-end="url(#architecture-arrow-link)"/>
-    <rect class="mask" x="342" y="330" width="164" height="14" rx="2"/>
-    <text class="elabel-jump" x="424" y="341" text-anchor="middle">1 session.focus_block</text>
-    <line class="jump" x1="104" y1="272" x2="104" y2="424" marker-end="url(#architecture-arrow-link)"/>
-    <rect class="mask" x="112" y="364" width="128" height="30" rx="2"/>
-    <text class="elabel-jump" x="116" y="375">2 client.perform</text>
-    <text class="elabel-jump" x="130" y="389">session.select</text>
-    <rect class="mask" x="48" y="96" width="232" height="64" rx="6"/>
-    <rect class="external" x="48" y="96" width="232" height="64" rx="6"/>
-    <text class="title" x="164" y="124" text-anchor="middle">local · this Mac</text>
-    <text class="sub-mono" x="164" y="143" text-anchor="middle">observer.lua · rex do - --all</text>
-    <rect class="mask" x="48" y="208" width="232" height="64" rx="6"/>
-    <rect class="external" x="48" y="208" width="232" height="64" rx="6"/>
-    <text class="title" x="164" y="236" text-anchor="middle">mini · remote</text>
-    <text class="sub-mono" x="164" y="255" text-anchor="middle">observer.lua · rex -S mini do</text>
-    <rect class="mask" x="48" y="424" width="232" height="64" rx="6"/>
-    <rect class="external" x="48" y="424" width="232" height="64" rx="6"/>
-    <text class="title" x="164" y="452" text-anchor="middle">Rex app</text>
-    <text class="sub" x="164" y="471" text-anchor="middle">this Mac · the focused window</text>
-    <rect class="mask" x="360" y="104" width="240" height="96" rx="6"/>
-    <rect class="focal" x="360" y="104" width="240" height="96" rx="6"/>
-    <text class="title" x="480" y="148" text-anchor="middle">rexboard serve</text>
-    <text class="sub" x="480" y="167" text-anchor="middle">collectors · one reducer · state</text>
-    <rect class="mask" x="360" y="256" width="240" height="64" rx="6"/>
-    <rect class="store" x="360" y="256" width="240" height="64" rx="6"/>
-    <text class="title" x="480" y="284" text-anchor="middle">state on disk</text>
-    <text class="sub-mono" x="480" y="303" text-anchor="middle">state.json · transitions.jsonl</text>
-    <rect class="mask" x="728" y="88" width="248" height="64" rx="6"/>
-    <rect class="backend" x="728" y="88" width="248" height="64" rx="6"/>
-    <text class="title-mono" x="852" y="116" text-anchor="middle">ls · watch · seen</text>
-    <text class="sub" x="852" y="135" text-anchor="middle">the CLI · one request per line</text>
-    <rect class="mask" x="728" y="184" width="248" height="64" rx="6"/>
-    <rect class="backend" x="728" y="184" width="248" height="64" rx="6"/>
-    <text class="title-mono" x="852" y="212" text-anchor="middle">board · pick</text>
-    <text class="sub" x="852" y="231" text-anchor="middle">the TUI · rows from serve · answers</text>
-    <rect class="mask" x="728" y="296" width="248" height="64" rx="6"/>
-    <rect class="focal" x="728" y="296" width="248" height="64" rx="6"/>
-    <text class="title-mono" x="852" y="324" text-anchor="middle">jump · next</text>
-    <text class="sub" x="852" y="343" text-anchor="middle">runs jump.lua through rex do</text>
-    <line class="rule" x1="32" y1="528" x2="1008" y2="528"/>
-    <text class="legend-head" x="32" y="552">LEGEND</text>
-    <line class="edge" x1="112" y1="548" x2="144" y2="548" marker-end="url(#architecture-arrow)"/>
-    <text class="legend" x="152" y="552">reads</text>
-    <line class="jump" x1="384" y1="548" x2="416" y2="548" marker-end="url(#architecture-arrow-link)"/>
-    <text class="legend" x="424" y="552">a write: a jump or an answer</text>
-    <rect class="swatch" x="608" y="541" width="20" height="14" rx="2"/>
-    <text class="legend" x="636" y="552">focal: serve and jumps</text>
-    <text class="caption" x="32" y="588">A pane on local takes the same path through its own server.</text>
+
+  <rect class="zone" x="16" y="64" width="200" height="328" rx="8"/>
+  <rect class="mask" x="24" y="56" width="72" height="16" rx="2"/>
+  <text class="zlabel" x="32" y="68">AGENTS</text>
+  <rect class="zone" x="264" y="64" width="224" height="328" rx="8"/>
+  <rect class="mask" x="272" y="56" width="160" height="16" rx="2"/>
+  <text class="zlabel" x="280" y="68">REX · RUNS THE LUA</text>
+  <rect class="zone" x="536" y="64" width="528" height="328" rx="8"/>
+  <rect class="mask" x="544" y="56" width="216" height="16" rx="2"/>
+  <text class="zlabel" x="552" y="68">REXBOARD · ONE RUST BINARY</text>
+
+  <line class="edge" x1="200" y1="128" x2="278" y2="128" marker-end="url(#architecture-arrow)"/>
+  <rect class="mask" x="212" y="106" width="56" height="14" rx="2"/>
+  <text class="elabel" x="240" y="117" text-anchor="middle">STATUS</text>
+  <line class="edge" x1="200" y1="232" x2="278" y2="232" marker-end="url(#architecture-arrow)"/>
+  <rect class="mask" x="212" y="210" width="56" height="14" rx="2"/>
+  <text class="elabel" x="240" y="221" text-anchor="middle">STATUS</text>
+  <line class="edge" x1="472" y1="128" x2="558" y2="128" marker-end="url(#architecture-arrow)"/>
+  <rect class="mask" x="488" y="106" width="56" height="14" rx="2"/>
+  <text class="elabel" x="516" y="117" text-anchor="middle">NDJSON</text>
+  <path class="edge" d="M472,216 H508 Q516,216 516,208 V176 Q516,168 524,168 H558" marker-end="url(#architecture-arrow)"/>
+  <line class="edge" x1="672" y1="202" x2="672" y2="254" marker-start="url(#architecture-arrow)" marker-end="url(#architecture-arrow)"/>
+  <rect class="mask" x="680" y="221" width="104" height="14" rx="2"/>
+  <text class="elabel" x="684" y="232">ROWS · FIELDS</text>
+  <line class="edge" x1="784" y1="128" x2="838" y2="128" marker-end="url(#architecture-arrow)"/>
+  <rect class="mask" x="785" y="106" width="54" height="14" rx="2"/>
+  <text class="elabel" x="812" y="117" text-anchor="middle">SOCKET</text>
+  <path class="edge" d="M784,176 H804 Q812,176 812,184 V208 Q812,216 820,216 H838" marker-end="url(#architecture-arrow)"/>
+  <line class="edge" x1="940" y1="248" x2="940" y2="294" marker-end="url(#architecture-arrow)"/>
+  <rect class="mask" x="948" y="264" width="40" height="14" rx="2"/>
+  <text class="elabel" x="950" y="275">ACTS</text>
+
+  <path class="jump" d="M840,320 H504 Q496,320 496,312 V256 Q496,248 488,248 H476" marker-end="url(#architecture-arrow-link)"/>
+  <rect class="mask" x="552" y="313" width="272" height="14" rx="2"/>
+  <text class="elabel-jump" x="688" y="324" text-anchor="middle">its host: focus · answer · close</text>
+  <line class="jump" x1="840" y1="352" x2="476" y2="352" marker-end="url(#architecture-arrow-link)"/>
+  <rect class="mask" x="560" y="345" width="216" height="14" rx="2"/>
+  <text class="elabel-jump" x="668" y="356" text-anchor="middle">jump · show the pane</text>
+
+  <rect class="mask" x="32" y="96" width="168" height="64" rx="6"/>
+  <rect class="external" x="32" y="96" width="168" height="64" rx="6"/>
+  <text class="title" x="116" y="124" text-anchor="middle">agent in a Rex pane</text>
+  <text class="sub" x="116" y="143" text-anchor="middle">reports its state itself</text>
+  <rect class="mask" x="32" y="200" width="168" height="64" rx="6"/>
+  <rect class="external" x="32" y="200" width="168" height="64" rx="6"/>
+  <text class="title" x="116" y="228" text-anchor="middle">agent inside tmux</text>
+  <text class="sub" x="116" y="247" text-anchor="middle">a hook passes it through</text>
+  <text class="sub-mono" x="116" y="316" text-anchor="middle">Claude Code · Codex</text>
+  <text class="sub-mono" x="116" y="334" text-anchor="middle">pi · grok</text>
+
+  <rect class="mask" x="280" y="96" width="192" height="64" rx="6"/>
+  <rect class="external" x="280" y="96" width="192" height="64" rx="6"/>
+  <text class="title" x="376" y="124" text-anchor="middle">Rex · this host</text>
+  <text class="sub-mono" x="376" y="143" text-anchor="middle">observer.lua · rex do</text>
+  <rect class="mask" x="280" y="200" width="192" height="64" rx="6"/>
+  <rect class="external" x="280" y="200" width="192" height="64" rx="6"/>
+  <text class="title" x="376" y="228" text-anchor="middle">Rex · each other host</text>
+  <text class="sub-mono" x="376" y="247" text-anchor="middle">observer.lua · rex -S HOST</text>
+  <rect class="mask" x="280" y="304" width="192" height="64" rx="6"/>
+  <rect class="external" x="280" y="304" width="192" height="64" rx="6"/>
+  <text class="title" x="376" y="332" text-anchor="middle">Rex app</text>
+  <text class="sub" x="376" y="351" text-anchor="middle">this Mac · the focused window</text>
+
+  <rect class="mask" x="560" y="96" width="224" height="104" rx="6"/>
+  <rect class="focal" x="560" y="96" width="224" height="104" rx="6"/>
+  <text class="title" x="672" y="128" text-anchor="middle">rexboard serve</text>
+  <text class="sub" x="672" y="150" text-anchor="middle">an observer per host · one reducer</text>
+  <text class="sub" x="672" y="168" text-anchor="middle">harness adapters · state on disk</text>
+  <rect class="mask" x="560" y="256" width="224" height="48" rx="6"/>
+  <rect class="store" x="560" y="256" width="224" height="48" rx="6"/>
+  <text class="title" x="672" y="276" text-anchor="middle">extensions</text>
+  <text class="sub" x="672" y="294" text-anchor="middle">any tool · rows in, fields out</text>
+
+  <rect class="mask" x="840" y="96" width="200" height="64" rx="6"/>
+  <rect class="backend" x="840" y="96" width="200" height="64" rx="6"/>
+  <text class="title-mono" x="940" y="124" text-anchor="middle">board · pick</text>
+  <text class="sub" x="940" y="143" text-anchor="middle">the TUI</text>
+  <rect class="mask" x="840" y="184" width="200" height="64" rx="6"/>
+  <rect class="backend" x="840" y="184" width="200" height="64" rx="6"/>
+  <text class="title-mono" x="940" y="212" text-anchor="middle">ls · watch · show</text>
+  <text class="sub" x="940" y="231" text-anchor="middle">the CLI · text or --json</text>
+  <rect class="mask" x="840" y="296" width="200" height="72" rx="6"/>
+  <rect class="focal" x="840" y="296" width="200" height="72" rx="6"/>
+  <text class="title-mono" x="940" y="326" text-anchor="middle">jump · answer · close</text>
+  <text class="sub" x="940" y="346" text-anchor="middle">from the board or the CLI</text>
+
+  <line class="rule" x1="16" y1="416" x2="1064" y2="416"/>
+  <text class="legend-head" x="16" y="444">LEGEND</text>
+  <line class="edge" x1="96" y1="440" x2="128" y2="440" marker-end="url(#architecture-arrow)"/>
+  <text class="legend" x="136" y="444">reads</text>
+  <line class="jump" x1="200" y1="440" x2="232" y2="440" marker-end="url(#architecture-arrow-link)"/>
+  <text class="legend" x="240" y="444">a write, to one pane you chose</text>
+  <rect class="swatch" x="456" y="433" width="20" height="14" rx="2"/>
+  <text class="legend" x="484" y="444">focal: serve and the writes</text>
+  <text class="caption" x="16" y="476">Some reads skip serve: the card's tail and the full view read the pane straight through Rex.</text>
 </svg>
     </div>
   </div>

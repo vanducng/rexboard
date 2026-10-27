@@ -39,6 +39,12 @@ The board opens in this terminal. The first run starts `rexboard serve` in the b
 
 Press `?` on the board for every key. What the board shows is also a command with `--json`, such as `rexboard ls --json`.
 
+## How it works
+
+<img alt="rexboard architecture: agents (Claude Code, Codex, pi, grok) report their state to Rex, on their own in a Rex pane or through a hook inside tmux. On this host and every host in rex hosts, Rex runs observer.lua, which streams NDJSON to rexboard serve; serve keeps state on disk, holds the harness adapters, runs the extensions (rows in, fields out) and answers the board, pick and the CLI over a unix socket. Three things write to Rex, each on one pane you chose, from the board or the CLI: a jump, an answer and a close act on the pane's host, and a jump then asks the Rex app to show the pane" src="docs/assets/architecture.svg" width="100%">
+
+rexboard reads Rex and writes only to a pane you chose: a jump, an answer or a close. [System architecture](docs/system-architecture.md) has the details.
+
 ## Docs
 
 - [TUI](docs/tui.md): the board, its views and keys, answer mode and `pick`
