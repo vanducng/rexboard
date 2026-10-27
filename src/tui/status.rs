@@ -108,7 +108,7 @@ pub mod tests {
             .into_iter()
             .filter_map(|item| match item {
                 crate::tui::app::Item::Row(i) => Some(app.rows[i].key.clone()),
-                crate::tui::app::Item::Header { .. } => None,
+                crate::tui::app::Item::Header { .. } | crate::tui::app::Item::Gap => None,
             })
             .collect();
         keys.sort();

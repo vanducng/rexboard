@@ -1,11 +1,16 @@
 use super::Harness;
 use super::usage::{Usage, percent};
+use crate::tui::icons::{Icon, icon};
 
 pub struct Pi;
 
 impl Harness for Pi {
     fn id(&self) -> &'static str {
         "pi"
+    }
+
+    fn mark(&self) -> Option<Icon> {
+        Some(icon("fae-pi", "\u{e22c}"))
     }
 
     fn processes(&self) -> &'static [&'static str] {

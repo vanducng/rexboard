@@ -253,6 +253,27 @@ pub fn fuller() -> App {
     app
 }
 
+/// `fuller`'s rows on each harness: two Claude, then Codex, pi, grok (an adapter without a mark)
+/// and OpenCode (no adapter), in the view `view`.
+pub fn harnesses(view: &str) -> App {
+    let mut app = fuller();
+    let mut rows = app.rows.clone();
+    for (key, harness) in [
+        ("mini/codex", "codex"),
+        ("mini/rig", "pi"),
+        ("local/seat-a", "grok-build"),
+        ("local/inferred", "opencode"),
+    ] {
+        rows.iter_mut().find(|r| r.key == key).unwrap().pane.harness = Some(harness.into());
+    }
+    app.set_rows(rows, hosts());
+    app.view = crate::tui::views::views()
+        .into_iter()
+        .find(|v| v.name == view)
+        .unwrap();
+    app
+}
+
 pub fn render(app: &App, width: u16, height: u16) -> String {
     let now = DateTime::parse_from_rfc3339("2026-01-01T05:43:00Z")
         .unwrap()
