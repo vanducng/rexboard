@@ -42,7 +42,7 @@ pub fn inline(text: &str) -> Vec<Run> {
         if c == '['
             && let Some(close) = (i + 1..chars.len()).find(|&j| chars[j] == ']')
             && chars.get(close + 1) == Some(&'(')
-            && let Some(paren) = (close + 2..chars.len()).find(|&j| chars[j] == ')')
+            && let Some(paren) = closing_paren(&chars, close + 2)
         {
             for (text, strong) in inline(&chars[i + 1..close].iter().collect::<String>()) {
                 push(&mut runs, &text, strong);
@@ -62,6 +62,23 @@ fn push(runs: &mut Vec<Run>, text: &str, strong: bool) {
         _ if text.is_empty() => {}
         _ => runs.push((text.to_owned(), strong)),
     }
+}
+
+/// The `)` that closes a link's URL from `from` on, past any balanced pair inside it
+/// (`https://w.test/Foo_(bar)`).
+fn closing_paren(chars: &[char], from: usize) -> Option<usize> {
+    let mut depth = 0;
+    (from..chars.len()).find(|&j| match chars[j] {
+        '(' => {
+            depth += 1;
+            false
+        }
+        ')' if depth > 0 => {
+            depth -= 1;
+            false
+        }
+        c => c == ')',
+    })
 }
 
 /// Where a run of exactly `n` backticks starts, from `from` on.
@@ -212,6 +229,11 @@ mod tests {
             ("``a ` b`` c", "[a ` b] c"),
             ("see [the PR](https://x.test/pr/31)", "see the PR"),
             ("[run `make`](https://x.test)", "run [make]"),
+            ("[Foo](https://w.test/Foo_(bar)) after", "Foo after"),
+            (
+                "[open](https://w.test/a(b) tail",
+                "[open](https://w.test/a(b) tail",
+            ),
             (
                 "**bold with `code` and [a link](u)**",
                 "[bold with code and a link]",
