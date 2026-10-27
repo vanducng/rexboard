@@ -451,7 +451,8 @@ fn ls_json_adds_board_fields() {
     assert_eq!(by_block(&panes, "block:api-seat-a")["group"], "unreported");
     assert_eq!(codex["process"], "codex");
     assert_eq!(claude["ext"], serde_json::json!({}), "no extension enabled");
-    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 27));
+    assert_eq!(claude["usage"], serde_json::Value::Null, "no usage file");
+    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 29));
 }
 
 /// A status line for the fixture's idle seat on `host`, sent after the recorded stream ends.
@@ -3312,12 +3313,12 @@ fn serve_puts_a_local_panes_usage_on_its_row_until_it_goes_stale() {
     });
     let rows = serve.rows(&[]);
     assert!(
-        row(&rows, "mini/block:web-seat-b").get("usage").is_none(),
+        row(&rows, "mini/block:web-seat-b")["usage"].is_null(),
         "a file on this host says nothing of mini's panes"
     );
     keep("block:api-seat-a", "2020-01-01T00:00:00.000Z");
     eventually_within("a stale file to blank it", 10, || {
-        row(&serve.rows(&[]), SEAT).get("usage").is_none()
+        row(&serve.rows(&[]), SEAT)["usage"].is_null()
     });
 }
 

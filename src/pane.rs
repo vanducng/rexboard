@@ -122,7 +122,7 @@ pub struct Pane {
     /// The foreground process, as in `zsh` or `tmux`.
     pub process: Option<String>,
     /// Its pid, on its host; for a tmux client, what finds the tmux pane it shows.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub pid: Option<u32>,
     pub harness: Option<String>,
     pub state: String,

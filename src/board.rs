@@ -45,7 +45,7 @@ pub struct Row {
     #[serde(default)]
     pub ext: BTreeMap<String, String>,
     /// What the agent's last turn used, for a pane on serve's own host; see `rexboard usage`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub usage: Option<crate::harness::usage::Usage>,
 }
 
