@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.15.0](https://github.com/vanducng/rexboard/compare/v0.14.1...v0.15.0) (2026-10-27)
+
+
+### Features
+
+* **tui:** part grouped views by fit, drop the grouped column, harness marks from the adapter ([#86](https://github.com/vanducng/rexboard/issues/86)) ([dc5cde2](https://github.com/vanducng/rexboard/commit/dc5cde2f7b24644c73615aafe5de7f11f8bf2d5b))
+* **tui:** render inline markdown in MSG and the card ([#89](https://github.com/vanducng/rexboard/issues/89)) ([f39e818](https://github.com/vanducng/rexboard/commit/f39e818e281c63a7fe6047f1134e5ab6a0c11002))
+
+
+### Bug Fixes
+
+* **hooks:** refuse linked config files and directories ([#87](https://github.com/vanducng/rexboard/issues/87)) ([b321c1d](https://github.com/vanducng/rexboard/commit/b321c1d2d1ffe3d9476a08f5b77e59f5ae2cb531))
+
 ## [0.14.1](https://github.com/vanducng/rexboard/compare/v0.14.0...v0.14.1) (2026-10-27)
 
 
