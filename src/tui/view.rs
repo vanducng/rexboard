@@ -718,7 +718,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
-    fn usage_shows_model_ctx_and_tok_from_140_columns_cost_and_5h_when_asked_and_in_the_card() {
+    fn usage_shows_model_and_ctx_from_140_the_rest_when_asked_and_the_card_says_it() {
         use crate::harness::usage::Usage;
         let mut app = fuller();
         let plain = render(&app, 160, 30);
@@ -733,22 +733,30 @@ mod tests {
                 row.usage = Some(Usage {
                     model: Some("Opus 5.5".into()),
                     ctx_pct: Some(88),
-                    tok: Some(820_000),
+                    ctx_window: Some(200_000),
+                    tok: Some(176_000),
                     cost_usd: Some(4.2),
                     quota_5h: Some(12),
-                    ..Usage::default()
                 });
             }
         }
         app.set_rows(rows, app.hosts.clone());
         let wide = render(&app, 160, 30);
         let header = wide.lines().find(|l| l.contains("HARNESS")).unwrap();
-        assert!(
-            header.contains("MODEL") && header.contains("CTX") && header.contains("TOK"),
-            "{wide}"
-        );
+        assert!(header.contains("MODEL") && header.contains("CTX"), "{wide}");
+        for opt_in in ["TOK", "COST", "5H"] {
+            assert!(
+                !header.contains(opt_in),
+                "{opt_in} waits for tui.json: {header}"
+            );
+        }
         let line = wide.lines().find(|l| l.contains("Opus 5.5")).expect(&wide);
-        assert!(line.contains("88%") && line.contains("820k"), "{line}");
+        assert!(line.contains("88%") && !line.contains("176k"), "{line}");
+        assert_eq!(
+            header.find("CTX").unwrap() + 3,
+            line.find("88%").unwrap() + 3,
+            "figures are right-aligned under a right-aligned name:\n{header}\n{line}"
+        );
         assert!(
             wide.lines()
                 .filter(|l| l.contains("claude") && !l.contains("Opus"))
@@ -756,36 +764,58 @@ mod tests {
             "a row with no usage shows -, not 0:\n{wide}"
         );
         let card = card_of(&wide);
-        assert!(
+        let fact = |card: &[String], label: &str, value: &str| {
             card.iter()
-                .any(|l| l.contains("model") && l.contains("Opus 5.5")),
-            "{card:#?}"
-        );
+                .any(|l| l.contains(&format!("{label} ")) && l.contains(value))
+        };
+        assert!(fact(&card, "model", "Opus 5.5"), "{card:#?}");
+        assert!(fact(&card, "ctx", "88% · 176k of 200k"), "{card:#?}");
         assert!(
-            card.iter().any(|l| l.contains("ctx") && l.contains("88%")),
-            "{card:#?}"
-        );
-        assert!(
-            card.iter().any(|l| l.contains("tok") && l.contains("820k")),
+            !card
+                .iter()
+                .any(|l| l.contains("cost") || l.contains("$4.20")),
             "{card:#?}"
         );
         assert!(
             !render(&app, 130, 30).lines().any(|l| l.contains("MODEL")),
             "below 140, no room"
         );
-        assert!(
-            !header.contains("COST") && !header.contains("5H"),
-            "COST and 5H wait for tui.json: {header}"
-        );
-        app.columns = vec!["5h".into(), "cost".into(), "later".into()];
+        app.columns = vec!["5h".into(), "cost".into(), "tok".into(), "later".into()];
         let opted = render(&app, 160, 30);
         let header = opted.lines().find(|l| l.contains("HARNESS")).unwrap();
+        let at = |name: &str| header.find(name).unwrap();
         assert!(
-            header.find("TOK") < header.find("COST") && header.find("COST") < header.find("5H"),
+            at("CTX") < at("TOK") && at("TOK") < at("COST") && at("COST") < at("5H"),
             "in the table's order, whatever tui.json's: {header}"
         );
         let line = opted.lines().find(|l| l.contains("Opus 5.5")).unwrap();
-        assert!(line.contains("$4.20") && line.contains("12%"), "{line}");
+        assert!(
+            line.contains("176k") && line.contains("$4.20") && line.contains("12%"),
+            "{line}"
+        );
+        assert_eq!(
+            at("COST") + 4,
+            line.find("$4.20").unwrap() + 5,
+            "{header}\n{line}"
+        );
+        let card = card_of(&opted);
+        assert!(
+            fact(&card, "cost", "$4.20") && fact(&card, "5h", "12%"),
+            "{card:#?}"
+        );
+        let mut sorted = |sort: Sort| {
+            app.sort = Some(sort);
+            let text = render(&app, 160, 30);
+            text.lines()
+                .find(|l| l.contains("HARNESS"))
+                .unwrap()
+                .to_owned()
+        };
+        let header = sorted((Col::Ctx, crate::tui::columns::Dir::Down));
+        assert!(header.contains(" ↓CTX "), "in its own room: {header}");
+        let header = sorted((Col::Msg, crate::tui::columns::Dir::Up));
+        assert!(header.contains(" 5H MSG↑"), "never joins 5H: {header}");
+        app.sort = None;
         let columns = Columns::with_usage(160, 160, &[], &app.usage_columns());
         let cells = columns.cells(app.current().unwrap(), "", Utc::now());
         let tone = |want: &str| cells.iter().find(|(t, _)| t.trim() == want).unwrap().1;
@@ -795,6 +825,32 @@ mod tests {
             Tone::Fill(Some(12)),
             "5H fills by its own figure"
         );
+    }
+
+    #[test]
+    fn below_160_usage_keeps_where_whole_so_msg_keeps_its_room_and_from_160_model_grows() {
+        use crate::tui::columns::UsageShown;
+        let usage = |model: usize| UsageShown {
+            cols: vec![Col::Model, Col::Ctx],
+            model,
+        };
+        let plain = Columns::new(140, 140, &[]);
+        let with = Columns::with_usage(140, 140, &[], &usage(8));
+        assert!(plain.has(Col::Session) && with.has(Col::Where) && !with.has(Col::Session));
+        assert!(
+            with.width(Col::Msg) >= plain.width(Col::Msg),
+            "MSG at 140: {} with usage, {} without",
+            with.width(Col::Msg),
+            plain.width(Col::Msg)
+        );
+        assert!(Columns::with_usage(160, 160, &[], &usage(8)).has(Col::Session));
+        let model = |board: u16, longest: usize| {
+            Columns::with_usage(board, usize::from(board), &[], &usage(longest)).width(Col::Model)
+        };
+        assert_eq!(model(150, 17), 13, "below 160 MODEL keeps its least");
+        assert_eq!(model(160, 8), 13);
+        assert_eq!(model(160, 17), 18, "claude-sonnet-5-5 whole");
+        assert_eq!(model(200, 40), 21, "and no more than 20");
     }
 
     #[test]

@@ -85,9 +85,16 @@ fn text(row: &Row, fields: &[Field], tail: Option<&[String]>) -> String {
     ];
     facts.extend(row.last_turn.map(|secs| ("turn", span(secs))));
     if let Some(usage) = &row.usage {
+        use crate::tui::columns::{Col, opted};
+        let columns = crate::tui::prefs().columns;
         facts.extend(usage.model.as_deref().map(|m| ("model", clean(m))));
-        facts.extend(usage.ctx_pct.map(|p| ("ctx", format!("{p}%"))));
-        facts.extend(usage.tok.map(|t| ("tok", crate::output::tokens(t))));
+        facts.extend(crate::output::context(usage).map(|c| ("ctx", c)));
+        if opted(&columns, Col::Cost) {
+            facts.extend(usage.cost_usd.map(|c| ("cost", crate::output::dollars(c))));
+        }
+        if opted(&columns, Col::Quota) {
+            facts.extend(usage.quota_5h.map(|p| ("5h", format!("{p}%"))));
+        }
     }
     for field in fields {
         if let Some(value) = row.ext.get(&field.id) {

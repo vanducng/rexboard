@@ -7,7 +7,7 @@ use tui_input::backend::crossterm::EventHandler;
 use unicode_width::UnicodeWidthStr;
 
 use super::answer::{Answer, Step};
-use super::columns::{Col, Column, Columns, Sort, field_column, free_letter};
+use super::columns::{Col, Column, Columns, Sort, UsageShown, field_column, free_letter};
 use super::full::Full;
 use super::keys::{self, Act, K};
 use super::screen::Screen;

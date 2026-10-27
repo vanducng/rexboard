@@ -5,11 +5,12 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use super::app::App;
+use super::columns::{Col, opted};
 use super::icons;
 use super::theme;
 use crate::board::Row;
 use crate::client::Field;
-use crate::output::{SEP, clean, fit, harness, labels, path, span, tokens};
+use crate::output::{SEP, clean, context, dollars, fit, harness, labels, path, span};
 use crate::pane::bare_title;
 
 /// A fact the card states. Its label is one token: a word, or with `"icons": "nerd"` a glyph.
@@ -20,7 +21,8 @@ pub enum Fact {
     Turn,
     Model,
     Ctx,
-    Tok,
+    Cost,
+    Quota,
     Title,
     Source,
     Where,
@@ -35,7 +37,8 @@ impl Fact {
                 Fact::Turn => icons::TURN.glyph,
                 Fact::Model => icons::MODEL.glyph,
                 Fact::Ctx => icons::CTX.glyph,
-                Fact::Tok => icons::TOK.glyph,
+                Fact::Cost => icons::COST.glyph,
+                Fact::Quota => icons::QUOTA.glyph,
                 Fact::Title => icons::TITLE.glyph,
                 Fact::Source => icons::source(&row.pane.source).map_or("source", |i| i.glyph),
                 // The session's mark leads `where`, whose window and block carry their own.
@@ -48,7 +51,8 @@ impl Fact {
             Fact::Turn => "turn",
             Fact::Model => "model",
             Fact::Ctx => "ctx",
-            Fact::Tok => "tok",
+            Fact::Cost => "cost",
+            Fact::Quota => "5h",
             Fact::Title => "title",
             Fact::Source => "source",
             Fact::Where => "where",
@@ -81,10 +85,15 @@ pub fn lines(app: &App, row: &Row, width: usize) -> Vec<Line<'static>> {
         usage
             .and_then(|u| u.model.clone())
             .map(|m| (Fact::Model, clean(&m))),
+        usage.and_then(context).map(|c| (Fact::Ctx, c)),
         usage
-            .and_then(|u| u.ctx_pct)
-            .map(|p| (Fact::Ctx, format!("{p}%"))),
-        usage.and_then(|u| u.tok).map(|t| (Fact::Tok, tokens(t))),
+            .and_then(|u| u.cost_usd)
+            .filter(|_| opted(&app.columns, Col::Cost))
+            .map(|c| (Fact::Cost, dollars(c))),
+        usage
+            .and_then(|u| u.quota_5h)
+            .filter(|_| opted(&app.columns, Col::Quota))
+            .map(|p| (Fact::Quota, format!("{p}%"))),
     ]);
     let names = labelled(vec![
         (!title.is_empty()).then(|| (Fact::Title, clean(title))),

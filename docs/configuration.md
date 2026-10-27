@@ -31,6 +31,8 @@ separator = "-"
 
 A `[jump]` table is ignored, so an old config that still has one loads.
 
+The board's own display settings (`icons`, `card_height`, `motion`, `columns`) live in `tui.json`, not here; see [TUI](tui.md#turn-card).
+
 ## When a change takes effect
 
 serve reads the file when it starts and each time it rescans `rex hosts`, every 5 minutes. After `rexboard serve --stop`, the next command starts a serve that reads it at once. `jump`, `next`, `pick`, `ls --direct`, `watch --raw`, `watch --direct`, `ext ls` and `ext test` read it each time they run.

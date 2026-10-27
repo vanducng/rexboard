@@ -437,6 +437,22 @@ pub fn tokens(n: u64) -> String {
     }
 }
 
+/// How full a pane's context is, as much as its harness reported: `88% · 176k of 200k`.
+pub fn context(usage: &crate::harness::usage::Usage) -> Option<String> {
+    let size = match (usage.tok, usage.ctx_window) {
+        (Some(tok), Some(window)) => Some(format!("{} of {}", tokens(tok), tokens(window))),
+        (Some(tok), None) => Some(tokens(tok)),
+        _ => None,
+    };
+    let parts: Vec<String> = usage
+        .ctx_pct
+        .map(|p| format!("{p}%"))
+        .into_iter()
+        .chain(size)
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
 /// Cents while they fit in a 6-column cell, then whole dollars.
 pub fn dollars(usd: f64) -> String {
     if usd < 99.995 {

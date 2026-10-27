@@ -125,25 +125,32 @@ impl App {
 
     /// The built-in columns `o` can sort by: the usage ones only while they show.
     pub fn builtin_columns(&self) -> impl Iterator<Item = &'static Column> {
-        let usage = self.usage_columns();
+        let usage = self.usage_columns().cols;
         crate::tui::columns::COLUMNS
             .iter()
             .filter(move |c| !crate::tui::columns::is_usage(c.id) || usage.contains(&c.id))
     }
 
     /// The usage columns the list shows: none until some row reports what its turn used, then
-    /// MODEL, CTX and TOK, and COST and 5H when tui.json's `columns` names them.
-    pub fn usage_columns(&self) -> Vec<Col> {
-        if !self.rows.iter().any(|row| row.usage.is_some()) {
-            return Vec::new();
+    /// MODEL and CTX, and TOK, COST and 5H when tui.json's `columns` names them.
+    pub fn usage_columns(&self) -> UsageShown {
+        use crate::tui::columns::{USAGE, USAGE_SHOWN, opted};
+        let models: Vec<&str> = self
+            .rows
+            .iter()
+            .filter_map(|row| row.usage.as_ref())
+            .map(|usage| usage.model.as_deref().unwrap_or_default())
+            .collect();
+        if models.is_empty() {
+            return UsageShown::default();
         }
-        use crate::tui::columns::{USAGE, USAGE_SHOWN, opt_in};
-        USAGE
-            .into_iter()
-            .filter(|c| {
-                USAGE_SHOWN.contains(c) || self.columns.iter().any(|name| opt_in(name) == Some(*c))
-            })
-            .collect()
+        UsageShown {
+            cols: USAGE
+                .into_iter()
+                .filter(|c| USAGE_SHOWN.contains(c) || opted(&self.columns, *c))
+                .collect(),
+            model: models.iter().map(|m| m.width()).max().unwrap_or_default(),
+        }
     }
 
     /// The columns of the fields, but for the one the view groups by, whose group header says it.

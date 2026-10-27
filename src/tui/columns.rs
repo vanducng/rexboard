@@ -72,6 +72,8 @@ pub enum Tone {
 enum Width {
     /// This many columns, the gap after it included.
     Fixed(usize),
+    /// The longest model name on the board, within MODEL_MIN and MODEL_MAX.
+    Model,
     /// A share of what the fixed columns leave: WHERE's, one of its three parts, or MSG's.
     Where,
     Part(usize),
@@ -87,23 +89,48 @@ const FIELDS_ALL: u16 = 160;
 /// A field column's width, the gap after it included.
 const FIELD_WIDTH: usize = 12;
 const ALWAYS: RangeInclusive<u16> = 0..=u16::MAX;
-/// MODEL, CTX and TOK show from this width, and only while some row reports its usage; COST
+/// MODEL and CTX show from this width, and only while some row reports its usage; TOK, COST
 /// and 5H too when tui.json's `columns` names them.
 pub const USAGE_FROM: u16 = 140;
+/// Below this width WHERE stays one column while usage columns show, so MSG keeps its room;
+/// from it MODEL grows to its longest value.
+const USAGE_WIDE: u16 = 160;
+/// MODEL's width, the gap after it included: below USAGE_WIDE always the least.
+const MODEL_MIN: usize = 13;
+const MODEL_MAX: usize = 21;
 pub const USAGE: [Col; 5] = [Col::Model, Col::Ctx, Col::Tok, Col::Cost, Col::Quota];
-pub const USAGE_SHOWN: [Col; 3] = [Col::Model, Col::Ctx, Col::Tok];
+pub const USAGE_SHOWN: [Col; 2] = [Col::Model, Col::Ctx];
 
 pub fn is_usage(id: Col) -> bool {
     USAGE.contains(&id)
 }
 
-/// The opt-in column tui.json's `columns` names; any other name is none.
-pub fn opt_in(name: &str) -> Option<Col> {
-    match name {
-        "cost" => Some(Col::Cost),
-        "5h" => Some(Col::Quota),
-        _ => None,
-    }
+/// Whether tui.json's `columns` names the opt-in column `id`; unknown names are ignored.
+pub fn opted(names: &[String], id: Col) -> bool {
+    let name = match id {
+        Col::Tok => "tok",
+        Col::Cost => "cost",
+        Col::Quota => "5h",
+        _ => return false,
+    };
+    names.iter().any(|n| n == name)
+}
+
+/// Figures read best right-aligned, so their digits line up.
+fn right(id: Col) -> bool {
+    matches!(id, Col::Ctx | Col::Tok | Col::Cost | Col::Quota)
+}
+
+fn align_right(fitted: &str) -> String {
+    let text = fitted.trim_end();
+    format!("{}{text}", " ".repeat(fitted.len() - text.len()))
+}
+
+/// The usage columns a list shows, and the widest model name among its rows.
+#[derive(Debug, Default, PartialEq)]
+pub struct UsageShown {
+    pub cols: Vec<Col>,
+    pub model: usize,
 }
 
 /// A sort's direction: `Up` is a to z, newest or shortest first, and for STATE most urgent first.
@@ -227,7 +254,7 @@ pub const COLUMNS: [Column; 16] = [
         "WHERE",
         Some('w'),
         Dir::Up,
-        0..=SPLIT - 1,
+        ALWAYS,
         Width::Where,
         Tone::Soft,
     ),
@@ -236,7 +263,7 @@ pub const COLUMNS: [Column; 16] = [
         "SESSION",
         Some('e'),
         Dir::Up,
-        SPLIT..=u16::MAX,
+        ALWAYS,
         Width::Part(0),
         Tone::Soft,
     ),
@@ -245,7 +272,7 @@ pub const COLUMNS: [Column; 16] = [
         "WINDOW",
         Some('n'),
         Dir::Up,
-        SPLIT..=u16::MAX,
+        ALWAYS,
         Width::Part(1),
         Tone::Soft,
     ),
@@ -254,7 +281,7 @@ pub const COLUMNS: [Column; 16] = [
         "BLOCK",
         Some('b'),
         Dir::Up,
-        SPLIT..=u16::MAX,
+        ALWAYS,
         Width::Part(2),
         Tone::Soft,
     ),
@@ -264,7 +291,7 @@ pub const COLUMNS: [Column; 16] = [
         Some('d'),
         Dir::Up,
         USAGE_FROM..=u16::MAX,
-        Width::Fixed(13),
+        Width::Model,
         Tone::Soft,
     ),
     column(
@@ -451,15 +478,15 @@ impl Columns {
     /// columns, and only the first two below FIELDS_ALL. No usage columns.
     #[cfg(test)]
     pub fn new(board: u16, list: usize, fields: &[&'static Column]) -> Columns {
-        Self::with_usage(board, list, fields, &[])
+        Self::with_usage(board, list, fields, &UsageShown::default())
     }
 
-    /// As `new`, with the usage columns in `usage` (MODEL, CTX, TOK, COST, 5H).
+    /// As `new`, with the usage columns `usage` names (MODEL, CTX, TOK, COST, 5H).
     pub fn with_usage(
         board: u16,
         list: usize,
         fields: &[&'static Column],
-        usage: &[Col],
+        usage: &UsageShown,
     ) -> Columns {
         let tier = tier(board);
         let fields = match board {
@@ -467,26 +494,35 @@ impl Columns {
             FIELDS_FROM..FIELDS_ALL => &fields[..fields.len().min(2)],
             _ => fields,
         };
+        let split = board >= SPLIT && (usage.cols.is_empty() || board >= USAGE_WIDE);
         let mut shown: Vec<&'static Column> = COLUMNS
             .iter()
-            .filter(|c| c.boards.contains(&board) && (!is_usage(c.id) || usage.contains(&c.id)))
+            .filter(|c| match c.id {
+                Col::Where => !split,
+                Col::Session | Col::Window | Col::Block => split,
+                id => c.boards.contains(&board) && (!is_usage(id) || usage.cols.contains(&id)),
+            })
             .collect();
         if let Some(host) = shown.iter().position(|c| c.id == Col::Host) {
             shown.splice(host + 1..host + 1, fields.iter().copied());
         }
-        let lead: usize = shown
-            .iter()
-            .map(|c| match c.width {
-                Width::Fixed(n) => n,
-                _ => 0,
-            })
-            .sum();
+        let model = if board >= USAGE_WIDE {
+            (usage.model + 1).clamp(MODEL_MIN, MODEL_MAX)
+        } else {
+            MODEL_MIN
+        };
+        let fixed = |c: &Column| match c.width {
+            Width::Fixed(n) => Some(n),
+            Width::Model => Some(model),
+            _ => None,
+        };
+        let lead: usize = shown.iter().filter_map(|c| fixed(c)).sum();
         let rest = list.saturating_sub(lead);
         // WHERE names the row, so from 100 it keeps v0.1's width (5/9 of what v0.1 left, which
         // was 2 more before STATE widened); once split its parts take two thirds, and from 140
         // TURN's room comes out of MSG.
-        let place = match (tier, board) {
-            (_, SPLIT..) => rest * 2 / 3,
+        let place = match (tier, split) {
+            (_, true) => rest * 2 / 3,
             (Tier::Wide, _) => ((rest + 2) * 5 / 9).min(rest),
             _ => rest * 9 / 20,
         };
@@ -494,7 +530,7 @@ impl Columns {
             .into_iter()
             .map(|c| {
                 let width = match c.width {
-                    Width::Fixed(n) => n,
+                    Width::Fixed(_) | Width::Model => fixed(c).unwrap_or_default(),
                     Width::Where => place,
                     Width::Part(2) => place - 2 * (place / 3),
                     Width::Part(_) => place / 3,
@@ -566,7 +602,13 @@ impl Columns {
                     Col::Quota => Tone::Fill(figure(|u| u.quota_5h)),
                     _ => c.tone,
                 };
-                (fit(&text, width.saturating_sub(1)) + " ", tone)
+                let fitted = fit(&text, width.saturating_sub(1));
+                let fitted = if right(c.id) {
+                    align_right(&fitted)
+                } else {
+                    fitted
+                };
+                (fitted + " ", tone)
             })
             .collect()
     }
@@ -584,9 +626,14 @@ impl Columns {
         } else {
             width.saturating_sub(1)
         };
+        // A right-aligned name has its own room before it.
+        let pad = room.saturating_sub(column.header.len());
+        if right(id) && pad > 0 {
+            return Some((start + pad - 1, id, dir.arrow()));
+        }
         let gap = at > 0 && {
             let (before, before_width) = self.cols[at - 1];
-            before.header.len() + 1 < before_width
+            !right(before.id) && before.header.len() + 1 < before_width
         };
         if !gap && column.header.len() < room {
             Some((start + column.header.len(), id, dir.arrow()))
@@ -604,12 +651,15 @@ impl Columns {
             .map(|(c, width)| {
                 let text = match c.id {
                     Col::Msg => fit(c.header, *width),
+                    id if right(id) => align_right(&fit(c.header, width.saturating_sub(1))) + " ",
                     _ => fit(c.header, width.saturating_sub(1)) + " ",
                 };
+                let name = text.trim_start();
                 let underline = c
                     .letter
                     .and_then(|letter| c.header.find(letter.to_ascii_uppercase()))
-                    .filter(|_| text.starts_with(c.header));
+                    .filter(|_| name.starts_with(c.header))
+                    .map(|at| at + text.len() - name.len());
                 HeaderCell { text, underline }
             })
             .collect();
