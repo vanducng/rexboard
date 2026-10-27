@@ -20,7 +20,7 @@ The board shows about 40 rows that must be read at a glance, in terminals with d
 
 - A new screen picks a role, not a colour, and stays consistent.
 - A change of look shows as a diff in the style snapshot test.
-- Not built yet: harness marks on the adapter (today `icons::harness()` is a second list), and markdown (the board shows the raw text).
+- Not built yet: markdown (the board shows the raw text).
 
 ## Supersedes
 

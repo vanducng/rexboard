@@ -516,11 +516,11 @@ fn scroll_offset(at: Option<usize>, kept: usize, len: usize, room: usize) -> usi
     }
 }
 
-/// In nerd mode, a harness group's mark before its name, or room for one so the names line up.
+/// In nerd mode, a harness group's mark before its name.
 fn group_mark(app: &App, bucket: &Bucket) -> Option<&'static str> {
     match bucket {
         Bucket::Value(name) if app.nerd && app.view.group_by == Some(Key::Harness) => {
-            Some(crate::harness::mark(name).map_or(" ", |icon| icon.glyph))
+            crate::harness::mark(name).map(|icon| icon.glyph)
         }
         _ => None,
     }
@@ -1568,7 +1568,7 @@ mod tests {
         let text = render(&grouped, 140, 30);
         assert!(text.contains(&format!("{claude} CLAUDE (2)")), "{text}");
         assert!(text.contains("\u{e22c} PI (1)"), "{text}");
-        assert!(text.lines().any(|l| l.starts_with("  GROK (1)")), "{text}");
+        assert!(text.lines().any(|l| l.starts_with("GROK (1)")), "{text}");
     }
 
     #[test]
