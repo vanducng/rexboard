@@ -353,7 +353,7 @@ rexboard hooks replay SESSION          # from tmux, when a client attaches
 | `pi` | `rexboard.js` in `$PI_CODING_AGENT_DIR/extensions`, else `~/.pi/agent/extensions` | An extension that runs `rexboard hook pi` on pi's events and `rexboard usage pi` at each turn's end |
 | `grok` | | Nothing: grok reports to a Rex pane itself, and reads a status line only from `~/.grok/config.toml`, which rexboard does not edit. For its usage, add the lines below there by hand |
 
-A settings file is merged, never replaced. Hooks that already report to Rex (rexboard's, or the `rex-agent-status` bridge it replaces) give way to rexboard's, where the first of them was; every other key and hook stays, in its order. Before it writes, the old file is kept beside it as `FILE.bak-<UTC>`, with the file's own permissions, and the write is a rename. A second install changes nothing. The hooks run `rexboard` when that is this binary on `PATH`, else its full path.
+A settings file is merged, never replaced. Hooks that already report to Rex (rexboard's, or the `rex-agent-status` bridge it replaces) give way to rexboard's, where the first of them was; every other key and hook stays, in its order. Before it writes, the old file is kept beside it as `FILE.bak-<UTC>`, with the file's own permissions, and the write is a rename. A second install changes nothing. The hooks name rexboard by full path, since an agent may run its hooks with a shorter `PATH` than your shell's: the `rexboard` on `PATH` as found (`/opt/homebrew/bin/rexboard`, which stays put across upgrades) when it is this binary, else this binary's own path. Run `install` again after moving rexboard.
 
 What `install` leaves alone:
 - a harness whose settings directory is missing (`absent`);

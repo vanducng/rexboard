@@ -326,3 +326,41 @@ fn replay_sends_each_panes_kept_status_again() {
         "a pane with none gets nothing"
     );
 }
+
+#[test]
+fn hooks_name_rexboard_by_full_path_the_path_entry_when_it_is_this_binary() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    let bin = home.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::os::unix::fs::symlink(
+        assert_cmd::cargo::cargo_bin("rexboard"),
+        bin.join("rexboard"),
+    )
+    .unwrap();
+    let first_change = |path: &str| -> String {
+        let out = rexboard(home)
+            .env("PATH", path)
+            .args(["hooks", "install", "claude", "--dry-run", "--json"])
+            .output()
+            .unwrap();
+        let plan: Value = serde_json::from_slice(&out.stdout).unwrap();
+        plan["harnesses"][0]["changes"][0]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let linked = format!("{}/rexboard hook claude SessionStart", bin.display());
+    assert!(
+        first_change(&format!("{}:/usr/bin:/bin", bin.display())).contains(&linked),
+        "the PATH entry, which outlives an upgrade"
+    );
+    let own = assert_cmd::cargo::cargo_bin("rexboard")
+        .canonicalize()
+        .unwrap();
+    assert!(
+        first_change("/usr/bin:/bin").contains(&format!("{} hook claude", own.display())),
+        "not on PATH: its own path, never a bare name"
+    );
+}

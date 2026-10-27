@@ -225,21 +225,25 @@ fn expand(file: &str) -> PathBuf {
     }
 }
 
-/// How a hook runs rexboard: `rexboard` when that is this binary on PATH, else its full path.
+/// How a hook runs rexboard: by full path, since an agent may run its hooks with a shorter PATH
+/// than your shell's. That is the `rexboard` on PATH as found (`/opt/homebrew/bin/rexboard`, which
+/// outlives an upgrade) when it is this binary, else this binary's own path.
 fn binary() -> String {
     let me = std::env::current_exe()
         .and_then(|exe| exe.canonicalize())
         .ok();
-    let on_path = std::env::var_os("PATH").and_then(|paths| {
+    let found = std::env::var_os("PATH").and_then(|paths| {
         std::env::split_paths(&paths)
             .map(|dir| dir.join("rexboard"))
-            .find(|candidate| candidate.is_file())
-            .and_then(|found| found.canonicalize().ok())
+            .find(|candidate| candidate.is_absolute() && candidate.is_file())
     });
-    match me {
-        Some(me) if on_path.as_ref() != Some(&me) => quoted(&me.display().to_string()),
-        _ => "rexboard".into(),
-    }
+    let path = match (me, found) {
+        (Some(me), Some(found)) if found.canonicalize().ok() == Some(me.clone()) => found,
+        (Some(me), _) => me,
+        (None, Some(found)) => found,
+        (None, None) => return "rexboard".into(),
+    };
+    quoted(&path.display().to_string())
 }
 
 /// `text` as one shell word.
