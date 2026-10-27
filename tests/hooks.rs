@@ -365,10 +365,11 @@ fn install_refuses_a_linked_pi_extension_and_writes_nothing() {
             .find(|p| p["harness"] == "pi")
             .unwrap();
         assert_eq!(pi["state"], "symlink", "{args:?}: {pi}");
-        assert_eq!(
-            pi["note"],
-            "~/.pi/agent/extensions/rexboard.js is a link, as a dotfiles checkout makes it: \
-             change it there"
+        let note = pi["note"].as_str().unwrap();
+        assert!(
+            note.starts_with("~/.pi/agent/extensions/rexboard.js is a link into a checkout")
+                && note.ends_with("; change it there"),
+            "{args:?}: {note}"
         );
     }
     assert!(link.is_symlink(), "the link is kept");
@@ -613,4 +614,227 @@ fn a_rexboard_whose_path_has_a_space_or_a_quote_installs_once() {
             "{dir}: the copy itself ran the hook: {log}"
         );
     }
+}
+
+/// `tree` without the backups a run leaves beside each file.
+fn kept(dir: &Path) -> Vec<(String, String)> {
+    tree(dir)
+        .into_iter()
+        .filter(|(path, _)| !path.contains(".bak-"))
+        .collect()
+}
+
+fn hooks_run(home: &Path, args: &[&str]) -> Value {
+    let out = rexboard(home)
+        .args(["hooks"])
+        .args(args)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{args:?}: {out:?}");
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+fn state(plans: &Value, harness: &str) -> String {
+    let plan = plans["harnesses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["harness"] == harness)
+        .unwrap();
+    plan["state"].as_str().unwrap().to_owned()
+}
+
+/// A home as a user keeps it before install: Claude settings with their own hook, a status line
+/// of their own and other keys; Codex hooks of their own; pi's extensions with one of theirs.
+fn lived_in(home: &Path) {
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::write(
+        home.join(".claude/settings.json"),
+        r#"{
+  "model": "opus",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "afplay done.aiff"
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "~/bin/my line.sh --short",
+    "padding": 0
+  },
+  "theme": "dark"
+}
+"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(home.join(".codex")).unwrap();
+    std::fs::write(
+        home.join(".codex/hooks.json"),
+        "{\"hooks\":{\"SessionStart\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"echo hi\"}]}]}}",
+    )
+    .unwrap();
+    std::fs::create_dir_all(home.join(".pi/agent/extensions")).unwrap();
+    std::fs::write(home.join(".pi/agent/extensions/mine.js"), "// mine\n").unwrap();
+}
+
+#[test]
+fn uninstall_after_install_leaves_every_file_as_it_was_a_chained_status_line_included() {
+    let bare = |home: &Path| {
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        std::fs::create_dir_all(home.join(".pi/agent")).unwrap();
+    };
+    let empty = |home: &Path| {
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::write(home.join(".claude/settings.json"), "{}").unwrap();
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        std::fs::create_dir_all(home.join(".pi/agent")).unwrap();
+    };
+    for setup in [lived_in as fn(&Path), bare, empty] {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path();
+        setup(home);
+        let before = kept(home);
+        let installed = hooks_run(home, &["install"]);
+        for harness in ["claude", "codex", "pi"] {
+            assert_eq!(state(&installed, harness), "written", "{installed}");
+        }
+        assert_ne!(kept(home), before);
+        let out = hooks_run(home, &["uninstall"]);
+        assert_eq!(kept(home), before, "byte for byte: {out}");
+        assert_eq!(
+            hooks_run(home, &["uninstall"])["harnesses"][0]["state"],
+            "not installed",
+            "a second uninstall changes nothing"
+        );
+    }
+}
+
+#[test]
+fn uninstall_keeps_what_the_user_changed_after_install() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    lived_in(home);
+    hooks_run(home, &["install"]);
+    let file = home.join(".claude/settings.json");
+    let mut settings: Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    settings["hooks"]["Stop"][1]["hooks"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({ "type": "command", "command": "say done" }));
+    settings["editor"] = json!("vim");
+    std::fs::write(&file, serde_json::to_string_pretty(&settings).unwrap()).unwrap();
+    let pi = home.join(".pi/agent/extensions/rexboard.js");
+    std::fs::write(&pi, std::fs::read_to_string(&pi).unwrap() + "// my tweak\n").unwrap();
+    let out = hooks_run(home, &["uninstall"]);
+    assert_eq!(state(&out, "pi"), "not ours", "{out}");
+    assert!(
+        pi.exists(),
+        "a changed extension is not rexboard's to remove"
+    );
+    let after: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    let text = after.to_string();
+    assert!(!text.contains("rexboard hook"), "{text}");
+    assert_eq!(after["editor"], "vim");
+    assert_eq!(after["statusLine"]["command"], "~/bin/my line.sh --short");
+    let stop: Vec<&str> = after["hooks"]["Stop"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|g| g["hooks"].as_array().unwrap())
+        .map(|h| h["command"].as_str().unwrap())
+        .collect();
+    assert_eq!(stop, ["afplay done.aiff", "say done"]);
+}
+
+#[test]
+fn uninstall_on_a_home_never_installed_or_as_a_dry_run_writes_nothing() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    lived_in(home);
+    let before = tree(home);
+    let out = hooks_run(home, &["uninstall"]);
+    for harness in ["claude", "codex", "pi"] {
+        assert_eq!(state(&out, harness), "not installed", "{out}");
+    }
+    assert_eq!(tree(home), before, "nothing written, no backup");
+    hooks_run(home, &["install"]);
+    let installed = tree(home);
+    let text = rexboard(home)
+        .args(["hooks", "uninstall", "--dry-run"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(text.stdout).unwrap();
+    assert!(
+        text.contains("statusLine: back to `~/bin/my line.sh --short` alone")
+            && text.contains("the extension: remove it")
+            && text.ends_with("dry run: nothing written; rexboard hooks uninstall writes these\n"),
+        "{text}"
+    );
+    assert_eq!(tree(home), installed, "a dry run writes nothing");
+}
+
+#[test]
+fn uninstall_refuses_a_linked_file_or_directory() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    lived_in(home);
+    hooks_run(home, &["install"]);
+    let checkout = home.join("dotfiles");
+    std::fs::create_dir_all(&checkout).unwrap();
+    std::fs::rename(home.join(".claude"), checkout.join("claude")).unwrap();
+    std::os::unix::fs::symlink(checkout.join("claude"), home.join(".claude")).unwrap();
+    let pi = home.join(".pi/agent/extensions/rexboard.js");
+    std::fs::rename(&pi, checkout.join("rexboard.js")).unwrap();
+    std::os::unix::fs::symlink(checkout.join("rexboard.js"), &pi).unwrap();
+    let before = tree(&checkout);
+    let out = hooks_run(home, &["uninstall"]);
+    assert_eq!(state(&out, "claude"), "symlink", "{out}");
+    assert_eq!(state(&out, "pi"), "symlink", "{out}");
+    assert_eq!(state(&out, "codex"), "written", "a real file still goes");
+    assert_eq!(tree(&checkout), before, "nothing written through a link");
+    assert!(pi.is_symlink());
+}
+
+#[test]
+fn status_reads_a_linked_settings_file_and_says_what_it_lacks() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    lived_in(home);
+    hooks_run(home, &["install", "claude"]);
+    let file = home.join(".claude/settings.json");
+    let mut settings: Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    let hooks = settings["hooks"].as_object_mut().unwrap();
+    hooks.remove("SessionEnd");
+    hooks["Stop"] = json!([{ "hooks": [{ "type": "command", "command": "afplay done.aiff" }] }]);
+    let checkout = home.join("dotfiles");
+    std::fs::create_dir_all(&checkout).unwrap();
+    std::fs::write(checkout.join("settings.json"), settings.to_string()).unwrap();
+    std::fs::remove_file(&file).unwrap();
+    std::os::unix::fs::symlink(checkout.join("settings.json"), &file).unwrap();
+    let before = tree(&checkout);
+    let out = hooks_run(home, &["status"]);
+    let claude = &out["harnesses"][0];
+    assert_eq!(claude["state"], "symlink");
+    assert_eq!(
+        claude["note"],
+        "~/.claude/settings.json is a link into a checkout; missing: Stop, SessionEnd; change it there"
+    );
+    let text = rexboard(home).args(["hooks", "status"]).output().unwrap();
+    assert!(
+        String::from_utf8(text.stdout)
+            .unwrap()
+            .contains("missing: Stop, SessionEnd")
+    );
+    assert_eq!(tree(&checkout), before, "read only");
 }
