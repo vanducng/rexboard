@@ -225,21 +225,25 @@ fn expand(file: &str) -> PathBuf {
     }
 }
 
-/// How a hook runs rexboard: `rexboard` when that is this binary on PATH, else its full path.
+/// How a hook runs rexboard: by full path, since an agent may run its hooks with a shorter PATH
+/// than your shell's. That is the `rexboard` on PATH as found (`/opt/homebrew/bin/rexboard`, which
+/// outlives an upgrade) when it is this binary, else this binary's own path.
 fn binary() -> String {
     let me = std::env::current_exe()
         .and_then(|exe| exe.canonicalize())
         .ok();
-    let on_path = std::env::var_os("PATH").and_then(|paths| {
+    let found = std::env::var_os("PATH").and_then(|paths| {
         std::env::split_paths(&paths)
             .map(|dir| dir.join("rexboard"))
-            .find(|candidate| candidate.is_file())
-            .and_then(|found| found.canonicalize().ok())
+            .find(|candidate| candidate.is_absolute() && candidate.is_file())
     });
-    match me {
-        Some(me) if on_path.as_ref() != Some(&me) => quoted(&me.display().to_string()),
-        _ => "rexboard".into(),
-    }
+    let path = match (me, found) {
+        (Some(me), Some(found)) if found.canonicalize().ok() == Some(me.clone()) => found,
+        (Some(me), _) => me,
+        (None, Some(found)) => found,
+        (None, None) => return "rexboard".into(),
+    };
+    quoted(&path.display().to_string())
 }
 
 /// `text` as one shell word.
@@ -255,16 +259,75 @@ fn quoted(text: &str) -> String {
 /// A hook that reports to Rex: rexboard's own, or the `rex-agent-status` bridge it replaces.
 fn reports(hook: &Value) -> bool {
     let command = hook["command"].as_str().unwrap_or_default();
-    let mut words = command.split_whitespace();
-    command.contains("rex-agent-status")
-        || (words
-            .next()
-            .is_some_and(|w| w.trim_matches('\'').ends_with("rexboard"))
-            && words.next() == Some("hook"))
+    command.contains("rex-agent-status") || runs_hook(command, 2)
 }
 
+/// Whether `command`, read as a shell reads it, runs `rexboard hook`: its program is a file named
+/// `rexboard` and its first argument `hook`, also inside `sh -c '…'`, however the path is quoted.
+fn runs_hook(command: &str, depth: u8) -> bool {
+    let words = shell_words(command);
+    let named = |word: &str| {
+        Path::new(word)
+            .file_name()
+            .is_some_and(|name| name == "rexboard")
+    };
+    if depth > 0
+        && let [shell, flag, script, ..] = &words[..]
+        && Path::new(shell)
+            .file_name()
+            .is_some_and(|name| name == "sh")
+        && flag == "-c"
+    {
+        return runs_hook(script, depth - 1);
+    }
+    matches!(&words[..], [program, verb, ..] if named(program) && verb == "hook")
+}
+
+/// `command` split into words as a POSIX shell splits them: whitespace between, `'…'` literal,
+/// `"…"` with `\` before `"`, `\`, `$` and `` ` ``, and `\` quoting the next character.
+fn shell_words(command: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word: Option<String> = None;
+    let mut chars = command.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            c if c.is_whitespace() => words.extend(word.take()),
+            '\'' => {
+                let w = word.get_or_insert_with(String::new);
+                w.extend(chars.by_ref().take_while(|&c| c != '\''));
+            }
+            '"' => {
+                let w = word.get_or_insert_with(String::new);
+                while let Some(c) = chars.next() {
+                    match c {
+                        '"' => break,
+                        '\\' => match chars.next() {
+                            Some(next) if "\"\\$`".contains(next) => w.push(next),
+                            Some(next) => {
+                                w.push('\\');
+                                w.push(next);
+                            }
+                            None => w.push('\\'),
+                        },
+                        c => w.push(c),
+                    }
+                }
+            }
+            '\\' => word.get_or_insert_with(String::new).extend(chars.next()),
+            c => word.get_or_insert_with(String::new).push(c),
+        }
+    }
+    words.extend(word);
+    words
+}
+
+/// A hook that exits 0 whatever happens, since exit 2 blocks the agent: a missing rexboard, or one
+/// too old to know `hook`, fails open.
 fn hook_command(bin: &str, harness: &str, event: &str) -> String {
-    format!("{bin} hook {harness} {event}")
+    format!(
+        "/bin/sh -c {}",
+        quoted(&format!("{bin} hook {harness} {event} || true"))
+    )
 }
 
 fn settings(
@@ -477,11 +540,8 @@ fn usage_line(current: &Value, bin: &str) -> Option<Value> {
     if command.contains("usage claude") {
         return None;
     }
-    let found = if bin == "rexboard" {
-        "command -v rexboard >/dev/null 2>&1".to_owned()
-    } else {
-        format!("[ -x {bin} ]")
-    };
+    // A missing rexboard, or one too old to know `usage`, leaves the user's own line running.
+    let found = format!("{bin} usage --help >/dev/null 2>&1");
     let theirs = quoted(command);
     let mut line = current.clone();
     line["command"] = json!(format!(
@@ -614,7 +674,7 @@ mod tests {
             after["hooks"]["Stop"],
             json!([
                 { "hooks": [{ "type": "command", "command": "afplay done.aiff" }] },
-                { "hooks": [{ "type": "command", "command": "rexboard hook claude Stop", "timeout": 5 }] },
+                { "hooks": [{ "type": "command", "command": "/bin/sh -c 'rexboard hook claude Stop || true'", "timeout": 5 }] },
                 { "hooks": [{ "type": "command", "command": "notify" }] },
             ]),
             "in the bridge's place; the user's hooks stay"
@@ -623,7 +683,7 @@ mod tests {
         assert_eq!(
             after["hooks"]["PostToolUse"],
             json!([{ "matcher": "AskUserQuestion", "hooks": [
-                { "type": "command", "command": "rexboard hook claude PostToolUse", "timeout": 5 }
+                { "type": "command", "command": "/bin/sh -c 'rexboard hook claude PostToolUse || true'", "timeout": 5 }
             ]}]),
             "a missing event is added"
         );
@@ -635,8 +695,8 @@ mod tests {
         let said = changes(&live, &after, CLAUDE_EVENTS);
         assert!(
             said.contains(
-                &"Stop: replace `rex-agent-status` with `rexboard hook claude Stop`".to_owned()
-            ) && said.contains(&"PreToolUse: add `rexboard hook claude PreToolUse`".to_owned()),
+                &"Stop: replace `rex-agent-status` with `/bin/sh -c 'rexboard hook claude Stop || true'`".to_owned()
+            ) && said.contains(&"PreToolUse: add `/bin/sh -c 'rexboard hook claude PreToolUse || true'`".to_owned()),
             "{said:#?}"
         );
         assert!(changes(&after, &after, CLAUDE_EVENTS).is_empty());
@@ -755,5 +815,36 @@ mod tests {
             .collect();
         kept.sort();
         assert_eq!(kept, ["first", "original", "second"]);
+    }
+
+    #[test]
+    fn a_hook_is_rexboards_however_its_path_is_quoted() {
+        for bin in [
+            "/opt/homebrew/bin/rexboard",
+            "/tmp/My Tools/rexboard",
+            "/tmp/it's/rexboard",
+            "/tmp/a \"b\" $c/rexboard",
+        ] {
+            let command = hook_command(&quoted(bin), "claude", "Stop");
+            assert!(reports(&json!({ "command": command })), "{command}");
+            let inner = &shell_words(&command)[2];
+            assert_eq!(shell_words(inner)[0], bin, "{command}");
+        }
+        for theirs in [
+            "afplay done.aiff",
+            "/usr/local/bin/rexboard-notes hook",
+            "/bin/sh -c 'echo rexboard hook'",
+            "echo 'rexboard'",
+        ] {
+            assert!(!reports(&json!({ "command": theirs })), "{theirs}");
+        }
+        assert!(
+            reports(&json!({ "command": "rexboard hook claude Stop" })),
+            "the bare form"
+        );
+        assert_eq!(
+            shell_words(r#"a 'b c' "d \"e\" \$f" g\ h"#),
+            ["a", "b c", r#"d "e" $f"#, "g h"]
+        );
     }
 }

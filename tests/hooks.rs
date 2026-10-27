@@ -106,10 +106,33 @@ fn a_hook_outside_tmux_and_rex_writes_nothing_and_never_fails() {
             .stderr("");
     }
     assert!(!home.path().join("calls").exists());
+    for args in [
+        &["hook", "nope"][..],
+        &["hook"],
+        &["hook", "claude", "Stop", "extra"],
+        &["usage"],
+        &["usage", "nope", "--flag-from-later"],
+    ] {
+        rexboard(home.path())
+            .args(args)
+            .write_stdin("{}")
+            .assert()
+            .success();
+    }
     rexboard(home.path())
-        .args(["hook", "nope"])
+        .args([
+            "usage",
+            "--from-a-later-build",
+            "claude",
+            "--",
+            "sh",
+            "-c",
+            "cat; exit 3",
+        ])
+        .write_stdin("theirs")
         .assert()
-        .code(2);
+        .code(3)
+        .stdout("theirs");
 }
 
 #[test]
@@ -209,7 +232,7 @@ fn install_merges_each_harness_after_a_backup_and_a_second_install_changes_nothi
         .map(|h| h["command"].as_str().unwrap())
         .collect();
     assert!(
-        stop[0].ends_with(" hook claude Stop") && stop[1] == "afplay done.aiff",
+        stop[0].ends_with(" hook claude Stop || true'") && stop[1] == "afplay done.aiff",
         "{stop:?}"
     );
     assert!(
@@ -325,4 +348,161 @@ fn replay_sends_each_panes_kept_status_again() {
         "",
         "a pane with none gets nothing"
     );
+}
+
+#[test]
+fn hooks_name_rexboard_by_full_path_the_path_entry_when_it_is_this_binary() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    let bin = home.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::os::unix::fs::symlink(
+        assert_cmd::cargo::cargo_bin("rexboard"),
+        bin.join("rexboard"),
+    )
+    .unwrap();
+    let first_change = |path: &str| -> String {
+        let out = rexboard(home)
+            .env("PATH", path)
+            .args(["hooks", "install", "claude", "--dry-run", "--json"])
+            .output()
+            .unwrap();
+        let plan: Value = serde_json::from_slice(&out.stdout).unwrap();
+        plan["harnesses"][0]["changes"][0]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let linked = format!("{}/rexboard hook claude SessionStart", bin.display());
+    assert!(
+        first_change(&format!("{}:/usr/bin:/bin", bin.display())).contains(&linked),
+        "the PATH entry, which outlives an upgrade"
+    );
+    let own = assert_cmd::cargo::cargo_bin("rexboard")
+        .canonicalize()
+        .unwrap();
+    assert!(
+        first_change("/usr/bin:/bin").contains(&format!("{} hook claude", own.display())),
+        "not on PATH: its own path, never a bare name"
+    );
+}
+
+#[test]
+fn installed_hooks_and_status_line_fail_open_with_rexboard_missing_or_too_old() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::write(
+        home.join(".claude/settings.json"),
+        r#"{"statusLine": {"type": "command", "command": "echo theirs"}}"#,
+    )
+    .unwrap();
+    rexboard(home)
+        .args(["hooks", "install", "claude"])
+        .assert()
+        .success();
+    let after = settings(home);
+    let stop = after["hooks"]["Stop"][0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let line = after["statusLine"]["command"].as_str().unwrap().to_owned();
+    let me = assert_cmd::cargo::cargo_bin("rexboard")
+        .canonicalize()
+        .unwrap();
+    let me = me.display().to_string();
+    assert!(stop.contains(&me) && line.contains(&me), "{stop}\n{line}");
+
+    // A build from before `hook` and `usage`: clap refuses both with exit 2.
+    let old = home.join("old-rexboard");
+    std::fs::write(
+        &old,
+        "#!/bin/sh\necho \"error: unrecognized subcommand '$1'\" >&2\nexit 2\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&old, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let missing = home.join("no-such-rexboard").display().to_string();
+    for bin in [me.as_str(), old.to_str().unwrap(), missing.as_str()] {
+        let run = |command: &str| {
+            std::process::Command::new("/bin/sh")
+                .args(["-c", &command.replace(&me, bin)])
+                .env("HOME", home)
+                .env_remove("TMUX")
+                .env_remove("REX_BLOCK")
+                .stdin(std::process::Stdio::null())
+                .output()
+                .unwrap()
+        };
+        let hook = run(&stop);
+        assert_eq!(hook.status.code(), Some(0), "{bin}: the hook");
+        let shown = run(&line);
+        assert_eq!(shown.status.code(), Some(0), "{bin}: the status line");
+        assert_eq!(String::from_utf8_lossy(&shown.stdout), "theirs\n", "{bin}");
+    }
+}
+
+#[test]
+fn a_rexboard_whose_path_has_a_space_or_a_quote_installs_once() {
+    for dir in ["My Tools", "it's"] {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path();
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        let bin = home.join(dir).join("rexboard");
+        std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+        std::fs::copy(assert_cmd::cargo::cargo_bin("rexboard"), &bin).unwrap();
+        let install = || {
+            let mut cmd = Command::new(&bin);
+            for name in [
+                "TMUX",
+                "TMUX_PANE",
+                "REX_BLOCK",
+                "CLAUDE_CONFIG_DIR",
+                "CODEX_HOME",
+            ] {
+                cmd.env_remove(name);
+            }
+            let out = cmd
+                .env("HOME", home)
+                .env("PATH", "/usr/bin:/bin")
+                .args(["hooks", "install", "claude", "codex", "--json"])
+                .output()
+                .unwrap();
+            let plan: Value = serde_json::from_slice(&out.stdout).unwrap();
+            plan["harnesses"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|h| h["state"].as_str().unwrap().to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(install(), ["written", "written"], "{dir}");
+        assert_eq!(
+            install(),
+            ["installed", "installed"],
+            "{dir}: a second install"
+        );
+        let stop = settings(home)["hooks"]["Stop"].clone();
+        assert_eq!(
+            stop.as_array().unwrap().len(),
+            1,
+            "{dir}: one group, not two"
+        );
+        let command = stop[0]["hooks"][0]["command"].as_str().unwrap().to_owned();
+        let ran = std::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .env("REXBOARD_HOOK_LOG", home.join("hook.log"))
+            .env("REX_BLOCK", "block:1")
+            .env_remove("TMUX")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(ran.status.code(), Some(0), "{dir}");
+        let log = std::fs::read_to_string(home.join("hook.log")).unwrap();
+        assert!(
+            log.contains("Stop"),
+            "{dir}: the copy itself ran the hook: {log}"
+        );
+    }
 }

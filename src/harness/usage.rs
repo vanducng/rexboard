@@ -46,11 +46,19 @@ impl Usage {
 /// `rexboard usage HARNESS [-- CMD]`. Keeping the numbers never breaks the status line it runs
 /// in: a payload it cannot read, or a pane it cannot name, is skipped without a word.
 pub fn run(name: &str, then: &[String]) -> crate::error::Result<()> {
-    let harness = named(name)?;
     let mut input = Vec::new();
-    std::io::stdin().take(1 << 20).read_to_end(&mut input)?;
-    if let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&input) {
-        keep(harness, &payload);
+    let _ = std::io::stdin().take(1 << 20).read_to_end(&mut input);
+    match named(name) {
+        Ok(harness) => {
+            if let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&input) {
+                keep(harness, &payload);
+            }
+        }
+        // The status line it runs in still shows: an unknown name keeps nothing, and says so.
+        Err(err) => {
+            eprintln!("error: {err}");
+            crate::hook::note(&format!("usage: {err}"));
+        }
     }
     let Some((cmd, args)) = then.split_first() else {
         return Ok(());

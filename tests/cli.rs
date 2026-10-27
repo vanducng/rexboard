@@ -3280,7 +3280,7 @@ fn usage_keeps_the_last_turn_by_pane_and_passes_the_json_on() {
         .args(["usage", "nope"])
         .write_stdin("{}")
         .assert()
-        .code(2)
+        .success()
         .stderr(predicate::str::contains(
             "harnesses: claude, codex, pi, grok",
         ));

@@ -22,6 +22,7 @@ mod upgrade;
 
 pub use cli::Cli;
 pub use error::{Error, report};
+pub use hook::note as hook_note;
 
 use std::io::{IsTerminal, Write, stderr, stdin, stdout};
 
