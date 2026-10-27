@@ -302,7 +302,7 @@ Keeps what an agent's last turn used, for the board's `MODEL` and `CTX` (and `TO
 
 It keeps one small file per pane in `usage/` in the state dir, named for the pane: `REX_BLOCK` in a plain Rex pane, or inside tmux the tmux socket, server pid and `TMUX_PANE`, where `REX_BLOCK` names the pane that started the tmux server. Serve reads a file again only when it changes, and keeps a pane's figures while the pane lives, at any age: a harness writes only when it works. A file that no pane on this host names (a Rex pane, or any pane on a tmux server a local tmux client talks to) is removed once it is 10 minutes old (Rex never reuses a block id, and a restarted tmux server has a new pid). Figures a harness does not report stay blank, never zero, and so do a token count of 0 and a cost of 0 (before the first request, or a proxy or a subscription).
 
-It prints nothing itself. `-- CMD …` runs your own status line command with the same JSON and passes its output and exit code through, so the status line looks as it did. A payload it cannot read, or a pane it cannot name, keeps nothing and still runs `CMD`: it never breaks the status line it runs in. An unknown harness fails with `USAGE` (exit 2).
+It prints nothing itself. `-- CMD …` runs your own status line command with the same JSON and passes its output and exit code through, so the status line looks as it did. A payload it cannot read, or a pane it cannot name, keeps nothing and still runs `CMD`: it never breaks the status line it runs in. Nothing else makes it fail either: an unknown harness, or an argument this build does not know, is said on stderr and in `REXBOARD_HOOK_LOG`, and it exits 0, or with `CMD`'s code when there is one, which it still runs.
 
 ## `rexboard hook`
 
@@ -332,7 +332,7 @@ Tells Rex an agent's status from one of its hooks. The hooks `rexboard hooks ins
 
 Any other event changes nothing. A message goes on one line, ` ⏎ ` for each line break, cut to Rex's 2048 bytes and to 4096 for the whole sequence. `EVENT` names the event for JSON that has no `hook_event_name`. On Codex's `Stop` it also keeps the turn's usage, as [`rexboard usage codex`](#rexboard-usage) does.
 
-It prints nothing and exits 0 whatever happens, so it never fails the agent's hook; only an unknown harness fails, with `USAGE` (exit 2). `REXBOARD_HOOK_LOG=FILE` appends one line per call: the event, which of `TMUX`, `TMUX_PANE` and `REX_BLOCK` were set, the pane found, and what it did. It never logs the hook's text.
+It prints nothing and exits 0 whatever happens, an unknown harness or an argument this build does not know included, since exit 2 is the code that blocks a Claude Code agent. Such an error is said on stderr and noted in `REXBOARD_HOOK_LOG`. `REXBOARD_HOOK_LOG=FILE` appends one line per call: the event, which of `TMUX`, `TMUX_PANE` and `REX_BLOCK` were set, the pane found, and what it did. It never logs the hook's text.
 
 ## `rexboard hooks`
 
@@ -348,12 +348,12 @@ rexboard hooks replay SESSION          # from tmux, when a client attaches
 
 | Harness | File | What it adds |
 | --- | --- | --- |
-| `claude` | `$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json` | `rexboard hook claude EVENT` for the nine events above (`PostToolUse` for `AskUserQuestion` only), each with a 5 s timeout. The `statusLine` runs through `rexboard usage claude`: yours keeps running and printing, through rexboard while `rexboard` is there and on its own when it is not. With no status line, `rexboard usage claude` |
-| `codex` | `$CODEX_HOME/hooks.json`, else `~/.codex/hooks.json` | `rexboard hook codex EVENT` for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `Stop` and `SessionEnd`; `Stop` keeps the usage too |
+| `claude` | `$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json` | `/bin/sh -c 'REXBOARD hook claude EVENT \|\| true'` for the nine events above (`PostToolUse` for `AskUserQuestion` only), each with a 5 s timeout, so a hook exits 0 even with rexboard gone or too old to know `hook`. The `statusLine` runs through `rexboard usage claude`: yours keeps running and printing, through rexboard while it answers `usage --help` and on its own when it does not. With no status line, `rexboard usage claude` |
+| `codex` | `$CODEX_HOME/hooks.json`, else `~/.codex/hooks.json` | `/bin/sh -c 'REXBOARD hook codex EVENT \|\| true'` for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `Stop` and `SessionEnd`; `Stop` keeps the usage too |
 | `pi` | `rexboard.js` in `$PI_CODING_AGENT_DIR/extensions`, else `~/.pi/agent/extensions` | An extension that runs `rexboard hook pi` on pi's events and `rexboard usage pi` at each turn's end |
 | `grok` | | Nothing: grok reports to a Rex pane itself, and reads a status line only from `~/.grok/config.toml`, which rexboard does not edit. For its usage, add the lines below there by hand |
 
-A settings file is merged, never replaced. Hooks that already report to Rex (rexboard's, or the `rex-agent-status` bridge it replaces) give way to rexboard's, where the first of them was; every other key and hook stays, in its order. Before it writes, the old file is kept beside it as `FILE.bak-<UTC>`, with the file's own permissions, and the write is a rename. A second install changes nothing. The hooks name rexboard by full path, since an agent may run its hooks with a shorter `PATH` than your shell's: the `rexboard` on `PATH` as found (`/opt/homebrew/bin/rexboard`, which stays put across upgrades) when it is this binary, else this binary's own path. Run `install` again after moving rexboard.
+A settings file is merged, never replaced. Hooks that already report to Rex (rexboard's, or the `rex-agent-status` bridge it replaces) give way to rexboard's, where the first of them was; every other key and hook stays, in its order. Before it writes, the old file is kept beside it as `FILE.bak-<UTC>`, with the file's own permissions, and the write is a rename. A second install changes nothing. `REXBOARD` is rexboard by full path, since an agent may run its hooks with a shorter `PATH` than your shell's: the `rexboard` on `PATH` as found (`/opt/homebrew/bin/rexboard`, which stays put across upgrades) when it is this binary, else this binary's own path. Run `install` again after moving rexboard.
 
 What `install` leaves alone:
 - a harness whose settings directory is missing (`absent`);

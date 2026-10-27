@@ -223,6 +223,11 @@ fn write(tty: &str, text: &str) {
     }
 }
 
+/// Notes an error in REXBOARD_HOOK_LOG, for the hook and status line commands that never fail.
+pub fn note(error: &str) {
+    log(None, None, &format!("error: {error}"));
+}
+
 /// With REXBOARD_HOOK_LOG set, one line per hook call: the event, which of TMUX, TMUX_PANE and
 /// REX_BLOCK were set, the pane found, and what it did; never the hook's text.
 fn log(event: Option<&str>, pane: Option<&str>, action: &str) {

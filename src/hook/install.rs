@@ -259,16 +259,20 @@ fn quoted(text: &str) -> String {
 /// A hook that reports to Rex: rexboard's own, or the `rex-agent-status` bridge it replaces.
 fn reports(hook: &Value) -> bool {
     let command = hook["command"].as_str().unwrap_or_default();
-    let mut words = command.split_whitespace();
+    let words: Vec<&str> = command.split_whitespace().collect();
     command.contains("rex-agent-status")
-        || (words
-            .next()
-            .is_some_and(|w| w.trim_matches('\'').ends_with("rexboard"))
-            && words.next() == Some("hook"))
+        || words.windows(2).any(|pair| {
+            pair[0].trim_matches(['\'', '"']).ends_with("rexboard") && pair[1] == "hook"
+        })
 }
 
+/// A hook that exits 0 whatever happens, since exit 2 blocks the agent: a missing rexboard, or one
+/// too old to know `hook`, fails open.
 fn hook_command(bin: &str, harness: &str, event: &str) -> String {
-    format!("{bin} hook {harness} {event}")
+    format!(
+        "/bin/sh -c {}",
+        quoted(&format!("{bin} hook {harness} {event} || true"))
+    )
 }
 
 fn settings(
@@ -481,11 +485,8 @@ fn usage_line(current: &Value, bin: &str) -> Option<Value> {
     if command.contains("usage claude") {
         return None;
     }
-    let found = if bin == "rexboard" {
-        "command -v rexboard >/dev/null 2>&1".to_owned()
-    } else {
-        format!("[ -x {bin} ]")
-    };
+    // A missing rexboard, or one too old to know `usage`, leaves the user's own line running.
+    let found = format!("{bin} usage --help >/dev/null 2>&1");
     let theirs = quoted(command);
     let mut line = current.clone();
     line["command"] = json!(format!(
@@ -618,7 +619,7 @@ mod tests {
             after["hooks"]["Stop"],
             json!([
                 { "hooks": [{ "type": "command", "command": "afplay done.aiff" }] },
-                { "hooks": [{ "type": "command", "command": "rexboard hook claude Stop", "timeout": 5 }] },
+                { "hooks": [{ "type": "command", "command": "/bin/sh -c 'rexboard hook claude Stop || true'", "timeout": 5 }] },
                 { "hooks": [{ "type": "command", "command": "notify" }] },
             ]),
             "in the bridge's place; the user's hooks stay"
@@ -627,7 +628,7 @@ mod tests {
         assert_eq!(
             after["hooks"]["PostToolUse"],
             json!([{ "matcher": "AskUserQuestion", "hooks": [
-                { "type": "command", "command": "rexboard hook claude PostToolUse", "timeout": 5 }
+                { "type": "command", "command": "/bin/sh -c 'rexboard hook claude PostToolUse || true'", "timeout": 5 }
             ]}]),
             "a missing event is added"
         );
@@ -639,8 +640,8 @@ mod tests {
         let said = changes(&live, &after, CLAUDE_EVENTS);
         assert!(
             said.contains(
-                &"Stop: replace `rex-agent-status` with `rexboard hook claude Stop`".to_owned()
-            ) && said.contains(&"PreToolUse: add `rexboard hook claude PreToolUse`".to_owned()),
+                &"Stop: replace `rex-agent-status` with `/bin/sh -c 'rexboard hook claude Stop || true'`".to_owned()
+            ) && said.contains(&"PreToolUse: add `/bin/sh -c 'rexboard hook claude PreToolUse || true'`".to_owned()),
             "{said:#?}"
         );
         assert!(changes(&after, &after, CLAUDE_EVENTS).is_empty());
