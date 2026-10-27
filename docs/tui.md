@@ -261,7 +261,7 @@ Two failures are not refusals. `the pane did not answer within 5s, so it may or 
 
 After a send the board returns to the same row, marks it seen, drops the pane's tail read before the answer (it shows the question just answered), and the card's bar says what went where: `sent 1 (Yes) → seat-a 11:22:04`, until the row needs you again with a newer report. Nothing moves on by itself; `tab` goes to the next row that needs you.
 
-Options are read for Claude Code's dialogs (permission prompts and questions). Other harnesses get line replies at an input line they show; a dialog the board does not recognise offers nothing to send, so jump to it.
+Options are read the same way for every harness: numbered `1.` or `1)`, with `❯` or `>` before the highlighted one, as Claude Code draws its permission prompts and questions. The board and `send.lua` read the screen by one copy of that grammar (`src/harness/dialog.rs`). A line reply goes to an input line any harness shows; a dialog drawn another way offers nothing to send, so jump to it.
 
 ## Status filter
 
