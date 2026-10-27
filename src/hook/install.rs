@@ -521,13 +521,7 @@ fn before_install(
     bin: &str,
 ) -> Option<(String, Value)> {
     let mut bins = vec![bin.to_owned()];
-    for hook in live["hooks"]
-        .as_object()
-        .into_iter()
-        .flat_map(|hooks| hooks.values())
-        .flat_map(|groups| groups.as_array().into_iter().flatten())
-        .flat_map(|group| group["hooks"].as_array().into_iter().flatten())
-    {
+    for hook in every_hook(live) {
         if let Some(found) = hook["command"].as_str().and_then(installed_bin) {
             bins.push(quoted(&found));
         }
@@ -546,8 +540,16 @@ fn before_install(
     backups.into_iter().rev().find_map(|path| {
         let text = std::fs::read_to_string(path).ok()?;
         let was: Value = serde_json::from_str(&text).ok()?;
-        let clean =
-            was.is_object() && stripped(&was) == was && unchained(&was["statusLine"]).is_none();
+        // A bridge hook stays gone: it exits 2, which blocks the agent, once its script is.
+        let bridge = every_hook(&was).any(|hook| {
+            hook["command"]
+                .as_str()
+                .is_some_and(|c| c.contains("rex-agent-status"))
+        });
+        let clean = was.is_object()
+            && stripped(&was) == was
+            && unchained(&was["statusLine"]).is_none()
+            && !bridge;
         let becomes = |bin: &String| {
             let mut out = merged(&was, harness, events, bin);
             if status_line && let Some(line) = usage_line(&was["statusLine"], bin) {
@@ -557,6 +559,16 @@ fn before_install(
         };
         (clean && bins.iter().any(becomes)).then_some((text, was))
     })
+}
+
+/// Every hook in a settings value, in each event's groups.
+fn every_hook(settings: &Value) -> impl Iterator<Item = &Value> {
+    settings["hooks"]
+        .as_object()
+        .into_iter()
+        .flat_map(|hooks| hooks.values())
+        .flat_map(|groups| groups.as_array().into_iter().flatten())
+        .flat_map(|group| group["hooks"].as_array().into_iter().flatten())
 }
 
 /// `live` without the hooks install added. A group, an event or `hooks` that only held them goes;

@@ -730,6 +730,37 @@ fn uninstall_after_install_leaves_every_file_as_it_was_a_chained_status_line_inc
 }
 
 #[test]
+fn uninstall_never_brings_back_a_bridge_hook_install_replaced() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    let bridge =
+        "/bin/sh -c 'exec /usr/bin/python3 \"$HOME/.local/bin/rex-agent-status\" claude-code'";
+    let before = json!({
+        "model": "opus",
+        "hooks": {
+            "PreToolUse": [{ "hooks": [{ "type": "command", "command": bridge }] }],
+            "Notification": [{ "hooks": [{ "type": "command", "command": "say hi" }] }]
+        }
+    });
+    let file = home.join(".claude/settings.json");
+    std::fs::write(&file, serde_json::to_string_pretty(&before).unwrap()).unwrap();
+    let installed = hooks_run(home, &["install", "claude"]);
+    assert!(
+        installed.to_string().contains("replace `rex-agent-status`"),
+        "{installed}"
+    );
+    hooks_run(home, &["uninstall", "claude"]);
+    let after: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    let mut want = before.clone();
+    want["hooks"].as_object_mut().unwrap().remove("PreToolUse");
+    assert_eq!(
+        after, want,
+        "everything else as it was; the bridge, which exits 2 once its script is gone, stays gone"
+    );
+}
+
+#[test]
 fn uninstall_keeps_what_the_user_changed_after_install() {
     let home = tempfile::tempdir().unwrap();
     let home = home.path();
