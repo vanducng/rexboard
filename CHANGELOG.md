@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.16.0](https://github.com/vanducng/rexboard/compare/v0.15.0...v0.16.0) (2026-10-27)
+
+
+### Features
+
+* **hooks:** uninstall, and status on a linked file ([#90](https://github.com/vanducng/rexboard/issues/90)) ([cf27fa3](https://github.com/vanducng/rexboard/commit/cf27fa37d17c96a90bd5a91a38c95fbfe15cfbc8))
+* **tui:** card keeps paragraphs and lays out lists, quotes, code and tables ([#92](https://github.com/vanducng/rexboard/issues/92)) ([0ba8066](https://github.com/vanducng/rexboard/commit/0ba806696959760c9ff17009f9c1ecab71978b11))
+
 ## [0.15.0](https://github.com/vanducng/rexboard/compare/v0.14.1...v0.15.0) (2026-10-27)
 
 
