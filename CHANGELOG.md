@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/vanducng/rexboard/compare/v0.13.0...v0.14.0) (2026-10-27)
+
+
+### Features
+
+* **hooks:** rexboard hook and hooks install, status and replay, for Claude Code, Codex and pi ([3817e60](https://github.com/vanducng/rexboard/commit/3817e60ef9f5a0c33904e88b00207db9cf64f201))
+
 ## [0.13.0](https://github.com/vanducng/rexboard/compare/v0.12.0...v0.13.0) (2026-10-27)
 
 
