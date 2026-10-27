@@ -174,7 +174,7 @@ fn agent_tty() -> Option<(u32, String)> {
     None
 }
 
-fn tmux(args: &[&str]) -> Option<String> {
+pub(super) fn tmux(args: &[&str]) -> Option<String> {
     output(
         &["tmux", "/opt/homebrew/bin/tmux", "/usr/local/bin/tmux"],
         args,

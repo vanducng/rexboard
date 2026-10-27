@@ -35,6 +35,8 @@ const CODEX_EVENTS: &[Event] = &[
 /// The pi extension, with `__REXBOARD__` for the command that runs rexboard.
 const PI_EXTENSION: &str = include_str!("pi-extension.js");
 const HARNESSES: [&str; 4] = ["claude", "codex", "pi", "grok"];
+/// grok reads a command status line only from its own config.toml, which rexboard does not edit.
+const GROK_LINE: &str = "[ui.status_line]\ntype = \"command\"\ncommand = \"rexboard usage grok\"";
 
 /// What install would do, or did, to one harness.
 #[derive(Debug, Serialize)]
@@ -67,13 +69,38 @@ impl Plan {
     }
 }
 
-/// `rexboard hooks status`.
+/// How a run ends: what `status` found, what a dry run would write, or what was written.
+#[derive(Clone, Copy, PartialEq)]
+enum Ending {
+    Status,
+    Preview,
+    Written,
+}
+
+/// `rexboard hooks status`, and whether the default tmux server passes a status through.
 pub fn status(json: bool) -> Result<()> {
     let plans = HARNESSES
         .iter()
         .map(|h| plan(h, &binary()))
         .collect::<Result<Vec<_>>>()?;
-    print(&plans, json, false);
+    let passthrough = super::tmux(&["show", "-gv", "allow-passthrough"]);
+    if json {
+        println!(
+            "{}",
+            json!({ "harnesses": plans, "tmux": { "allow_passthrough": passthrough } })
+        );
+        return Ok(());
+    }
+    print(&plans, Ending::Status);
+    match passthrough.as_deref() {
+        Some("on" | "all") => println!("{:<7}allow-passthrough on", "tmux"),
+        Some(_) => println!(
+            "{:<7}allow-passthrough off: add `set -g allow-passthrough on` to tmux.conf, or a \
+             status from inside tmux never reaches Rex",
+            "tmux"
+        ),
+        None => {}
+    }
     Ok(())
 }
 
@@ -102,28 +129,42 @@ pub fn install(names: &[String], dry_run: bool, json: bool) -> Result<()> {
             plans.push(plan);
         }
     }
-    print(&plans, json, !dry_run);
+    if json {
+        println!("{}", json!({ "harnesses": plans }));
+    } else {
+        print(
+            &plans,
+            if dry_run {
+                Ending::Preview
+            } else {
+                Ending::Written
+            },
+        );
+    }
     Ok(())
 }
 
-fn print(plans: &[Plan], json: bool, applied: bool) {
-    if json {
-        println!("{}", json!({ "harnesses": plans }));
-        return;
-    }
+fn print(plans: &[Plan], ending: Ending) {
     for plan in plans {
         let file = plan.file.as_deref().unwrap_or("-");
-        println!("{}  {}  {}", plan.harness, plan.state, file);
+        println!("{:<7}{:<12}{file}", plan.harness, plan.state);
         for change in &plan.changes {
             println!("  {change}");
         }
-        if let Some(note) = &plan.note {
-            println!("  {note}");
+        for line in plan.note.iter().flat_map(|note| note.lines()) {
+            println!("  {line}");
         }
-        match (&plan.backup, plan.state) {
-            (Some(backup), _) => println!("  the old one is {backup}"),
-            (None, "changes") if !applied => println!("  rexboard hooks install writes it"),
-            _ => {}
+        if let Some(backup) = &plan.backup {
+            println!("  the old one is {backup}");
+        }
+    }
+    if plans.iter().any(|p| p.state == "changes") {
+        match ending {
+            Ending::Status => println!("rexboard hooks install writes these"),
+            Ending::Preview => {
+                println!("dry run: nothing written; rexboard hooks install writes these")
+            }
+            Ending::Written => {}
         }
     }
 }
@@ -135,11 +176,10 @@ fn plan(harness: &'static str, bin: &str) -> Result<Plan> {
         "pi" => pi(bin),
         _ => {
             let mut plan = Plan::new(harness, None, "not managed");
-            plan.note = Some(
-                "grok reports to a Rex pane itself; its status line is read only from \
-                 ~/.grok/config.toml, so add `rexboard usage grok` there by hand"
-                    .into(),
-            );
+            plan.note = Some(format!(
+                "grok reports to a Rex pane itself. For its usage, add to ~/.grok/config.toml:\n\
+                 {GROK_LINE}"
+            ));
             Ok(plan)
         }
     }
@@ -247,7 +287,18 @@ fn settings(
     };
     let live: Value = serde_json::from_str(&before)
         .map_err(|err| Error::Config(format!("{} is not valid JSON: {err}", shown(&file))))?;
-    if !live.is_object() || !(live["hooks"].is_null() || live["hooks"].is_object()) {
+    let known = |groups: &Value| {
+        groups.as_array().is_some_and(|groups| {
+            groups
+                .iter()
+                .all(|group| group.is_object() && group["hooks"].is_array())
+        })
+    };
+    let hooks_known = live["hooks"].is_null()
+        || live["hooks"]
+            .as_object()
+            .is_some_and(|hooks| hooks.values().all(known));
+    if !live.is_object() || !hooks_known {
         return Err(Error::Config(format!(
             "{} has hooks in a shape rexboard does not know; left alone",
             shown(&file)
@@ -339,7 +390,7 @@ fn merged(live: &Value, harness: &str, events: &[Event], bin: &str) -> Value {
             new.extend(want(&event));
         }
         if new.is_empty() {
-            hooks.remove(&event);
+            hooks.shift_remove(&event);
         } else {
             hooks.insert(event, Value::Array(new));
         }
@@ -347,15 +398,21 @@ fn merged(live: &Value, harness: &str, events: &[Event], bin: &str) -> Value {
     out
 }
 
-/// Each event whose reporting hooks change, as `EVENT: old -> new`.
+/// Each event whose reporting hooks change: `EVENT: add …, keeping your 1 hook`,
+/// `replace … with …`, or `remove …`.
 fn changes(live: &Value, after: &Value, events: &[Event]) -> Vec<String> {
-    let reporting = |settings: &Value, event: &str| -> Vec<String> {
+    let hooks = |settings: &Value, event: &str| -> Vec<Value> {
         settings["hooks"][event]
             .as_array()
             .into_iter()
             .flatten()
             .flat_map(|group| group["hooks"].as_array().cloned().unwrap_or_default())
-            .filter(reports)
+            .collect()
+    };
+    let reporting = |settings: &Value, event: &str| -> Vec<String> {
+        hooks(settings, event)
+            .iter()
+            .filter(|hook| reports(hook))
             .filter_map(|hook| hook["command"].as_str().map(str::to_owned))
             .collect()
     };
@@ -372,16 +429,26 @@ fn changes(live: &Value, after: &Value, events: &[Event]) -> Vec<String> {
         .into_iter()
         .filter_map(|event| {
             let (old, new) = (reporting(live, event), reporting(after, event));
-            (old != new).then(|| format!("{event}: {} -> {}", said(&old), said(&new)))
+            if old == new {
+                return None;
+            }
+            let yours = hooks(after, event).iter().filter(|h| !reports(h)).count();
+            Some(match (old.is_empty(), new.is_empty()) {
+                (true, _) if yours > 0 => format!(
+                    "{event}: add {}, keeping your {yours} hook{}",
+                    said(&new),
+                    if yours == 1 { "" } else { "s" }
+                ),
+                (true, _) => format!("{event}: add {}", said(&new)),
+                (_, true) => format!("{event}: remove {}", said(&old)),
+                _ => format!("{event}: replace {} with {}", said(&old), said(&new)),
+            })
         })
         .collect()
 }
 
-/// Commands as a change shows them: each in backticks, or `none`.
+/// Commands as a change shows them, each in backticks.
 fn said(commands: &[String]) -> String {
-    if commands.is_empty() {
-        return "none".to_owned();
-    }
     commands
         .iter()
         .map(|c| format!("`{}`", short(c)))
@@ -468,13 +535,7 @@ fn apply(file: &Path, text: &str) -> Result<Option<String>> {
     };
     let backup = match mode {
         Ok(mode) => {
-            let name = format!(
-                "{}.bak-{}",
-                file.file_name().unwrap_or_default().to_string_lossy(),
-                chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
-            );
-            let backup = dir.join(name);
-            put(&backup, &std::fs::read_to_string(file)?, mode)?;
+            let backup = keep_old(file, mode)?;
             put(file, text, mode)?;
             Some(shown(&backup))
         }
@@ -484,6 +545,42 @@ fn apply(file: &Path, text: &str) -> Result<Option<String>> {
         }
     };
     Ok(backup)
+}
+
+/// Copies `file` to `FILE.bak-<UTC>` with `mode`, never over an existing backup: a second one in
+/// the same second takes `-2`, then `-3`.
+fn keep_old(file: &Path, mode: u32) -> std::io::Result<PathBuf> {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let base = format!(
+        "{}.bak-{}",
+        file.file_name().unwrap_or_default().to_string_lossy(),
+        chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
+    );
+    let old = std::fs::read(file)?;
+    for n in 1.. {
+        let name = if n == 1 {
+            base.clone()
+        } else {
+            format!("{base}-{n}")
+        };
+        let backup = file.with_file_name(name);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(mode)
+            .open(&backup)
+        {
+            Ok(mut out) => {
+                out.write_all(&old)?;
+                std::fs::set_permissions(&backup, std::fs::Permissions::from_mode(mode))?;
+                return Ok(backup);
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(err),
+        }
+    }
+    unreachable!("some name is free")
 }
 
 #[cfg(test)]
@@ -537,7 +634,9 @@ mod tests {
         );
         let said = changes(&live, &after, CLAUDE_EVENTS);
         assert!(
-            said.contains(&"Stop: `rex-agent-status` -> `rexboard hook claude Stop`".to_owned()),
+            said.contains(
+                &"Stop: replace `rex-agent-status` with `rexboard hook claude Stop`".to_owned()
+            ) && said.contains(&"PreToolUse: add `rexboard hook claude PreToolUse`".to_owned()),
             "{said:#?}"
         );
         assert!(changes(&after, &after, CLAUDE_EVENTS).is_empty());
@@ -605,5 +704,56 @@ mod tests {
             "'/Apps/My Tools/rexboard'"
         );
         assert_eq!(quoted("it's"), r"'it'\''s'");
+    }
+
+    #[test]
+    fn an_emptied_event_goes_and_the_rest_keep_their_order() {
+        let live = json!({ "hooks": {
+            "Gone": [{ "hooks": [bridge("Gone")] }],
+            "PreCompact": [{ "hooks": [{ "type": "command", "command": "mine" }] }],
+            "Custom": [{ "hooks": [{ "type": "command", "command": "also mine" }] }],
+        }});
+        let after = merged(&live, "codex", CODEX_EVENTS, "rexboard");
+        let keys: Vec<&String> = after["hooks"].as_object().unwrap().keys().collect();
+        assert_eq!(keys[..2], ["PreCompact", "Custom"], "{keys:?}");
+        assert!(
+            changes(&live, &after, CODEX_EVENTS)
+                .contains(&"Gone: remove `rex-agent-status`".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_settings_file_with_hooks_in_another_shape_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        for text in [
+            r#"{"hooks": {"Stop": {"hooks": []}}}"#,
+            r#"{"hooks": {"Stop": [{"hooks": {"type": "command"}}]}}"#,
+            r#"{"hooks": {"Stop": ["rexboard hook claude Stop"]}}"#,
+        ] {
+            std::fs::write(&file, text).unwrap();
+            let err =
+                settings("claude", file.clone(), CLAUDE_EVENTS, true, "rexboard").unwrap_err();
+            assert!(
+                err.to_string().contains("a shape rexboard does not know"),
+                "{text}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn two_writes_in_one_second_keep_the_original() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("hooks.json");
+        std::fs::write(&file, "original").unwrap();
+        let first = apply(&file, "first").unwrap().unwrap();
+        let second = apply(&file, "second").unwrap().unwrap();
+        assert_ne!(first, second);
+        let mut kept: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| std::fs::read_to_string(e.unwrap().path()).unwrap())
+            .collect();
+        kept.sort();
+        assert_eq!(kept, ["first", "original", "second"]);
     }
 }

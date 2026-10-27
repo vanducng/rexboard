@@ -125,6 +125,7 @@ pub enum HooksCommand {
     /// Send each pane's last status again to a tmux client that just attached to SESSION; for
     /// tmux's client-attached hook.
     Replay {
+        /// The tmux session, as `#{session_id}` gives it.
         #[arg(value_name = "SESSION")]
         session: String,
     },
