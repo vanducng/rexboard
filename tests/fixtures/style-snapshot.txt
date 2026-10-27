@@ -505,6 +505,68 @@
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                   {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
+== markdown 80
+{Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                     {Reset/Reset/DIM}hh:mm · local + mini
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/DIM}  {Reset/Reset/DIM | UNDERLINED}A{Reset/Reset/DIM}GE    {Reset/Reset/DIM | UNDERLINED}H{Reset/Reset/DIM}ARNESS H{Reset/Reset/DIM | UNDERLINED}O{Reset/Reset/DIM}ST    {Reset/Reset/DIM | UNDERLINED}W{Reset/Reset/DIM}HERE                   {Reset/Reset/DIM | UNDERLINED}M{Reset/Reset/DIM}SG                            
+{Reset/Reset/BOLD | DIM}NEEDS YOU (2) ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+{Red/Reset/BOLD}! {Reset/Reset/NONE}5h43m  claude  {Reset/Reset/DIM}mini    {Reset/Reset/NONE}api › seat-b            seat-b msg                     
+{Green/DarkGray/BOLD}✓ {Reset/DarkGray/NONE}5h43m  claude  {Reset/DarkGray/DIM}local   {Reset/DarkGray/NONE}api › claude            {Reset/DarkGray/BOLD}Tests pass{Reset/DarkGray/NONE}: ran {Reset/DarkGray/BOLD}cargo test{Reset/DarkGray/NONE} on …
+{Reset/Reset/BOLD | DIM}WORKING (2) ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+{Yellow/Reset/NONE}⠴ {Reset/Reset/NONE}5h43m  claude  {Reset/Reset/DIM}mini    {Reset/Reset/NONE}api › codex             codex msg                      
+{Yellow/Reset/NONE}⠴ {Reset/Reset/NONE}≥5h43m claude  {Reset/Reset/DIM}mini    {Reset/Reset/NONE}api › rig                                              
+{Reset/Reset/BOLD | DIM}QUIET (1) ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+{Reset/Reset/DIM}○ {Reset/Reset/NONE}5h43m  claude  {Reset/Reset/DIM}local   {Reset/Reset/NONE}api › seat-a            seat-a msg                     
+{Reset/Reset/BOLD | DIM}UNREPORTED (1) ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+{Reset/Reset/DIM}· -      claude? local   api › inferred          inferred msg                   
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/DIM}━━{Green/Reset/BOLD} ✓ done · claude · ended 5h43m ago {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{Reset/Reset/BOLD} ## Tests pass: ran cargo test on the PR{Reset/Reset/NONE}                                        
+{Reset/Reset/NONE}   - next: {Reset/Reset/BOLD}merge{Reset/Reset/NONE} it, then {Reset/Reset/BOLD}make release{Reset/Reset/NONE}                                          
+{Reset/Reset/NONE}   snake_case and 2*3*4 stay                                                    
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › claude                                                    
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local          {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                          
+{Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}claude title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                          
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE}                                                                                
+{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump{Reset/Reset/NONE}          {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
+== markdown 140
+{Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                                                                                 {Reset/Reset/DIM}hh:mm · local + mini
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/DIM}  {Reset/Reset/DIM | UNDERLINED}S{Reset/Reset/DIM}TATE      {Reset/Reset/DIM | UNDERLINED}A{Reset/Reset/DIM}GE    {Reset/Reset/DIM | UNDERLINED}T{Reset/Reset/DIM}URN   {Reset/Reset/DIM | UNDERLINED}H{Reset/Reset/DIM}ARNESS H{Reset/Reset/DIM | UNDERLINED}O{Reset/Reset/DIM}ST    S{Reset/Reset/DIM | UNDERLINED}E{Reset/Reset/DIM}SSION              WI{Reset/Reset/DIM | UNDERLINED}N{Reset/Reset/DIM}DOW               {Reset/Reset/DIM | UNDERLINED}B{Reset/Reset/DIM}LOCK                 {Reset/Reset/DIM | UNDERLINED}M{Reset/Reset/DIM}SG                              
+{Reset/Reset/BOLD | DIM}NEEDS YOU (2) ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+{Red/Reset/BOLD}! blocked    {Reset/Reset/NONE}5h43m  -      claude  {Reset/Reset/DIM}mini    {Reset/Reset/NONE}api                  main                 seat-b                seat-b msg                       
+{Green/DarkGray/BOLD}✓ done       {Reset/DarkGray/NONE}5h43m  -      claude  {Reset/DarkGray/DIM}local   {Reset/DarkGray/NONE}api                  main                 claude                {Reset/DarkGray/BOLD}Tests pass{Reset/DarkGray/NONE}: ran {Reset/DarkGray/BOLD}cargo test{Reset/DarkGray/NONE} on th…
+{Reset/Reset/BOLD | DIM}WORKING (2) ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+{Yellow/Reset/NONE}⠴ working    {Reset/Reset/NONE}5h43m  -      claude  {Reset/Reset/DIM}mini    {Reset/Reset/NONE}api                  main                 codex                 codex msg                        
+{Yellow/Reset/NONE}⠴ working    {Reset/Reset/NONE}≥5h43m -      claude  {Reset/Reset/DIM}mini    {Reset/Reset/NONE}api                  2-toolrig:…abcdef#l2 rig                                                    
+{Reset/Reset/BOLD | DIM}QUIET (1) ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+{Reset/Reset/DIM}○ idle       {Reset/Reset/NONE}5h43m  -      claude  {Reset/Reset/DIM}local   {Reset/Reset/NONE}api                  main                 seat-a                seat-a msg                       
+{Reset/Reset/BOLD | DIM}UNREPORTED (1) ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+{Reset/Reset/DIM}· unknown    -      -      claude? local   api                  main                 inferred              inferred msg                     
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/DIM}━━{Green/Reset/BOLD} ✓ done · claude · ended 5h43m ago {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{Reset/Reset/BOLD} ## Tests pass: ran cargo test on the PR{Reset/Reset/NONE}                                                                                                    
+{Reset/Reset/NONE}   - next: {Reset/Reset/BOLD}merge{Reset/Reset/NONE} it, then {Reset/Reset/BOLD}make release{Reset/Reset/NONE}                                                                                                      
+{Reset/Reset/NONE}   snake_case and 2*3*4 stay                                                                                                                
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › claude                                                                                                                
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}local          {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                      
+{Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}claude title   {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                                      
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/BOLD}j/k{Reset/Reset/DIM} move · {Reset/Reset/BOLD}m{Reset/Reset/DIM} seen · {Reset/Reset/BOLD}/{Reset/Reset/DIM} filter · {Reset/Reset/BOLD}v{Reset/Reset/DIM} next view · {Reset/Reset/BOLD}?{Reset/Reset/DIM} keys · {Reset/Reset/BOLD}n{Reset/Reset/DIM} needs you · {Reset/Reset/BOLD}enter{Reset/Reset/DIM} jump · {Reset/Reset/BOLD}a{Reset/Reset/DIM} answer · {Reset/Reset/BOLD}space{Reset/Reset/DIM} full · {Reset/Reset/BOLD}1-9{Reset/Reset/DIM} select{Reset/Reset/NONE}                   {Reset/Reset/BOLD}q{Reset/Reset/DIM} quit
 == f picker 80
 {Cyan/Reset/BOLD}rexboard{Reset/Reset/DIM} · 2 hosts · 6 panes · 6 agents{Reset/Reset/NONE}                     {Reset/Reset/DIM}hh:mm · local + mini
 {Reset/Reset/NONE}                                                                                
