@@ -698,7 +698,18 @@ fn uninstall_after_install_leaves_every_file_as_it_was_a_chained_status_line_inc
         std::fs::create_dir_all(home.join(".codex")).unwrap();
         std::fs::create_dir_all(home.join(".pi/agent")).unwrap();
     };
-    for setup in [lived_in as fn(&Path), bare, empty] {
+    let containers = |home: &Path| {
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::write(
+            home.join(".claude/settings.json"),
+            "{\"hooks\": {\"Stop\": []}, \"model\": \"opus\"}",
+        )
+        .unwrap();
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        std::fs::write(home.join(".codex/hooks.json"), "{\"hooks\": {}}").unwrap();
+        std::fs::create_dir_all(home.join(".pi/agent")).unwrap();
+    };
+    for setup in [lived_in as fn(&Path), bare, empty, containers] {
         let home = tempfile::tempdir().unwrap();
         let home = home.path();
         setup(home);
@@ -732,6 +743,14 @@ fn uninstall_keeps_what_the_user_changed_after_install() {
         .unwrap()
         .push(json!({ "type": "command", "command": "say done" }));
     settings["editor"] = json!("vim");
+    settings["hooks"]["Notification"].as_array_mut().unwrap().push(json!({ "hooks": [{
+        "type": "command",
+        "command": "/bin/sh -c 'rexboard hook claude Notification; afplay /System/Library/Sounds/Ping.aiff'"
+    }]}));
+    settings["hooks"]["PreCompact"] = json!([{ "hooks": [{
+        "type": "command",
+        "command": "rexboard hook claude PreCompact && notify-send compacting"
+    }]}]);
     std::fs::write(&file, serde_json::to_string_pretty(&settings).unwrap()).unwrap();
     let pi = home.join(".pi/agent/extensions/rexboard.js");
     std::fs::write(&pi, std::fs::read_to_string(&pi).unwrap() + "// my tweak\n").unwrap();
@@ -743,7 +762,10 @@ fn uninstall_keeps_what_the_user_changed_after_install() {
     );
     let after: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
     let text = after.to_string();
-    assert!(!text.contains("rexboard hook"), "{text}");
+    assert!(
+        !text.contains("|| true"),
+        "install's own hooks are gone: {text}"
+    );
     assert_eq!(after["editor"], "vim");
     assert_eq!(after["statusLine"]["command"], "~/bin/my line.sh --short");
     let stop: Vec<&str> = after["hooks"]["Stop"]
@@ -754,6 +776,15 @@ fn uninstall_keeps_what_the_user_changed_after_install() {
         .map(|h| h["command"].as_str().unwrap())
         .collect();
     assert_eq!(stop, ["afplay done.aiff", "say done"]);
+    for theirs in [
+        "afplay /System/Library/Sounds/Ping.aiff",
+        "notify-send compacting",
+    ] {
+        assert!(
+            text.contains(theirs),
+            "a hook that also runs {theirs} is the user's: {text}"
+        );
+    }
 }
 
 #[test]
@@ -767,6 +798,15 @@ fn uninstall_on_a_home_never_installed_or_as_a_dry_run_writes_nothing() {
         assert_eq!(state(&out, harness), "not installed", "{out}");
     }
     assert_eq!(tree(home), before, "nothing written, no backup");
+    let text = rexboard(home)
+        .args(["hooks", "uninstall"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(text.stdout).unwrap();
+    assert!(
+        text.contains("claude not installed ~/.claude/settings.json\n"),
+        "{text}"
+    );
     hooks_run(home, &["install"]);
     let installed = tree(home);
     let text = rexboard(home)
@@ -837,4 +877,42 @@ fn status_reads_a_linked_settings_file_and_says_what_it_lacks() {
             .contains("missing: Stop, SessionEnd")
     );
     assert_eq!(tree(&checkout), before, "read only");
+}
+
+#[test]
+fn uninstall_never_writes_back_a_backup_an_earlier_install_made() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    std::fs::create_dir_all(home.join(".codex")).unwrap();
+    let bin = home.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::os::unix::fs::symlink(
+        assert_cmd::cargo::cargo_bin("rexboard"),
+        bin.join("rexboard"),
+    )
+    .unwrap();
+    let linked = format!("{}:/usr/bin:/bin", bin.display());
+    let install = |path: &str| {
+        let out = rexboard(home)
+            .env("PATH", path)
+            .args(["hooks", "install", "codex"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+    };
+    install(&linked);
+    install("/usr/bin:/bin");
+    assert_eq!(
+        backups(&home.join(".codex")),
+        1,
+        "the second install, on another path, backed up the first's file"
+    );
+    let out = rexboard(home)
+        .env("PATH", "/usr/bin:/bin")
+        .args(["hooks", "uninstall", "codex", "--json"])
+        .output()
+        .unwrap();
+    let out: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(out["harnesses"][0]["state"], "removed", "{out}");
+    assert!(!home.join(".codex/hooks.json").exists(), "install made it");
 }

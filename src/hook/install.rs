@@ -164,7 +164,7 @@ pub fn run(mode: Mode, names: &[String], dry_run: bool, json: bool) -> Result<()
 fn print(plans: &[Plan], ending: Ending) {
     for plan in plans {
         let file = plan.file.as_deref().unwrap_or("-");
-        println!("{:<7}{:<12}{file}", plan.harness, plan.state);
+        println!("{:<7}{:<14}{file}", plan.harness, plan.state);
         for change in &plan.changes {
             println!("  {change}");
         }
@@ -311,9 +311,32 @@ fn quoted(text: &str) -> String {
     }
 }
 
-/// A hook install added: one that runs `rexboard hook`.
+/// A hook install added.
 fn ours(hook: &Value) -> bool {
-    hook["command"].as_str().is_some_and(|c| runs_hook(c, 2))
+    hook["command"].as_str().and_then(installed_bin).is_some()
+}
+
+/// The rexboard a hook install wrote runs, as written, or None for any other hook. After one
+/// `sh -c`, its words are exactly `REXBOARD hook HARNESS EVENT`, alone or with `|| true`; a hook
+/// of the user's that also runs something else is theirs.
+fn installed_bin(command: &str) -> Option<String> {
+    let mut words = shell_words(command);
+    if let [shell, flag, script] = &words[..]
+        && Path::new(shell).file_name().is_some_and(|n| n == "sh")
+        && flag == "-c"
+    {
+        words = shell_words(script);
+    }
+    let whole = match &words[..] {
+        [_, _, _, _] => true,
+        [_, _, _, _, or, yes] => or == "||" && yes == "true",
+        _ => false,
+    };
+    let [bin, verb, ..] = &words[..] else {
+        return None;
+    };
+    let named = Path::new(bin).file_name().is_some_and(|n| n == "rexboard");
+    (whole && named && verb == "hook").then(|| bin.clone())
 }
 
 /// A hook that reports to Rex: rexboard's own, or the `rex-agent-status` bridge it replaces.
@@ -426,9 +449,13 @@ fn settings(
             shown(&file)
         )));
     }
-    let (mut after, done) = match mode {
-        Mode::Install => (merged(&live, harness, events, bin), "installed"),
-        Mode::Uninstall => (stripped(&live), "not installed"),
+    let found = (mode == Mode::Uninstall)
+        .then(|| before_install(&file, &live, harness, events, status_line, bin))
+        .flatten();
+    let (mut after, done) = match (mode, &found) {
+        (Mode::Install, _) => (merged(&live, harness, events, bin), "installed"),
+        (Mode::Uninstall, Some((_, was))) => (was.clone(), "not installed"),
+        (Mode::Uninstall, None) => (stripped(&live), "not installed"),
     };
     let mut changes = changes(&live, &after, events);
     let line = &live["statusLine"];
@@ -443,15 +470,20 @@ fn settings(
             after["statusLine"] = new;
         }
     } else if status_line {
+        let restored = found.is_some();
         match unchained(line) {
             Some(Some(command)) => {
                 changes.push(format!("statusLine: back to `{command}` alone"));
-                after["statusLine"]["command"] = json!(command);
+                if !restored {
+                    after["statusLine"]["command"] = json!(command);
+                }
             }
             Some(None) => {
                 changes.push("statusLine: remove `rexboard usage claude`".into());
-                let object = after.as_object_mut().expect("an object");
-                object.shift_remove("statusLine");
+                if !restored {
+                    let object = after.as_object_mut().expect("an object");
+                    object.shift_remove("statusLine");
+                }
             }
             None => {}
         }
@@ -462,10 +494,7 @@ fn settings(
         if changes.is_empty() { done } else { "changes" },
     );
     if !changes.is_empty() {
-        let kept = (mode == Mode::Uninstall)
-            .then(|| as_it_was(&file, &after))
-            .flatten();
-        plan.after = Some(if let Some(text) = kept {
+        plan.after = Some(if let Some((text, _)) = found {
             Write::Text(text)
         } else if after.as_object().is_some_and(|o| o.is_empty()) {
             Write::Remove
@@ -479,9 +508,31 @@ fn settings(
     Ok(plan)
 }
 
-/// The text of the newest backup of `file` that holds `after`, so an uninstall gives back the
-/// file as install found it, its layout included.
-fn as_it_was(file: &Path, after: &Value) -> Option<String> {
+/// The file as install found it, text and value: the newest backup that holds nothing of
+/// rexboard's and that install turns into `live`, run with the rexboard `live`'s hooks name (or
+/// `bin`). A backup holding rexboard's hooks is a later install's, and is passed over. None when
+/// the file changed since install, or install made it.
+fn before_install(
+    file: &Path,
+    live: &Value,
+    harness: &str,
+    events: &[Event],
+    status_line: bool,
+    bin: &str,
+) -> Option<(String, Value)> {
+    let mut bins = vec![bin.to_owned()];
+    for hook in live["hooks"]
+        .as_object()
+        .into_iter()
+        .flat_map(|hooks| hooks.values())
+        .flat_map(|groups| groups.as_array().into_iter().flatten())
+        .flat_map(|group| group["hooks"].as_array().into_iter().flatten())
+    {
+        if let Some(found) = hook["command"].as_str().and_then(installed_bin) {
+            bins.push(quoted(&found));
+        }
+    }
+    bins.dedup();
     let name = format!("{}.bak-", file.file_name()?.to_string_lossy());
     let mut backups: Vec<PathBuf> = std::fs::read_dir(file.parent()?)
         .ok()?
@@ -494,7 +545,17 @@ fn as_it_was(file: &Path, after: &Value) -> Option<String> {
     backups.sort();
     backups.into_iter().rev().find_map(|path| {
         let text = std::fs::read_to_string(path).ok()?;
-        (serde_json::from_str::<Value>(&text).ok()? == *after).then_some(text)
+        let was: Value = serde_json::from_str(&text).ok()?;
+        let clean =
+            was.is_object() && stripped(&was) == was && unchained(&was["statusLine"]).is_none();
+        let becomes = |bin: &String| {
+            let mut out = merged(&was, harness, events, bin);
+            if status_line && let Some(line) = usage_line(&was["statusLine"], bin) {
+                out["statusLine"] = line;
+            }
+            out == *live
+        };
+        (clean && bins.iter().any(becomes)).then_some((text, was))
     })
 }
 
@@ -502,7 +563,8 @@ fn as_it_was(file: &Path, after: &Value) -> Option<String> {
 /// one the user left empty stays.
 fn stripped(live: &Value) -> Value {
     let mut out = live.clone();
-    let Some(hooks) = out["hooks"].as_object_mut() else {
+    // Not `out["hooks"]`: indexing a map for a key it lacks inserts it.
+    let Some(hooks) = out.get_mut("hooks").and_then(Value::as_object_mut) else {
         return out;
     };
     let mut emptied = Vec::new();
@@ -1092,5 +1154,33 @@ mod tests {
             json!({ "model": "opus" }),
             "hooks only held rexboard's"
         );
+    }
+
+    #[test]
+    fn only_the_hooks_install_writes_are_rexboards_to_take_out() {
+        for (command, bin) in [
+            (
+                hook_command("/opt/homebrew/bin/rexboard", "claude", "Stop"),
+                Some("/opt/homebrew/bin/rexboard"),
+            ),
+            (
+                hook_command("'/tmp/My Tools/rexboard'", "codex", "Stop"),
+                Some("/tmp/My Tools/rexboard"),
+            ),
+            ("rexboard hook claude Stop".into(), Some("rexboard")),
+            (
+                "/bin/sh -c 'rexboard hook claude Notification; afplay ping.aiff'".into(),
+                None,
+            ),
+            (
+                "rexboard hook claude PreCompact && notify-send compacting".into(),
+                None,
+            ),
+            ("rexboard hook claude Stop || say done".into(), None),
+            ("rexboard usage claude".into(), None),
+            ("echo rexboard hook claude Stop".into(), None),
+        ] {
+            assert_eq!(installed_bin(&command).as_deref(), bin, "{command}");
+        }
     }
 }

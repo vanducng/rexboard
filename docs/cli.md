@@ -375,12 +375,12 @@ command = "rexboard usage grok"
 Inside tmux a status reaches Rex only through tmux passthrough, so tmux needs `set -g allow-passthrough on` in `tmux.conf`. `status` says when the default tmux server has it off.
 
 `uninstall` takes out exactly what `install` put in, with the same rules (a backup first, a linked file or directory left alone, `--dry-run` and `--json` as for `install`):
-- the hooks that run `rexboard hook`, and any group, event or `hooks` key they alone filled. Hooks and keys of yours stay, also ones added after install. A `rex-agent-status` hook that install replaced does not come back;
+- the hooks install writes, `REXBOARD hook HARNESS EVENT` alone or with `|| true`, inside `sh -c` or not. A hook of yours that also runs something else stays, as do your other hooks and keys, also ones added after install;
 - Claude's `statusLine`: one install chained goes back to your own command, with its other keys as they are, and one install added goes. A status line install did not write is left alone;
 - pi's `rexboard.js`, only while it is the file rexboard wrote. One you changed is `not ours` and stays;
-- a file install made and that holds nothing else now (Codex's `hooks.json` on a fresh machine) is removed, after its backup.
+- a file install made (no backup holds what it was) that holds nothing else now, such as Codex's `hooks.json` on a fresh machine, is removed after a backup. A file of yours is never removed.
 
-When a backup beside the file holds exactly what is left, uninstall writes that backup's text, so a file comes back byte for byte, its layout included. A second uninstall changes nothing. Codex's `config.toml` is never touched by either. Run `uninstall` before removing rexboard: until then each hook fails on every event. Moving `FILE.bak-<UTC>` back over the file also undoes an install. A second backup in the same second takes `-2`, so none is ever written over.
+When the newest backup that holds nothing of rexboard's is the file install turned into this one, uninstall writes that backup back, so the file comes back byte for byte: its layout, your empty events and a `rex-agent-status` hook install replaced included. When the file changed since install, there is no such backup, and uninstall takes out rexboard's hooks and any group, event or `hooks` key they alone filled. A second uninstall changes nothing. Codex's `config.toml` is never touched by either. Run `uninstall` before removing rexboard: until then each hook fails on every event. Moving `FILE.bak-<UTC>` back over the file also undoes an install. A second backup in the same second takes `-2`, so none is ever written over.
 
 Each harness gets one line, `HARNESS STATE FILE`, then each change: `EVENT: add …` (`, keeping your 1 hook` when the event has others), `EVENT: replace OLD with …`, or `EVENT: remove …`. `status` ends with `rexboard hooks install writes these` when there is anything to write, a dry run with `dry run: nothing written; rexboard hooks install writes these` (or `uninstall`), and `status` adds a `tmux` line when a tmux server runs:
 
