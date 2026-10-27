@@ -121,12 +121,9 @@ pub fn msg(row: &crate::board::Row) -> Vec<Run> {
     msg_line(&lines(&msg))
 }
 
-/// A cleaned message's lines, trimmed, the blank ones left out.
+/// A cleaned message's lines, as the hook kept them: blank ones and leading spaces included.
 pub fn lines(msg: &str) -> Vec<&str> {
-    msg.split(crate::output::BREAK)
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect()
+    msg.split(crate::output::BREAK).map(str::trim_end).collect()
 }
 
 /// The text of `runs`, as it shows.
@@ -146,20 +143,74 @@ pub fn msg_line(lines: &[&str]) -> Vec<Run> {
     line.map_or_else(Vec::new, |line| inline(unblock(line)))
 }
 
-/// A card line: a heading's text all strong, without its `#`s; a fence line, with its info
-/// string, not at all; any other line as written, list and quote markers kept.
-pub fn card_line(line: &str) -> Option<Vec<Run>> {
-    if fence(line) {
+/// How the card lays out one line of a message.
+#[derive(Debug, PartialEq)]
+pub enum Block {
+    /// Wraps; a heading's text is all strong.
+    Text(Vec<Run>),
+    /// A list item: wraps under its text, the marker (`- `, `12. `) on the first row only.
+    Item(String, Vec<Run>),
+    /// A quote: wraps with `> ` on every row.
+    Quote(Vec<Run>),
+    /// A code line between fences, as typed, or a table row: cut at the edge, never wrapped.
+    Cut(Vec<Run>, bool),
+    /// The one blank line between paragraphs.
+    Blank,
+}
+
+/// A message's lines as the card lays them out. Fence lines go and what is between them is code;
+/// a table's separator row goes; runs of blank lines are one, and none at the start or end.
+pub fn card(lines: &[&str]) -> Vec<Block> {
+    let mut blocks = Vec::new();
+    let mut code = false;
+    for line in lines {
+        let block = if fence(line) {
+            code = !code;
+            continue;
+        } else if code {
+            Block::Cut(vec![((*line).to_owned(), false)], true)
+        } else if line.trim().is_empty() {
+            Block::Blank
+        } else if let Some(text) = heading(line) {
+            let mut runs = Vec::new();
+            for (text, _) in inline(text) {
+                push(&mut runs, &text, true);
+            }
+            Block::Text(runs)
+        } else if let Some(row) = line.trim_start().strip_prefix('|') {
+            if row.chars().all(|c| "|-: ".contains(c)) {
+                continue;
+            }
+            Block::Cut(inline(line.trim_start()), false)
+        } else if let Some(rest) = line.trim_start().strip_prefix('>') {
+            Block::Quote(inline(rest.trim_start()))
+        } else if let Some((marker, rest)) = item(line.trim_start()) {
+            Block::Item(marker.to_owned(), inline(rest))
+        } else {
+            Block::Text(inline(line.trim_start()))
+        };
+        let blank = block == Block::Blank;
+        if !blank || blocks.last().is_some_and(|last| *last != Block::Blank) {
+            blocks.push(block);
+        }
+    }
+    if blocks.last() == Some(&Block::Blank) {
+        blocks.pop();
+    }
+    blocks
+}
+
+/// A list item's marker with its space (`- `, `12. `), and its text.
+fn item(line: &str) -> Option<(&str, &str)> {
+    let digits = line.len() - line.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+    let width = if ["- ", "* ", "+ "].iter().any(|m| line.starts_with(m)) {
+        2
+    } else if digits > 0 && line[digits..].starts_with(". ") {
+        digits + 2
+    } else {
         return None;
-    }
-    let Some(text) = heading(line) else {
-        return Some(inline(line));
     };
-    let mut runs = Vec::new();
-    for (text, _) in inline(text) {
-        push(&mut runs, &text, true);
-    }
-    Some(runs)
+    Some(line.split_at(width))
 }
 
 /// A heading's text: what follows its `#`s and a space.
@@ -181,18 +232,9 @@ fn fence(line: &str) -> bool {
 pub fn unblock(line: &str) -> &str {
     let mut line = line.trim_start();
     loop {
-        let digits = line.len() - line.trim_start_matches(|c: char| c.is_ascii_digit()).len();
-        let rest = if let Some(text) = heading(line) {
-            Some(text)
-        } else if let Some(rest) = line.strip_prefix('>') {
-            Some(rest)
-        } else if let Some(rest) = ["- ", "* ", "+ "].iter().find_map(|m| line.strip_prefix(m)) {
-            Some(rest)
-        } else if digits > 0 && line[digits..].starts_with(". ") {
-            Some(&line[digits + 1..])
-        } else {
-            None
-        };
+        let rest = heading(line)
+            .or_else(|| line.strip_prefix('>'))
+            .or_else(|| item(line).map(|(_, rest)| rest));
         match rest {
             Some(rest) => line = rest.trim_start(),
             None => return line,
@@ -319,16 +361,50 @@ mod tests {
     }
 
     #[test]
-    fn the_card_drops_heading_marks_and_fences_and_keeps_list_and_quote_marks() {
-        let card = |line: &str| card_line(line).map(|runs| drawn(&runs));
-        assert_eq!(card("## The **plan**").as_deref(), Some("[The plan]"));
-        assert_eq!(card("```rust"), None);
-        assert_eq!(card("```"), None);
-        assert_eq!(card("```x``` is code").as_deref(), Some("[x] is code"));
-        assert_eq!(card("- a **b**").as_deref(), Some("- a [b]"));
-        assert_eq!(card("1. one").as_deref(), Some("1. one"));
-        assert_eq!(card("> quote").as_deref(), Some("> quote"));
-        assert_eq!(card("#123 fixed").as_deref(), Some("#123 fixed"));
+    fn the_card_reads_each_line_as_a_block() {
+        let show = |block: &Block| match block {
+            Block::Text(runs) => drawn(runs),
+            Block::Item(marker, runs) => format!("item {marker:?} {}", drawn(runs)),
+            Block::Quote(runs) => format!("quote {}", drawn(runs)),
+            Block::Cut(runs, true) => format!("code {:?}", drawn(runs)),
+            Block::Cut(runs, false) => format!("row {}", drawn(runs)),
+            Block::Blank => "blank".into(),
+        };
+        let lines = [
+            "",
+            "## The **plan**",
+            "",
+            "",
+            "- a **b**",
+            "12. twelve",
+            "> quoted **bit**",
+            "#123 fixed",
+            "```x``` is code",
+            "```rust",
+            "    let **x** = 1;",
+            "",
+            "```",
+            "| a | **b** |",
+            "|---|:-:|",
+            "",
+        ];
+        let blocks: Vec<String> = card(&lines).iter().map(show).collect();
+        assert_eq!(
+            blocks,
+            [
+                "[The plan]",
+                "blank",
+                "item \"- \" a [b]",
+                "item \"12. \" twelve",
+                "quote quoted [bit]",
+                "#123 fixed",
+                "[x] is code",
+                "code \"    let **x** = 1;\"",
+                "code \"\"",
+                "row | a | [b] |",
+            ],
+            "blank runs are one, none at either end; fences and the table separator go"
+        );
     }
 
     #[test]
@@ -358,7 +434,7 @@ mod board_tests {
     use crate::tui::app::{App, Effect, Spot};
 
     const MSG: &str = "## Summary ⏎ **Tests pass**: ran `cargo test` on [the PR](https://x.test/31) \
-                       ⏎ - next: **merge** it ⏎ ```sh ⏎ \x1b[31mred\x1b[0m snake_case 修复 **解析器**";
+                       ⏎ - next: **merge** it ⏎ ```sh ⏎ make **all** ⏎ ``` ⏎ \x1b[31mred\x1b[0m snake_case 修复 **解析器**";
 
     fn board() -> App {
         let mut app = app();
@@ -429,6 +505,11 @@ mod board_tests {
             "no fence"
         );
         assert_eq!(
+            at("make").0,
+            "     make **all**",
+            "code as typed, 2 in from the text"
+        );
+        assert_eq!(
             at("next").0,
             "   - next: merge it",
             "the card keeps block markers"
@@ -454,7 +535,7 @@ mod board_tests {
         let lines = screen(&board(), 80);
         let row = lines.iter().find(|l| l.0.contains("✓")).unwrap();
         assert!(
-            row.0.ends_with("Tests pass: ran cargo test on …"),
+            row.0.ends_with("Tests pass: ran cargo test o…"),
             "{}",
             row.0
         );

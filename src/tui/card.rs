@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use super::app::{App, CardDrawn, Peek, Spot};
-use super::markdown::{Run, restyle};
+use super::markdown::{Block, Run, restyle};
 use super::screen::Screen;
 use super::theme;
 use super::view::key_rows;
@@ -60,14 +60,18 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
             ));
         }
         headline => {
-            let title = [(
+            let title = Block::Text(vec![(
                 (if title.is_empty() { "-" } else { title }).to_owned(),
                 false,
-            )];
-            let headline = headline.map_or(&title[..], Vec::as_slice);
-            lines.extend(marked_lines(headline, " ", text, theme::strong()));
-            for segment in segments {
-                lines.extend(marked_lines(segment, "   ", text, theme::plain()));
+            )]);
+            lines.extend(laid_out(
+                headline.unwrap_or(&title),
+                " ",
+                text,
+                theme::strong(),
+            ));
+            for block in segments {
+                lines.extend(laid_out(block, "   ", text, theme::plain()));
             }
         }
     }
@@ -280,32 +284,74 @@ fn fresh(row: &Row, peek: Option<&Peek>, now: DateTime<Utc>) -> Option<String> {
 /// `text` wrapped to `width` after `lead`, the lines past the first under it; a word longer than
 /// the line is cut into pieces, so nothing runs off the card.
 fn indented(text: &str, lead: &str, width: usize, style: Style) -> Vec<Line<'static>> {
-    marked_lines(&[(text.to_owned(), false)], lead, width, style)
+    marked_lines(&[(text.to_owned(), false)], lead, lead, width, style)
+}
+
+/// A message's block on the card under `lead`: text wraps, a list item hangs under its text, a
+/// quote keeps `> ` on each row, and code or a table row is cut at the edge with the cut mark.
+fn laid_out(block: &Block, lead: &str, width: usize, style: Style) -> Vec<Line<'static>> {
+    match block {
+        Block::Text(runs) => marked_lines(runs, lead, lead, width, style),
+        Block::Item(marker, runs) => {
+            let hang = format!("{lead}{}", " ".repeat(marker.width()));
+            marked_lines(runs, &format!("{lead}{marker}"), &hang, width, style)
+        }
+        Block::Quote(runs) => {
+            let quoted = format!("{lead}> ");
+            marked_lines(runs, &quoted, &quoted, width, style)
+        }
+        Block::Cut(runs, code) => {
+            let lead = format!("{lead}{}", if *code { "  " } else { "" });
+            let room = width.saturating_sub(lead.width()).max(1);
+            let whole: String = runs.iter().map(|(text, _)| text.as_str()).collect();
+            let cut = whole.width() > room;
+            let shown = if cut {
+                chop(&whole, room.saturating_sub(theme::CUT.width())).swap_remove(0)
+            } else {
+                whole
+            };
+            let mut line = styled(&lead, &restyle(&[shown], runs)[0], style);
+            if cut {
+                line.push_span(Span::styled(theme::CUT, theme::cut_mark(None)));
+            }
+            vec![line]
+        }
+        Block::Blank => vec![Line::default()],
+    }
+}
+
+/// `lead`, then `runs` with strong ones in the strong role, on `style`.
+fn styled(lead: &str, runs: &[Run], style: Style) -> Line<'static> {
+    let spans = runs.iter().map(|(text, strong)| {
+        let role = if *strong {
+            style.patch(theme::strong())
+        } else {
+            style
+        };
+        Span::styled(text.clone(), role)
+    });
+    Line::from_iter(std::iter::once(Span::styled(lead.to_owned(), style)).chain(spans))
 }
 
 /// As `indented`, with markdown's strong runs in the strong role.
-fn marked_lines(runs: &[Run], lead: &str, width: usize, style: Style) -> Vec<Line<'static>> {
-    let room = width.saturating_sub(lead.width()).max(1);
+/// `runs` wrapped to `width`, the first row after `first` and the rest after `rest`, both as wide.
+fn marked_lines(
+    runs: &[Run],
+    first: &str,
+    rest: &str,
+    width: usize,
+    style: Style,
+) -> Vec<Line<'static>> {
+    let room = width.saturating_sub(first.width()).max(1);
     let text: String = runs.iter().map(|(text, _)| text.as_str()).collect();
     let rows: Vec<String> = wrap(&text, room)
         .into_iter()
         .flat_map(|line| chop(&line, room))
         .collect();
     restyle(&rows, runs)
-        .into_iter()
-        .map(|row| {
-            let spans = row.into_iter().map(|(text, strong)| {
-                Span::styled(
-                    text,
-                    if strong {
-                        style.patch(theme::strong())
-                    } else {
-                        style
-                    },
-                )
-            });
-            Line::from_iter(std::iter::once(Span::styled(lead.to_owned(), style)).chain(spans))
-        })
+        .iter()
+        .enumerate()
+        .map(|(n, row)| styled(if n == 0 { first } else { rest }, row, style))
         .collect()
 }
 
@@ -393,6 +439,97 @@ mod tests {
     use super::*;
     use crate::tui::app::testkit::*;
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    /// The rows a message's lines take on the card, `width` wide, as text.
+    fn laid(lines: &[&str], width: usize) -> Vec<String> {
+        crate::tui::markdown::card(lines)
+            .iter()
+            .flat_map(|block| laid_out(block, "   ", width, theme::plain()))
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_card_lays_out_paragraphs_lists_quotes_code_and_tables_at_40_and_80() {
+        let lines = [
+            "",
+            "First paragraph, long enough to wrap at forty.",
+            "",
+            "",
+            "- an item long enough to wrap at forty",
+            "12. twelve wraps four cells in at forty",
+            "> a quote that wraps keeps its marker",
+            "```sh",
+            "  cargo test --workspace --all-features -- --nocapture",
+            "```",
+            "| a | **b** |",
+            "|---|:-:|",
+            "| 1 | 2 |",
+            "",
+        ];
+        assert_eq!(
+            laid(&lines, 40),
+            [
+                "   First paragraph, long enough to wrap",
+                "   at forty.",
+                "",
+                "   - an item long enough to wrap at",
+                "     forty",
+                "   12. twelve wraps four cells in at",
+                "       forty",
+                "   > a quote that wraps keeps its marker",
+                "       cargo test --workspace --all-fea…",
+                "   | a | b |",
+                "   | 1 | 2 |",
+            ]
+        );
+        assert_eq!(
+            laid(&lines, 80),
+            [
+                "   First paragraph, long enough to wrap at forty.",
+                "",
+                "   - an item long enough to wrap at forty",
+                "   12. twelve wraps four cells in at forty",
+                "   > a quote that wraps keeps its marker",
+                "       cargo test --workspace --all-features -- --nocapture",
+                "   | a | b |",
+                "   | 1 | 2 |",
+            ],
+            "code is cut, never wrapped, and whole when it fits"
+        );
+    }
+
+    #[test]
+    fn harness_shows_its_longest_word_whole_at_80_140_and_200() {
+        for (view, width) in [
+            ("status", 80),
+            ("status", 140),
+            ("host", 140),
+            ("host", 200),
+        ] {
+            let text = render(&harnesses(view), width, 40);
+            assert!(text.contains(" opencode? "), "{view} {width}:\n{text}");
+        }
+    }
+
+    #[test]
+    fn yy_copies_the_message_as_the_agent_sent_it_paragraphs_and_all() {
+        let mut app = app();
+        let mut rows = rows();
+        let msg = "Done. ⏎  ⏎ ```sh ⏎   make ⏎ ``` ⏎ - **next**";
+        rows[0].pane.msg = Some(msg.into());
+        app.set_rows(rows, hosts());
+        app.selected = Some(Spot::Row("mini/seat-b".into()));
+        assert!(matches!(
+            typed(&mut app, "yy").pop().flatten(),
+            Some(crate::tui::app::Effect::Copy { text, .. }) if text == msg
+        ));
+    }
 
     #[test]
     fn the_card_says_who_where_how_and_what_at_80_140_and_200() {

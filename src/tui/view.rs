@@ -1526,7 +1526,7 @@ mod tests {
             !harness.contains("HARNESS") && harness.contains("HOST"),
             "{harness}"
         );
-        assert_eq!(harness_msg, msg + 8);
+        assert_eq!(harness_msg, msg + 10);
         let (host, host_msg) = header_and_msg("host");
         assert!(host.contains("HARNESS") && !host.contains("HOST"), "{host}");
         assert_eq!(host_msg, msg + 8);
@@ -1827,13 +1827,45 @@ mod tests {
             let row = rows.iter_mut().find(|r| r.key == "local/claude").unwrap();
             row.pane.msg = Some(
                 "## Summary ⏎ **Tests pass**: ran `cargo test` on [the PR](https://x.test/31) ⏎ \
-                 - next: **merge** it, then `make release` ⏎ ```sh ⏎ snake_case and 2*3*4 stay"
+                 - next: **merge** it, then `make release` ⏎ ```sh ⏎ make release ⏎ ``` ⏎ snake_case and 2*3*4 stay"
                     .into(),
             );
             marked.set_rows(rows, hosts());
             marked.selected = Some(Spot::Row("local/claude".into()));
             screens.push((name, marked, width, 30));
         }
+        let mut laid = fuller();
+        let mut rows = laid.rows.clone();
+        let row = rows.iter_mut().find(|r| r.key == "local/claude").unwrap();
+        row.pane.msg = Some(
+            [
+                "## Release **0.16**",
+                "",
+                "The card keeps one blank line between paragraphs, and this one is long enough to wrap \
+                 across the card's width at 140 columns.",
+                "",
+                "",
+                "- a list item long enough to wrap, whose second row hangs under its text and not under \
+                 the marker that leads it",
+                "12. a numbered one, which hangs four cells in",
+                "> a quote long enough to wrap keeps its marker on every row it takes, so it reads as a \
+                 quote all the way down",
+                "```rust",
+                "    let total: u64 = rows.iter().map(|row| row.tokens).sum(); // a code line long enough to reach the card's edge",
+                "```",
+                "| crate | before | after |",
+                "|---|:-:|---|",
+                "| **rexboard** | 0.15.0 | 0.16.0 |",
+            ]
+            .join(" ⏎ "),
+        );
+        laid.set_rows(rows, hosts());
+        laid.selected = Some(Spot::Row("local/claude".into()));
+        let mut narrow = App::default();
+        narrow.set_rows(laid.rows.clone(), hosts());
+        narrow.selected = laid.selected.clone();
+        screens.push(("card layout 80", narrow, 80, 48));
+        screens.push(("card layout 140", laid, 140, 44));
         let mut status = fuller();
         press(&mut status, KeyCode::Char('f'));
         screens.push(("f picker 80", status, 80, 20));

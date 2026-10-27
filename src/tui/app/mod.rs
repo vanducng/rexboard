@@ -10,7 +10,7 @@ use super::answer::{Answer, Step};
 use super::columns::{Col, Column, Columns, Sort, UsageShown, field_column, free_letter};
 use super::full::Full;
 use super::keys::{self, Act, K};
-use super::markdown::{self, Run, card_line};
+use super::markdown::{self, Block, Run};
 use super::screen::Screen;
 use super::status::Status;
 use super::views::{Bucket, Key, View, arrange, bucket, views};
@@ -155,7 +155,7 @@ pub struct CardDrawn {
 /// A row's message mapped as inline markdown: MSG's one line, and the card's lines.
 pub struct Marked {
     pub msg: Vec<Run>,
-    pub lines: Vec<Vec<Run>>,
+    pub lines: Vec<Block>,
     /// The whole message as it shows, markers gone, for `/` to match.
     pub plain: String,
 }
@@ -268,15 +268,19 @@ impl App {
             return marked.clone();
         }
         let msg = clean(row.pane.msg.as_deref().unwrap_or_default());
-        let lines: Vec<Vec<Run>> = markdown::lines(&msg)
-            .into_iter()
-            .filter_map(card_line)
-            .collect();
+        let lines = markdown::card(&markdown::lines(&msg));
         let marked = std::rc::Rc::new(Marked {
             msg: markdown::msg(row),
             plain: lines
                 .iter()
-                .map(|line| markdown::text(line))
+                .filter_map(|block| match block {
+                    Block::Text(runs)
+                    | Block::Item(_, runs)
+                    | Block::Quote(runs)
+                    | Block::Cut(runs, _) => Some(runs),
+                    Block::Blank => None,
+                })
+                .map(|runs| markdown::text(runs))
                 .collect::<Vec<_>>()
                 .join(" "),
             lines,

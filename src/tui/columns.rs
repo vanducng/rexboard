@@ -542,11 +542,15 @@ impl Columns {
                 (c, width)
             })
             .collect();
-        Columns {
+        let mut columns = Columns {
             tier,
             cols,
             marks: false,
-        }
+        };
+        // `opencode?`, the longest harness word with the `?` of a guess, and its gap. The room
+        // comes from MSG, so WHERE keeps its width.
+        columns.resize(Col::Harness, 10);
+        columns
     }
 
     /// Gives `id`, if shown, `width` columns, dropping it at 0; MSG gives or takes the difference.
@@ -877,13 +881,16 @@ mod tests {
     }
 
     #[test]
-    fn at_100_the_arrow_follows_a_name_with_no_gap_before_it() {
+    fn at_100_the_arrow_sits_in_the_gap_before_its_name() {
         use crate::tui::app::testkit::sort;
 
         let mut app = table(100);
         sort(&mut app, 'o');
         let header = line(&buffer(&app, 100, 30), 2);
-        assert!(header.contains("HARNESS HOST↑"), "{header}");
+        assert!(
+            header.contains("HARNESS  ↑HOST"),
+            "HARNESS leaves HOST a gap: {header}"
+        );
         sort(&mut app, 'a');
         let header = line(&buffer(&app, 100, 30), 2);
         assert!(
@@ -1102,15 +1109,15 @@ mod tests {
             let columns = Columns::new(board, usize::from(board) - 39, &[]);
             [Col::Where, Col::Session, Col::Window, Col::Block, Col::Msg].map(|c| columns.width(c))
         };
-        assert_eq!(at(100), [15, 0, 0, 0, 10], "v0.1's WHERE at 100");
-        assert_eq!(at(120), [26, 0, 0, 0, 19], "v0.1's WHERE at 120");
-        assert_eq!(at(131), [32, 0, 0, 0, 24], "a 92-column list keeps WHERE");
+        assert_eq!(at(100), [15, 0, 0, 0, 8], "v0.1's WHERE at 100");
+        assert_eq!(at(120), [26, 0, 0, 0, 17], "v0.1's WHERE at 120");
+        assert_eq!(at(131), [32, 0, 0, 0, 22], "a 92-column list keeps WHERE");
         assert_eq!(
             at(132),
-            [0, 12, 12, 14, 19],
+            [0, 12, 12, 14, 17],
             "a 93-column list splits, no TURN yet"
         );
-        assert_eq!(at(140), [0, 12, 12, 14, 20], "a 101-column list adds TURN");
+        assert_eq!(at(140), [0, 12, 12, 14, 18], "a 101-column list adds TURN");
     }
 
     #[test]
