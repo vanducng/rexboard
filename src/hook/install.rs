@@ -170,19 +170,52 @@ fn print(plans: &[Plan], ending: Ending) {
 }
 
 fn plan(harness: &'static str, bin: &str) -> Result<Plan> {
-    match harness {
-        "claude" => settings(harness, claude_file(), CLAUDE_EVENTS, true, bin),
-        "codex" => settings(harness, codex_file(), CODEX_EVENTS, false, bin),
-        "pi" => pi(bin),
+    let (dir, file) = match harness {
+        "claude" => (dir_from("CLAUDE_CONFIG_DIR", ".claude"), "settings.json"),
+        "codex" => (dir_from("CODEX_HOME", ".codex"), "hooks.json"),
+        "pi" => (
+            dir_from("PI_CODING_AGENT_DIR", ".pi/agent"),
+            "extensions/rexboard.js",
+        ),
         _ => {
             let mut plan = Plan::new(harness, None, "not managed");
             plan.note = Some(format!(
                 "grok reports to a Rex pane itself. For its usage, add to ~/.grok/config.toml:\n\
                  {GROK_LINE}"
             ));
-            Ok(plan)
+            return Ok(plan);
         }
+    };
+    let file = dir.join(file);
+    if let Some(link) = link_on_the_way(&dir, &file) {
+        let mut plan = Plan::new(harness, Some(&file), "symlink");
+        plan.note = Some(format!(
+            "{} is a link, as a dotfiles checkout makes it: change it there",
+            shown(&link)
+        ));
+        return Ok(plan);
     }
+    match harness {
+        "claude" => settings(harness, file, CLAUDE_EVENTS, true, bin),
+        "codex" => settings(harness, file, CODEX_EVENTS, false, bin),
+        _ => pi(&file, bin),
+    }
+}
+
+/// The first link a write to `file` would go through: `file` itself, or a directory between it and
+/// the harness's home `dir`, from the home directory down when `dir` is under it. Links above that
+/// are the system's (macOS's `/var`), not a checkout's.
+fn link_on_the_way(dir: &Path, file: &Path) -> Option<PathBuf> {
+    let home = home();
+    let top = if !home.as_os_str().is_empty() && dir.starts_with(&home) {
+        home
+    } else {
+        dir.parent()?.to_path_buf()
+    };
+    file.ancestors()
+        .take_while(|path| *path != top)
+        .find(|path| path.is_symlink())
+        .map(Path::to_path_buf)
 }
 
 fn home() -> PathBuf {
@@ -196,18 +229,6 @@ fn dir_from(var: &str, default: &str) -> PathBuf {
         .filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| home().join(default))
-}
-
-fn claude_file() -> PathBuf {
-    dir_from("CLAUDE_CONFIG_DIR", ".claude").join("settings.json")
-}
-
-fn codex_file() -> PathBuf {
-    dir_from("CODEX_HOME", ".codex").join("hooks.json")
-}
-
-fn pi_dir() -> PathBuf {
-    dir_from("PI_CODING_AGENT_DIR", ".pi/agent").join("extensions")
 }
 
 /// `~/` for the home directory, so a printed path names no user.
@@ -337,11 +358,6 @@ fn settings(
     status_line: bool,
     bin: &str,
 ) -> Result<Plan> {
-    if file.is_symlink() {
-        let mut plan = Plan::new(harness, Some(&file), "symlink");
-        plan.note = Some("a link, as a dotfiles checkout makes it: change it there".into());
-        return Ok(plan);
-    }
     let before = match std::fs::read_to_string(&file) {
         Ok(text) => text,
         Err(_) if file.parent().is_some_and(Path::is_dir) && !file.exists() => "{}\n".into(),
@@ -550,15 +566,14 @@ fn usage_line(current: &Value, bin: &str) -> Option<Value> {
     Some(line)
 }
 
-fn pi(bin: &str) -> Result<Plan> {
-    let dir = pi_dir();
-    let file = dir.join("rexboard.js");
+fn pi(file: &Path, bin: &str) -> Result<Plan> {
+    let dir = file.parent().unwrap_or(Path::new("."));
     if !dir.parent().is_some_and(Path::is_dir) {
-        return Ok(Plan::new("pi", Some(&file), "absent"));
+        return Ok(Plan::new("pi", Some(file), "absent"));
     }
     let want = PI_EXTENSION.replace("__REXBOARD__", &json!(bin).to_string());
-    let have = std::fs::read_to_string(&file).ok();
-    let mut plan = Plan::new("pi", Some(&file), "installed");
+    let have = std::fs::read_to_string(file).ok();
+    let mut plan = Plan::new("pi", Some(file), "installed");
     if have.as_deref() != Some(want.as_str()) {
         plan.state = "changes";
         plan.changes.push(
