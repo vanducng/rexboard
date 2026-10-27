@@ -29,6 +29,15 @@ pub trait Harness: Sync {
 /// In title order: Claude's glyph is checked before Codex's title.
 pub static BUILTIN: &[&dyn Harness] = &[&claude::Claude, &codex::Codex, &pi::Pi];
 
+/// The process names an agent runs as, besides Claude Code's binary named for its version.
+pub fn processes() -> Vec<&'static str> {
+    BUILTIN
+        .iter()
+        .flat_map(|h| h.processes())
+        .copied()
+        .collect()
+}
+
 /// Which harness a pane runs: its record's app, else the process in front, else its title. An
 /// app rexboard does not know is kept as it is.
 pub fn name_of(app: Option<String>, process: Option<&str>, title: &str) -> Option<String> {

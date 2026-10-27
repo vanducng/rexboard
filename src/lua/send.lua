@@ -75,26 +75,28 @@ for i = math.max(1, #lines - 39), #lines do last[#last + 1] = lines[i] end
 local window = "\n" .. table.concat(last, "\n") .. "\n"
 if not window:find(a.expect.fingerprint, 1, true) then return refuse("prompt_changed") end
 
+-- The marks come from the board's own grammar (a.dialog), so the two read a screen alike.
+local function marked(rest, marks)
+  for _, mark in ipairs(marks) do
+    if rest:sub(1, #mark) == mark then return rest:sub(#mark + 1) end
+  end
+end
+
 -- `1. Yes` or `❯ 2) No`: the option's digit.
 local function option(line)
   local rest = line:gsub("^%s+", "")
-  for _, mark in ipairs({ "❯", ">" }) do
-    if rest:sub(1, #mark) == mark then
-      rest = rest:sub(#mark + 1)
-      break
-    end
-  end
-  return rest:match("^%s*([1-9])[.)]%s+%S")
+  rest = (marked(rest, a.dialog.cursor) or rest):gsub("^%s+", "")
+  local digit, after = rest:match("^([1-9])(.*)$")
+  if not digit then return nil end
+  after = marked(after, a.dialog.separators)
+  if after and after:match("^%s+%S") then return digit end
 end
 
 local function input_line(line)
   if option(line) then return false end
   local rest = line:gsub("^%s+", "")
-  if rest:sub(1, #"│") == "│" then rest = rest:sub(#"│" + 1):gsub("^%s+", "") end
-  for _, mark in ipairs({ "❯", "›", ">" }) do
-    if rest:sub(1, #mark) == mark then return true end
-  end
-  return false
+  rest = (marked(rest, { "│" }) or rest):gsub("^%s+", "")
+  return marked(rest, a.dialog.input) ~= nil
 end
 
 -- A dialog is up when options 1 and 2 show with no input line below them. Text into a dialog
