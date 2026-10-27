@@ -341,6 +341,8 @@ rexboard hooks status                  # what each harness has, and what an inst
 rexboard hooks install --dry-run       # the same changes, written nowhere
 rexboard hooks install                 # every harness this host has
 rexboard hooks install claude codex    # only these
+rexboard hooks uninstall --dry-run     # what an uninstall would take out
+rexboard hooks uninstall               # exactly what install put in, after a backup
 rexboard hooks replay SESSION          # from tmux, when a client attaches
 ```
 
@@ -357,7 +359,7 @@ A settings file is merged, never replaced. Hooks that already report to Rex (rex
 
 What `install` leaves alone:
 - a harness whose settings directory is missing (`absent`);
-- a settings file or pi's `rexboard.js` that is a symlink, or sits in a directory that is one, as a dotfiles checkout makes them (`symlink`): the note names the link, and you change it at its source. Every directory from your home directory down counts (`~/.claude`, or `~/.pi` when stow folds it), or from the harness's own directory when its variable puts it elsewhere;
+- a settings file or pi's `rexboard.js` that is a symlink, or sits in a directory that is one, as a dotfiles checkout makes them (`symlink`): the note names the link, and you change it at its source. `status` and `install` read the file through the link without writing and say what it lacks (`~/.claude is a link into a checkout; missing: Stop, SessionEnd; change it there`), or that it has rexboard's hooks. Every directory from your home directory down counts (`~/.claude`, or `~/.pi` when stow folds it), or from the harness's own directory when its variable puts it elsewhere;
 - a file that is not valid JSON, or whose `hooks` is not an object: `CONFIG` (exit 1), and nothing is written.
 
 A directory with no settings file yet gets one. With pi's old `rex-status.js` extension still there, the line says so, as pi would report twice.
@@ -372,15 +374,24 @@ command = "rexboard usage grok"
 
 Inside tmux a status reaches Rex only through tmux passthrough, so tmux needs `set -g allow-passthrough on` in `tmux.conf`. `status` says when the default tmux server has it off.
 
-To undo an install, move `FILE.bak-<UTC>` back over the file, or delete the hooks that run `rexboard hook`, the `statusLine`'s `rexboard usage` wrapper and pi's `rexboard.js`. Do that before removing rexboard: until then each of those hooks fails on every event. A second backup in the same second takes `-2`, so none is ever written over.
+`uninstall` takes out exactly what `install` put in, with the same rules (a backup first, a linked file or directory left alone, `--dry-run` and `--json` as for `install`):
+- the hooks that run `rexboard hook`, and any group, event or `hooks` key they alone filled. Hooks and keys of yours stay, also ones added after install. A `rex-agent-status` hook that install replaced does not come back;
+- Claude's `statusLine`: one install chained goes back to your own command, with its other keys as they are, and one install added goes. A status line install did not write is left alone;
+- pi's `rexboard.js`, only while it is the file rexboard wrote. One you changed is `not ours` and stays;
+- a file install made and that holds nothing else now (Codex's `hooks.json` on a fresh machine) is removed, after its backup.
 
-Each harness gets one line, `HARNESS STATE FILE`, then each change: `EVENT: add …` (`, keeping your 1 hook` when the event has others), `EVENT: replace OLD with …`, or `EVENT: remove …`. `status` ends with `rexboard hooks install writes these` when there is anything to write, a dry run with `dry run: nothing written`, and `status` adds a `tmux` line when a tmux server runs:
+When a backup beside the file holds exactly what is left, uninstall writes that backup's text, so a file comes back byte for byte, its layout included. A second uninstall changes nothing. Codex's `config.toml` is never touched by either. Run `uninstall` before removing rexboard: until then each hook fails on every event. Moving `FILE.bak-<UTC>` back over the file also undoes an install. A second backup in the same second takes `-2`, so none is ever written over.
+
+Each harness gets one line, `HARNESS STATE FILE`, then each change: `EVENT: add …` (`, keeping your 1 hook` when the event has others), `EVENT: replace OLD with …`, or `EVENT: remove …`. `status` ends with `rexboard hooks install writes these` when there is anything to write, a dry run with `dry run: nothing written; rexboard hooks install writes these` (or `uninstall`), and `status` adds a `tmux` line when a tmux server runs:
 
 | State | Meaning |
 | --- | --- |
 | `installed` | rexboard's hooks are there and current |
-| `changes` | an install would change what follows |
-| `written` | this install wrote them; the old file's name follows |
+| `not installed` | uninstall: nothing of rexboard's is there |
+| `changes` | an install or uninstall would change what follows |
+| `written` | this run wrote them; the old file's name follows |
+| `removed` | uninstall removed a file install made; the backup's name follows |
+| `not ours` | uninstall: pi's `rexboard.js` is not the one rexboard wrote |
 | `absent`, `symlink`, `not managed` | left alone, as above |
 
 With `--json` (`tmux` from `status` only; `null` with no tmux server):
