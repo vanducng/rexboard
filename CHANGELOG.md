@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/vanducng/rexboard/compare/v0.14.0...v0.14.1) (2026-10-27)
+
+
+### Bug Fixes
+
+* **hooks:** hooks and the status line fail open, by full path ([95ce655](https://github.com/vanducng/rexboard/commit/95ce6553af212b713820e969638407ceb21cf28d))
+
 ## [0.14.0](https://github.com/vanducng/rexboard/compare/v0.13.0...v0.14.0) (2026-10-27)
 
 
