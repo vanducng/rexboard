@@ -1,6 +1,6 @@
 # Agent status
 
-rexboard shows the status Rex has for each pane. It never asks an agent anything and installs nothing into one, so a row is only as right as what reached Rex.
+rexboard shows the status Rex has for each pane. It never asks an agent anything, so a row is only as right as what reached Rex. The hooks that make an agent report are rexboard's own, but it installs them only when you run `rexboard hooks install` ([13](decisions/0013-rexboard-ships-the-hooks-it-relies-on.md)).
 
 ## Where status comes from
 
@@ -19,7 +19,7 @@ The turn card shows `source`, and `rexboard ls --json` has it on every row ([JSO
 
 An agent's own `done` record carries no message. A hook can add a sub-record with the id `turn` that carries the turn's final message, and rexboard uses its `msg` when the pane's own record has none. It is not counted as a child record. While the pane is `done` the `turn` message always applies, since the agent's own `done` lands just after it; in any other state it applies only when it is not older than the pane's record.
 
-The reporting belongs to the agent's setup, not rexboard's. One working setup for agents in tmux seats is on the [Rex page of vanducng/dotfiles](https://dotfiles.vanducng.dev/rex/#agent-status): the hooks, `make rex-hooks-apply` to merge them into the agent's settings, and `REX_AGENT_STATUS_LOG` to log what each hook did.
+`rexboard hooks install` puts [`rexboard hook`](cli.md#rexboard-hook) into Claude Code's and Codex's settings and adds a pi extension; `rexboard hooks status` says what it would change ([`rexboard hooks`](cli.md#rexboard-hooks)). Straight in a Rex pane Claude Code and Codex need no hook to report; inside tmux they do, and pi needs its extension everywhere.
 
 ## A row looks wrong
 
@@ -27,8 +27,8 @@ Start from the row's `source`.
 
 | What you see | Why | What to do |
 | --- | --- | --- |
-| An agent you know is running shows `inferred`, with `AGE` `-`, under `UNREPORTED` | Nothing reported to Rex for that pane. Inside tmux, the agent's own sequence stops at tmux | Inside tmux, set up a bridge: Claude Code picks it up as it runs, and pi or Codex need a restart. Straight in a Rex pane, check that the agent is one that reports |
-| A row lags its agent, or never leaves one state | Rex still has the agent's last report. For a `bridge` row, a hook usually did not run. A `working` report over 120 seconds old on a pane that looks idle shows as `idle?` ([TUI](tui.md#layout)) | For a `bridge` row, check that the hooks are installed and current: in the dotfiles setup, `make rex-hooks` prints what it would change and `make rex-hooks-apply` writes it. Then start the agent with `REX_AGENT_STATUS_LOG=FILE` and read which events arrive. The next report fixes the row |
+| An agent you know is running shows `inferred`, with `AGE` `-`, under `UNREPORTED` | Nothing reported to Rex for that pane. Inside tmux, the agent's own sequence stops at tmux | Inside tmux, run `rexboard hooks install`: Claude Code picks the hooks up as it runs, and pi or Codex need a restart. Straight in a Rex pane, check that the agent is one that reports |
+| A row lags its agent, or never leaves one state | Rex still has the agent's last report. For a `bridge` row, a hook usually did not run. A `working` report over 120 seconds old on a pane that looks idle shows as `idle?` ([TUI](tui.md#layout)) | For a `bridge` row, check that the hooks are installed and current: `rexboard hooks status` says what an install would change. Then start the agent with `REXBOARD_HOOK_LOG=FILE` and read which events arrive. The next report fixes the row |
 | `MSG` is blank | The record has no message, or only filler | The reporter decides what it sends; see its setup. The turn card still shows the title |
 | A dim row with `◌`, its host red in the top bar | That host's observer is down, so its rows are `stale` | `rex hosts`, then `serve.log` in the state dir ([Files](system-architecture.md#files)) |
 

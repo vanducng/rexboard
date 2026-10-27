@@ -6,7 +6,7 @@ Each record says what rexboard decided, why, and what it costs. They are short o
 | --- | --- | --- |
 | [1](0001-reach-rex-only-through-the-rex-cli.md) | Reach Rex only through the `rex` CLI | Accepted |
 | [2](0002-one-serve-daemon-many-clients.md) | One serve daemon, many clients | Accepted |
-| [3](0003-the-agent-tells-rex-rexboard-shows-it.md) | The agent tells Rex, rexboard shows it | Accepted |
+| [3](0003-the-agent-tells-rex-rexboard-shows-it.md) | The agent tells Rex, rexboard shows it | Accepted; install bullet superseded by 13 |
 | [4](0004-extensions-not-a-built-in-core.md) | Extensions, not a built-in core | Accepted |
 | [5](0005-the-cli-is-the-api.md) | The CLI is the API | Accepted |
 | [6](0006-vim-keymap-from-one-table.md) | A vim keymap from one table | Accepted |
@@ -16,6 +16,7 @@ Each record says what rexboard decided, why, and what it costs. They are short o
 | [10](0010-public-repo-hygiene.md) | Public-repo hygiene | Accepted |
 | [11](0011-seen-means-you-acted.md) | Seen means you acted on it | Accepted |
 | [12](0012-scope-and-non-goals.md) | Scope and non-goals | Accepted |
+| [13](0013-rexboard-ships-the-hooks-it-relies-on.md) | rexboard ships the hooks it relies on | Accepted |
 
 ## Adding or changing one
 

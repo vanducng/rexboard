@@ -1,6 +1,6 @@
 # 3. The agent tells Rex, rexboard shows it
 
-**Status:** Accepted, 2026-10-26
+**Status:** Accepted, 2026-10-26. Its install bullet is superseded by [13](0013-rexboard-ships-the-hooks-it-relies-on.md)
 
 ## Context
 
