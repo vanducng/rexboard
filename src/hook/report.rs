@@ -126,30 +126,38 @@ fn question(args: &Value) -> String {
     one_line(&lines.join("\n"))
 }
 
-/// Rex allows no control characters in msg: each run of line breaks becomes ` ⏎ `, and any other
-/// control character a space.
+/// Rex allows no control characters in msg, so lines join with ` ⏎ `. A run of blank lines leaves
+/// one empty line, so paragraphs survive, and none at the start or end. Leading spaces stay, for
+/// code, with a leading tab as four; trailing ones go. Any other control character is a space.
 pub fn one_line(text: &str) -> String {
     let control = |c: char| matches!(c, '\u{0}'..='\u{1f}' | '\u{7f}'..='\u{9f}');
-    text.split(['\r', '\n'])
-        .map(|line| {
-            let mut out = String::with_capacity(line.len());
-            let mut run = false;
-            for c in line.chars() {
-                if control(c) {
-                    if !run {
-                        out.push(' ');
-                    }
-                    run = true;
-                } else {
-                    out.push(c);
-                    run = false;
+    let mut lines: Vec<String> = Vec::new();
+    for line in text.split('\n') {
+        let mut out = String::with_capacity(line.len());
+        let mut run = false;
+        for c in line.chars() {
+            if c == '\t' && out.chars().all(|c| c == ' ') {
+                out.push_str("    ");
+            } else if control(c) {
+                if !run {
+                    out.push(' ');
                 }
+                run = true;
+                continue;
+            } else {
+                out.push(c);
             }
-            out.trim().to_owned()
-        })
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ⏎ ")
+            run = false;
+        }
+        let out = out.trim_end();
+        if !out.is_empty() || lines.last().is_some_and(|last| !last.is_empty()) {
+            lines.push(out.to_owned());
+        }
+    }
+    while lines.last().is_some_and(String::is_empty) {
+        lines.pop();
+    }
+    lines.join(" ⏎ ")
 }
 
 /// `text` in at most `limit` UTF-8 bytes, cut at a character and ending in … when cut.
@@ -253,6 +261,24 @@ mod tests {
             checked += 1;
         }
         assert!(checked >= 70, "only {checked} events with a status");
+    }
+
+    #[test]
+    fn a_message_keeps_its_paragraphs_and_indentation_on_one_line() {
+        for (text, want) in [
+            ("a\n\n\n\nb", "a ⏎  ⏎ b"),
+            ("\n\n  a  \n\n", "  a"),
+            (
+                "fn x() {\n    y();\n\tz();\n}",
+                "fn x() { ⏎     y(); ⏎     z(); ⏎ }",
+            ),
+            ("a\tb\u{7}c\r\nd", "a b c ⏎ d"),
+            ("one line", "one line"),
+            ("\n \t \n", ""),
+        ] {
+            assert_eq!(one_line(text), want, "{text:?}");
+            assert_eq!(one_line(want), want, "a second pass changes nothing");
+        }
     }
 
     #[test]
