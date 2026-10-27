@@ -545,6 +545,66 @@ pub fn short(entry: &Entry) -> &'static str {
 mod tests {
     use super::*;
 
+    /// A sequence as docs/tui.md writes it (`gg`, `ctrl-d`, `space`), or None for the keys it
+    /// names in words (arrows, Home, End, the page keys).
+    fn doc_name(seq: &[K]) -> Option<String> {
+        seq.iter()
+            .map(|key| match key {
+                K(KeyCode::Char(' '), false) => Some("space".to_owned()),
+                K(KeyCode::Char(c), false) => Some(c.to_string()),
+                K(KeyCode::Char(c), true) => Some(format!("ctrl-{c}")),
+                K(KeyCode::Enter, _) => Some("enter".to_owned()),
+                K(KeyCode::Esc, _) => Some("esc".to_owned()),
+                K(KeyCode::Tab, _) => Some("tab".to_owned()),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+            .map(|names| names.concat())
+    }
+
+    /// docs/tui.md names every key the board and the full view bind, each in its own section,
+    /// and the Keys table lists no key the board does not bind, such as a moved one.
+    #[test]
+    fn the_tui_doc_names_every_bound_key_and_no_other() {
+        let doc = include_str!("../../docs/tui.md");
+        let section = |title: &str| {
+            let start = doc.find(title).expect(title) + title.len();
+            let rest = &doc[start..];
+            &rest[..rest.find("\n## ").unwrap_or(rest.len())]
+        };
+        let live = |table: &'static [Entry]| {
+            table
+                .iter()
+                .filter(|entry| !matches!(entry.act, Act::Moved(_)))
+                .flat_map(|entry| entry.seqs.iter().copied())
+        };
+        for (table, title) in [(BOARD, "## Keys"), (FULL, "## Full view")] {
+            let text = section(title);
+            for seq in live(table) {
+                let Some(name) = doc_name(seq) else { continue };
+                // `1`-`9` names the digits between.
+                let digit = name.len() == 1 && name.as_bytes()[0].is_ascii_digit();
+                assert!(
+                    text.contains(&format!("`{name}`")) || digit && text.contains("`1`-`9`"),
+                    "{title} in docs/tui.md does not name `{name}`"
+                );
+            }
+        }
+        let bound: std::collections::BTreeSet<String> = live(BOARD)
+            .flat_map(|seq| [doc_name(seq), doc_name(&seq[..1])])
+            .flatten()
+            .collect();
+        for row in section("## Keys").lines().filter(|l| l.starts_with("| `")) {
+            let cell = row.split('|').nth(1).unwrap_or_default();
+            for name in cell.split('`').skip(1).step_by(2) {
+                assert!(
+                    bound.contains(name),
+                    "docs/tui.md lists `{name}`, which the board does not bind: {row}"
+                );
+            }
+        }
+    }
+
     /// No key or sequence means two things in one layer, and the only chords that act are vim's
     /// own; an old chord only says where it went.
     #[test]

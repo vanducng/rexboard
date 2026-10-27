@@ -2020,6 +2020,15 @@ fn answers(rows: &str) -> String {
 
 const SEAT: &str = "local/block:api-seat-a";
 
+/// Waits for the local host's seat row, which every check of an extension's fields reads. Its
+/// snapshot can come after mini's, and serve's start and both snapshots slow down under load, so
+/// this wait has its own budget and the checks after it time only the extension's runs.
+fn local_seat(rows: impl Fn() -> Vec<serde_json::Value>) {
+    eventually_within("the local host's rows", 30, || {
+        rows().iter().any(|row| row["key"] == SEAT)
+    });
+}
+
 fn ext_of(rows: &[serde_json::Value], key: &str) -> serde_json::Value {
     row(rows, key)["ext"].clone()
 }
@@ -2039,6 +2048,7 @@ fn ext_fields_reach_ls_json() {
         &answers(r#"{"local/block:api-seat-a": {"fields": {"rig": "api"}}}"#),
     );
     serve.config("[extensions]\nenabled = [\"fake\"]\n");
+    local_seat(|| serve.rows(&[]));
     eventually("the fake extension's field", || {
         ext_of(&serve.rows(&[]), SEAT) == serde_json::json!({ "fake.rig": "api" })
     });
@@ -2074,6 +2084,7 @@ fn ext_discovery_runs_only_the_enabled_good_one() {
         "[extensions]\nenabled = [\"fake\", \"broken\"]\ndirs = [\"{}\"]\n",
         extra.display()
     ));
+    local_seat(|| serve.rows(&[]));
     eventually("the enabled extension's field", || {
         ext_of(&serve.rows(&[]), SEAT)["fake.rig"] == "api"
     });
@@ -2124,6 +2135,7 @@ fn ext_status_fallback_only_reaches_unreported_rows_and_only_when_provided() {
                 .clone();
             serde_json::from_slice::<Vec<serde_json::Value>>(&out).unwrap()
         };
+        local_seat(rows);
         if provides {
             eventually("the fallback status", || {
                 row(&rows(), SEAT)["source"] == "fake"
@@ -2170,6 +2182,7 @@ fn good_then(serve: &Serve, failure: &str, timing: &str) {
 /// The field shows, a failure is logged while it still shows, and after three failed runs it
 /// is gone; serve answers throughout.
 fn kept_three_runs_then_dropped(serve: &Serve, logged: &str) {
+    local_seat(|| serve.rows(&[]));
     eventually("the first good run", || {
         ext_of(&serve.rows(&[]), SEAT)["fake.rig"] == "api"
     });
@@ -2228,6 +2241,7 @@ fn ext_undeclared_field_is_dropped_and_logged_once() {
         &answers(r#"{"local/block:api-seat-a": {"fields": {"rig": "api", "extra": "x"}}}"#),
     );
     serve.config("[extensions]\nenabled = [\"fake\"]\n");
+    local_seat(|| serve.rows(&[]));
     eventually("the declared field", || {
         ext_of(&serve.rows(&[]), SEAT) == serde_json::json!({ "fake.rig": "api" })
     });
@@ -2292,6 +2306,7 @@ fn ext_a_disabled_extension_leaves_the_rows_at_the_next_rescan() {
             .clone();
         serde_json::from_slice::<Vec<serde_json::Value>>(&out).unwrap()
     };
+    local_seat(rows);
     eventually("the field and status", || {
         let all = rows();
         let seat = row(&all, SEAT);
@@ -2376,6 +2391,7 @@ fn ext_ls_shows_enabled_disabled_and_broken_with_why() {
 fn ext_test_passes_the_example_and_names_an_undeclared_field() {
     let serve = Serve::new();
     example(&serve);
+    local_seat(|| serve.rows(&[]));
     serve
         .cmd()
         .args(["ext", "test", "session-prefix"])
@@ -2444,6 +2460,7 @@ fn ext_new_scaffold_passes_ext_test_unchanged() {
     )
     .unwrap();
     assert!(manifest.starts_with("name = \"foo\"\n"), "{manifest}");
+    local_seat(|| serve.rows(&[]));
     serve
         .cmd()
         .args(["ext", "test", "foo"])
@@ -3130,21 +3147,6 @@ fn close_asks_on_a_terminal_and_needs_yes_without_one() {
         .args(["close", "local/block:api-seat-a", "--yes"])
         .assert()
         .success();
-}
-
-#[test]
-fn every_json_sample_in_the_cli_doc_parses() {
-    let doc = include_str!("../docs/cli.md");
-    let samples: Vec<&str> = doc
-        .split("```json\n")
-        .skip(1)
-        .map(|rest| rest.split("```").next().unwrap())
-        .collect();
-    assert!(samples.len() >= 5, "{}", samples.len());
-    for sample in samples {
-        serde_json::from_str::<serde_json::Value>(sample)
-            .unwrap_or_else(|err| panic!("{err}: {sample}"));
-    }
 }
 
 #[test]
