@@ -213,7 +213,14 @@ Nerd mode needs a Nerd Font **Mono** variant from Nerd Fonts **3.5.0** or later:
 
 ### Markdown
 
-`MSG` and the card's message draw an agent's inline markdown: `**bold**`, `__bold__` and `` `code` `` in the `strong` role, and `[text](url)` as its text. The markers go, and the cut and the wrap count what shows, not the markers. Italics stay as written, so `snake_case` and `2*3*4` are unchanged, and an unmatched marker shows as typed. In the card a heading loses its `#`s and is all `strong`, a code fence's line (with its info string) is left out, and every other line stays as written, `- `, `1. ` and `> ` included; lists, tables and code blocks are not laid out. Control and escape sequences are removed first. Each report is mapped once, not on every frame. Sorting by `MSG` (`o m`, `ls --sort msg`) goes by what `MSG` shows, and `/` matches a phrase as it shows as well as as it was sent. `rexboard ls --json`, `rexboard show` and what `yy` copies keep the raw text.
+`MSG` and the card's message draw an agent's inline markdown: `**bold**`, `__bold__` and `` `code` `` in the `strong` role, and `[text](url)` as its text. The markers go, and the cut and the wrap count what shows, not the markers. Italics stay as written, so `snake_case` and `2*3*4` are unchanged, and an unmatched marker shows as typed. The card lays a message out by line:
+- one blank line between paragraphs; a run of them is one, and none at the top or bottom;
+- a heading loses its `#`s and is all `strong`;
+- a list item wraps under its text, not its marker (`- ` hangs 2 cells, `12. ` 4), and a nested one keeps its depth. Past 9 a numbered list's numbers right-align (` 9.`, `10.`), so the text keeps one edge. A quote keeps `> ` on each row;
+- the lines between code fences show as typed, 2 cells in, cut at the card's edge with `…` and never wrapped; the fence lines go, with their info strings. Code is not highlighted;
+- a table's rows (lines that start with `|`) line up: each column is padded to its widest cell as it shows. The row above the `|---|` separator is the header and `strong`, and the separator goes. A row is cut the same way as code, never wrapped.
+
+Blank lines and indentation reach the card only from reports `rexboard hook` made from 0.16; an older report is one paragraph. Control and escape sequences are removed first. Each report is mapped once, not on every frame. Sorting by `MSG` (`o m`, `ls --sort msg`) goes by what `MSG` shows, and `/` matches a phrase as it shows as well as as it was sent. `rexboard ls --json`, `rexboard show` and what `yy` copies keep the raw text.
 
 ## Full view
 

@@ -20,7 +20,6 @@ The board shows about 40 rows that must be read at a glance, in terminals with d
 
 - A new screen picks a role, not a colour, and stays consistent.
 - A change of look shows as a diff in the style snapshot test.
-- Not built yet: laying out lists, tables and code blocks. The board draws inline markdown, shows a heading as `strong` text and leaves out code fences.
 
 ## Supersedes
 
