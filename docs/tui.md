@@ -16,10 +16,14 @@ The board is built to live in a narrow column, so the narrow layout is the main 
   | under 60 | `AGE` · `WHERE` (`session › block`) · `MSG` |
   | 60-99 | adds `HARNESS` and `HOST` |
   | 100-131 | adds `STATE`, and the window in `WHERE`: `session › window › block` |
-  | 132-139 | splits `WHERE` into `SESSION`, `WINDOW` and `BLOCK`, each as wide as its longest label and a two-column gap (one when that does not fit; at least 10 columns) while together they stay within WHERE's share; `MSG` takes what they free |
+  | 132-139 | splits `WHERE` into `SESSION`, `WINDOW` and `BLOCK`, each as wide as its longest label (cut to 24 columns) and a two-column gap (one when that does not fit; at least 10 columns) while together they stay within WHERE's share; `MSG` takes what they free |
   | 140 and up | adds `TURN`, and `MODEL` and `CTX` while some row reports what its turn used; `TOK`, `COST` and `5H` too when `tui.json` asks for them. Below 160, while they show, `WHERE` stays one column so `MSG` keeps its room |
 
   The list is as wide as the board at every width (the turn card sits under it), and `pick` uses the same columns.
+
+  `HOST` is as wide as the longest host name shown, from 8 to 16 columns, with `…` past that. From 140 columns `MSG` keeps at least 40 columns, or 35% of the list when that is more: `SESSION`, `WINDOW` and `BLOCK` give way first (each cut to 24 columns, then sharing what is left, at least 10 each), then the extension columns, the last one first, so a board with three extension fields shows fewer of them until it is wide enough.
+
+  **Column widths.** `"widths"` in `tui.json` fixes a column's width in columns, gap included, at every board width where the column shows: `{"widths": {"host": 12, "session": 20, "window": 24, "block": 20, "msg": 60}}`. The names are `host`, `session`, `window`, `block` and `msg`; another name, or a value that is not a whole number from 1 to 500, is ignored (the file keeps what it says). A fixed `session`, `window` or `block` is not fitted to its labels; `msg` is exactly that wide, or as wide as the others leave, and a fixed `msg` is not held to its floor, while the floor still holds `MSG` when only other columns are set.
 
   The usage columns are for panes on serve's own host whose harness runs `rexboard usage`. A pane keeps its last turn's figures while it lives, however long it idles, since a harness writes only when it works. A figure the harness does not report is `-`, never `0`. `TOK`, `COST` and `5H` are off until `tui.json` names them: `"columns": ["tok", "cost", "5h"]` (see [Turn card](#turn-card) for where the file lives). They keep the table's order whatever the list's, and any other name is ignored. From 160 columns `MODEL` widens to the longest model name, up to 20. The figures are right-aligned, so their digits line up.
 
@@ -203,7 +207,7 @@ The card is 40% of the body, and at least 8 rows, and more when the list is shor
 
 Reading a card does not mark a row seen. `m` does, and so does `n` or `tab` off a `done` row whose card has shown for at least a second. The tail of a blocked row is read by itself once its card has shown for 300 ms, once per report, so the ask can be checked against the screen; moving through rows reads none.
 
-`c`'s choice lives in `tui.json` beside serve's `state.json` (`~/.local/state/rexboard/tui.json`, or under `XDG_STATE_HOME`), as `detail_hidden` (missing means shown), next to `motion` (see [Style](#style)), `icons` (see [Icons](#icons)), `card_height` and `columns` (see [Layout](#layout)), which `c` keeps as they were. The file is read when the board starts and written on each `c`. The side pane's old width key is ignored.
+`c`'s choice lives in `tui.json` beside serve's `state.json` (`~/.local/state/rexboard/tui.json`, or under `XDG_STATE_HOME`), as `detail_hidden` (missing means shown), next to `motion` (see [Style](#style)), `icons` (see [Icons](#icons)), `card_height`, `columns` and `widths` (see [Layout](#layout)), which `c` keeps as they were. The file is read when the board starts and written on each `c`. The side pane's old width key is ignored.
 
 ### Icons
 

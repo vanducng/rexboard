@@ -1540,10 +1540,12 @@ mod tests {
             !harness.contains("HARNESS") && harness.contains("HOST"),
             "{harness}"
         );
-        assert_eq!(harness_msg, msg + 10);
+        // MSG is at its floor here, so the freed column goes to MSG less the wider part gaps it now
+        // allows.
+        assert!(harness_msg >= msg + 7, "{msg} {harness_msg}");
         let (host, host_msg) = header_and_msg("host");
         assert!(host.contains("HARNESS") && !host.contains("HOST"), "{host}");
-        assert_eq!(host_msg, msg + 8);
+        assert!(host_msg >= msg + 5, "{msg} {host_msg}");
         let text = render(&harnesses("harness"), 140, 30);
         for group in [
             "CLAUDE (2)",
@@ -2013,6 +2015,146 @@ mod extension_tests {
         app
     }
 
+    /// `with_fields` with a third extension field, a long host name, and window labels as an
+    /// orchestrator generates them.
+    fn wide_board() -> App {
+        let mut app = with_fields(&[field("fake.role", "ROLE")]);
+        let mut rows = app.rows.clone();
+        for row in &mut rows {
+            row.ext.insert("fake.role".into(), "lead.owner".into());
+            row.pane.tab = format!("1-team:rig:{}#0123456789abcdef#l6", row.pane.session);
+        }
+        rows[0].pane.host = "linux_build_01".into();
+        app.set_rows(rows, hosts());
+        app
+    }
+
+    fn header(app: &App, width: u16) -> String {
+        render(app, width, 30).lines().nth(2).unwrap().to_owned()
+    }
+
+    #[test]
+    fn host_shows_the_longest_host_name_whole_up_to_16_and_80_columns_stay() {
+        let app = wide_board();
+        for width in [140u16, 200, 250] {
+            let text = render(&app, width, 30);
+            assert!(
+                text.contains("linux_build_01 "),
+                "{width}: HOST whole:\n{text}"
+            );
+            let columns = app.columns(width, usize::from(width));
+            assert_eq!(columns.width(Col::Host), 15, "{width}: 14 and a gap");
+        }
+        let mut long = wide_board();
+        let mut rows = long.rows.clone();
+        rows[0].pane.host = "h".repeat(30);
+        long.set_rows(rows, hosts());
+        assert_eq!(
+            long.columns(200, 200).width(Col::Host),
+            16,
+            "never wider than 16"
+        );
+        let plain = app_default();
+        assert_eq!(
+            plain.columns(80, 80).width(Col::Host),
+            8,
+            "short names keep 8"
+        );
+        assert_eq!(
+            plain
+                .columns(80, 80)
+                .cols
+                .iter()
+                .map(|(_, w)| *w)
+                .collect::<Vec<_>>(),
+            Columns::new(80, 80, &[])
+                .cols
+                .iter()
+                .map(|(_, w)| *w)
+                .collect::<Vec<_>>(),
+            "80 columns do not change"
+        );
+    }
+
+    fn app_default() -> App {
+        let mut app = App::default();
+        let mut rows = crate::tui::app::testkit::rows();
+        for row in &mut rows {
+            row.pane.tab = "main".into();
+        }
+        app.set_rows(rows, hosts());
+        app
+    }
+
+    #[test]
+    fn msg_keeps_a_floor_and_labels_their_cap_with_three_extension_columns() {
+        let app = wide_board();
+        for width in [140u16, 200, 250] {
+            let columns = app.columns(width, usize::from(width));
+            let floor = 40.max(usize::from(width) * 35 / 100);
+            assert!(
+                columns.width(Col::Msg) >= floor,
+                "{width}: MSG is {} wide, under its floor of {floor}:\n{}",
+                columns.width(Col::Msg),
+                header(&app, width)
+            );
+            for part in [Col::Session, Col::Window, Col::Block] {
+                assert!(
+                    columns.width(part) <= 27,
+                    "{width}: {part:?} past the 24 cap"
+                );
+            }
+        }
+        let at = |width| {
+            let header = header(&app, width);
+            ["RIG", "PROJECT", "ROLE"].map(|name| header.contains(name))
+        };
+        assert_eq!(at(250), [true, true, true], "room for all three at 250");
+        assert!(
+            !at(140)[2],
+            "the extension columns give way once the parts are at their least: {}",
+            header(&app, 140)
+        );
+    }
+
+    #[test]
+    fn tui_json_widths_fix_a_column_at_every_width_and_msg_floor_waits_for_msg() {
+        let mut app = wide_board();
+        app.widths = std::collections::BTreeMap::from([
+            ("host".to_owned(), 12),
+            ("session".to_owned(), 20),
+            ("window".to_owned(), 24),
+            ("block".to_owned(), 18),
+            ("msg".to_owned(), 60),
+            ("nonsense".to_owned(), 3),
+        ]);
+        for width in [140u16, 200, 250] {
+            let columns = app.columns(width, usize::from(width));
+            let got = [Col::Host, Col::Session, Col::Window, Col::Block].map(|c| columns.width(c));
+            assert_eq!(got, [12, 20, 24, 18], "{width}: {}", header(&app, width));
+            let msg = columns.width(Col::Msg);
+            let others: usize = columns.cols.iter().map(|(_, w)| *w).sum::<usize>() - msg;
+            assert_eq!(
+                msg,
+                60.min(usize::from(width) - others),
+                "{width}: 60, or what the others leave"
+            );
+        }
+        assert_eq!(
+            app.columns(80, 80).width(Col::Host),
+            12,
+            "HOST shows at 80 too"
+        );
+        let mut only_session = wide_board();
+        only_session.widths = std::collections::BTreeMap::from([("session".to_owned(), 30)]);
+        let columns = only_session.columns(250, 250);
+        assert_eq!(columns.width(Col::Session), 30);
+        assert!(
+            columns.width(Col::Msg) >= 250 * 35 / 100,
+            "the floor holds with msg unset"
+        );
+    }
+
     fn render(app: &App, width: u16, height: u16) -> String {
         let now = DateTime::parse_from_rfc3339("2026-01-01T05:43:00Z")
             .unwrap()
@@ -2083,12 +2225,21 @@ mod extension_tests {
         assert!(!at(119).contains("RIG"), "{}", at(119));
         let mid = words(at(140));
         let host = mid.iter().position(|w| w.starts_with("HOST")).unwrap();
-        assert_eq!(&mid[host + 1..host + 3], ["RIG", "PROJECT"], "{mid:?}");
+        assert_eq!(&mid[host + 1..host + 2], ["RIG"], "{mid:?}");
         assert!(
-            !mid.contains(&"OWNER".to_owned()),
-            "only two below 160: {mid:?}"
+            !mid.contains(&"PROJECT".to_owned()) && !mid.contains(&"OWNER".to_owned()),
+            "MSG's floor takes the later fields at 140: {mid:?}"
         );
-        assert!(words(at(160)).contains(&"OWNER".to_owned()), "{}", at(160));
+        let wide = words(at(120));
+        assert!(
+            wide.contains(&"RIG".to_owned()) && wide.contains(&"PROJECT".to_owned()),
+            "{wide:?}"
+        );
+        assert!(
+            !wide.contains(&"OWNER".to_owned()),
+            "only two below 160: {wide:?}"
+        );
+        assert!(words(at(200)).contains(&"OWNER".to_owned()), "{}", at(200));
         let text = render(&app, 140, 30);
         let seat_b = text.lines().find(|l| l.contains("seat-b")).unwrap();
         assert!(seat_b.contains(" api "), "{seat_b}");

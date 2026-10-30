@@ -7,7 +7,9 @@ use tui_input::backend::crossterm::EventHandler;
 use unicode_width::UnicodeWidthStr;
 
 use super::answer::{Answer, Step};
-use super::columns::{Col, Column, Columns, Sort, UsageShown, field_column, free_letter};
+use super::columns::{
+    Col, Column, Columns, LABEL_MAX, Longest, Sort, UsageShown, field_column, free_letter,
+};
 use super::full::Full;
 use super::keys::{self, Act, K};
 use super::markdown::{self, Block, Run};
@@ -225,6 +227,8 @@ pub struct App {
     pub card_height: Option<super::prefs::CardHeight>,
     /// tui.json's opt-in columns, written back the same way.
     pub columns: Vec<String>,
+    /// tui.json's column widths, written back the same way.
+    pub widths: std::collections::BTreeMap<String, u16>,
     /// Whether the card's facts take Nerd Font glyphs: REXBOARD_ICONS, else tui.json's icons.
     pub nerd: bool,
     /// The terminal's size at the last draw, which `<` and `>` move the pane against and a

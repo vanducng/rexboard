@@ -1,5 +1,6 @@
 //! tui.json: the board's own settings on this machine.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -28,6 +29,28 @@ pub struct Prefs {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub columns: Vec<String>,
+    /// Fixed widths by column name (`host`, `session`, `window`, `block`, `msg`), kept as
+    /// written; a name or a value this build does not know is ignored when the list is drawn.
+    #[serde(
+        default,
+        deserialize_with = "widths",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    pub widths: BTreeMap<String, u16>,
+}
+
+/// Anything but an object is none; an entry whose value is not a width from 1 to 500 is dropped.
+fn widths<'de, D: Deserializer<'de>>(d: D) -> Result<BTreeMap<String, u16>, D::Error> {
+    Ok(match serde_json::Value::deserialize(d)? {
+        serde_json::Value::Object(entries) => entries
+            .into_iter()
+            .filter_map(|(name, width)| {
+                let width = u16::try_from(width.as_u64()?).ok()?;
+                (1..=500).contains(&width).then_some((name, width))
+            })
+            .collect(),
+        _ => BTreeMap::new(),
+    })
 }
 
 /// Anything but a list of names is none, and keeps the rest of the file.
@@ -121,6 +144,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn widths_keep_every_whole_number_width_and_drop_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tui.json");
+        std::fs::write(
+            &path,
+            r#"{"widths": {"host": 12, "msg": 60, "later": 7, "zero": 0, "neg": -3, "text": "9", "huge": 9999, "frac": 2.5}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            load(&path).widths,
+            BTreeMap::from([
+                ("host".to_owned(), 12),
+                ("later".to_owned(), 7),
+                ("msg".to_owned(), 60)
+            ]),
+            "a name this build does not know is kept as written; a value that is no width is dropped"
+        );
+        std::fs::write(&path, r#"{"widths": [1, 2], "detail_hidden": true}"#).unwrap();
+        assert!(load(&path).widths.is_empty() && load(&path).detail_hidden);
+    }
+
+    #[test]
     fn prefs_round_trip_and_bad_files_give_the_default() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("rexboard/tui.json");
@@ -131,6 +176,7 @@ mod tests {
             icons: Icons::Nerd,
             card_height: Some(CardHeight::Percent(30)),
             columns: vec!["cost".into(), "5h".into()],
+            widths: BTreeMap::from([("host".to_owned(), 12), ("whatever".to_owned(), 9)]),
         };
         save(&path, &kept).unwrap();
         assert_eq!(load(&path), kept);
@@ -148,6 +194,7 @@ mod tests {
                 icons: Icons::Text,
                 card_height: None,
                 columns: Vec::new(),
+                widths: BTreeMap::new(),
             },
             "an unknown motion is full and keeps the rest"
         );
@@ -160,6 +207,7 @@ mod tests {
                 icons: Icons::Text,
                 card_height: None,
                 columns: Vec::new(),
+                widths: BTreeMap::new(),
             },
             "unknown icons are words and keep the rest"
         );
