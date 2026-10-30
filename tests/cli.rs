@@ -2473,7 +2473,7 @@ fn acting_with(
         "acts",
         "",
         &format!(
-            "[[fields]]\nname = \"session\"\ntitle = \"SESSION\"\nhidden = true\n[[actions]]\nname = \"send\"\ntitle = \"Send message\"\nkey = \"s\"\n{when}cmd = [\"./send\", \"--host\", \"{{host}}\", \"--\", \"{{field:session}}\", \"{{text}}\"]\nconfirm = \"send to {{field:session}} on {{host}}: {{text}}\"\n{action}"
+            "[[fields]]\nname = \"session\"\ntitle = \"SESSION\"\nhidden = true\n[[actions]]\nname = \"send\"\ntitle = \"Send message\"\nkey = \"s\"\n{when}cmd = [\"./send\", \"--host\", \"{{host}}\", \"--\", \"{{field:session}}\", \"{{text}}\"]\nconfirm = \"send to {{field:session}} on {{host}}\"\n{action}"
         ),
         adapter,
     );
@@ -2518,7 +2518,7 @@ fn ext_run_dry_run_prints_the_argv_and_runs_nothing() {
     ext_run(&serve, &rows, &["--text", text, "--dry-run"])
         .success()
         .stdout(predicate::str::contains(format!(
-            "send to api-lead on mini: {text}\n"
+            "send to api-lead on mini: \"{text}\"\n"
         )))
         .stdout(predicate::str::contains(
             r#""--host" "mini" "--" "api-lead" "it's \"q\"; $(touch pwn) -rf""#,
@@ -2530,7 +2530,7 @@ fn ext_run_dry_run_prints_the_argv_and_runs_nothing() {
         .clone();
     let json: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(json["dry_run"], true);
-    assert_eq!(json["confirm"], "send to api-lead on mini: hi");
+    assert_eq!(json["confirm"], "send to api-lead on mini: \"hi\"");
     assert_eq!(
         json["argv"].as_array().unwrap()[1..],
         ["--host", "mini", "--", "api-lead", "hi"]

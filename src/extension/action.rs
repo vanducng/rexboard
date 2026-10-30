@@ -33,7 +33,8 @@ pub struct Action {
     pub key: String,
     /// argv, no shell; a leading `./` is the extension's directory.
     pub cmd: Vec<String>,
-    /// The confirm line, with the same placeholders as `cmd`. Empty is `TITLE: TEXT?`.
+    /// What the confirm line says the action does and to whom, with `cmd`'s placeholders but not
+    /// `{text}`: the line always adds the text. Empty is the title.
     #[serde(default)]
     pub confirm: String,
     /// Fields of this extension a row must have a value for.
@@ -69,11 +70,22 @@ pub struct Offered {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Plan {
     pub argv: Vec<String>,
+    /// What the action does and to whom: the manifest's `confirm`, or its title.
     pub confirm: String,
+    /// The typed line, which every confirm shows beside `confirm`.
+    pub text: String,
     pub dir: PathBuf,
     pub timeout: Duration,
     /// `REXBOARD_EXTENSION`, `REXBOARD_ACTION` and `REXBOARD_SETTINGS`.
     pub env: Vec<(String, String)>,
+}
+
+impl Plan {
+    /// The confirm line as the CLI shows it: the target, then the text in quotes. The board
+    /// draws the same two parts, cutting the target first.
+    pub fn line(&self) -> String {
+        format!("{}: \"{}\"", self.confirm, self.text)
+    }
 }
 
 /// The placeholders a template may hold.
@@ -156,6 +168,11 @@ impl Action {
                     Part::Field(field) if !declared.contains(field) => {
                         return Err(at(&format!("{{field:{field}}} is not a declared field")));
                     }
+                    Part::Typed if i >= self.cmd.len() => {
+                        return Err(at(
+                            "{text} is for cmd; every confirm line shows the text itself",
+                        ));
+                    }
                     _ if i == 0 && !matches!(part, Part::Text(_)) => {
                         return Err(at("the program cannot be a placeholder"));
                     }
@@ -220,13 +237,14 @@ impl Offered {
             argv[0] = self.dir.join(rest).display().to_string();
         }
         let confirm = if action.confirm.is_empty() {
-            format!("{}: {text}?", action.title)
+            action.title.clone()
         } else {
             expand(&action.confirm)?
         };
         Ok(Plan {
             argv,
             confirm,
+            text: text.to_owned(),
             dir: self.dir.clone(),
             timeout: Duration::from_secs(action.timeout),
             env: vec![
@@ -546,18 +564,36 @@ mod tests {
     }
 
     #[test]
-    fn the_confirm_line_names_the_target_and_defaults_to_the_text() {
+    fn every_confirm_line_names_the_target_and_quotes_the_text() {
         let plan = offered("").plan(&seat(), "hi there").unwrap();
-        assert_eq!(plan.confirm, "Send: hi there?");
-        let plan = offered("confirm = \"send to {field:session} on {host} : {text}\"\n")
-            .plan(&seat(), "hi")
+        assert_eq!(
+            (plan.confirm.as_str(), plan.line().as_str()),
+            ("Send", "Send: \"hi there\"")
+        );
+        // A template that leaves the text out still shows it: the line is the board's, not the
+        // manifest's.
+        let plan = offered("confirm = \"send to {field:session} on {host}\"\n")
+            .plan(&seat(), "say \"hi\"")
             .unwrap();
-        assert_eq!(plan.confirm, "send to lead@api on mini : hi");
+        assert_eq!(plan.line(), "send to lead@api on mini: \"say \"hi\"\"");
+        assert_eq!(plan.text, "say \"hi\"");
         assert_eq!(plan.env[0], ("REXBOARD_EXTENSION".into(), "fake".into()));
         assert_eq!(plan.env[1], ("REXBOARD_ACTION".into(), "send".into()));
         assert_eq!(
             plan.env[2],
             ("REXBOARD_SETTINGS".into(), "{\"wait\":true}".into())
+        );
+    }
+
+    #[test]
+    fn a_confirm_that_takes_the_text_is_refused() {
+        let err = load(&with_action(
+            "cmd = [\"./s\", \"{text}\"]\nconfirm = \"send {text}\"\n",
+        ))
+        .unwrap_err();
+        assert!(
+            err.contains("{text} is for cmd; every confirm line shows the text itself"),
+            "{err}"
         );
     }
 
@@ -574,6 +610,7 @@ mod tests {
                 "$(touch pwn)".into(),
             ],
             confirm: String::new(),
+            text: String::new(),
             dir: dir.to_owned(),
             timeout: Duration::from_secs(timeout),
             env: vec![("REXBOARD_ACTION".into(), "send".into())],

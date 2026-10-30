@@ -143,13 +143,13 @@ name = "send"            # [a-z0-9-]+, unique in the extension
 title = "Send message"   # the input line's label, and the word `x` lists
 key = "s"                # one printable character, after the board's x; unique in the extension
 cmd = ["./send", "--", "{field:session}", "{text}"]   # argv, no shell; it must hold {text}
-confirm = "send to {field:session} on {host}: {text}" # the red line before y; default: TITLE: TEXT?
+confirm = "send to {field:session} on {host}"          # what the red line before y says; it then adds the text in quotes. Default: the title
 when = ["session"]       # the action applies to a row with a value for each of these fields
 max = 1000               # bytes of text, 1 to 4096
 timeout = 10             # seconds, 1 to 60; the run and what it started are then killed
 ```
 
-`confirm`, `when`, `max` and `timeout` are optional; the values above for the last two are their defaults. `cmd` and `confirm` take `{host}` (the row's host), `{field:NAME}` (a declared field of this extension, which the row must have a value for) and `{text}`, the one line the user types. Each placeholder is expanded inside one argv element, so the text can hold quotes, `;`, `$(…)` or a leading `-` and still arrives as one argument; put `--` before it if the program reads options. The program (the first element) cannot be a placeholder. The text is one line with no control characters and at most `max` bytes. The manifest is broken when an action breaks any of this, repeats a name or a key, or names a field it does not declare.
+`confirm`, `when`, `max` and `timeout` are optional; the values above for the last two are their defaults. `cmd` and `confirm` take `{host}` (the row's host) and `{field:NAME}` (a declared field of this extension, which the row must have a value for); only `cmd` takes `{text}`, the one line the user types. Every confirm line is the target the manifest words, then the text in quotes, so a template cannot leave the message out: `send to seat-b@web on mini: "ready for review?"`. Each placeholder is expanded inside one argv element, so the text can hold quotes, `;`, `$(…)` or a leading `-` and still arrives as one argument; put `--` before it if the program reads options. The program (the first element) cannot be a placeholder. The text is one line with no control characters and at most `max` bytes. The manifest is broken when an action breaks any of this, repeats a name or a key, or names a field it does not declare.
 
 The action runs in the extension's directory with no stdin, in its own process group, with `REXBOARD_EXTENSION`, `REXBOARD_ACTION` and `REXBOARD_SETTINGS` (its `[extensions.settings]` as JSON) in the environment. It succeeds on exit 0, and what it printed first is the result. A non-zero exit, a timeout or a program that cannot start is a failure that says so. rexboard keeps the first 4 KiB of each output.
 
@@ -194,7 +194,7 @@ It exits 0 when the answer is valid. It exits 1 with `EXTENSION` when the answer
 
 Runs extension `NAME`'s action `ACTION` on the row `KEY` (`host/block`, as `rexboard ls` prints it), with the checks the board makes: the row must have a value for each field in `when`, the text must be one line within `max`. Rows come from serve, which has the extension's fields only while the extension is enabled; `--rows FILE` reads them from a file as `ext test` does.
 
-- `--dry-run` prints the confirm line and the argv, and runs nothing. With `--json`: `{ok, extension, action, key, argv, confirm, dry_run: true, output: null}`.
+- `--dry-run` prints the confirm line (`send to seat-b@web on mini: "ready for review?"`) and the argv, and runs nothing. With `--json`: `{ok, extension, action, key, argv, confirm, dry_run: true, output: null}`.
 - `--yes` runs it. On a terminal, without `--yes`, it prints the confirm line and `[y/N]` on stderr and runs on `y`. With no terminal and neither flag it fails and runs nothing.
 - It prints `TITLE: FIRST LINE` (`done` when the run printed none), or with `--json` the object above with `dry_run: false` and `output`.
 

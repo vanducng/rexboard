@@ -392,12 +392,12 @@ fn act(go: &Go, rows: Option<&Path>, json: bool) -> Result<()> {
                 "{}",
                 json!({
                     "ok": true, "extension": go.name, "action": go.action, "key": go.key,
-                    "argv": plan.argv, "confirm": plan.confirm,
+                    "argv": plan.argv, "confirm": plan.line(),
                     "dry_run": go.dry_run, "output": output,
                 })
             );
         } else if go.dry_run {
-            println!("{}", plan.confirm);
+            println!("{}", plan.line());
             println!(
                 "would run: {}",
                 plan.argv
@@ -428,7 +428,7 @@ fn act(go: &Go, rows: Option<&Path>, json: bool) -> Result<()> {
                 ],
             ));
         }
-        eprint!("{} [y/N] ", plan.confirm);
+        eprint!("{} [y/N] ", plan.line());
         let mut answer = String::new();
         let _ = std::io::stdin().read_line(&mut answer);
         if answer.trim() != "y" {
