@@ -571,17 +571,22 @@ impl Columns {
         }
     }
 
-    /// Once WHERE is split, fits SESSION, WINDOW and BLOCK to their longest labels (`need`, in
-    /// columns with the gap), and MSG takes what they free. When together they want more than
-    /// they hold, the short ones keep their fit and the long ones share the rest.
-    pub fn fit_parts(&mut self, need: [usize; 3]) {
+    /// Once WHERE is split, fits SESSION, WINDOW and BLOCK to their `longest` labels and a gap,
+    /// two columns when that all fits, else one; MSG takes what they free. When together they
+    /// want more than they hold, the short ones keep their fit and the long ones share the rest.
+    pub fn fit_parts(&mut self, longest: [usize; 3]) {
         let parts = [Col::Session, Col::Window, Col::Block];
         if parts.iter().any(|id| !self.has(*id)) {
             return;
         }
         let held: usize = parts.iter().map(|id| self.width(*id)).sum();
         // Never narrower than the header word with its gap and sort arrow.
-        let mut want = need.map(|n| n.max(10));
+        let wanted = |gap: usize| longest.map(|n| (n + gap).max(10));
+        let mut want = if wanted(2).iter().sum::<usize>() <= held {
+            wanted(2)
+        } else {
+            wanted(1)
+        };
         let mut left = held;
         let mut open: Vec<usize> = (0..3).collect();
         // Water-filling: a part that needs no more than an equal share of what is left gets its fit.
@@ -597,8 +602,11 @@ impl Columns {
                 }
             }
         }
-        for (id, width) in parts.into_iter().zip(want) {
-            self.resize(id, width);
+        // Shrinks first, so the room they give back is there for the parts that grow.
+        let mut order: Vec<usize> = (0..3).collect();
+        order.sort_by_key(|&i| want[i] as isize - self.width(parts[i]) as isize);
+        for i in order {
+            self.resize(parts[i], want[i]);
         }
     }
 
@@ -1115,6 +1123,65 @@ mod tests {
     }
 
     #[test]
+    fn a_session_label_that_fits_its_share_is_shown_whole_at_240_columns() {
+        let width = 240u16;
+        let mut app = App::default();
+        let label = format!("api-{}-end", "x".repeat(102));
+        let mut seat = row("mini/seat", "working", "working", true);
+        seat.pane.session = label.clone();
+        seat.pane.tab = "main".into();
+        seat.pane.pane = "seat".into();
+        app.set_rows(vec![seat], hosts());
+        let columns = app.columns(width, usize::from(width));
+        assert_eq!(columns.width(Col::Session), 111, "label and one gap");
+        let buf = buffer(&app, width, 40);
+        let shown = (0..40)
+            .map(|y| line(&buf, y))
+            .find(|line| line.contains("seat msg"))
+            .unwrap();
+        assert!(shown.contains(&label), "no ellipsis: {shown}");
+        assert_eq!(
+            columns.width(Col::Msg),
+            Columns::new(width, usize::from(width), &[]).width(Col::Msg),
+            "MSG keeps its own share"
+        );
+    }
+
+    #[test]
+    fn session_window_and_block_sit_two_columns_apart_when_there_is_room() {
+        let mut app = App::default();
+        let mut seat = row("local/seat", "working", "working", true);
+        seat.pane.session = "api-gateway".into();
+        seat.pane.tab = "integration-checks".into();
+        seat.pane.pane = "seat".into();
+        app.set_rows(vec![seat], hosts());
+        for width in [140u16, 200] {
+            let columns = app.columns(width, usize::from(width));
+            assert_eq!(columns.width(Col::Session), 13, "{width}: label and two");
+            assert_eq!(columns.width(Col::Window), 20, "{width}: label and two");
+        }
+        // Too little room for two: one column each, as before.
+        let mut tight = App::default();
+        let mut seat = row("local/seat", "working", "working", true);
+        seat.pane.session = "s".repeat(40);
+        seat.pane.tab = "w".repeat(40);
+        seat.pane.pane = "b".repeat(40);
+        tight.set_rows(vec![seat], hosts());
+        let columns = tight.columns(132, 132);
+        let parts = [Col::Session, Col::Window, Col::Block].map(|c| columns.width(c));
+        assert_eq!(
+            parts.iter().sum::<usize>(),
+            Columns::new(132, 132, &[])
+                .cols
+                .iter()
+                .filter(|(c, _)| matches!(c.id, Col::Session | Col::Window | Col::Block))
+                .map(|(_, w)| w)
+                .sum::<usize>(),
+            "{parts:?}"
+        );
+    }
+
+    #[test]
     fn labels_longer_than_their_share_split_it_and_never_starve_msg() {
         let mut app = App::default();
         let long = |key: &str, text: &str| {
@@ -1147,7 +1214,7 @@ mod tests {
         );
         let mut columns = Columns::new(160, 160, &[]);
         let msg = columns.width(Col::Msg);
-        columns.fit_parts([4, 4, 4]);
+        columns.fit_parts([1, 1, 1]);
         assert_eq!(
             [Col::Session, Col::Window, Col::Block].map(|c| columns.width(c)),
             [10, 10, 10],
@@ -1155,7 +1222,7 @@ mod tests {
         );
         assert!(columns.width(Col::Msg) > msg, "MSG takes the freed width");
         let mut columns = Columns::new(160, 160, &[]);
-        columns.fit_parts([200, 12, 12]);
+        columns.fit_parts([199, 11, 11]);
         assert_eq!(columns.width(Col::Window), 12);
         assert_eq!(columns.width(Col::Block), 12);
         assert_eq!(

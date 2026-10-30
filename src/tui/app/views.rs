@@ -170,11 +170,11 @@ impl App {
                 .max()
                 .unwrap_or_default()
         };
-        // The longest label of each part, its gap, and room for a twin's ` #N` on the block.
+        // The longest label of each part, and room for a twin's ` #N` on the block.
         columns.fit_parts([
-            widest(&|row| clean(&row.pane.session)) + 1,
-            widest(&|row| clean(&row.pane.tab)) + 1,
-            widest(&crate::output::name) + 4,
+            widest(&|row| clean(&row.pane.session)),
+            widest(&|row| clean(&row.pane.tab)),
+            widest(&crate::output::name) + 3,
         ]);
         if self.nerd {
             columns.marks = true;

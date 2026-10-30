@@ -329,15 +329,31 @@ fn laid_out(block: &Block, lead: &str, width: usize, style: Style) -> Vec<Line<'
 /// The longest first sentence the card sets strong; a longer one would be a heavy block.
 const LEAD_MAX: usize = 120;
 
+/// Whether the sentence ends at `i`: a `.`, `!` or `?` and then a space or the end. A `.` also
+/// needs a capital, a quote or a bracket after the space, and no `e.g.`-style dot before it, so
+/// `e.g. the docs` and `v1. 2 files` do not end it.
+fn sentence_stop(text: &[char], i: usize) -> bool {
+    if !matches!(text[i], '.' | '!' | '?') {
+        return false;
+    }
+    match text.get(i + 1) {
+        None => true,
+        Some(c) if !c.is_whitespace() => false,
+        Some(_) if text[i] != '.' => true,
+        Some(_) => {
+            let abbreviation = i >= 2 && text[i - 2] == '.';
+            let next = text[i + 1..].iter().find(|c| !c.is_whitespace());
+            !abbreviation && next.is_none_or(|c| c.is_uppercase() || "\"'([`".contains(*c))
+        }
+    }
+}
+
 /// The headline paragraph with only its first sentence strong, and only when that is short, so a
 /// long opening reads as plain text and not as a heavy block.
 fn lead(runs: &[Run]) -> Block {
     let whole: Vec<char> = runs.iter().flat_map(|(text, _)| text.chars()).collect();
     let end = (0..whole.len())
-        .find(|&i| {
-            matches!(whole[i], '.' | '!' | '?')
-                && whole.get(i + 1).is_none_or(|c| c.is_whitespace())
-        })
+        .find(|&i| sentence_stop(&whole, i))
         .map_or(whole.len(), |i| i + 1);
     let strong = if end <= LEAD_MAX { end } else { 0 };
     let mut at = 0;
@@ -516,6 +532,21 @@ mod tests {
         assert_eq!(
             strong("Opened PR #31. See it."),
             ("Opened PR #31.".into(), " See it.".into())
+        );
+        assert_eq!(
+            strong("See e.g. the docs. Then more."),
+            ("See e.g. the docs.".into(), " Then more.".into()),
+            "e.g. does not end it"
+        );
+        assert_eq!(
+            strong("Bumped to v1. 2 files changed. Done."),
+            ("Bumped to v1. 2 files changed.".into(), " Done.".into()),
+            "a number after the stop does not end it"
+        );
+        assert_eq!(
+            strong("Is it ready? yes. Next."),
+            ("Is it ready?".into(), " yes. Next.".into()),
+            "a question ends it"
         );
         let long = format!(
             "I refactored {} so it reads. And then more.",
