@@ -84,6 +84,10 @@ impl App {
                 KeyCode::Enter => {
                     let text = input.value().to_owned();
                     match self.plan_for(&doing, &text) {
+                        Ok(plan) if self.confirm_line(&doing, &plan, self.cols()).is_none() => {
+                            self.failed = Some(format!("{title} cancelled: {TOO_NARROW}"));
+                            doing.stage = Stage::Text(input);
+                        }
                         Ok(plan) => {
                             doing.stage = Stage::Confirm {
                                 plan: Box::new(plan),
@@ -115,6 +119,9 @@ impl App {
                     match self.plan_for(&doing, &text) {
                         Ok(again) if again != *plan => {
                             self.failed = Some(format!("{title} cancelled: the target changed"));
+                        }
+                        Ok(again) if self.confirm_line(&doing, &again, self.cols()).is_none() => {
+                            self.failed = Some(format!("{title} cancelled: {TOO_NARROW}"));
                         }
                         Ok(_) if self.busy() => {}
                         Ok(again) => {
@@ -171,6 +178,13 @@ impl App {
     pub fn action_footer(&self, width: usize) -> Option<Line<'static>> {
         let doing = self.doing.as_ref()?;
         match &doing.stage {
+            Stage::Text(_) if self.failed.is_some() => {
+                let why = self.failed.as_deref().unwrap_or_default();
+                Some(Line::styled(
+                    crate::output::squeeze(why, width),
+                    theme::alert(),
+                ))
+            }
             Stage::Text(input) => {
                 let row = self.rows.iter().find(|row| row.key == doing.key)?;
                 // The end being typed keeps at least half the line; the head gives way.
@@ -191,35 +205,62 @@ impl App {
                 Some(Line::from(spans))
             }
             Stage::Confirm { plan, .. } => {
-                // The board's line, not the manifest's: the target, the text in quotes, and what a
-                // row that waits on a dialog would make of typed text.
-                let state = self
-                    .rows
-                    .iter()
-                    .find(|row| row.key == doing.key)?
-                    .pane
-                    .state
-                    .as_str();
-                let note = match state {
-                    "blocked" => " · it waits on a dialog",
-                    "error" => " · it reported an error",
-                    _ => "",
-                };
-                let tail = format!("{note} · y runs");
-                let colon = ": ";
-                let target = plan.confirm.width().min(12);
-                let text_room = width.saturating_sub(tail.width() + colon.width() + target);
-                let text = crate::output::squeeze(&format!("\"{}\"", plan.text), text_room);
-                let room = width.saturating_sub(tail.width() + colon.width() + text.width());
-                let head = crate::output::squeeze(&plan.confirm, room);
-                Some(Line::styled(
-                    format!("{head}{colon}{text}{tail}"),
-                    theme::alert_label(),
-                ))
+                let line = self
+                    .confirm_line(doing, plan, width)
+                    .unwrap_or_else(|| crate::output::squeeze("too narrow · esc", width));
+                Some(Line::styled(line, theme::alert_label()))
             }
         }
     }
+
+    /// The window as columns; 0 before the first draw is no limit.
+    fn cols(&self) -> usize {
+        match self.width {
+            0 => usize::MAX,
+            width => usize::from(width),
+        }
+    }
+
+    /// The board's confirm line in `width` columns: the target, the text in quotes, a note when
+    /// the row waits on a dialog or errored (typed text may be read as the dialog's answer), and
+    /// the key. The note gives way first, then the target is cut, then the text; the target and
+    /// the text are always there, or there is no line, and then nothing may run.
+    fn confirm_line(&self, doing: &Doing, plan: &Plan, width: usize) -> Option<String> {
+        let row = self.rows.iter().find(|row| row.key == doing.key)?;
+        let notes = match row.pane.state.as_str() {
+            "blocked" => [" · it waits on a dialog", " · dialog", ""],
+            "error" => [" · it reported an error", " · error", ""],
+            _ => ["", "", ""],
+        };
+        let (colon, run) = (": ", " · y runs");
+        let quoted = format!("\"{}\"", plan.text);
+        let target = plan.confirm.width().min(8);
+        let room = |note: &str| width.checked_sub(note.width() + run.width() + colon.width());
+        let line = |note: &str, room: usize| {
+            let text = crate::output::squeeze(&quoted, room - target);
+            let head = crate::output::squeeze(&plan.confirm, room - text.width());
+            format!("{head}{colon}{text}{note}{run}")
+        };
+        // The whole text first, shedding the note; only a text too long for that is cut, with
+        // the short note kept.
+        notes
+            .iter()
+            .find_map(|note| {
+                room(note)
+                    .filter(|r| *r >= target + quoted.width())
+                    .map(|r| line(note, r))
+            })
+            .or_else(|| {
+                notes[1..].iter().find_map(|note| {
+                    room(note)
+                        .filter(|r| *r >= target + quoted.width().min(8))
+                        .map(|r| line(note, r))
+                })
+            })
+    }
 }
+
+const TOO_NARROW: &str = "the screen is too narrow to confirm it";
 
 /// The last `room` columns of `text`, so the end being typed stays in view.
 fn ends(text: &str, room: usize) -> String {
@@ -303,6 +344,9 @@ mod tests {
         press(&mut app, KeyCode::Enter);
         assert!(app.doing.is_some(), "an empty line stays in the input");
         assert_eq!(app.failed.as_deref(), Some("there is no text to send"));
+        // The reason shows, in place of the input line, until the next key.
+        let footer = app.action_footer(100).unwrap().to_string();
+        assert_eq!(footer, "there is no text to send");
         press(&mut app, KeyCode::Esc);
         assert!(app.doing.is_none());
         assert_eq!(app.toast(), Some("Send message cancelled"));

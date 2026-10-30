@@ -308,12 +308,12 @@ The end of what you type stays in view, and the head gives way when the screen i
 send to seat-b@web on mini: "ready for review?" · it waits on a dialog · y runs
 ```
 
-It is the extension's words for the target (`confirm`), then the text in quotes, whatever the extension's `confirm` says. When the row is `blocked` it adds `· it waits on a dialog`, and when it errored `· it reported an error`: text sent to a pane that waits on a dialog may be read as the dialog's answer, so the line says so before you press `y`. Only `y` runs it, and only once the line has been up for 300 ms; any other key says `NAME cancelled`. At `y` the board builds the plan again from the extension's current offer and the row as it is now; if it differs from the one shown, or the action or the row is gone, nothing runs and it says why. A row that leaves, or stops taking the action, while you type or before you confirm ends the action with `NAME cancelled: that row is gone` in red.
+It is the extension's words for the target (`confirm`), then the text in quotes, whatever the extension's `confirm` says. When the row is `blocked` it adds `· it waits on a dialog`, and when it errored `· it reported an error`: text sent to a pane that waits on a dialog may be read as the dialog's answer, so the line says so before you press `y`. Only `y` runs it, and only once the line has been up for 300 ms; any other key says `NAME cancelled`. At `y` the board builds the plan again from the extension's current offer and the row as it is now; if it differs from the one shown, or the action or the row is gone, nothing runs and it says why. When the window is narrow the note gives way first (to `· dialog`, then to nothing), then the target is cut, then a long text, and the target and the text are always there. If no line with both fits, `enter` says `Send message cancelled: the screen is too narrow to confirm it` and nothing is armed; a window that narrows after the line is drawn refuses `y` the same way. A row that leaves, or stops taking the action, while you type or before you confirm ends the action with `NAME cancelled: that row is gone` in red.
 
 The footer says `NAME…` while it runs and `NAME: FIRST LINE` after (`done` when the action said nothing). A failure shows `NAME failed: FIRST LINE`, with its exit code, in red until the next key:
 
 ```
-Send message failed: exited with 3: rig: send failed: not delivered
+Send message failed: exited with 3: not delivered
 ```
 
 A second run waits for a jump or close in flight, and a running action is stopped when the board exits.

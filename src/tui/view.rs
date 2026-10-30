@@ -1151,6 +1151,88 @@ mod tests {
         assert_eq!(last(&app, 80), "no action for this row");
     }
 
+    /// The confirm line of an action on a blocked row at `width`: the actual footer, after the
+    /// keys, with the window that wide.
+    fn confirm_at(width: u16, text: &str) -> (App, String) {
+        let mut app = with_actions();
+        app.width = width;
+        typed(&mut app, &format!("xs{text}"));
+        press(&mut app, KeyCode::Enter);
+        let last = render(&app, width, 30).lines().last().unwrap().to_owned();
+        (app, last)
+    }
+
+    /// At every width the confirm has the target and the whole short text, and the key; the dialog
+    /// note gives way first (to its short form, then to nothing) and a long text is cut with the
+    /// short note kept. Where no such line fits, nothing is armed.
+    #[test]
+    fn the_confirm_keeps_the_target_and_the_text_at_every_width_or_refuses_to_arm() {
+        let full = "send to api-lead on mini: \"hi\" · it waits on a dialog · y runs";
+        assert_eq!(confirm_at(80, "hi").1, full);
+        for width in [36, 40, 45, 46, 60] {
+            let (_, line) = confirm_at(width, "hi");
+            assert!(line.width() <= usize::from(width), "{width}: {line}");
+            assert!(
+                line.contains(": \"hi\"") && line.ends_with(" · y runs"),
+                "{width}: {line}"
+            );
+            assert!(
+                line.starts_with("se"),
+                "the target is there, cut: {width}: {line}"
+            );
+        }
+        assert!(
+            confirm_at(46, "hi").1.contains("dialog"),
+            "the note stays while it fits"
+        );
+        assert!(
+            !confirm_at(36, "hi").1.contains("waits"),
+            "the full note gave way"
+        );
+        let long = "please look at the failing test in the parser and tell me what you think";
+        let (_, line) = confirm_at(80, long);
+        assert!(
+            line.contains(" · dialog · y runs") && !line.contains("waits"),
+            "{line}"
+        );
+        assert!(
+            line.contains("\"please look at")
+                && line.contains("what you think\"")
+                && line.contains('…'),
+            "{line}"
+        );
+        assert!(line.width() <= 80);
+        // Too narrow for the target and the text: it says so and arms nothing.
+        let (mut app, line) = confirm_at(22, "hi");
+        assert_eq!(
+            app.failed.as_deref(),
+            Some("Send message cancelled: the screen is too narrow to confirm it")
+        );
+        assert!(
+            line.starts_with("Send mess") && line.width() <= 22,
+            "{line}"
+        );
+        assert!(press(&mut app, KeyCode::Char('y')).is_none());
+        assert!(app.going.is_none());
+        // A window that narrows after the confirm was drawn does not run it either.
+        let (mut app, _) = confirm_at(80, "hi");
+        app.width = 22;
+        assert!(
+            render(&app, 22, 30)
+                .lines()
+                .last()
+                .unwrap()
+                .ends_with("too narrow · esc"),
+            "{:?}",
+            render(&app, 22, 30).lines().last()
+        );
+        assert!(press(&mut app, KeyCode::Char('y')).is_none() && app.going.is_none());
+        assert_eq!(
+            app.failed.as_deref(),
+            Some("Send message cancelled: the screen is too narrow to confirm it")
+        );
+    }
+
     #[test]
     fn the_narrow_key_bar_keeps_the_essentials_and_question_mark_shows_all() {
         let mut app = fuller();
