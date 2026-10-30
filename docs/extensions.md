@@ -153,7 +153,13 @@ timeout = 10             # seconds, 1 to 60; the run and what it started are the
 
 The program is found as exec finds it from the extension's directory: a path with a slash (`./send`, `bin/send`) is taken from that directory unless it is absolute, and a bare name is the first executable file of that name on `PATH`, where a relative or empty `PATH` entry is under that directory too, since the action starts there. The action runs there with no stdin, in its own process group, with `REXBOARD_EXTENSION`, `REXBOARD_ACTION` and `REXBOARD_SETTINGS` (its `[extensions.settings]` as JSON) in the environment. It succeeds on exit 0, and what it printed first is the result. A non-zero exit, a timeout or a program that cannot start is a failure that says so. rexboard keeps the first 4 KiB of each output.
 
-On the board, `x` and the key start it ([TUI](tui.md)): an input line, a confirm line that names the target, then `y`. Nothing runs before `y`, and `y` runs only the argv the confirm line was made from: the row is read again, and if it changed or went, nothing runs. The board runs the action itself, not serve, and stops it when it exits. When two enabled extensions declare the same key, the first in `enabled` keeps it and serve logs the other as left out.
+On the board, `x` and the key start it ([TUI](tui.md#actions)): an input line that names the target as the board does (`Send message web › seats › seat-b on mini: …`), then a confirm line, then `y`. The confirm line is the board's: your `confirm` for the target, then the typed text in quotes, then `· y runs`:
+
+```
+send to seat-b@web on mini: "ready for review?" · it waits on a dialog · y runs
+```
+
+When the row is `blocked` or in an error state it adds `· it waits on a dialog` or `· it reported an error`, because text sent to a pane that waits on a dialog may be read as the dialog's answer. Nothing runs before `y`, and `y` runs only the plan the line was made from: it is built again from the current action offer and the row, and if it changed or went, nothing runs. The board runs the action itself, not serve, and stops it when it exits. When two enabled extensions declare the same key, the first in `enabled` keeps it and serve logs the other as left out.
 
 `rexboard ext run NAME ACTION KEY --text TEXT [--dry-run | --yes]` does the same from the command line.
 
