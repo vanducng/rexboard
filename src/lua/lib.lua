@@ -21,7 +21,7 @@ local function block(api, session_id, b)
   }
 end
 
-local function session_entry(api, s)
+local function session_entry(api, s, unplaced)
   local view = api.call("session.view", { session_id = s.session_id }) or {}
   local listed = api.call("session.list_blocks", { session_id = s.session_id }) or {}
   local windows, by_id = {}, {}
@@ -32,19 +32,23 @@ local function session_entry(api, s)
   end
   for _, b in ipairs(listed.blocks or {}) do
     local win = by_id[b.window_id]
-    if win and b.creator_name == term and b.placement == "placed" then
-      win.blocks[#win.blocks + 1] = block(api, s.session_id, b)
+    if b.creator_name == term then
+      if win and b.placement == "placed" then
+        win.blocks[#win.blocks + 1] = block(api, s.session_id, b)
+      elseif unplaced and b.placement ~= "placed" then
+        unplaced[b.block_id] = s.session_id
+      end
     end
   end
   return { session_id = s.session_id, label = s.label, windows = windows }
 end
 
-local function snapshot(api)
+local function snapshot(api, unplaced)
   local _, err = api.call("session.attach_all", { event_scope = "session" })
   if err then error(err, 0) end
   local sessions = {}
   for _, s in ipairs(api.call("session.list").sessions or {}) do
-    sessions[#sessions + 1] = session_entry(api, s)
+    sessions[#sessions + 1] = session_entry(api, s, unplaced)
   end
   return { sessions = sessions }
 end
