@@ -163,6 +163,19 @@ impl App {
             Some(Key::Host) => columns.resize(Col::Host, 0),
             _ => {}
         }
+        let widest = |text: &dyn Fn(&Row) -> String| {
+            self.rows
+                .iter()
+                .map(|row| text(row).width())
+                .max()
+                .unwrap_or_default()
+        };
+        // The longest label of each part, its gap, and room for a twin's ` #N` on the block.
+        columns.fit_parts([
+            widest(&|row| clean(&row.pane.session)) + 1,
+            widest(&|row| clean(&row.pane.tab)) + 1,
+            widest(&crate::output::name) + 4,
+        ]);
         if self.nerd {
             columns.marks = true;
             columns.resize(Col::Harness, columns.width(Col::Harness) + 2);

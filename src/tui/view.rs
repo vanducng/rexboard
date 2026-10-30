@@ -130,7 +130,7 @@ fn card_height(app: &App, now: DateTime<Utc>, body: Rect, headed: bool) -> u16 {
             let room = usize::from(rows.saturating_sub(FOOTER_GAP));
             super::card::lines(app, now, usize::from(body.width), room).len() as u16 + FOOTER_GAP
         };
-        let mut height = fixed_height(app, body).max(lines(most)).min(most);
+        let mut height = fixed_height(app, body, headed).max(lines(most)).min(most);
         // A digit picks only an option the card drew, so the card takes rows from the list,
         // all of them if it must, until every option shows.
         while height < body.height {
@@ -147,18 +147,32 @@ fn card_height(app: &App, now: DateTime<Utc>, body: Rect, headed: bool) -> u16 {
         let table = super::card::lines(app, now, usize::from(body.width), 0).len() as u16;
         return (table + FOOTER_GAP).min(most);
     }
-    fixed_height(app, body).min(most)
+    fixed_height(app, body, headed).min(most)
 }
 
-/// tui.json's `card_height`: its rows, or its percent of the body and at least 8; 40% by default.
-fn fixed_height(app: &App, body: Rect) -> u16 {
+/// tui.json's `card_height`: its rows, or its percent of the body and at least 8. By default 40%
+/// of the body, and more when the list is short: the card takes the rows the list leaves empty,
+/// so there is no blank band between them.
+fn fixed_height(app: &App, body: Rect, headed: bool) -> u16 {
     let percent = match app.card_height {
         Some(CardHeight::Rows(rows)) => return rows,
         Some(CardHeight::Percent(percent)) => percent,
         None => 40,
     };
     let rows = u32::from(body.height) * u32::from(percent) / 100;
-    u16::try_from(rows).unwrap_or(u16::MAX).max(8)
+    let rows = u16::try_from(rows).unwrap_or(u16::MAX).max(8);
+    if app.card_height.is_some() {
+        return rows;
+    }
+    let items = app.listed(false);
+    let groups = items
+        .iter()
+        .filter(|item| matches!(item, Item::Header { .. }))
+        .count();
+    // The list's rows and a blank one between it and the card.
+    let need = items.len() + groups.saturating_sub(1) + usize::from(headed) + 1;
+    let spare = usize::from(body.height).saturating_sub(need.max(1));
+    rows.max(u16::try_from(spare).unwrap_or(u16::MAX))
 }
 
 /// While a prefix waits for its second key, which-key style: `g… g top · t next view …`, cut to
