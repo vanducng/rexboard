@@ -57,6 +57,12 @@ fire("block_closed", { block_id = "gone" })
 blocks = { block("late", "placed"), block("now", "placed"), block("gone", "placed") }
 fire("session_view_changed", {})
 
-blocks = { block("boot", "placed") }
+blocks = { block("boot", "detached"), block("dup", "detached") }
+fire("session_created", { session = { session_id = "s" } })
+blocks = { block("boot", "detached"), block("dup", "placed") }
+fire("block_created", { block_id = "dup" })
+fire("session_view_changed", {})
+
+blocks = { block("boot", "placed"), block("dup", "placed") }
 fire("session_view_changed", {})
 fire("session_view_changed", {})

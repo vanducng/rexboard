@@ -59,6 +59,7 @@ rex.on("block_created", function(_, ev)
   for _, b in ipairs(terminal_blocks(ev.session_id)) do
     if b.block_id == ev.block_id then
       if b.placement == "placed" then
+        unplaced[ev.block_id] = nil
         announce(ev.session_id, b)
       else
         unplaced[ev.block_id] = ev.session_id
