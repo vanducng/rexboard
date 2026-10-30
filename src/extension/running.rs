@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use serde_json::{Value, json};
 
+use super::action::Offered;
 use super::contract::RowIn;
 use super::runner::{Report, Rows, RunState, Runner};
 use super::{Extension, discover, field_names, roots};
@@ -103,6 +104,37 @@ impl Running {
         self.runners
             .get(name)
             .map(|runner| runner.ext.manifest.provides.status)
+    }
+
+    /// The actions of the running extensions, in `enabled` order, for the board. An action whose
+    /// key an earlier one took is left out and said once.
+    pub fn actions(&mut self) -> Vec<Offered> {
+        let mut offered: Vec<Offered> = Vec::new();
+        let mut taken = Vec::new();
+        for name in &self.order {
+            let Some(runner) = self.runners.get(name) else {
+                continue;
+            };
+            for action in &runner.ext.manifest.actions {
+                if let Some(first) = offered.iter().find(|o| o.action.key == action.key) {
+                    taken.push(format!(
+                        "ext {name}: action {} is left out, its key {:?} is {}'s {}",
+                        action.name, action.key, first.extension, first.action.name
+                    ));
+                    continue;
+                }
+                offered.push(Offered {
+                    extension: name.clone(),
+                    dir: runner.ext.dir.clone(),
+                    settings: runner.settings.clone(),
+                    action: action.clone(),
+                });
+            }
+        }
+        for line in taken {
+            self.say(line);
+        }
+        offered
     }
 
     /// The declared fields of the running extensions, in `enabled` order and then each

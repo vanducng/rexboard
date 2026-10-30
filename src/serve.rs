@@ -665,7 +665,8 @@ impl Reducer {
             .collect()
     }
 
-    fn rows_line(&self) -> Value {
+    fn rows_line(&mut self) -> Value {
+        let actions = self.extensions.actions();
         let mut rows = self.board.rows(chrono::Utc::now());
         for row in &mut rows {
             row.usage = self.usage.get(&row.key).cloned();
@@ -677,6 +678,7 @@ impl Reducer {
             "host_errors": self.host_errors,
             "extensions": self.extensions.states,
             "fields": self.extensions.fields(),
+            "actions": actions,
         })
     }
 

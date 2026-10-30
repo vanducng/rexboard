@@ -41,6 +41,9 @@ pub struct Rows {
     /// How each enabled extension's last run went.
     #[serde(default)]
     pub extensions: BTreeMap<String, ExtRun>,
+    /// What the enabled extensions let a user start on a row.
+    #[serde(default)]
+    pub actions: Vec<crate::extension::action::Offered>,
     /// Why a host is down or stopped.
     #[serde(default)]
     pub host_errors: BTreeMap<String, String>,

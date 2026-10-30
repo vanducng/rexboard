@@ -184,6 +184,8 @@ fn prefix_keys(app: &App, prefix: char, width: usize) -> Line<'static> {
             .chain(fields.iter().copied())
             .filter_map(|c| Some((c.letter?.to_string(), c.header.to_lowercase())))
             .collect()
+    } else if prefix == 'x' {
+        app.action_pairs()
     } else {
         keys::after(keys::BOARD, keys::K(KeyCode::Char(prefix), false))
             .into_iter()
@@ -663,6 +665,9 @@ fn footer_overlay(app: &App, width: usize) -> Option<Line<'static>> {
         let text = format!("/ {}{}", app.filter.value(), theme::CURSOR);
         return Some(Line::styled(fit(&text, width), theme::strong()));
     }
+    if let Some(line) = app.action_footer(width) {
+        return Some(line);
+    }
     match app.pending {
         Some('f') => return Some(status_keys(app, width)),
         Some(prefix) => return Some(prefix_keys(app, prefix, width)),
@@ -1105,6 +1110,47 @@ mod tests {
         assert!(!last("gx", 140).contains("g…"), "another key drops it");
     }
 
+    /// `x` lists what applies to the row; an action's input line names its target and keeps the
+    /// end being typed in view; its confirm line is the red one and always ends with the key.
+    #[test]
+    fn an_action_shows_its_menu_its_input_and_its_confirm_in_the_footer() {
+        let last =
+            |app: &App, width: u16| render(app, width, 30).lines().last().unwrap().to_owned();
+        let mut app = with_actions();
+        press(&mut app, KeyCode::Char('x'));
+        assert_eq!(last(&app, 100), "x… s send message · esc cancels");
+        press(&mut app, KeyCode::Char('s'));
+        assert_eq!(
+            last(&app, 100),
+            "Send message api › main › seat-b on mini: ▏ · enter · esc"
+        );
+        typed(&mut app, "hello there, are you free");
+        assert_eq!(
+            last(&app, 100),
+            "Send message api › main › seat-b on mini: hello there, are you free▏ · enter · esc"
+        );
+        let narrow = last(&app, 50);
+        assert!(
+            narrow.width() <= 50 && narrow.contains("you free▏"),
+            "{narrow}"
+        );
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(
+            last(&app, 100),
+            "send to api-lead on mini: hello there, are you free · y runs"
+        );
+        let narrow = last(&app, 40);
+        assert!(
+            narrow.width() <= 40 && narrow.ends_with(" · y runs"),
+            "{narrow}"
+        );
+        press(&mut app, KeyCode::Char('n'));
+        assert_eq!(last(&app, 80), "Send message cancelled");
+        app.selected = Some(Spot::Row("local/seat-a".into()));
+        press(&mut app, KeyCode::Char('x'));
+        assert_eq!(last(&app, 80), "no action for this row");
+    }
+
     #[test]
     fn the_narrow_key_bar_keeps_the_essentials_and_question_mark_shows_all() {
         let mut app = fuller();
@@ -1114,8 +1160,8 @@ mod tests {
             assert!(bar.contains(want), "{bar}");
         }
         press(&mut app, KeyCode::Char('?'));
-        // One column of 29 keys under the shortest list.
-        let text = render(&app, 50, 37);
+        // One column of 30 keys under the shortest list.
+        let text = render(&app, 50, 38);
         for (key, _) in listed() {
             assert!(
                 text.lines().any(|l| l.trim_start().starts_with(key)),

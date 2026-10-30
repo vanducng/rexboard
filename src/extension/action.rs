@@ -7,6 +7,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -277,6 +278,34 @@ fn valid_text(text: &str, max: usize) -> Result<&str, String> {
     Ok(text)
 }
 
+/// The process groups of runs in flight, so the board can stop them when it exits.
+type Running = Mutex<Vec<i32>>;
+
+static RUNNING: Running = Mutex::new(Vec::new());
+
+fn held(running: &Running) -> std::sync::MutexGuard<'_, Vec<i32>> {
+    running
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Kills every run still going.
+pub fn stop_all() {
+    stop(&RUNNING);
+}
+
+fn stop(running: &Running) {
+    for pgid in held(running).drain(..) {
+        kill_group(pgid);
+    }
+}
+
+/// Runs `plan` in its directory, in its own process group, and returns the first line of what it
+/// printed. A failure says its exit, or that it timed out or could not start.
+pub fn run(plan: &Plan) -> Result<String, String> {
+    run_in(plan, &RUNNING)
+}
+
 /// The first line a pipe says, sent once it closes. The rest is read and dropped, so the action
 /// never blocks on a full pipe.
 fn first_line(mut pipe: impl Read + Send + 'static) -> std::sync::mpsc::Receiver<String> {
@@ -311,9 +340,7 @@ pub fn stop_on_signals() {
     }
 }
 
-/// Runs `plan` in its directory, in its own process group, and returns the first line of what it
-/// printed. A failure says its exit, or that it timed out or could not start.
-pub fn run(plan: &Plan) -> Result<String, String> {
+fn run_in(plan: &Plan, running: &Running) -> Result<String, String> {
     let mut cmd = Command::new(&plan.argv[0]);
     cmd.args(&plan.argv[1..])
         .current_dir(&plan.dir)
@@ -325,6 +352,7 @@ pub fn run(plan: &Plan) -> Result<String, String> {
     let mut child = crate::rex::spawn(&mut cmd)
         .map_err(|err| format!("could not run {}: {err}", plan.argv[0]))?;
     let pgid = child.id() as i32;
+    held(running).push(pgid);
     let out = first_line(child.stdout.take().expect("piped stdout"));
     let err = first_line(child.stderr.take().expect("piped stderr"));
     let deadline = Instant::now() + plan.timeout;
@@ -348,6 +376,7 @@ pub fn run(plan: &Plan) -> Result<String, String> {
         }
         thread::sleep(Duration::from_millis(10));
     };
+    held(running).retain(|p| *p != pgid);
     let status = outcome?;
     // What something that left the group still holds open is not waited for past the deadline.
     let wait = deadline.saturating_duration_since(Instant::now());
@@ -774,6 +803,34 @@ mod tests {
             Some(later.clone())
         );
         assert_eq!(program_on(&ext, "tool", &on(&[&later_dir])), Some(later));
+    }
+
+    #[test]
+    fn stopping_all_kills_a_run_in_flight_and_what_it_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let plan = plan(dir.path(), "sleep 60 &\necho $! > child\nwait", 30);
+        let running = std::sync::Arc::new(Running::default());
+        let theirs = running.clone();
+        let started = Instant::now();
+        let handle = thread::spawn(move || run_in(&plan, &theirs));
+        while !dir.path().join("child").exists() {
+            assert!(started.elapsed() < Duration::from_secs(5), "never started");
+            thread::sleep(Duration::from_millis(20));
+        }
+        stop(&running);
+        assert!(handle.join().unwrap().unwrap_err().contains("signal"));
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(held(&running).is_empty());
+        let child: i32 = std::fs::read_to_string(dir.path().join("child"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while unsafe { libc::kill(child, 0) } == 0 {
+            assert!(Instant::now() < deadline, "the action's child outlived it");
+            thread::sleep(Duration::from_millis(20));
+        }
     }
 
     #[test]
