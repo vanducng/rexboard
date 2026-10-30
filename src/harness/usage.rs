@@ -320,13 +320,16 @@ impl Procs {
         )
     }
 
-    /// The tmux client that is a child of `parent`: a pane runs one under OpenRig's
-    /// `sh -c ... tmux attach` wrapper, which is what Rex reports as the foreground process.
+    /// The tmux client that is the one tmux child of `parent`: a pane runs one under OpenRig's
+    /// `sh -c ... tmux attach` wrapper, which is what Rex reports as the foreground process. With
+    /// two, which one the pane shows is a guess, so there is none.
     pub fn tmux_child(&self, parent: u32) -> Option<u32> {
-        self.0
+        let mut found = self
+            .0
             .iter()
-            .find(|(_, ppid, comm)| *ppid == parent && comm.rsplit('/').next() == Some("tmux"))
-            .map(|(pid, ..)| *pid)
+            .filter(|(_, ppid, comm)| *ppid == parent && comm.rsplit('/').next() == Some("tmux"))
+            .map(|(pid, ..)| *pid);
+        found.next().filter(|_| found.next().is_none())
     }
 }
 
@@ -446,12 +449,20 @@ mod tests {
              320   100 /bin/sh\n  \
              321   320 /usr/bin/tail\n  \
              330   100 /Apps/My Tool/tmux\n  \
+             410   400 /bin/sh\n  \
+             411   410 /usr/local/bin/tmux\n  \
+             412   410 /usr/local/bin/tmux\n  \
              garbage\n",
         );
         assert_eq!(procs.tmux_child(310), Some(311), "tmux under its wrapper");
         assert_eq!(procs.tmux_child(320), None, "a wrapper of something else");
         assert_eq!(procs.tmux_child(311), None, "a client has no client");
         assert_eq!(procs.tmux_child(100), Some(330), "a path with a space");
+        assert_eq!(
+            procs.tmux_child(410),
+            None,
+            "two tmux children: which is shown is a guess"
+        );
         assert_eq!(Procs::default().tmux_child(1), None);
     }
 
