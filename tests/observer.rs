@@ -33,6 +33,7 @@ fn observer_announces_a_block_once_rex_places_it() {
             "block_created late",
             "block_created now",
             "block_closed gone",
+            "block_created boot",
         ]
     );
 }

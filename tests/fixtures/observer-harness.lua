@@ -2,7 +2,8 @@
 -- Usage: lua observer-harness.lua <src/lua dir>. Each line printed is "<type> <block id>".
 local dir = assert(arg[1], "usage: observer-harness.lua <src/lua dir>")
 
-local handlers, blocks = {}, {}
+local handlers = {}
+local blocks = { { block_id = "boot", creator_name = "com.superlogical.terminal", placement = "detached" } }
 rex = {
   json = {
     encode = function(line)
@@ -15,6 +16,8 @@ rex = {
   every = function() end,
   call = function(method)
     if method == "session.list_blocks" then return { blocks = blocks } end
+    if method == "session.list" then return { sessions = { { session_id = "s" } } } end
+    if method == "session.view" then return { windows = { { window_id = "w" } } } end
     return {}
   end,
 }
@@ -52,4 +55,8 @@ blocks = { block("late", "placed"), block("now", "placed"), block("gone", "detac
 fire("block_created", { block_id = "gone" })
 fire("block_closed", { block_id = "gone" })
 blocks = { block("late", "placed"), block("now", "placed"), block("gone", "placed") }
+fire("session_view_changed", {})
+
+blocks = { block("boot", "placed") }
+fire("session_view_changed", {})
 fire("session_view_changed", {})

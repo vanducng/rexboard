@@ -101,7 +101,7 @@ rex.on("active_window_changed", function(_, ev)
   emit({ type = "active_window", session_id = ev.session_id, window_id = ev.window_id })
 end)
 rex.on("session_created", function(_, ev)
-  if ev.session then emit({ type = "session_created", session = session_entry(rex, ev.session) }) end
+  if ev.session then emit({ type = "session_created", session = session_entry(rex, ev.session, unplaced) }) end
 end)
 rex.on("session_destroyed", function(_, ev)
   for id, session_id in pairs(unplaced) do
@@ -111,7 +111,7 @@ rex.on("session_destroyed", function(_, ev)
 end)
 rex.every(30, function() emit({ type = "tick" }) end)
 
-local snap = snapshot(rex)
+local snap = snapshot(rex, unplaced)
 local version = rex.call("server.version")
 snap.type, snap.rex_version = "snapshot", version and version.rex_version
 emit(snap)
