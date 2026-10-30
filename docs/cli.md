@@ -135,8 +135,9 @@ A missing value is `null`. `ids` is `[]` when empty.
 | `title` | `session_id`, `block_id`, `title` | The terminal title changed |
 | `process` | `session_id`, `block_id`, `name`, `argv0`, `cwd`, `pid` | The foreground process changed |
 | `child_exited` | `session_id`, `block_id`, `exit_code` | The pane's process exited |
-| `block_created` | `session_id`, `window_id`, `block` | A terminal pane opened. `block` has the same shape as a block in `snapshot` |
-| `block_closed` | `session_id`, `block_id` | A pane closed |
+| `block_created` | `session_id`, `window_id`, `block` | A terminal pane opened, or was placed in a window after it was created without one. `block` has the same shape as a block in `snapshot` |
+| `block_moved` | `session_id`, `block_id`, `window_id` | A pane moved to another window |
+| `block_closed` | `session_id`, `block_id` | A pane closed, or was detached from its window (it comes back as `block_created` once it is placed) |
 | `window_created` | `session_id`, `window_id`, `label` | A tab opened |
 | `window_closed` | `session_id`, `window_id` | A tab closed |
 | `label` | `kind`, `session_id`, `id`, `label` | A session or tab was renamed. `kind` is `session` or `window`; `id` is that session or window id |

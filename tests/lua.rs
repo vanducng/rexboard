@@ -9,7 +9,7 @@ fn lua() -> &'static str {
 }
 
 #[test]
-fn observer_announces_a_block_once_rex_places_it() {
+fn observer_announces_a_block_once_placed_and_follows_it_through_moves_and_detaches() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let out = Command::new(lua())
         .arg(root.join("tests/fixtures/observer-harness.lua"))
@@ -36,6 +36,12 @@ fn observer_announces_a_block_once_rex_places_it() {
             "session_created ",
             "block_created dup",
             "block_created boot",
+            "block_created mv",
+            "block_moved mv",
+            "block_moved mv",
+            "window_closed ",
+            "block_closed mv",
+            "block_created mv",
         ]
     );
 }

@@ -38,7 +38,8 @@ rex.on("block_event", function(_, ev)
   end
 end)
 
-local unplaced = {}
+-- Every terminal block the board has a row for, with the session and window it was announced in.
+local placed = {}
 
 local function terminal_blocks(session_id)
   local listed = rex.call("session.list_blocks", { session_id = session_id }) or {}
@@ -49,47 +50,42 @@ local function terminal_blocks(session_id)
   return out
 end
 
-local function announce(session_id, b)
-  emit({ type = "block_created", session_id = session_id, window_id = b.window_id,
-    block = block(rex, session_id, b) })
+-- Rex sends block_created before it places the block, and no event of its own when a block moves
+-- to another window or is detached; each changes the session view. So the session's blocks are
+-- compared with what was announced: a block newly placed is announced, one in another window is
+-- moved, and one no longer placed leaves the board and is announced again once it is placed.
+local function reconcile(session_id)
+  for _, b in ipairs(terminal_blocks(session_id)) do
+    local id, at = b.block_id, placed[b.block_id]
+    if b.placement ~= "placed" then
+      if at then
+        placed[id] = nil
+        emit({ type = "block_closed", session_id = session_id, block_id = id })
+      end
+    elseif not at then
+      placed[id] = { session = session_id, window = b.window_id }
+      emit({ type = "block_created", session_id = session_id, window_id = b.window_id,
+        block = block(rex, session_id, b) })
+    elseif at.window ~= b.window_id then
+      at.window = b.window_id
+      emit({ type = "block_moved", session_id = session_id, block_id = id, window_id = b.window_id })
+    end
+  end
 end
 
--- Rex can send block_created before it places the block; session_view_changed follows the placement.
-rex.on("block_created", function(_, ev)
-  for _, b in ipairs(terminal_blocks(ev.session_id)) do
-    if b.block_id == ev.block_id then
-      if b.placement == "placed" then
-        unplaced[ev.block_id] = nil
-        announce(ev.session_id, b)
-      else
-        unplaced[ev.block_id] = ev.session_id
-      end
-    end
-  end
-end)
-
-rex.on("session_view_changed", function(_, ev)
-  local waiting = false
-  for _, session_id in pairs(unplaced) do
-    waiting = waiting or session_id == ev.session_id
-  end
-  if not waiting then return end
-  for _, b in ipairs(terminal_blocks(ev.session_id)) do
-    if unplaced[b.block_id] and b.placement == "placed" then
-      unplaced[b.block_id] = nil
-      announce(ev.session_id, b)
-    end
-  end
-end)
+rex.on("block_created", function(_, ev) reconcile(ev.session_id) end)
+rex.on("session_view_changed", function(_, ev) reconcile(ev.session_id) end)
 
 rex.on("block_closed", function(_, ev)
-  unplaced[ev.block_id] = nil
+  placed[ev.block_id] = nil
   emit({ type = "block_closed", session_id = ev.session_id, block_id = ev.block_id })
 end)
 rex.on("window_created", function(_, ev)
   emit({ type = "window_created", session_id = ev.session_id, window_id = ev.window_id, label = ev.label })
 end)
 rex.on("window_closed", function(_, ev)
+  -- A block moved out of this window is announced first, or the board would drop it with the window.
+  reconcile(ev.session_id)
   emit({ type = "window_closed", session_id = ev.session_id, window_id = ev.window_id })
 end)
 rex.on("session_label_changed", function(_, ev)
@@ -102,17 +98,17 @@ rex.on("active_window_changed", function(_, ev)
   emit({ type = "active_window", session_id = ev.session_id, window_id = ev.window_id })
 end)
 rex.on("session_created", function(_, ev)
-  if ev.session then emit({ type = "session_created", session = session_entry(rex, ev.session, unplaced) }) end
+  if ev.session then emit({ type = "session_created", session = session_entry(rex, ev.session, placed) }) end
 end)
 rex.on("session_destroyed", function(_, ev)
-  for id, session_id in pairs(unplaced) do
-    if session_id == ev.session_id then unplaced[id] = nil end
+  for id, at in pairs(placed) do
+    if at.session == ev.session_id then placed[id] = nil end
   end
   emit({ type = "session_destroyed", session_id = ev.session_id })
 end)
 rex.every(30, function() emit({ type = "tick" }) end)
 
-local snap = snapshot(rex, unplaced)
+local snap = snapshot(rex, placed)
 local version = rex.call("server.version")
 snap.type, snap.rex_version = "snapshot", version and version.rex_version
 emit(snap)

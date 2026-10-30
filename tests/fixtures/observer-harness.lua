@@ -33,8 +33,8 @@ local function load_all(...)
 end
 load_all("lib.lua", "observer.lua")
 
-local function block(id, placement)
-  return { block_id = id, creator_name = "com.superlogical.terminal", placement = placement, window_id = "w" }
+local function block(id, placement, window)
+  return { block_id = id, creator_name = "com.superlogical.terminal", placement = placement, window_id = window or "w" }
 end
 local function fire(name, ev)
   ev.session_id = "s"
@@ -54,7 +54,7 @@ fire("block_created", { block_id = "now" })
 blocks = { block("late", "placed"), block("now", "placed"), block("gone", "detached") }
 fire("block_created", { block_id = "gone" })
 fire("block_closed", { block_id = "gone" })
-blocks = { block("late", "placed"), block("now", "placed"), block("gone", "placed") }
+blocks = { block("late", "placed"), block("now", "placed") }
 fire("session_view_changed", {})
 
 blocks = { block("dup", "detached") }
@@ -64,5 +64,28 @@ fire("block_created", { block_id = "dup" })
 fire("session_view_changed", {})
 
 blocks = { block("boot", "placed"), block("dup", "placed") }
+fire("session_view_changed", {})
+fire("session_view_changed", {})
+
+-- A block that moves to another window is moved, and before its old window closes, or the board
+-- would drop it with that window. One that is detached leaves, and is announced once when placed.
+local rest = { block("boot", "placed"), block("dup", "placed") }
+local function with(extra)
+  local out = {}
+  for i, b in ipairs(rest) do out[i] = b end
+  out[#out + 1] = extra
+  return out
+end
+blocks = with(block("mv", "placed"))
+fire("block_created", { block_id = "mv" })
+blocks = with(block("mv", "placed", "w2"))
+fire("session_view_changed", {})
+fire("session_view_changed", {})
+blocks = with(block("mv", "placed", "w3"))
+fire("window_closed", { window_id = "w2" })
+blocks = with(block("mv", "detached"))
+fire("session_view_changed", {})
+fire("session_view_changed", {})
+blocks = with(block("mv", "placed", "w1"))
 fire("session_view_changed", {})
 fire("session_view_changed", {})
