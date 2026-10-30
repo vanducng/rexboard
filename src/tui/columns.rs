@@ -594,10 +594,8 @@ impl Columns {
     /// way to it first, then the extension columns, last one first.
     pub fn fit(&mut self, board: u16, longest: &Longest, widths: &BTreeMap<String, u16>) {
         let set = |name: &str| widths.get(name).map(|w| usize::from(*w));
-        self.resize(
-            Col::Host,
-            set("host").unwrap_or((longest.host + 1).clamp(8, 16)),
-        );
+        let host = set("host").unwrap_or((longest.host + 1).clamp(8, 16));
+        self.resize(Col::Host, host);
         let parts = [Col::Session, Col::Window, Col::Block];
         if parts.iter().all(|id| self.has(*id)) {
             let total: usize = self.cols.iter().map(|(_, w)| *w).sum();
@@ -606,23 +604,21 @@ impl Columns {
             } else {
                 0
             };
-            let others = |s: &Self| {
-                s.cols
-                    .iter()
+            // What the parts may share: the list less every other column and MSG's floor. When
+            // that is under their least, the last extension column goes, and again.
+            let limit = loop {
+                let others: usize = (self.cols.iter())
                     .filter(|(c, _)| !parts.contains(&c.id) && c.id != Col::Msg)
                     .map(|(_, w)| *w)
-                    .sum::<usize>()
+                    .sum();
+                let limit = total.saturating_sub(others + floor);
+                let field = (self.cols.iter().rev()).find(|(c, _)| matches!(c.id, Col::Field(_)));
+                match field {
+                    Some((field, _)) if limit < PART_MIN * 3 => self.resize(field.id, 0),
+                    _ => break limit,
+                }
             };
-            while total.saturating_sub(others(self) + floor) < PART_MIN * 3 {
-                let Some(field) = self.cols.iter().rev().find_map(|(c, _)| match c.id {
-                    Col::Field(_) => Some(c.id),
-                    _ => None,
-                }) else {
-                    break;
-                };
-                self.resize(field, 0);
-            }
-            self.fit_parts(longest.parts, total.saturating_sub(others(self) + floor));
+            self.fit_parts(longest.parts, limit);
         }
         for (name, id) in [
             ("session", Col::Session),
@@ -633,16 +629,12 @@ impl Columns {
                 self.resize(id, width);
             }
         }
+        // MSG is what the others leave, so a fixed width can only be narrower.
         if let (Some(width), Some(msg)) = (
             set("msg"),
-            self.cols.iter().position(|(c, _)| c.id == Col::Msg),
+            (self.cols.iter()).position(|(c, _)| c.id == Col::Msg),
         ) {
-            let others: usize = (0..self.cols.len())
-                .filter(|&i| i != msg)
-                .map(|i| self.cols[i].1)
-                .sum();
-            let total = others + self.cols[msg].1;
-            self.cols[msg].1 = width.min(total.saturating_sub(others));
+            self.cols[msg].1 = self.cols[msg].1.min(width);
         }
     }
 
