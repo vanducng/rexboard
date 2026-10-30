@@ -2226,6 +2226,45 @@ mod extension_tests {
     }
 
     #[test]
+    fn host_is_planned_with_the_parts_and_fixed_parts_still_leave_msg_its_floor() {
+        let mut app = configured(0, 0, false);
+        app.widths = BTreeMap::from([
+            ("host".to_owned(), 180.into()),
+            ("session".to_owned(), 1.into()),
+            ("window".to_owned(), 1.into()),
+            ("block".to_owned(), 1.into()),
+            ("msg".to_owned(), 500.into()),
+        ]);
+        let columns = app.columns(250, 250);
+        assert_eq!(
+            [Col::Host, Col::Session, Col::Window, Col::Block].map(|c| columns.width(c)),
+            [180, 1, 1, 1],
+            "HOST grows once the parts have shrunk: {}",
+            header(&app, 250)
+        );
+        // Every part fixed, no `msg`: the extension columns still give way to the floor.
+        let mut fixed = wide_board();
+        let mut rows = fixed.rows.clone();
+        for row in &mut rows {
+            row.pane.msg = Some("long message ".repeat(30));
+        }
+        fixed.set_rows(rows, hosts());
+        fixed.widths = BTreeMap::from([
+            ("session".to_owned(), 90.into()),
+            ("window".to_owned(), 10.into()),
+            ("block".to_owned(), 10.into()),
+        ]);
+        let columns = fixed.columns(250, 250);
+        assert!(
+            columns.width(Col::Msg) >= 250 * 35 / 100,
+            "MSG is {}: {}",
+            columns.width(Col::Msg),
+            header(&fixed, 250)
+        );
+        assert!(!header(&fixed, 250).contains("ROLE"), "a field gave way");
+    }
+
+    #[test]
     fn short_messages_do_not_cost_a_label_its_cut() {
         let mut app = wide_board();
         let mut rows = app.rows.clone();

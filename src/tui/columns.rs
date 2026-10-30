@@ -639,10 +639,13 @@ impl Columns {
             None if board < FLOOR_FROM => 0,
             None => MSG_FLOOR.max(total * MSG_SHARE / 100).min(longest.msg + 1),
         };
-        self.apply(vec![(
-            Col::Host,
-            set("host").unwrap_or((longest.host + 1).clamp(8, 16)),
-        )]);
+        // Every column that is planned here, HOST and the location columns, gets its width in one
+        // pass; what is fixed counts at its planned width.
+        let mut wants = Vec::new();
+        if self.has(Col::Host) {
+            let host = set("host").unwrap_or((longest.host + 1).clamp(8, 16));
+            wants.push((Col::Host, host));
+        }
         // The location columns: SESSION, WINDOW and BLOCK once WHERE is split, else WHERE.
         let split = [Col::Session, Col::Window, Col::Block];
         let (group, need, each) = if split.iter().all(|id| self.has(*id)) {
@@ -650,7 +653,7 @@ impl Columns {
         } else {
             (vec![Col::Where], vec![self.width(Col::Where)], WHERE_MIN)
         };
-        let (mut wants, mut free, mut wanted) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut free, mut wanted) = (Vec::new(), Vec::new());
         for (i, id) in group.iter().enumerate() {
             let fixed = ["session", "window", "block"]
                 .get(i)
@@ -664,22 +667,23 @@ impl Columns {
             }
         }
         let fixed_sum: usize = wants.iter().map(|(_, w)| *w).sum();
-        // Room for the free location columns: the list less everything else and MSG's floor. Under
-        // their least, the last extension column goes, then the last usage column, and again.
+        // Room for the free location columns: the list less everything else and MSG's floor. Short
+        // of their least, even with none free, the last extension column goes, then the last usage
+        // column, and again.
         let rank = |id: Col| (!matches!(id, Col::Field(_)), !is_usage(id));
         let limit = loop {
             let others: usize = (self.cols.iter())
-                .filter(|(c, _)| !group.contains(&c.id) && c.id != Col::Msg)
+                .filter(|(c, _)| !group.contains(&c.id) && !matches!(c.id, Col::Host | Col::Msg))
                 .map(|(_, w)| *w)
                 .sum();
-            let limit = total.saturating_sub(others + fixed_sum + floor);
+            let spent = others + fixed_sum + floor;
             let gone = (self.cols.iter().rev())
                 .map(|(c, _)| c.id)
                 .min_by_key(|id| rank(*id))
                 .filter(|id| rank(*id) != (true, true));
             match gone {
-                Some(id) if limit < each * free.len() => self.resize(id, 0),
-                _ => break limit,
+                Some(id) if spent + each * free.len() > total => self.resize(id, 0),
+                _ => break total.saturating_sub(spent),
             }
         };
         let held: usize = free.iter().map(|id| self.width(*id)).sum();
