@@ -368,7 +368,8 @@ pub fn run(plan: &Plan) -> Result<String, String> {
 
 /// The file `first`, a `cmd`'s program, runs as, found the way exec finds it from `dir`: a path
 /// with a slash is taken from `dir` unless it is absolute, and a bare name is the first
-/// executable file of that name on PATH. None when there is none.
+/// executable file of that name on PATH, where a relative or empty entry is the extension's
+/// too. None when there is none.
 pub fn program(dir: &Path, first: &str) -> Option<PathBuf> {
     program_on(dir, first, &std::env::var_os("PATH").unwrap_or_default())
 }
@@ -377,7 +378,10 @@ fn program_on(dir: &Path, first: &str, path: &std::ffi::OsStr) -> Option<PathBuf
     let candidates: Vec<PathBuf> = if first.contains('/') {
         vec![dir.join(first.strip_prefix("./").unwrap_or(first))]
     } else {
-        std::env::split_paths(path).map(|d| d.join(first)).collect()
+        // The run starts in `dir`, so a relative or empty entry is under it, not the caller's.
+        std::env::split_paths(path)
+            .map(|entry| dir.join(entry).join(first))
+            .collect()
     };
     candidates.into_iter().find(|p| is_executable(p))
 }
@@ -728,6 +732,48 @@ mod tests {
             None
         );
         assert!(plain.exists());
+    }
+
+    #[test]
+    fn a_relative_or_empty_path_entry_is_under_the_extension_not_the_caller() {
+        let root = tempfile::tempdir().unwrap();
+        let make = |rel: &str| {
+            let path = root.path().join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        };
+        let ext = root.path().join("ext");
+        let (inside, tool_here, later) =
+            (make("ext/bin/tool"), make("ext/tool"), make("later/tool"));
+        let later_dir = root.path().join("later");
+        let on = |entries: &[&std::path::Path]| std::env::join_paths(entries).unwrap();
+        // The caller's directory is the crate's, which has none of these: only `ext` decides.
+        // A relative entry beats a later absolute one that also has the tool.
+        assert_eq!(
+            program_on(&ext, "tool", &on(&[Path::new("bin"), &later_dir])),
+            Some(inside.clone())
+        );
+        assert_eq!(
+            program_on(&ext, "tool", &on(&[Path::new("bin")])),
+            Some(inside)
+        );
+        // An empty entry is the extension's directory.
+        assert_eq!(
+            program_on(&ext, "tool", &on(&[Path::new(""), &later_dir])),
+            Some(ext.join("tool"))
+        );
+        assert_eq!(
+            program_on(&ext, "tool", &std::ffi::OsString::new()),
+            Some(tool_here)
+        );
+        // An absolute entry stays as it is, and a relative one without the tool is skipped.
+        assert_eq!(
+            program_on(&ext, "tool", &on(&[Path::new("nowhere"), &later_dir])),
+            Some(later.clone())
+        );
+        assert_eq!(program_on(&ext, "tool", &on(&[&later_dir])), Some(later));
     }
 
     #[test]
