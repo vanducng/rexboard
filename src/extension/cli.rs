@@ -284,12 +284,14 @@ fn action_problems(ext: &super::Extension, rows: &[Row], parsed: &Parsed) -> Vec
     let mut problems = Vec::new();
     for action in &ext.manifest.actions {
         let at = |why: String| format!("action {}: {why}", action.name);
-        let program = super::action::program(&ext.dir, action);
-        if !is_executable(&program) {
-            problems.push(at(format!(
-                "{} is not an executable file",
-                program.display()
-            )));
+        let first = &action.cmd[0];
+        if super::action::program(&ext.dir, first).is_none() {
+            let place = if first.contains('/') {
+                ext.dir.join(first).display().to_string()
+            } else {
+                format!("{first} on PATH")
+            };
+            problems.push(at(format!("{place} is not an executable file")));
         }
         let offered = super::action::Offered {
             extension: ext.name().to_owned(),
@@ -312,7 +314,7 @@ fn action_problems(ext: &super::Extension, rows: &[Row], parsed: &Parsed) -> Vec
         });
         match sample {
             Some(row) => {
-                if let Err(why) = offered.plan(&row, "sample") {
+                if let Err(why) = offered.plan(&row, "x") {
                     problems.push(at(format!("on {}: {why}", row.key)));
                 }
             }
@@ -324,11 +326,6 @@ fn action_problems(ext: &super::Extension, rows: &[Row], parsed: &Parsed) -> Vec
         }
     }
     problems
-}
-
-fn is_executable(path: &Path) -> bool {
-    path.metadata()
-        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 
 /// What `ext run` was asked.

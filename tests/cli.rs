@@ -3888,3 +3888,60 @@ fn ext_test_says_when_no_row_has_what_an_action_needs_and_still_passes() {
             .contains("note: no row has session to check action send against")
     );
 }
+
+#[test]
+fn an_action_with_the_smallest_cap_passes_ext_test_and_runs() {
+    let serve = Serve::new();
+    let (ran, rows) = acting_with(
+        &serve,
+        "",
+        "max = 1\n",
+        "when = [\"session\"]\n",
+        &answers(SEAT_ANSWER),
+    );
+    let out = ext_test_acts(&serve, &rows, false);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    ext_run(&serve, &rows, &["--text", "y", "--yes"]).success();
+    assert!(ran.exists());
+    ext_run(&serve, &rows, &["--text", "yy", "--yes"])
+        .code(1)
+        .stderr(predicate::str::contains(
+            "the text is 2 bytes; the most is 1",
+        ));
+}
+
+#[test]
+fn a_program_path_is_the_extensions_not_the_callers_in_ext_test_and_ext_run() {
+    let serve = Serve::new();
+    let (ran, rows) = acting_with(
+        &serve,
+        "",
+        "",
+        "when = [\"session\"]\n",
+        &answers(SEAT_ANSWER),
+    );
+    let dir = ran.parent().unwrap();
+    std::fs::create_dir(dir.join("bin")).unwrap();
+    std::fs::rename(dir.join("send"), dir.join("bin/send")).unwrap();
+    let manifest = std::fs::read_to_string(dir.join("extension.toml")).unwrap();
+    std::fs::write(
+        dir.join("extension.toml"),
+        manifest.replace("\"./send\"", "\"bin/send\""),
+    )
+    .unwrap();
+    let out = ext_test_acts(&serve, &rows, false);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    ext_run(&serve, &rows, &["--text", "hi", "--yes"]).success();
+    assert!(
+        ran.exists(),
+        "ext run started bin/send from the extension's directory"
+    );
+}

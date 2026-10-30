@@ -3,6 +3,7 @@
 
 use std::collections::BTreeSet;
 use std::io::Read;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -233,7 +234,10 @@ impl Offered {
             .iter()
             .map(|t| expand(t))
             .collect::<Result<Vec<_>, _>>()?;
-        if let Some(rest) = argv[0].strip_prefix("./") {
+        if let Some(found) = program(&self.dir, &argv[0]) {
+            argv[0] = found.display().to_string();
+        } else if argv[0].contains('/') {
+            let rest = argv[0].strip_prefix("./").unwrap_or(&argv[0]);
             argv[0] = self.dir.join(rest).display().to_string();
         }
         let confirm = if action.confirm.is_empty() {
@@ -362,20 +366,25 @@ pub fn run(plan: &Plan) -> Result<String, String> {
     })
 }
 
-/// The program an action's `cmd` starts: a leading `./` is the extension's directory, a bare name
-/// is looked up on PATH.
-pub fn program(dir: &Path, action: &Action) -> PathBuf {
-    let first = &action.cmd[0];
-    if let Some(rest) = first.strip_prefix("./") {
-        return dir.join(rest);
-    }
-    if first.contains('/') {
-        return PathBuf::from(first);
-    }
-    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
-        .map(|d| d.join(first))
-        .find(|p| p.is_file())
-        .unwrap_or_else(|| PathBuf::from(first))
+/// The file `first`, a `cmd`'s program, runs as, found the way exec finds it from `dir`: a path
+/// with a slash is taken from `dir` unless it is absolute, and a bare name is the first
+/// executable file of that name on PATH. None when there is none.
+pub fn program(dir: &Path, first: &str) -> Option<PathBuf> {
+    program_on(dir, first, &std::env::var_os("PATH").unwrap_or_default())
+}
+
+fn program_on(dir: &Path, first: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
+    let candidates: Vec<PathBuf> = if first.contains('/') {
+        vec![dir.join(first.strip_prefix("./").unwrap_or(first))]
+    } else {
+        std::env::split_paths(path).map(|d| d.join(first)).collect()
+    };
+    candidates.into_iter().find(|p| is_executable(p))
+}
+
+fn is_executable(path: &Path) -> bool {
+    path.metadata()
+        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 
 #[cfg(test)]
@@ -670,6 +679,55 @@ mod tests {
             thread::sleep(Duration::from_millis(20));
         }
         assert!(gone, "the sleep the action started outlived it");
+    }
+
+    #[test]
+    fn the_program_is_found_as_exec_finds_it_from_the_extension_directory() {
+        use std::ffi::OsString;
+        let root = tempfile::tempdir().unwrap();
+        let make = |rel: &str, mode: u32| {
+            let path = root.path().join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+            path
+        };
+        let ext = root.path().join("ext");
+        let (first, second, plain) = (
+            make("a/tool", 0o755),
+            make("b/tool", 0o755),
+            make("c/tool", 0o644),
+        );
+        let relative = make("ext/bin/send", 0o755);
+        // A path with a slash is the extension's, whatever the caller's directory is.
+        assert_eq!(
+            program_on(&ext, "bin/send", &OsString::new()),
+            Some(relative.clone())
+        );
+        assert_eq!(
+            program_on(&ext, "./bin/send", &OsString::new()),
+            Some(ext.join("bin/send"))
+        );
+        assert_eq!(
+            program_on(&ext, relative.to_str().unwrap(), &OsString::new()),
+            Some(relative)
+        );
+        assert_eq!(program_on(&ext, "bin/none", &OsString::new()), None);
+        // A bare name is the first executable on PATH: a plain file earlier is skipped.
+        let path = std::env::join_paths([
+            root.path().join("c"),
+            root.path().join("b"),
+            root.path().join("a"),
+        ])
+        .unwrap();
+        assert_eq!(program_on(&ext, "tool", &path), Some(second));
+        let path = std::env::join_paths([root.path().join("a"), root.path().join("b")]).unwrap();
+        assert_eq!(program_on(&ext, "tool", &path), Some(first));
+        assert_eq!(
+            program_on(&ext, "tool", &root.path().join("c").into_os_string()),
+            None
+        );
+        assert!(plain.exists());
     }
 
     #[test]
