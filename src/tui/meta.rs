@@ -8,14 +8,19 @@ use super::app::App;
 use super::columns::{Col, Columns, Tier, opted};
 use super::icons;
 use super::theme;
+use super::views::Key;
 use crate::board::Row;
 use crate::client::Field;
-use crate::output::{SEP, clean, context, dollars, fit, labels, path, span, squeeze};
+use crate::output::{
+    SEP, blocks, clean, context, dollars, fit, harness, labels, path, span, squeeze, wheres,
+};
 use crate::pane::bare_title;
 
 /// A fact the card states. Its label is one token: a word, or with `"icons": "nerd"` a glyph.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Fact {
+    Host,
+    Harness,
     Turn,
     Model,
     Ctx,
@@ -30,6 +35,13 @@ impl Fact {
     pub fn label(self, row: &Row, nerd: bool) -> &'static str {
         if nerd {
             return match self {
+                Fact::Host => icons::HOST.glyph,
+                Fact::Harness => row
+                    .pane
+                    .harness
+                    .as_deref()
+                    .and_then(crate::harness::mark)
+                    .map_or("harness", |i| i.glyph),
                 Fact::Turn => icons::TURN.glyph,
                 Fact::Model => icons::MODEL.glyph,
                 Fact::Ctx => icons::CTX.glyph,
@@ -42,6 +54,8 @@ impl Fact {
             };
         }
         match self {
+            Fact::Host => "host",
+            Fact::Harness => "harness",
             Fact::Turn => "turn",
             Fact::Model => "model",
             Fact::Ctx => "ctx",
@@ -67,13 +81,17 @@ const GLYPH_TRACKS: [usize; 2] = [47, 73];
 /// visible column are left out.
 pub fn lines(app: &App, row: &Row, width: usize, board: usize) -> Vec<Line<'static>> {
     let columns = app.columns(u16::try_from(board).unwrap_or(u16::MAX), board);
+    // A column is on screen when the list draws it whole, not when it only sits in `columns`.
+    let drawn = |id| columns.drawn(id, board);
     let title = bare_title(&row.pane.title);
     let usage = row.usage.as_ref();
     let fact = |fact: Fact, value: String| (fact.label(row, app.nerd).to_owned(), value);
     let opt = |col| opted(&app.columns, col);
     let runs: Vec<_> = [
+        (!drawn(Col::Host)).then(|| fact(Fact::Host, clean(&row.pane.host))),
+        (!drawn(Col::Harness)).then(|| fact(Fact::Harness, harness(row))),
         row.last_turn
-            .filter(|_| !columns.has(Col::Turn))
+            .filter(|_| !drawn(Col::Turn))
             .map(|s| fact(Fact::Turn, span(s))),
         usage
             .and_then(|u| u.model.clone())
@@ -91,15 +109,14 @@ pub fn lines(app: &App, row: &Row, width: usize, board: usize) -> Vec<Line<'stat
     .into_iter()
     .flatten()
     .collect();
-    // An extension's field is a fact named after it, unless its column shows it.
+    // An extension's field is a fact named after it, unless its column is on screen.
     let fields: Vec<(String, String)> = app
         .fields
         .iter()
         .filter(|(f, _)| {
-            !columns
-                .cols
-                .iter()
-                .any(|(c, _)| matches!(c.id, Col::Field(id) if id == f.id))
+            !columns.cols.iter().any(|(c, _)| {
+                matches!(c.id, Col::Field(id) if id == f.id) && columns.drawn(c.id, board)
+            })
         })
         .filter_map(|(f, _)| Some((field_label(f, app.nerd), clean(row.ext.get(&f.id)?))))
         .collect();
@@ -111,7 +128,13 @@ pub fn lines(app: &App, row: &Row, width: usize, board: usize) -> Vec<Line<'stat
     .into_iter()
     .flatten()
     .collect();
-    let groups = [runs, fields, names];
+    // A value that cleans to nothing is no fact: its label would stand over a blank.
+    let groups = [runs, fields, names].map(|group: Vec<(String, String)>| {
+        group
+            .into_iter()
+            .filter(|(_, value)| !value.trim().is_empty())
+            .collect::<Vec<_>>()
+    });
     // Glyph labels are one cell; a word among them, as an extension field with no mark, keeps the
     // words' label cell for the whole card.
     let glyphs = app.nerd && groups.iter().flatten().all(|(l, _)| l.width() == 1);
@@ -123,7 +146,7 @@ pub fn lines(app: &App, row: &Row, width: usize, board: usize) -> Vec<Line<'stat
     let across = 1 + thresholds.iter().filter(|t| width >= **t).count();
     let room = width.saturating_sub(1);
     let mut lines = Vec::new();
-    if !list_shows_place(&columns, row) {
+    if !list_shows_place(app, &columns, row, board) {
         let long = room.saturating_sub(label + 1);
         let place_label = Fact::Where.label(row, app.nerd);
         let mut spans = vec![Span::raw(" ")];
@@ -143,12 +166,10 @@ pub fn lines(app: &App, row: &Row, width: usize, board: usize) -> Vec<Line<'stat
                 if i > 0 {
                     spans.push(Span::raw(" ".repeat(GAP)));
                 }
-                // Alone on its row, a value may run to the edge.
-                let shown = if across == 1 {
-                    room.saturating_sub(label + 1)
-                } else {
-                    VALUE
-                };
+                // A value is cut at its track, and at the row's edge when the track would pass it;
+                // alone on its row it may run to the edge.
+                let left = room.saturating_sub(i * (label + 1 + VALUE + GAP) + label + 1);
+                let shown = if across == 1 { left } else { VALUE.min(left) };
                 spans.extend(cell(l, v, label, shown, i + 1 == chunk.len()));
             }
             lines.push(Line::from(spans));
@@ -166,18 +187,29 @@ fn field_label(field: &Field, nerd: bool) -> String {
 }
 
 /// Whether the list row already says where the pane is: its SESSION, WINDOW and BLOCK, or WHERE
-/// with all three labels, and none of them cut.
-fn list_shows_place(columns: &Columns, row: &Row) -> bool {
-    let fits = |id: Col, text: &str| columns.has(id) && clean(text).width() < columns.width(id);
-    if columns.has(Col::Session) {
-        return fits(Col::Session, &row.pane.session)
-            && fits(Col::Window, &row.pane.tab)
-            && fits(Col::Block, &crate::output::name(row));
-    }
+/// with all three labels, drawn whole as the list draws them, twin suffixes and cuts included.
+fn list_shows_place(app: &App, columns: &Columns, row: &Row, board: usize) -> bool {
+    let Some(at) = app.rows.iter().position(|r| r.key == row.key) else {
+        return false;
+    };
+    let drawn = |id| columns.drawn(id, board);
+    let room = |id| columns.width(id).saturating_sub(1);
     let whole = labels(row, false);
+    if drawn(Col::Session) && drawn(Col::Window) && drawn(Col::Block) {
+        let block = blocks(
+            &app.rows,
+            room(Col::Session),
+            room(Col::Window),
+            room(Col::Block),
+        );
+        return squeeze(&clean(&row.pane.session), room(Col::Session)) == clean(&row.pane.session)
+            && squeeze(&clean(&row.pane.tab), room(Col::Window)) == clean(&row.pane.tab)
+            && block[at] == clean(&crate::output::name(row));
+    }
+    let host = columns.has(Col::Host) || app.view.group_by == Some(Key::Host);
     columns.tier == Tier::Wide
-        && columns.has(Col::Where)
-        && path(&whole, columns.width(Col::Where).saturating_sub(1))
+        && drawn(Col::Where)
+        && wheres(&app.rows, room(Col::Where), false, host)[at]
             == whole.iter().map(|l| clean(l)).collect::<Vec<_>>().join(SEP)
 }
 

@@ -35,7 +35,7 @@ description = "A row's project: its session label up to the first separator"
 cmd = ["./adapter"]      # argv, no shell; a leading ./ is the extension's directory
 every = 10               # seconds between runs, at least 2
 timeout = 5              # seconds, at least 1 and less than every; a slower run is killed
-icon = "\uF487"          # one character, one cell wide: the extension's mark (the card draws the fields' own)
+icon = "\uF487"          # one character, one cell wide: the extension's mark. Not drawn on the card, which has no extension row; `ext ls --json` lists it
 [[fields]]
 name = "project"         # [a-z0-9-]+, stored on a row as session-prefix.project
 title = "PROJECT"        # the column's header; keep it the name in capitals, so it says what to type

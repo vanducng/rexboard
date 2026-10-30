@@ -1063,14 +1063,31 @@ mod tests {
                 .join("\n")
         };
         let app = grid_app();
-        // Host and harness never, at any width.
-        for width in [36u16, 80, 140, 200] {
+        // Host and harness while their columns are not on screen: below 60 columns, or hidden.
+        for width in [36u16, 59] {
+            let text = words(&app, width);
+            assert!(
+                text.contains("host local") && text.contains("harness claude"),
+                "{width}:\n{text}"
+            );
+        }
+        for width in [80u16, 140, 200] {
             let text = words(&app, width);
             assert!(
                 !text.contains("host") && !text.contains("harness"),
                 "{width}:\n{text}"
             );
         }
+        let mut by_host = grid_app();
+        by_host.view = crate::tui::views::views()
+            .into_iter()
+            .find(|v| v.name == "host")
+            .unwrap();
+        let text = words(&by_host, 140);
+        assert!(
+            text.contains("host local") && !text.contains("harness"),
+            "its column is hidden, so the fact is back:\n{text}"
+        );
         // The turn has a column from 140; where from 100, with every label whole.
         assert!(words(&app, 120).contains("turn 6m") && !words(&app, 140).contains("turn"));
         assert!(words(&app, 80).contains("where api › main › seat-a"));
@@ -1152,6 +1169,93 @@ mod tests {
                 .any(|l| l == " model   claude-sonnet-4-5-20251001-extended"),
             "{narrow:#?}"
         );
+    }
+
+    #[test]
+    fn a_column_the_list_carries_past_its_edge_is_not_on_screen_and_its_fact_stays() {
+        use crate::client::Field;
+        let mut app = grid_app();
+        let fields: Vec<Field> = (0..30)
+            .map(|i| Field {
+                id: format!("fake.f{i}"),
+                name: format!("f{i}"),
+                title: format!("F{i}"),
+                ..Field::default()
+            })
+            .collect();
+        let mut rows = app.rows.clone();
+        for i in 0..30 {
+            rows[0].ext.insert(format!("fake.f{i}"), format!("v{i}"));
+        }
+        app.set_extensions(fields, std::collections::BTreeMap::new());
+        app.set_rows(rows, hosts());
+        let columns = app.columns(200, 200);
+        let off: Vec<&str> = columns
+            .cols
+            .iter()
+            .filter_map(|(c, _)| match c.id {
+                crate::tui::columns::Col::Field(id) if !columns.drawn(c.id, 200) => {
+                    id.strip_prefix("fake.")
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(!off.is_empty(), "the board carries fields past the edge");
+        let text = facts_at(&app, 200).join("\n");
+        for name in off {
+            assert!(
+                text.contains(&format!("{name} ")),
+                "{name} is on the card:\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn where_stays_when_a_twin_suffix_cuts_the_block() {
+        let mut app = grid_app();
+        let mut rows = app.rows.clone();
+        let mut twin = rows[0].clone();
+        twin.key = "local/seat-a2".into();
+        twin.pane.block_id = "seat-a2".into();
+        twin.pane.window_id = "window:other".into();
+        rows.push(twin);
+        app.set_rows(rows, hosts());
+        app.selected = Some(Spot::Row("local/seat-a".into()));
+        app.widths = std::collections::BTreeMap::from([("block".to_owned(), 9.into())]);
+        let text = facts_at(&app, 200).join("\n");
+        assert!(
+            text.contains("where   api › main › seat-a"),
+            "the list shows `se…-a #1`:\n{text}"
+        );
+    }
+
+    #[test]
+    fn the_last_value_on_a_row_is_cut_with_a_mark_where_the_row_ends() {
+        for (nerd, width) in [(false, 59u16), (true, 47)] {
+            let mut app = grid_app();
+            app.nerd = nerd;
+            let mut rows = app.rows.clone();
+            rows[0].usage.as_mut().unwrap().model = Some("abcdefghijklmnopqrst".into());
+            app.set_rows(rows, hosts());
+            let card = card_of(&render(&app, width, 40));
+            let line = card.iter().find(|l| l.contains("abcdefghij")).unwrap();
+            assert!(
+                line.ends_with('…') && line.chars().count() <= usize::from(width),
+                "{nerd} {width}: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_value_is_no_fact() {
+        let mut app = grid_app();
+        let mut rows = app.rows.clone();
+        rows[0].usage.as_mut().unwrap().model = Some(String::new());
+        rows[0].ext.insert("fake.rig".into(), "  ".into());
+        app.set_rows(rows, hosts());
+        let text = facts_at(&app, 80).join("\n");
+        assert!(!text.contains("model") && !text.contains(" rig "), "{text}");
+        assert!(text.contains("project api"), "the group closes up: {text}");
     }
 
     #[test]

@@ -14,6 +14,7 @@ pub const fn icon(name: &'static str, glyph: &'static str) -> Icon {
     Icon { name, glyph }
 }
 
+pub const HOST: Icon = icon("cod-server", "\u{eb50}");
 pub const TURN: Icon = icon("fa-hourglass_half", "\u{f252}");
 pub const TITLE: Icon = icon("cod-note", "\u{eb26}");
 pub const SESSION: Icon = icon("cod-layers", "\u{ebd2}");
@@ -42,7 +43,8 @@ pub fn source(source: &str) -> Option<Icon> {
 #[cfg(test)]
 pub fn all() -> Vec<Icon> {
     let own = [
-        TURN, TITLE, SESSION, WINDOW, BLOCK, MODEL, CTX, COST, QUOTA, NATIVE, BRIDGE, INFERRED,
+        HOST, TURN, TITLE, SESSION, WINDOW, BLOCK, MODEL, CTX, COST, QUOTA, NATIVE, BRIDGE,
+        INFERRED,
     ];
     let marks = crate::harness::BUILTIN.iter().filter_map(|h| h.mark());
     own.into_iter().chain(marks).collect()

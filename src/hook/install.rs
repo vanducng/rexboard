@@ -128,9 +128,9 @@ fn icons_line() -> String {
         return format!("{:<7}nerd marks on", "icons");
     }
     format!(
-        "{:<7}off (words). Nerd Font? printf '|\\356\\257\\222|\\n' should show one glyph between \
-         the bars; then set \"icons\": \"nerd\" in tui.json",
-        "icons"
+        "{:<7}off (words). Nerd Font? This should show one glyph between the bars:\n\
+         {:<7}printf '|\\356\\257\\222|\\n'   then set \"icons\": \"nerd\" in tui.json",
+        "icons", ""
     )
 }
 

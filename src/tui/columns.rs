@@ -711,6 +711,19 @@ impl Columns {
         }
     }
 
+    /// Whether the list draws column `id` whole in `board` columns, as opposed to carrying it in
+    /// `cols` past the right edge.
+    pub fn drawn(&self, id: Col, board: usize) -> bool {
+        let mut start = 0;
+        for (c, width) in &self.cols {
+            start += width;
+            if c.id == id {
+                return start <= board;
+            }
+        }
+        false
+    }
+
     pub fn width(&self, id: Col) -> usize {
         self.cols
             .iter()

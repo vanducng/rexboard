@@ -528,8 +528,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/NONE} {Reset/Reset/BOLD}seat-b msg{Reset/Reset/NONE}                                                                                                                                 
 {Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE} {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                                             
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title           {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                              
-{Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
@@ -569,8 +569,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/NONE} {Reset/Reset/BOLD}seat-b msg{Reset/Reset/NONE}                                                                                                                                 
 {Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE} {Reset/Reset/DIM} {Reset/Reset/NONE}claude                                                                                                                                   
 {Reset/Reset/NONE} {Reset/Reset/DIM} {Reset/Reset/NONE}seat-b title           {Reset/Reset/DIM} {Reset/Reset/NONE}native                                                                                                          
-{Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
@@ -610,8 +610,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/NONE} {Reset/Reset/BOLD}seat-b msg{Reset/Reset/NONE}                                                                                                                                                                                             
 {Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE} {Reset/Reset/DIM}harness {Reset/Reset/NONE}claude                                                                                                                                                                                         
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title           {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                                                                                          
-{Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        
@@ -651,8 +651,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/NONE} {Reset/Reset/BOLD}seat-b msg{Reset/Reset/NONE}                                                                                                                                                                                             
 {Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE} {Reset/Reset/DIM} {Reset/Reset/NONE}claude                                                                                                                                                                                               
 {Reset/Reset/NONE} {Reset/Reset/DIM} {Reset/Reset/NONE}seat-b title           {Reset/Reset/DIM} {Reset/Reset/NONE}native                                                                                                                                                                      
-{Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        
@@ -686,8 +686,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/NONE} {Reset/Reset/BOLD}seat-b msg{Reset/Reset/NONE}                                                                                                                                 
 {Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini                                                                                                                               
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title           {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                              
-{Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
@@ -727,8 +727,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/NONE} {Reset/Reset/BOLD}seat-b msg{Reset/Reset/NONE}                                                                                                                                 
 {Reset/Reset/NONE}                                                                                                                                            
+{Reset/Reset/NONE} {Reset/Reset/DIM} {Reset/Reset/NONE}mini                                                                                                                                     
 {Reset/Reset/NONE} {Reset/Reset/DIM} {Reset/Reset/NONE}seat-b title           {Reset/Reset/DIM} {Reset/Reset/NONE}native                                                                                                          
-{Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
@@ -768,8 +768,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/NONE} {Reset/Reset/BOLD}seat-b msg{Reset/Reset/NONE}                                                                                                                                                                                             
 {Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE} {Reset/Reset/DIM}host    {Reset/Reset/NONE}mini                                                                                                                                                                                           
 {Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title           {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                                                                                          
-{Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        
@@ -809,8 +809,8 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/NONE} {Reset/Reset/BOLD}seat-b msg{Reset/Reset/NONE}                                                                                                                                                                                             
 {Reset/Reset/NONE}                                                                                                                                                                                                        
+{Reset/Reset/NONE} {Reset/Reset/DIM} {Reset/Reset/NONE}mini                                                                                                                                                                                                 
 {Reset/Reset/NONE} {Reset/Reset/DIM} {Reset/Reset/NONE}seat-b title           {Reset/Reset/DIM} {Reset/Reset/NONE}native                                                                                                                                                                      
-{Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        
 {Reset/Reset/NONE}                                                                                                                                                                                                        

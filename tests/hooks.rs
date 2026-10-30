@@ -960,18 +960,23 @@ fn status_says_the_icons_are_off_with_the_font_check_and_how_to_turn_them_on() {
         String::from_utf8(out.stdout).unwrap()
     };
     let off = say(&[("REXBOARD_ICONS", "text")]);
-    let line = off.lines().find(|l| l.starts_with("icons")).expect(&off);
+    let lines: Vec<&str> = off.lines().collect();
+    let at = lines
+        .iter()
+        .position(|l| l.starts_with("icons"))
+        .expect(&off);
+    let (first, second) = (lines[at], lines[at + 1]);
+    assert!(first.contains("off (words)"), "{first}");
     assert!(
-        line.contains("off (words)")
-            && line.contains("printf '|\\356\\257\\222|\\n'")
-            && line.contains("\"icons\": \"nerd\" in tui.json"),
-        "{line}"
+        second.starts_with("       printf '|\\356\\257\\222|\\n'")
+            && second.contains("\"icons\": \"nerd\" in tui.json"),
+        "the check sits under the label: {second}"
     );
-    assert_eq!(
-        off.lines().filter(|l| l.starts_with("icons")).count(),
-        1,
-        "one line"
+    assert!(
+        first.chars().count() <= 80 && second.chars().count() <= 80,
+        "neither wraps at 80: {first} / {second}"
     );
+    assert_eq!(off.lines().filter(|l| l.starts_with("icons")).count(), 1);
     let on = say(&[("REXBOARD_ICONS", "nerd")]);
     assert!(on.lines().any(|l| l == "icons  nerd marks on"), "{on}");
     let json = rexboard(home.path())
