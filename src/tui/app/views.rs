@@ -163,6 +163,10 @@ impl App {
             Some(Key::Host) => columns.resize(Col::Host, 0),
             _ => {}
         }
+        if self.nerd {
+            columns.marks = true;
+            columns.resize(Col::Harness, columns.width(Col::Harness) + 2);
+        }
         let widest = |text: &dyn Fn(&Row) -> String| {
             self.rows
                 .iter()
@@ -170,16 +174,20 @@ impl App {
                 .max()
                 .unwrap_or_default()
         };
-        // The longest label of each part, and room for a twin's ` #N` on the block.
-        columns.fit_parts([
-            widest(&|row| clean(&row.pane.session)),
-            widest(&|row| clean(&row.pane.tab)),
-            widest(&crate::output::name) + 3,
-        ]);
-        if self.nerd {
-            columns.marks = true;
-            columns.resize(Col::Harness, columns.width(Col::Harness) + 2);
-        }
+        columns.fit(
+            board,
+            &Longest {
+                host: widest(&|row| clean(&row.pane.host)),
+                msg: widest(&|row| markdown::text(&markdown::msg(row))),
+                // The block's name has room for a twin's ` #N`.
+                parts: [
+                    widest(&|row| clean(&row.pane.session)).min(LABEL_MAX),
+                    widest(&|row| clean(&row.pane.tab)).min(LABEL_MAX),
+                    widest(&crate::output::name).min(LABEL_MAX) + 3,
+                ],
+            },
+            &self.widths,
+        );
         columns
     }
 

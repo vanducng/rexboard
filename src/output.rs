@@ -366,8 +366,34 @@ fn skip_string(chars: &mut std::iter::Peekable<impl Iterator<Item = char>>) {
     }
 }
 
-/// `text` in at most `max` columns, with an ellipsis in the middle when it does not fit.
+/// `text` in at most `max` columns, with an ellipsis in the middle when it does not fit. A label of
+/// ` · ` parts keeps those separators: the longest part is cut inside, and again.
 pub fn squeeze(text: &str, max: usize) -> String {
+    if text.width() <= max {
+        return text.to_owned();
+    }
+    let parts: Vec<&str> = text.split(" · ").collect();
+    let room = max.saturating_sub(3 * (parts.len() - 1));
+    let mut widths: Vec<usize> = parts.iter().map(|part| part.width()).collect();
+    while parts.len() > 1 && widths.iter().sum::<usize>() > room {
+        let longest = (0..widths.len()).max_by_key(|&i| widths[i]).unwrap_or(0);
+        if widths[longest] <= 2 {
+            return cut_middle(text, max);
+        }
+        widths[longest] -= 1;
+    }
+    if parts.len() > 1 {
+        let cut: Vec<String> = parts
+            .iter()
+            .zip(&widths)
+            .map(|(part, w)| cut_middle(part, *w))
+            .collect();
+        return cut.join(" · ");
+    }
+    cut_middle(text, max)
+}
+
+fn cut_middle(text: &str, max: usize) -> String {
     if text.width() <= max {
         return text.to_owned();
     }
@@ -690,6 +716,14 @@ mod tests {
         assert_eq!(short, "2-toolrig:ri…89abcdef#l2");
         assert!(short.width() <= 24);
         assert_eq!(squeeze("main", 24), "main");
+        let label = squeeze("api-gateway · release-notes · a long block label here", 40);
+        assert!(label.width() <= 40 && label.contains('…'), "{label}");
+        assert_eq!(
+            label.matches(" · ").count(),
+            2,
+            "the separators stay: {label}"
+        );
+        assert!(squeeze("a · b", 3).width() <= 3);
     }
 
     #[test]

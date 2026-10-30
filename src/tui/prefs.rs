@@ -1,5 +1,6 @@
 //! tui.json: the board's own settings on this machine.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -28,6 +29,24 @@ pub struct Prefs {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub columns: Vec<String>,
+    /// Fixed widths by column name (`host`, `session`, `window`, `block`, `msg`), kept as
+    /// written; the list checks a name and a value only when it applies them.
+    #[serde(
+        default,
+        deserialize_with = "widths",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    pub widths: BTreeMap<String, serde_json::Value>,
+}
+
+/// Anything but an object is none.
+fn widths<'de, D: Deserializer<'de>>(
+    d: D,
+) -> Result<BTreeMap<String, serde_json::Value>, D::Error> {
+    Ok(match serde_json::Value::deserialize(d)? {
+        serde_json::Value::Object(entries) => entries.into_iter().collect(),
+        _ => BTreeMap::new(),
+    })
 }
 
 /// Anything but a list of names is none, and keeps the rest of the file.
@@ -121,6 +140,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn widths_are_kept_as_written_and_checked_only_when_applied() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tui.json");
+        let written = r#"{"widths": {"host": 12, "session": 0, "window": "auto", "future": 501, "flag": true}}"#;
+        std::fs::write(&path, written).unwrap();
+        let prefs = load(&path);
+        assert_eq!(prefs.widths.len(), 5, "every entry is kept");
+        save(&path, &prefs).unwrap();
+        let back: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            back["widths"],
+            serde_json::from_str::<serde_json::Value>(written).unwrap()["widths"],
+            "a save writes back what was read, as the card toggle does"
+        );
+        std::fs::write(&path, r#"{"widths": [1, 2], "detail_hidden": true}"#).unwrap();
+        assert!(load(&path).widths.is_empty() && load(&path).detail_hidden);
+    }
+
+    #[test]
     fn prefs_round_trip_and_bad_files_give_the_default() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("rexboard/tui.json");
@@ -131,6 +170,10 @@ mod tests {
             icons: Icons::Nerd,
             card_height: Some(CardHeight::Percent(30)),
             columns: vec!["cost".into(), "5h".into()],
+            widths: BTreeMap::from([
+                ("host".to_owned(), 12.into()),
+                ("whatever".to_owned(), 9.into()),
+            ]),
         };
         save(&path, &kept).unwrap();
         assert_eq!(load(&path), kept);
@@ -148,6 +191,7 @@ mod tests {
                 icons: Icons::Text,
                 card_height: None,
                 columns: Vec::new(),
+                widths: BTreeMap::new(),
             },
             "an unknown motion is full and keeps the rest"
         );
@@ -160,6 +204,7 @@ mod tests {
                 icons: Icons::Text,
                 card_height: None,
                 columns: Vec::new(),
+                widths: BTreeMap::new(),
             },
             "unknown icons are words and keep the rest"
         );

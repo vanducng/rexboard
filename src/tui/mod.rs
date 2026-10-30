@@ -59,6 +59,7 @@ fn start_app(pick: bool) -> App {
     app.icons = prefs.icons;
     app.card_height = prefs.card_height;
     app.columns = prefs.columns;
+    app.widths = prefs.widths;
     app.nerd = match std::env::var("REXBOARD_ICONS").as_deref() {
         Ok("nerd") => true,
         Ok("text") => false,
