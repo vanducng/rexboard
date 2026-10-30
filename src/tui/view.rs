@@ -1137,7 +1137,7 @@ mod tests {
         press(&mut app, KeyCode::Enter);
         assert_eq!(
             last(&app, 100),
-            "send to api-lead on mini: hello there, are you free · y runs"
+            "send to api-lead on mini: \"hello there, are you free\" · it waits on a dialog · y runs"
         );
         let narrow = last(&app, 40);
         assert!(

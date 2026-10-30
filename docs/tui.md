@@ -169,7 +169,7 @@ The keys are vim's where vim has one, and plain keys or vim's own ctrl chords ot
 | `a`, `i` | Answer the selected row from the board: pick a dialog's option or reply with a line. See [Answer mode](#answer-mode) |
 | `m` | Mark the selected pane seen, through serve. The message names it `session › block` (`session › window` for a generic block label). A blocked or erroring row stays in `NEEDS YOU` |
 | `dd` | Close the selected row's pane. The footer asks, in red, `close WHERE on HOST, ending HARNESS (STATE)? y closes`, with WHERE as the list tells twins apart (`api › main #2`) and the state when it is blocked or working, with its kind (`blocked · question`); a narrow footer drops `ending …`, then cuts WHERE in the middle, never the key. `dd` only asks when its first `d` comes on its own, 300 ms after the key before (else `keys came too fast; nothing closed · dd closes`). Only `y` closes it, with `rex block close`, and only once the question has been up for 300 ms: a key sooner says `nothing closed (keys came too fast)`, and any other key says `nothing closed`. Either way that key does nothing else. The question goes if its row leaves the board. A pane whose process is `tmux` adds `(tmux keeps running)`: closing it ends the tmux client, not the session. The board's own pane, and any pane running `rexboard`, are never closed. Not in `pick` |
-| `x`, then an action's key | Start an action an enabled [extension](extensions.md#actions) offers for the selected row, such as sending a message to the seat in it. `x` lists the keys that apply to this row (`x… s send message · esc cancels`). An action that takes text opens an input line naming the target (`Send message api › main › seat-b on mini: …`; `enter` goes on, `esc` cancels); then a red confirm line, which the extension words and names the target and the text, with `· y runs`. Only `y` runs it, once the line has been up for 300 ms; any other key says `NAME cancelled`. It runs again the checks it had at the start against the row as it is now, and if the target changed or the row is gone nothing runs. The footer says `NAME…` while it runs and its first line of output (`done` when it said none) after; a failure stays in red until the next key. Not in `pick` |
+| `x`, then an action's key | Start an action an [extension](extensions.md#actions) offers for the selected row, such as a message to its seat. See [Actions](#actions). Not in `pick` |
 | `yy` / `yp` | Copy the selected row's message (`yy`), or where its pane is as `SESSION › WINDOW › BLOCK @HOST` (`yp`), to the clipboard of the machine the board runs on: `pbcopy` on macOS, `wl-copy` under Wayland, else `xclip`. Both go without escape sequences or control characters, so a paste cannot end early and run what follows. The footer says what it copied (`copied "Tests pass: 12 passed"`, `copied api › main › seat-b @local`), or why not (`could not copy: no clipboard to copy to`). Rex does not pass OSC 52 from a pane to the Mac's clipboard, so the board does not use it |
 | `R` | Reconnect to serve |
 | `?` | Show every key in the card, in as many columns as fit, a blank row above the footer; the list keeps every row above it. `?`, `q` or `esc` hides it |
@@ -293,6 +293,30 @@ Two failures are not refusals. `the pane did not answer within 5s, so it may or 
 After a send the board returns to the same row, marks it seen, drops the pane's tail read before the answer (it shows the question just answered), and the card's bar says what went where: `sent 1 (Yes) → seat-a 11:22:04`, until the row needs you again with a newer report. Nothing moves on by itself; `tab` goes to the next row that needs you.
 
 Options are read the same way for every harness: numbered `1.` or `1)`, with `❯` or `>` before the highlighted one, as Claude Code draws its permission prompts and questions. The board and `send.lua` read the screen by one copy of that grammar (`src/harness/dialog.rs`). A line reply goes to an input line any harness shows; a dialog drawn another way offers nothing to send, so jump to it.
+
+## Actions
+
+`x` lists the keys of the actions enabled [extensions](extensions.md#actions) offer for the selected row (`x… s send message · esc cancels`); with none it says `no action for this row`. An action's key opens one input line, which names the target:
+
+```
+Send message web › seats › seat-b on mini: ready for review?▏ · enter · esc
+```
+
+The end of what you type stays in view, and the head gives way when the screen is narrow. `enter` goes on, `esc` cancels, and every other key is text: `q`, `a`, `dd` and `x` do nothing else here. The line is red and is the board's, not the extension's:
+
+```
+send to seat-b@web on mini: "ready for review?" · it waits on a dialog · y runs
+```
+
+It is the extension's words for the target (`confirm`), then the text in quotes, whatever the extension's `confirm` says. When the row is `blocked` it adds `· it waits on a dialog`, and when it errored `· it reported an error`: text sent to a pane that waits on a dialog may be read as the dialog's answer, so the line says so before you press `y`. Only `y` runs it, and only once the line has been up for 300 ms; any other key says `NAME cancelled`. At `y` the board builds the plan again from the extension's current offer and the row as it is now; if it differs from the one shown, or the action or the row is gone, nothing runs and it says why. A row that leaves, or stops taking the action, while you type or before you confirm ends the action with `NAME cancelled: that row is gone` in red.
+
+The footer says `NAME…` while it runs and `NAME: FIRST LINE` after (`done` when the action said nothing). A failure shows `NAME failed: FIRST LINE`, with its exit code, in red until the next key:
+
+```
+Send message failed: exited with 3: rig: send failed: not delivered
+```
+
+A second run waits for a jump or close in flight, and a running action is stopped when the board exits.
 
 ## Status filter
 

@@ -380,7 +380,7 @@ pub const PERMISSION: &str = "⏺ Bash(git push origin main --force-with-lease)\
 
 /// `rows()` with the session field on every row but seat-a, and one action from `fake`.
 pub fn with_actions() -> App {
-    let manifest = "name = \"fake\"\ncontract = 1\ncmd = [\"./adapter\"]\n[[fields]]\nname = \"session\"\ntitle = \"S\"\nhidden = true\n[[actions]]\nname = \"send\"\ntitle = \"Send message\"\nkey = \"s\"\ncmd = [\"./send\", \"--\", \"{field:session}\", \"{text}\"]\nwhen = [\"session\"]\nconfirm = \"send to {field:session} on {host}: {text}\"\n";
+    let manifest = "name = \"fake\"\ncontract = 1\ncmd = [\"./adapter\"]\n[[fields]]\nname = \"session\"\ntitle = \"S\"\nhidden = true\n[[actions]]\nname = \"send\"\ntitle = \"Send message\"\nkey = \"s\"\ncmd = [\"./send\", \"--\", \"{field:session}\", \"{text}\"]\nwhen = [\"session\"]\nconfirm = \"send to {field:session} on {host}\"\n";
     let root = tempfile::tempdir().unwrap();
     let dir = crate::extension::tests::write(root.path(), "fake", manifest);
     let ext = crate::extension::load(&dir).unwrap();
