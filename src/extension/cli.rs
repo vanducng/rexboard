@@ -236,7 +236,7 @@ fn test(name: &str, rows: Option<&Path>, json: bool) -> Result<()> {
     let started = Instant::now();
     let result = super::runner::run_once(ext, &config.settings(name), &sent, &|| false);
     let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    let parsed = match result {
+    let mut parsed = match result {
         Ok(parsed) => parsed,
         Err(why) => {
             return Err(Error::extension(
@@ -245,6 +245,8 @@ fn test(name: &str, rows: Option<&Path>, json: bool) -> Result<()> {
             ));
         }
     };
+    let contract = parsed.problems.len();
+    parsed.problems.extend(action_problems(ext, &rows, &parsed));
     let enabled = config.enabled.iter().any(|e| e == name);
     let actions: Vec<String> = ext
         .manifest
@@ -265,14 +267,68 @@ fn test(name: &str, rows: Option<&Path>, json: bool) -> Result<()> {
     if parsed.problems.is_empty() {
         return Ok(());
     }
-    let count = parsed.problems.len();
+    let (count, what) = match contract {
+        0 => (parsed.problems.len(), "'s actions have"),
+        n => (n, "'s answer breaks contract 1 in"),
+    };
+    let (many, noun) = (count != 1, if contract == 0 { "problem" } else { "way" });
     Err(Error::extension(
-        format!(
-            "{name}'s answer breaks contract 1 in {count} way{}",
-            if count == 1 { "" } else { "s" }
-        ),
+        format!("{name}{what} {count} {noun}{}", if many { "s" } else { "" }),
         &[DOC],
     ))
+}
+
+/// What would stop each action from running, found without running it: a program that is not
+/// there or not executable, and a placeholder the first row the action applies to cannot fill.
+fn action_problems(ext: &super::Extension, rows: &[Row], parsed: &Parsed) -> Vec<String> {
+    let mut problems = Vec::new();
+    for action in &ext.manifest.actions {
+        let at = |why: String| format!("action {}: {why}", action.name);
+        let program = super::action::program(&ext.dir, action);
+        if !is_executable(&program) {
+            problems.push(at(format!(
+                "{} is not an executable file",
+                program.display()
+            )));
+        }
+        let offered = super::action::Offered {
+            extension: ext.name().to_owned(),
+            dir: ext.dir.clone(),
+            settings: Value::Null,
+            action: action.clone(),
+        };
+        let sample = rows.iter().find_map(|row| {
+            let mut row = row.clone();
+            row.ext = parsed
+                .rows
+                .get(&row.key)
+                .map_or_else(BTreeMap::new, |item| {
+                    item.fields
+                        .iter()
+                        .map(|(k, v)| (super::field_id(ext.name(), k), v.clone()))
+                        .collect()
+                });
+            offered.applies(&row).then_some(row)
+        });
+        match sample {
+            Some(row) => {
+                if let Err(why) = offered.plan(&row, "sample") {
+                    problems.push(at(format!("on {}: {why}", row.key)));
+                }
+            }
+            None => eprintln!(
+                "note: no row has {} to check action {} against",
+                action.when.join(", "),
+                action.name
+            ),
+        }
+    }
+    problems
+}
+
+fn is_executable(path: &Path) -> bool {
+    path.metadata()
+        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 
 /// What `ext run` was asked.
@@ -379,6 +435,7 @@ fn act(go: &Go, rows: Option<&Path>, json: bool) -> Result<()> {
             return Err(Error::extension(format!("{} cancelled", action.title), &[]));
         }
     }
+    super::action::stop_on_signals();
     let output = super::action::run(&plan)
         .map_err(|why| Error::extension(format!("{} failed: {why}", action.title), &[]))?;
     report(Some(&output));

@@ -4,8 +4,9 @@
 use std::collections::BTreeSet;
 use std::io::Read;
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -273,6 +274,21 @@ fn first_line(mut pipe: impl Read + Send + 'static) -> std::sync::mpsc::Receiver
     rx
 }
 
+/// Set by a signal handler once `stop_on_signals` is on: a run in flight kills its group and ends.
+static CANCELLED: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn cancel(_: libc::c_int) {
+    CANCELLED.store(true, Ordering::SeqCst);
+}
+
+/// SIGINT, SIGTERM and SIGHUP stop a run and what it started, instead of ending the process
+/// around it: the action is in its own group, so the terminal's Ctrl-C does not reach it.
+pub fn stop_on_signals() {
+    for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+        unsafe { libc::signal(signal, cancel as *const () as libc::sighandler_t) };
+    }
+}
+
 /// Runs `plan` in its directory, in its own process group, and returns the first line of what it
 /// printed. A failure says its exit, or that it timed out or could not start.
 pub fn run(plan: &Plan) -> Result<String, String> {
@@ -295,13 +311,18 @@ pub fn run(plan: &Plan) -> Result<String, String> {
             kill_group(pgid);
             break child.wait().map_err(|e| e.to_string());
         }
-        if Instant::now() >= deadline {
+        let late = Instant::now() >= deadline;
+        if late || CANCELLED.load(Ordering::SeqCst) {
             kill_group(pgid);
             let _ = child.wait();
-            break Err(format!(
-                "timed out after {}s and was stopped",
-                plan.timeout.as_secs()
-            ));
+            break Err(if late {
+                format!(
+                    "timed out after {}s and was stopped",
+                    plan.timeout.as_secs()
+                )
+            } else {
+                "interrupted and was stopped".to_owned()
+            });
         }
         thread::sleep(Duration::from_millis(10));
     };
@@ -321,6 +342,22 @@ pub fn run(plan: &Plan) -> Result<String, String> {
         Some(code) => format!("exited with {code}: {said}"),
         None => format!("stopped by a signal ({status})"),
     })
+}
+
+/// The program an action's `cmd` starts: a leading `./` is the extension's directory, a bare name
+/// is looked up on PATH.
+pub fn program(dir: &Path, action: &Action) -> PathBuf {
+    let first = &action.cmd[0];
+    if let Some(rest) = first.strip_prefix("./") {
+        return dir.join(rest);
+    }
+    if first.contains('/') {
+        return PathBuf::from(first);
+    }
+    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .map(|d| d.join(first))
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| PathBuf::from(first))
 }
 
 #[cfg(test)]

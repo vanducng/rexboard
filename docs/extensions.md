@@ -188,7 +188,7 @@ problem: undeclared field owner
 
 It sends serve's rows, starting serve when nothing answers, as `ls` does. `--rows FILE` sends the rows in FILE instead: an array as `rexboard ls --json` prints it, so `rexboard ls --json --all > rows.json` saves a set to test against. The adapter's stderr goes to stderr.
 
-It exits 0 when the answer is valid. It exits 1 with `EXTENSION` when the answer breaks the contract, when the run fails (`my-tool: exited with exit status: 3`, `my-tool: timed out after 5s and was stopped`), when the extension is broken, or when there is none of that name. `--json` prints `{ok, extension, ms, sent, rows, problems, actions}`. It lists the extension's actions after the rows and does not run them.
+It exits 0 when the answer is valid. It exits 1 with `EXTENSION` when the answer breaks the contract, when the run fails (`my-tool: exited with exit status: 3`, `my-tool: timed out after 5s and was stopped`), when the extension is broken, or when there is none of that name. `--json` prints `{ok, extension, ms, sent, rows, problems, actions}`. It lists the extension's actions after the rows and checks each without running it: the program must be an executable file, and the first row the action applies to must fill every placeholder (`problem: action send: on mini/seat-a: this row has no session`). With no such row it says so on stderr and passes. A problem there exits 1 with `EXTENSION`, `acts's actions have 1 problem`.
 
 ### `rexboard ext run NAME ACTION KEY --text TEXT [--dry-run | --yes] [--rows FILE]`
 
@@ -198,7 +198,7 @@ Runs extension `NAME`'s action `ACTION` on the row `KEY` (`host/block`, as `rexb
 - `--yes` runs it. On a terminal, without `--yes`, it prints the confirm line and `[y/N]` on stderr and runs on `y`. With no terminal and neither flag it fails and runs nothing.
 - It prints `TITLE: FIRST LINE` (`done` when the run printed none), or with `--json` the object above with `dry_run: false` and `output`.
 
-It exits 1 with `EXTENSION` when the extension, action or row is not there, the action does not apply, the text is refused, the run fails or times out, or the answer was not `y`.
+It exits 1 with `EXTENSION` when the extension, action or row is not there, the action does not apply, the text is refused, the run fails or times out, or the answer was not `y`. SIGINT, SIGTERM and SIGHUP while it runs kill the action and what it started, then exit 1 (`interrupted and was stopped`): the action is in its own process group, so the terminal's Ctrl-C would not reach it.
 
 ### `rexboard ext new NAME`
 

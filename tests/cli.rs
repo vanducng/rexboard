@@ -2450,15 +2450,32 @@ fn ext_test_reads_rows_from_a_file_and_says_what_a_failed_run_did() {
 /// its argv and environment in `ran` beside it, then runs the shell `body`. Returns its rows
 /// file: one seat, `mini/seat-a`, whose session is `api-lead`.
 fn acting(serve: &Serve, body: &str, action: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    acting_with(
+        serve,
+        body,
+        action,
+        "when = [\"session\"]\n",
+        &answers("{}"),
+    )
+}
+
+/// `acting` with its own `when` line and adapter script.
+fn acting_with(
+    serve: &Serve,
+    body: &str,
+    action: &str,
+    when: &str,
+    adapter: &str,
+) -> (std::path::PathBuf, std::path::PathBuf) {
     use std::os::unix::fs::PermissionsExt;
     let dir = extension(
         serve,
         "acts",
         "",
         &format!(
-            "[[fields]]\nname = \"session\"\ntitle = \"SESSION\"\nhidden = true\n[[actions]]\nname = \"send\"\ntitle = \"Send message\"\nkey = \"s\"\nwhen = [\"session\"]\ncmd = [\"./send\", \"--host\", \"{{host}}\", \"--\", \"{{field:session}}\", \"{{text}}\"]\nconfirm = \"send to {{field:session}} on {{host}}: {{text}}\"\n{action}"
+            "[[fields]]\nname = \"session\"\ntitle = \"SESSION\"\nhidden = true\n[[actions]]\nname = \"send\"\ntitle = \"Send message\"\nkey = \"s\"\n{when}cmd = [\"./send\", \"--host\", \"{{host}}\", \"--\", \"{{field:session}}\", \"{{text}}\"]\nconfirm = \"send to {{field:session}} on {{host}}: {{text}}\"\n{action}"
         ),
-        &answers("{}"),
+        adapter,
     );
     let program = dir.join("send");
     std::fs::write(
@@ -3690,4 +3707,184 @@ fn serve_keeps_a_local_panes_usage_while_it_lives_and_removes_a_gone_panes_file(
         !path("block:closed-pane").exists() && !path("block:web-seat-b").exists()
     });
     assert!(path("block:api-seat-a").exists(), "a live pane's stays");
+}
+
+/// Runs `ext run --yes` as a real process, interrupts it with `signal` once the action has
+/// started, and says what became of the action: the CLI's exit code and stderr, and whether the
+/// action got to write its marker after the CLI was gone.
+fn interrupted(signal: libc::c_int) -> (Option<i32>, String, bool, bool) {
+    use std::io::Read;
+    let serve = Serve::new();
+    let (ran, rows) = acting(
+        &serve,
+        "echo $$ > pid\nsleep 2\necho late > marker",
+        "timeout = 30\n",
+    );
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_rexboard"))
+        .env_remove("XDG_RUNTIME_DIR")
+        .envs(serve.envs())
+        .args([
+            "ext",
+            "run",
+            "acts",
+            "send",
+            "mini/seat-a",
+            "--text",
+            "hi",
+            "--yes",
+            "--rows",
+        ])
+        .arg(&rows)
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let dir = ran.parent().unwrap().to_owned();
+    eventually("the action to start", || dir.join("pid").exists());
+    let action: i32 = std::fs::read_to_string(dir.join("pid"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    unsafe { libc::kill(child.id() as i32, signal) };
+    let started = std::time::Instant::now();
+    let status = child.wait().unwrap();
+    let quick = started.elapsed() < std::time::Duration::from_secs(2);
+    let mut err = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut err)
+        .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(2600));
+    let alive = unsafe { libc::kill(action, 0) } == 0;
+    (
+        status.code().filter(|_| quick),
+        err,
+        dir.join("marker").exists(),
+        alive,
+    )
+}
+
+#[test]
+fn ctrl_c_stops_the_action_the_cli_started_and_what_it_started() {
+    let (code, err, marker, alive) = interrupted(libc::SIGINT);
+    assert_eq!(code, Some(1), "{err}");
+    assert!(
+        err.contains("Send message failed: interrupted and was stopped"),
+        "{err}"
+    );
+    assert!(!marker, "the action wrote after the CLI was interrupted");
+    assert!(!alive, "the action outlived the CLI");
+}
+
+#[test]
+fn a_term_signal_stops_the_action_the_cli_started_too() {
+    let (code, err, marker, alive) = interrupted(libc::SIGTERM);
+    assert_eq!(code, Some(1), "{err}");
+    assert!(!marker && !alive, "the action outlived the CLI: {err}");
+}
+
+/// `ext test` on `acts` against its rows file, whose adapter answers `answer`.
+fn ext_test_acts(serve: &Serve, rows: &std::path::Path, json: bool) -> std::process::Output {
+    let mut cmd = serve.cmd();
+    cmd.args(["ext", "test", "acts", "--rows"]).arg(rows);
+    if json {
+        cmd.arg("--json");
+    }
+    cmd.output().unwrap()
+}
+
+const SEAT_ANSWER: &str = r#"{"mini/seat-a": {"fields": {"session": "api-lead"}}}"#;
+
+#[test]
+fn ext_test_passes_an_action_that_could_run_and_does_not_run_it() {
+    let serve = Serve::new();
+    let (ran, rows) = acting_with(
+        &serve,
+        "",
+        "",
+        "when = [\"session\"]\n",
+        &answers(SEAT_ANSWER),
+    );
+    let out = ext_test_acts(&serve, &rows, false);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("actions: send"));
+    assert!(!ran.exists(), "ext test never runs an action");
+}
+
+#[test]
+fn ext_test_fails_for_an_action_program_that_is_missing_or_not_executable() {
+    use std::os::unix::fs::PermissionsExt;
+    for broken in ["missing", "plain file"] {
+        let serve = Serve::new();
+        let (ran, rows) = acting_with(
+            &serve,
+            "",
+            "",
+            "when = [\"session\"]\n",
+            &answers(SEAT_ANSWER),
+        );
+        let program = ran.parent().unwrap().join("send");
+        if broken == "missing" {
+            std::fs::remove_file(&program).unwrap();
+        } else {
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        let out = ext_test_acts(&serve, &rows, false);
+        assert_eq!(out.status.code(), Some(1), "{broken}");
+        let (stdout, stderr) = (
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr),
+        );
+        assert!(
+            stdout.contains("problem: action send: ")
+                && stdout.contains("is not an executable file"),
+            "{broken}: {stdout}"
+        );
+        assert!(
+            stderr.contains("acts's actions have 1 problem"),
+            "{broken}: {stderr}"
+        );
+        let json: serde_json::Value =
+            serde_json::from_slice(&ext_test_acts(&serve, &rows, true).stdout).unwrap();
+        assert_eq!(json["ok"], false, "{broken}");
+        assert!(
+            json["problems"][0]
+                .as_str()
+                .unwrap()
+                .contains("not an executable file")
+        );
+        assert!(!ran.exists());
+    }
+}
+
+#[test]
+fn ext_test_fails_for_a_placeholder_no_row_can_fill() {
+    let serve = Serve::new();
+    let (ran, rows) = acting_with(&serve, "", "", "", &answers("{}"));
+    let out = ext_test_acts(&serve, &rows, false);
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("problem: action send: on mini/seat-a: this row has no session"),
+        "{stdout}"
+    );
+    assert!(!ran.exists());
+}
+
+#[test]
+fn ext_test_says_when_no_row_has_what_an_action_needs_and_still_passes() {
+    let serve = Serve::new();
+    let (_, rows) = acting_with(&serve, "", "", "when = [\"session\"]\n", &answers("{}"));
+    let out = ext_test_acts(&serve, &rows, false);
+    assert!(out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("note: no row has session to check action send against")
+    );
 }
