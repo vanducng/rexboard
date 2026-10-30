@@ -188,7 +188,7 @@ The card is the selected row in full, under the list, as wide as the board:
 ```
 
 1. **The bar:** what you scan first. The glyph and the state (with its kind, as in `blocked · permission`), the block, and how the turn stands: `ended 4m ago` for a done row, `waiting 12s` for a blocked one, `failed 2m ago`, or `for 2m` in any other state. On the right, how fresh the pane's tail is: `captured 11:21:14 · 8s`, or `newer report · space refreshes` once the row has reported since.
-2. **The headline**, in bold: the first sentence of the message's first paragraph, when it is 120 characters or fewer; a longer first sentence is shown plain, not as a heavy block, and so is a first sentence the card cannot find. A sentence ends at `.`, `!` or `?` followed by a space (a `.` also needs a capital letter after it, and no `e.g.`-style dot before it, so `e.g. the docs` and `v1. 2 files` do not end it). With no message, the title. See [Agent status](agent-status.md).
+2. **The headline**, in bold: the first sentence of the message's first paragraph, when it is 120 characters or fewer; a longer first sentence is shown plain, not as a heavy block. A paragraph with no sentence stop is one sentence, so a short one (`Ready for review`) is all bold and a long one is plain. A sentence ends at `.`, `!` or `?` followed by a space (a `.` also needs a capital letter after it, and no `e.g.`-style dot before it, so `e.g. the docs` and `v1. 2 files` do not end it). With no message, the title. See [Agent status](agent-status.md).
 3. **The ask or the body:** the message's other lines, wrapped, whole.
 4. A failed jump's reason, and `may be stale:` for a suspect row.
 5. The pane's tail, when it has been read, newest line at the bottom.
