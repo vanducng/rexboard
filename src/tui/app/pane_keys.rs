@@ -81,7 +81,7 @@ impl App {
             .into_iter()
             .map(|(ending, tmux)| format!(" on {}{ending}?{tmux} y closes", row.pane.host))
             .find(|rest| "close ".width() + full.width() + rest.width() <= width)
-            .unwrap_or_else(|| format!(" on {}?{tmux} y closes", row.pane.host));
+            .unwrap_or_else(|| format!(" on {}? y closes", row.pane.host));
         let room = width.saturating_sub("close ".width() + rest.width());
         Some(format!("close {}{rest}", self.place(row, room)))
     }
@@ -252,6 +252,24 @@ mod tests {
         assert_eq!(ask(no_note.chars().count()), no_note, "the note goes first");
         let no_ending = ask(no_note.chars().count() - 1);
         assert!(!no_ending.contains("ending"), "{no_ending}");
+    }
+
+    #[test]
+    fn a_long_target_at_80_columns_never_brings_the_tmux_note_back() {
+        let mut app = app();
+        let mut row = row("local/claude", "working", "working", true);
+        row.pane.process = Some("claude".into());
+        row.pane.tmux = true;
+        row.pane.session = "api-gateway-component-with-a-long-session-label".into();
+        row.pane.tab = "integration-checks-with-a-long-window-label".into();
+        row.pane.pane = "seat-a".into();
+        app.set_rows(vec![row], hosts());
+        app.selected = Some(Spot::Row("local/claude".into()));
+        typed(&mut app, "dd");
+        let ask = app.close_question(80).unwrap();
+        assert!(ask.width() <= 80, "{ask}");
+        assert!(ask.ends_with(" on local? y closes"), "{ask}");
+        assert!(!ask.contains("tmux keeps running"), "{ask}");
     }
 
     #[test]
