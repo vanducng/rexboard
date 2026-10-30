@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.3](https://github.com/vanducng/rexboard/compare/v0.16.2...v0.16.3) (2026-10-30)
+
+
+### Bug Fixes
+
+* **tui:** host shows whole names, msg keeps a floor, column widths in tui.json ([#100](https://github.com/vanducng/rexboard/issues/100)) ([b011e10](https://github.com/vanducng/rexboard/commit/b011e10f2058c69c76a6a5eab8596f11bf34639c))
+
 ## [0.16.2](https://github.com/vanducng/rexboard/compare/v0.16.1...v0.16.2) (2026-10-30)
 
 
