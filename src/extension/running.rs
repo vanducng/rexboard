@@ -117,7 +117,7 @@ impl Running {
         let names = field_names(&exts);
         let mut fields = Vec::new();
         for ext in exts {
-            for field in &ext.manifest.fields {
+            for field in ext.manifest.fields.iter().filter(|f| !f.hidden) {
                 let id = super::field_id(ext.name(), &field.name);
                 let shown = names[&id].clone();
                 let mut entry = json!({ "id": id, "name": shown, "title": field.title });

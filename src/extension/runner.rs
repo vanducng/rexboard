@@ -220,14 +220,14 @@ pub fn run_once(
 
 /// Whether the adapter has exited, without reaping it: until it is reaped its pid still names
 /// its process group, so the group can be killed without reaching a process that reused the pid.
-fn exited(pid: i32) -> bool {
+pub(super) fn exited(pid: i32) -> bool {
     let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
     let flags = libc::WEXITED | libc::WNOHANG | libc::WNOWAIT;
     let rc = unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &raw mut info, flags) };
     rc == 0 && unsafe { info.si_pid() } != 0
 }
 
-fn kill_group(pid: i32) {
+pub(super) fn kill_group(pid: i32) {
     unsafe { libc::kill(-pid, libc::SIGKILL) };
 }
 

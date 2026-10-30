@@ -2446,6 +2446,299 @@ fn ext_test_reads_rows_from_a_file_and_says_what_a_failed_run_did() {
         .stderr(predicate::str::contains("no extension named nope"));
 }
 
+/// An extension `acts` with a hidden `session` field and a `send` action whose program records
+/// its argv and environment in `ran` beside it, then runs the shell `body`. Returns its rows
+/// file: one seat, `mini/seat-a`, whose session is `api-lead`.
+fn acting(serve: &Serve, body: &str, action: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = extension(
+        serve,
+        "acts",
+        "",
+        &format!(
+            "[[fields]]\nname = \"session\"\ntitle = \"SESSION\"\nhidden = true\n[[actions]]\nname = \"send\"\ntitle = \"Send message\"\nkey = \"s\"\nwhen = [\"session\"]\ncmd = [\"./send\", \"--host\", \"{{host}}\", \"--\", \"{{field:session}}\", \"{{text}}\"]\nconfirm = \"send to {{field:session}} on {{host}}: {{text}}\"\n{action}"
+        ),
+        &answers("{}"),
+    );
+    let program = dir.join("send");
+    std::fs::write(
+        &program,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > ran\necho \"$REXBOARD_ACTION\" >> ran\n{body}\n"
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let rows = serve.dir.path().join("rows.json");
+    let row = serde_json::json!({
+        "key": "mini/seat-a", "host": "mini", "session_id": "session:api", "session": "api",
+        "window_id": "window:main", "tab": "main", "block_id": "seat-a", "pane": "seat-a",
+        "title": "", "harness": "claude-code", "state": "idle", "kind": null, "msg": "",
+        "updated_at": "2026-01-01T00:00:00Z", "source": "native", "children": {},
+        "since": "2026-01-01T00:00:00.000Z", "since_estimated": false, "turn_started": null,
+        "last_turn": null, "seen": true, "stale": false, "suspect": false,
+        "suspect_reason": null, "group": "quiet", "ext": { "acts.session": "api-lead" }
+    });
+    std::fs::write(&rows, serde_json::json!([row]).to_string()).unwrap();
+    (dir.join("ran"), rows)
+}
+
+fn ext_run(serve: &Serve, rows: &std::path::Path, args: &[&str]) -> assert_cmd::assert::Assert {
+    serve
+        .cmd()
+        .args(["ext", "run", "acts", "send", "mini/seat-a", "--rows"])
+        .arg(rows)
+        .args(args)
+        .write_stdin("")
+        .assert()
+}
+
+#[test]
+fn ext_run_dry_run_prints_the_argv_and_runs_nothing() {
+    let serve = Serve::new();
+    let (ran, rows) = acting(&serve, "", "");
+    let text = r#"it's "q"; $(touch pwn) -rf"#;
+    ext_run(&serve, &rows, &["--text", text, "--dry-run"])
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "send to api-lead on mini: {text}\n"
+        )))
+        .stdout(predicate::str::contains(
+            r#""--host" "mini" "--" "api-lead" "it's \"q\"; $(touch pwn) -rf""#,
+        ));
+    let out = ext_run(&serve, &rows, &["--text", "hi", "--dry-run", "--json"])
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(json["dry_run"], true);
+    assert_eq!(json["confirm"], "send to api-lead on mini: hi");
+    assert_eq!(
+        json["argv"].as_array().unwrap()[1..],
+        ["--host", "mini", "--", "api-lead", "hi"]
+    );
+    assert!(!ran.exists(), "--dry-run runs nothing");
+    assert!(!serve.socket().exists(), "--rows needs no serve");
+}
+
+#[test]
+fn ext_run_yes_runs_the_argv_whole_and_json_has_the_output() {
+    let serve = Serve::new();
+    let (ran, rows) = acting(&serve, "echo delivered; echo second", "");
+    let text = "a; touch pwn $(touch pwn2) `touch pwn3` 日本語 🙂";
+    let out = ext_run(&serve, &rows, &["--text", text, "--yes"])
+        .success()
+        .stdout("Send message: delivered\n")
+        .get_output()
+        .clone();
+    drop(out);
+    let ran_text = std::fs::read_to_string(&ran).unwrap();
+    assert_eq!(
+        ran_text,
+        format!("--host\nmini\n--\napi-lead\n{text}\nsend\n")
+    );
+    let dir = ran.parent().unwrap();
+    for pwn in ["pwn", "pwn2", "pwn3"] {
+        assert!(!dir.join(pwn).exists(), "{pwn}: the text ran");
+    }
+    let out = ext_run(&serve, &rows, &["--text", "hi", "--yes", "--json"])
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        (
+            json["ok"].clone(),
+            json["dry_run"].clone(),
+            json["output"].clone()
+        ),
+        (true.into(), false.into(), "delivered".into())
+    );
+}
+
+#[test]
+fn ext_run_without_yes_and_without_a_terminal_runs_nothing() {
+    let serve = Serve::new();
+    let (ran, rows) = acting(&serve, "", "");
+    ext_run(&serve, &rows, &["--text", "hi"])
+        .code(1)
+        .stderr(predicate::str::contains(
+            "Send message runs only when you say so",
+        ))
+        .stderr(predicate::str::contains("add --yes to run it"));
+    assert!(!ran.exists());
+    serve
+        .cmd()
+        .args([
+            "ext",
+            "run",
+            "acts",
+            "send",
+            "mini/seat-a",
+            "--text",
+            "hi",
+            "--yes",
+            "--dry-run",
+        ])
+        .assert()
+        .code(2);
+    serve
+        .cmd()
+        .args(["ext", "run", "acts", "send", "mini/seat-a", "--yes"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("--text"));
+}
+
+#[test]
+fn ext_run_says_why_it_failed_or_was_refused() {
+    let serve = Serve::new();
+    let (ran, rows) = acting(&serve, "echo boom >&2; echo out; exit 3", "");
+    let refused = |args: &[&str], why: &str| {
+        ext_run(&serve, &rows, args)
+            .code(1)
+            .stderr(predicate::str::contains(why));
+    };
+    refused(
+        &["--text", "hi", "--yes"],
+        "Send message failed: exited with 3: boom",
+    );
+    std::fs::remove_file(&ran).unwrap();
+    refused(
+        &["--text", "a\nb", "--yes"],
+        "one line with no control characters",
+    );
+    refused(
+        &["--text", "\u{1b}[2J", "--yes"],
+        "one line with no control characters",
+    );
+    refused(&["--text", "  ", "--yes"], "there is no text to send");
+    refused(
+        &["--text", &"x".repeat(1001), "--yes"],
+        "the text is 1001 bytes; the most is 1000",
+    );
+    assert!(!ran.exists(), "a refused text runs nothing");
+    let other = |args: &[&str], why: &str| {
+        serve
+            .cmd()
+            .args(args)
+            .arg("--rows")
+            .arg(&rows)
+            .assert()
+            .code(1)
+            .stderr(predicate::str::contains(why));
+    };
+    other(
+        &[
+            "ext",
+            "run",
+            "acts",
+            "nope",
+            "mini/seat-a",
+            "--text",
+            "hi",
+            "--yes",
+        ],
+        "acts has no action named nope",
+    );
+    other(
+        &[
+            "ext",
+            "run",
+            "acts",
+            "send",
+            "mini/none",
+            "--text",
+            "hi",
+            "--yes",
+        ],
+        "no row mini/none",
+    );
+    other(
+        &[
+            "ext",
+            "run",
+            "nope",
+            "send",
+            "mini/seat-a",
+            "--text",
+            "hi",
+            "--yes",
+        ],
+        "no extension named nope",
+    );
+    let bare = serve.dir.path().join("bare.json");
+    let mut seat: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&rows).unwrap()).unwrap();
+    seat[0]["ext"] = serde_json::json!({});
+    std::fs::write(&bare, seat.to_string()).unwrap();
+    serve
+        .cmd()
+        .args([
+            "ext",
+            "run",
+            "acts",
+            "send",
+            "mini/seat-a",
+            "--text",
+            "hi",
+            "--yes",
+            "--rows",
+        ])
+        .arg(&bare)
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("does not apply to this row"));
+    assert!(!ran.exists());
+}
+
+#[test]
+fn ext_run_stops_an_action_at_its_timeout_and_what_it_started() {
+    let serve = Serve::new();
+    let (ran, rows) = acting(&serve, "sleep 60 &\necho $! > child\nwait", "timeout = 1\n");
+    let started = std::time::Instant::now();
+    ext_run(&serve, &rows, &["--text", "hi", "--yes"])
+        .code(1)
+        .stderr(predicate::str::contains(
+            "timed out after 1s and was stopped",
+        ));
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    let child: i32 = std::fs::read_to_string(ran.parent().unwrap().join("child"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    eventually(
+        "the action's child to be gone",
+        || unsafe { libc::kill(child, 0) } != 0,
+    );
+}
+
+#[test]
+fn ext_ls_json_and_ext_test_name_the_actions_and_a_hidden_field_has_no_column() {
+    let serve = Serve::new();
+    let (_, _) = acting(&serve, "", "");
+    serve.config("[extensions]\nenabled = [\"acts\"]\n");
+    let out = serve.cmd().args(["ext", "ls", "--json"]).output().unwrap();
+    let list: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(list[0]["actions"], serde_json::json!(["send"]));
+    local_seat(|| serve.rows(&[]));
+    serve
+        .cmd()
+        .args(["ext", "test", "acts"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("actions: send"));
+    let views = serve.cmd().args(["views", "--json"]).output().unwrap();
+    let views = String::from_utf8(views.stdout).unwrap();
+    assert!(
+        views.contains("rig") && !views.contains("session\""),
+        "{views}"
+    );
+}
+
 #[test]
 fn ext_new_scaffold_passes_ext_test_unchanged() {
     let serve = Serve::new();

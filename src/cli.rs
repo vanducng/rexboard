@@ -156,6 +156,29 @@ pub enum ExtCommand {
         #[arg(long, value_name = "FILE")]
         rows: Option<PathBuf>,
     },
+    /// Run extension NAME's ACTION on the row KEY, as the board's `x` does: the same checks,
+    /// the same argv. Asks first on a terminal; elsewhere it needs `--yes`.
+    Run {
+        #[arg(value_name = "NAME")]
+        name: String,
+        #[arg(value_name = "ACTION")]
+        action: String,
+        /// The row, as `rexboard ls` prints it (`host/block`).
+        #[arg(value_name = "KEY")]
+        key: String,
+        /// The one line of text the action sends.
+        #[arg(long, value_name = "TEXT")]
+        text: String,
+        /// Run without asking.
+        #[arg(long)]
+        yes: bool,
+        /// Print the argv and the confirm line, and run nothing.
+        #[arg(long, conflicts_with = "yes")]
+        dry_run: bool,
+        /// Read the row from FILE, as `rexboard ls --json` prints it, instead of serve.
+        #[arg(long, value_name = "FILE")]
+        rows: Option<PathBuf>,
+    },
     /// Start extension NAME from the example, in `$XDG_CONFIG_HOME/rexboard/extensions/NAME`.
     New {
         #[arg(value_name = "NAME")]

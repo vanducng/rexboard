@@ -44,6 +44,8 @@ icon = "\uF502"          # the field's own mark on the card, in place of its nam
 status = false           # true lets it give rows with no record a status
 ```
 
+A field may also have `hidden = true`: its value reaches the row (`ls --json`, an action's placeholders and `when`) with no column, view, filter key or card fact. An extension may add `[[actions]]` tables: see [Actions](#actions).
+
 `description`, `every`, `timeout`, `icon`, `fields` (and each field's `icon`) and `provides` are optional; the values above for `every` and `timeout` are their defaults. A field needs both `name` and `title`. The extension is broken when the manifest has a key it does not know, a name that does not match the directory, a name or field name that is not `[a-z0-9-]+`, another contract, an empty `cmd`, `every` under 2, `timeout` of 0 or not less than `every`, a field declared twice, or an `icon` that is not one character one cell wide. `rexboard ext ls` says why, and serve skips it and logs why.
 
 The icons show only with `"icons": "nerd"` (see [TUI](tui.md#icons)): the card labels each of the extension's fields with the field's `icon`, in place of its name. A field with no `icon` keeps its name. The extension's own `icon` is not drawn on the card, which has no extension row. In words mode, and everywhere else (column headers, `ls`, `--json`), titles and names are used as before; `ext ls --json` lists an extension's `icon`. A Nerd Font glyph from the Basic Multilingual Plane (U+E000 to U+F8FF) is the safe choice: one from plane 15 can draw two cells wide in some terminals. A rexboard older than this key does not know it, so it marks a manifest that has one broken.
@@ -126,9 +128,36 @@ Anything else wrong drops only that part, and the rest is kept:
 
 serve logs each problem once to `serve.log` as `ext NAME: …`, with the first 4 KiB of the adapter's stderr per run. `rexboard ext test` prints them all.
 
+## Actions
+
+An extension can offer something to do with a row, such as sending a message to the seat in it. It declares the action; rexboard asks, checks and runs it ([decision 16](decisions/0016-extensions-can-offer-actions.md)).
+
+```toml
+[[fields]]
+name = "session"
+title = "SESSION"
+hidden = true            # the adapter gives it; no column
+
+[[actions]]
+name = "send"            # [a-z0-9-]+, unique in the extension
+title = "Send message"   # the input line's label, and the word `x` lists
+key = "s"                # one printable character, after the board's x; unique in the extension
+cmd = ["./send", "--", "{field:session}", "{text}"]   # argv, no shell; it must hold {text}
+confirm = "send to {field:session} on {host}: {text}" # the red line before y; default: TITLE: TEXT?
+when = ["session"]       # the action applies to a row with a value for each of these fields
+max = 1000               # bytes of text, 1 to 4096
+timeout = 10             # seconds, 1 to 60; the run and what it started are then killed
+```
+
+`confirm`, `when`, `max` and `timeout` are optional; the values above for the last two are their defaults. `cmd` and `confirm` take `{host}` (the row's host), `{field:NAME}` (a declared field of this extension, which the row must have a value for) and `{text}`, the one line the user types. Each placeholder is expanded inside one argv element, so the text can hold quotes, `;`, `$(…)` or a leading `-` and still arrives as one argument; put `--` before it if the program reads options. The program (the first element) cannot be a placeholder. The text is one line with no control characters and at most `max` bytes. The manifest is broken when an action breaks any of this, repeats a name or a key, or names a field it does not declare.
+
+The action runs in the extension's directory with no stdin, in its own process group, with `REXBOARD_EXTENSION`, `REXBOARD_ACTION` and `REXBOARD_SETTINGS` (its `[extensions.settings]` as JSON) in the environment. It succeeds on exit 0, and what it printed first is the result. A non-zero exit, a timeout or a program that cannot start is a failure that says so. rexboard keeps the first 4 KiB of each output.
+
+`rexboard ext run NAME ACTION KEY --text TEXT [--dry-run | --yes]` runs it from the command line.
+
 ## Trust
 
-An extension runs with your permissions and sees every row's labels and titles, so enable only adapters you trust. Its `cmd` runs without a shell, in the extension's directory, in its own process group. Anything it leaves running when it exits, such as a process started with `&`, is stopped.
+An extension runs with your permissions and sees every row's labels and titles, so enable only adapters you trust. Its actions run the same way, after you confirm them. Its `cmd` runs without a shell, in the extension's directory, in its own process group. Anything it leaves running when it exits, such as a process started with `&`, is stopped.
 
 ## Commands
 
@@ -144,7 +173,7 @@ old-tool        -         yes      broken: contract 2 is not ...  ~/.config/rexb
 gone            -         yes      enabled, but not found         -
 ```
 
-`LAST RUN` comes from serve, as `ok 41ms` or the run's error, and only when serve is already running: `ext ls` never starts it. A broken extension says why, and a name enabled in config.toml but found nowhere says so. `--json` prints an array with `name`, `contract`, `enabled`, `dir`, `last_run` (`{ok, error, at, ms}` or `null`) and `problem`.
+`LAST RUN` comes from serve, as `ok 41ms` or the run's error, and only when serve is already running: `ext ls` never starts it. A broken extension says why, and a name enabled in config.toml but found nowhere says so. `--json` prints an array with `name`, `contract`, `enabled`, `dir`, `last_run` (`{ok, error, at, ms}` or `null`), `problem`, `icon` and `actions` (their names).
 
 ### `rexboard ext test NAME [--rows FILE]`
 
@@ -159,7 +188,17 @@ problem: undeclared field owner
 
 It sends serve's rows, starting serve when nothing answers, as `ls` does. `--rows FILE` sends the rows in FILE instead: an array as `rexboard ls --json` prints it, so `rexboard ls --json --all > rows.json` saves a set to test against. The adapter's stderr goes to stderr.
 
-It exits 0 when the answer is valid. It exits 1 with `EXTENSION` when the answer breaks the contract, when the run fails (`my-tool: exited with exit status: 3`, `my-tool: timed out after 5s and was stopped`), when the extension is broken, or when there is none of that name. `--json` prints `{ok, extension, ms, sent, rows, problems}`.
+It exits 0 when the answer is valid. It exits 1 with `EXTENSION` when the answer breaks the contract, when the run fails (`my-tool: exited with exit status: 3`, `my-tool: timed out after 5s and was stopped`), when the extension is broken, or when there is none of that name. `--json` prints `{ok, extension, ms, sent, rows, problems, actions}`. It lists the extension's actions after the rows and does not run them.
+
+### `rexboard ext run NAME ACTION KEY --text TEXT [--dry-run | --yes] [--rows FILE]`
+
+Runs extension `NAME`'s action `ACTION` on the row `KEY` (`host/block`, as `rexboard ls` prints it), with the checks the board makes: the row must have a value for each field in `when`, the text must be one line within `max`. Rows come from serve, which has the extension's fields only while the extension is enabled; `--rows FILE` reads them from a file as `ext test` does.
+
+- `--dry-run` prints the confirm line and the argv, and runs nothing. With `--json`: `{ok, extension, action, key, argv, confirm, dry_run: true, output: null}`.
+- `--yes` runs it. On a terminal, without `--yes`, it prints the confirm line and `[y/N]` on stderr and runs on `y`. With no terminal and neither flag it fails and runs nothing.
+- It prints `TITLE: FIRST LINE` (`done` when the run printed none), or with `--json` the object above with `dry_run: false` and `output`.
+
+It exits 1 with `EXTENSION` when the extension, action or row is not there, the action does not apply, the text is refused, the run fails or times out, or the answer was not `y`.
 
 ### `rexboard ext new NAME`
 

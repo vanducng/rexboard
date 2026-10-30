@@ -1,6 +1,6 @@
 # 4. Extensions, not a built-in core
 
-**Status:** Accepted, 2026-10-25. Amended 2026-10-27
+**Status:** Accepted, 2026-10-25. Amended 2026-10-27, 2026-10-31
 
 ## Context
 
@@ -11,7 +11,7 @@ Tools around the agents (a seat manager, a project layout, a ticket system) each
 - An extension is a directory: an `extension.toml` manifest and an adapter in any language. Each run, serve writes the rows as JSON on the adapter's stdin and reads fields per row from its stdout.
 - The contract is versioned (`contract = 1`) and documented with samples a test parses ([Extensions](../extensions.md)).
 - Only names listed in `extensions.enabled` run; dropping a directory in runs nothing.
-- Contract 1 gives fields, and optionally a fallback status for rows with no record. It cannot act, add keys or add views. Fields become columns, views and filter keys on their own.
+- Contract 1 gives fields, and optionally a fallback status for rows with no record. It cannot add views. Actions came later ([16](0016-extensions-can-offer-actions.md)). Fields become columns, views and filter keys on their own.
 - Not in-process Lua or a plugin API: rexboard only fetches data, so a process with JSON in and out is enough, works in any language, and cannot crash or stall the board (timeouts, output caps, its own process group).
 - No tool is named in `src/`.
 - Harness adapters (`src/harness/`) are not extensions. They run inside the agent's hook on every event, and they read the dialogs answer mode's guard depends on ([7](0007-acting-on-panes-is-guarded.md)), so they stay compiled and pinned by captured fixtures. Extensions add data and never decide an action.
@@ -24,4 +24,4 @@ Tools around the agents (a seat manager, a project layout, a ticket system) each
 
 ## Supersedes
 
-None. Amended 2026-10-27: the harness adapter bullet.
+None. Amended 2026-10-27: the harness adapter bullet. Amended 2026-10-31: actions, by 16.

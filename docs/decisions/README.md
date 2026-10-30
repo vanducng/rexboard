@@ -31,6 +31,7 @@ These decide between options the records do not cover.
 | [13](0013-rexboard-ships-the-hooks-it-relies-on.md) | rexboard ships the hooks it relies on | Accepted; amended |
 | [14](0014-writes-to-user-config-are-explicit-reversible-and-fail-open.md) | Writes to user config are explicit, reversible and fail open | Accepted |
 | [15](0015-scope-and-non-goals.md) | Scope and non-goals | Accepted |
+| [16](0016-extensions-can-offer-actions.md) | Extensions can offer actions | Accepted |
 
 ## Adding or changing one
 
