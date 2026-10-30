@@ -257,6 +257,13 @@ impl Board {
                 );
                 Ok(vec![self.insert(host, src, now, false)?])
             }
+            Event::BlockMoved {
+                block_id,
+                window_id,
+                ..
+            } => Ok(self.change(host, block_id, now, |src| {
+                src.window_id.clone_from(window_id);
+            })),
             Event::BlockClosed { block_id, .. } => {
                 let key = (host.to_owned(), block_id.clone());
                 Ok(self.rows.remove(&key).map(|_| key).into_iter().collect())
@@ -266,7 +273,7 @@ impl Board {
             } => {
                 let tab = (host.to_owned(), window_id.clone());
                 self.tabs.insert(tab, label.clone().unwrap_or_default());
-                Ok(Vec::new())
+                Ok(self.relabel(host, |src| &src.window_id == window_id))
             }
             Event::WindowClosed { window_id, .. } => {
                 self.tabs.remove(&(host.to_owned(), window_id.clone()));
@@ -969,6 +976,69 @@ mod tests {
             get("block:shell").suspect,
             "a login shell in front is still suspect"
         );
+    }
+
+    #[test]
+    fn a_moved_block_keeps_its_row_and_takes_the_new_windows_tab() {
+        let mut board = Board::default();
+        board
+            .apply(
+                "mini",
+                &snapshot(json!([block(
+                    "block:seat",
+                    "working",
+                    "2026-01-01T00:00:00Z"
+                )])),
+                at(0),
+            )
+            .unwrap();
+        let before = board.rows(at(1)).remove(0);
+        assert_eq!(
+            (before.pane.window_id.as_str(), before.pane.tab.as_str()),
+            ("window:api", "main")
+        );
+        let events = [
+            r#"{"v":1,"type":"window_created","session_id":"session:api","window_id":"window:two","label":"two"}"#,
+            r#"{"v":1,"type":"block_moved","session_id":"session:api","block_id":"block:seat","window_id":"window:two"}"#,
+        ];
+        for (i, text) in events.iter().enumerate() {
+            board.apply("mini", &line(text), at(2 + i as i64)).unwrap();
+        }
+        let after = board.rows(at(5)).remove(0);
+        assert_eq!(
+            (after.pane.window_id.as_str(), after.pane.tab.as_str()),
+            ("window:two", "two")
+        );
+        assert_eq!(after.since, before.since, "a move is not a new row");
+        let unknown = r#"{"v":1,"type":"block_moved","session_id":"session:api","block_id":"block:none","window_id":"window:two"}"#;
+        assert!(
+            board
+                .apply("mini", &line(unknown), at(6))
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_window_created_after_its_blocks_arrived_still_names_their_tab() {
+        let mut board = Board::default();
+        board
+            .apply(
+                "mini",
+                &snapshot(json!([block(
+                    "block:seat",
+                    "working",
+                    "2026-01-01T00:00:00Z"
+                )])),
+                at(0),
+            )
+            .unwrap();
+        let moved = r#"{"v":1,"type":"block_moved","session_id":"session:api","block_id":"block:seat","window_id":"window:two"}"#;
+        board.apply("mini", &line(moved), at(1)).unwrap();
+        assert_eq!(board.rows(at(2))[0].pane.tab, "", "no label yet");
+        let created = r#"{"v":1,"type":"window_created","session_id":"session:api","window_id":"window:two","label":"two"}"#;
+        board.apply("mini", &line(created), at(3)).unwrap();
+        assert_eq!(board.rows(at(4))[0].pane.tab, "two");
     }
 
     #[test]

@@ -52,6 +52,11 @@ pub enum Event {
         window_id: String,
         block: Value,
     },
+    BlockMoved {
+        session_id: String,
+        block_id: String,
+        window_id: String,
+    },
     BlockClosed {
         session_id: String,
         block_id: String,
