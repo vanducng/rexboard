@@ -1,14 +1,13 @@
 //! Acts on a pane: answers it (one `rex do` with `send.lua` re-checks the pane and sends a digit
 //! or a line), or closes it.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
 use serde_json::{Value, json};
 
 use crate::error::Error;
-use crate::harness::usage::{self, Procs};
 use crate::output::clean;
 use crate::pane::Pane;
 use crate::rex;
@@ -51,22 +50,8 @@ pub struct Expect {
     pub title: Option<String>,
 }
 
-/// What send.lua needs to accept a `/bin/sh` wrapper in front as a tmux client: its pid, the one
-/// tmux child under it, and the socket of the server that lists the child as an attached client.
-/// Rex lists no children, so only a pane on this host, whose process table `ps` reads, can have
-/// it; any other wrapper is refused. send.lua checks all of it again just before it types.
-fn wrapper_proof(
-    pane: &Pane,
-    procs: impl FnOnce() -> Procs,
-    attached: impl FnOnce(u32) -> Option<PathBuf>,
-) -> Option<Value> {
-    let pid = pane
-        .pid
-        .filter(|_| pane.host == "local" && pane.tmux && pane.process.as_deref() != Some("tmux"))?;
-    let client = procs().tmux_child(pid)?;
-    let socket = attached(client)?;
-    Some(json!({ "pid": pid, "client": client, "socket": socket }))
-}
+/// Why a seat behind OpenRig's `sh -c ... tmux attach` wrapper is not answered.
+pub const WRAPPED: &str = "a seat behind OpenRig's sh wrapper around tmux cannot be answered from rexboard yet; nothing sent";
 
 /// Sends `action` to the pane if it still shows `expect`; else why nothing was sent.
 pub fn send(
@@ -84,7 +69,6 @@ pub fn send(
             "kind": expect.kind,
             "fingerprint": expect.fingerprint,
             "title": expect.title,
-            "wrapper": wrapper_proof(pane, Procs::read, usage::attached_socket),
         },
         "harness": crate::harness::processes(),
         "harness_prefixes": crate::harness::process_prefixes(),
@@ -116,6 +100,7 @@ pub fn send(
             "{} is in front, not the agent; nothing sent",
             field("detail")
         ),
+        Some("wrapped") => WRAPPED.to_owned(),
         Some("prompt_changed") => "the screen changed since it was read; nothing sent".to_owned(),
         Some("gone") => "the pane is gone; nothing sent".to_owned(),
         Some(code) => format!("{}; nothing sent", clean(code)),
@@ -196,45 +181,6 @@ mod tests {
         let argv = std::fs::read_to_string(dir.join("argv")).unwrap();
         let (head, args) = argv.trim().split_once(" --args ").unwrap();
         (head.to_owned(), serde_json::from_str(args).unwrap())
-    }
-
-    #[test]
-    fn answer_names_a_wrapper_only_with_one_attached_tmux_child_on_this_host() {
-        let procs = || Procs::parse("310 100 /bin/sh\n311 310 /usr/bin/tmux\n320 100 /bin/sh\n");
-        let socket = || Some(PathBuf::from("/tmp/probe.sock"));
-        let proof = |host: &str, pid: u32, tmux: bool, attached: Option<PathBuf>| {
-            let mut pane = pane(host);
-            pane.pid = Some(pid);
-            pane.tmux = tmux;
-            wrapper_proof(&pane, procs, |_| attached)
-        };
-        assert_eq!(
-            proof("local", 310, true, socket()),
-            Some(json!({ "pid": 310, "client": 311, "socket": "/tmp/probe.sock" }))
-        );
-        assert_eq!(
-            proof("local", 310, true, None),
-            None,
-            "a child no server lists"
-        );
-        assert_eq!(
-            proof("local", 320, true, socket()),
-            None,
-            "a wrapper of something else"
-        );
-        assert_eq!(
-            proof("mini", 310, true, socket()),
-            None,
-            "ps knows no other host"
-        );
-        assert_eq!(
-            proof("local", 310, false, socket()),
-            None,
-            "not a tmux pane"
-        );
-        let mut no_pid = pane("local");
-        no_pid.tmux = true;
-        assert_eq!(wrapper_proof(&no_pid, procs, |_| socket()), None);
     }
 
     #[test]
@@ -319,6 +265,7 @@ mod tests {
                 json!({ "code": "not_harness", "detail": "zsh" }),
                 "zsh is in front, not the agent; nothing sent",
             ),
+            (json!({ "code": "wrapped", "detail": "bash" }), WRAPPED),
             (
                 json!({ "code": "prompt_changed" }),
                 "the screen changed since it was read; nothing sent",

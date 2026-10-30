@@ -76,10 +76,10 @@ impl App {
         let tmux = tmux_note(row);
         let full = self.place(row, usize::MAX);
         let ending = ending(row);
-        // A narrow footer drops what it ends before it cuts the place.
-        let rest = [ending.as_str(), ""]
+        // A narrow footer drops the tmux note, then what it ends, before it cuts the place.
+        let rest = [(ending.as_str(), tmux), (ending.as_str(), ""), ("", "")]
             .into_iter()
-            .map(|ending| format!(" on {}{ending}?{tmux} y closes", row.pane.host))
+            .map(|(ending, tmux)| format!(" on {}{ending}?{tmux} y closes", row.pane.host))
             .find(|rest| "close ".width() + full.width() + rest.width() <= width)
             .unwrap_or_else(|| format!(" on {}?{tmux} y closes", row.pane.host));
         let room = width.saturating_sub("close ".width() + rest.width());
@@ -234,6 +234,24 @@ mod tests {
                 .is_none(),
             "y after a pause does not bring the question back"
         );
+    }
+
+    #[test]
+    fn a_narrow_close_question_drops_the_tmux_note_before_what_it_ends() {
+        let mut app = app();
+        let mut row = row("local/claude", "working", "working", true);
+        row.pane.process = Some("claude".into());
+        row.pane.tmux = true;
+        app.set_rows(vec![row], hosts());
+        app.selected = Some(Spot::Row("local/claude".into()));
+        typed(&mut app, "dd");
+        let ask = |width| app.close_question(width).unwrap();
+        let full = ask(usize::MAX);
+        assert!(full.contains("ending claude (working)? (tmux keeps running) y closes"));
+        let no_note = full.replace(" (tmux keeps running)", "");
+        assert_eq!(ask(no_note.chars().count()), no_note, "the note goes first");
+        let no_ending = ask(no_note.chars().count() - 1);
+        assert!(!no_ending.contains("ending"), "{no_ending}");
     }
 
     #[test]

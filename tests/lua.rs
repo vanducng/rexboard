@@ -40,11 +40,11 @@ fn observer_announces_a_block_once_rex_places_it() {
     );
 }
 
-fn answer(front: &str, proof: &str, title: &str) -> String {
+fn answer(front: &str, title: &str) -> String {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let out = Command::new(lua())
         .arg(root.join("tests/fixtures/send-harness.lua"))
-        .args([root.join("src/lua").to_str().unwrap(), front, proof, title])
+        .args([root.join("src/lua").to_str().unwrap(), front, title])
         .output()
         .unwrap();
     assert!(
@@ -56,33 +56,20 @@ fn answer(front: &str, proof: &str, title: &str) -> String {
 }
 
 #[test]
-fn answer_goes_to_a_tmux_client_or_a_wrapper_around_an_attached_one() {
-    let refused = "refused not_harness bash";
-    assert_eq!(answer("tmux", "-", "seat-a"), "sent");
-    assert_eq!(answer("wrapper", "attached", "seat-a"), "sent");
-    assert_eq!(answer("wrapper", "-", "seat-a"), refused, "no proof");
+fn answer_goes_to_a_tmux_client_and_never_to_a_wrapper_or_a_shell() {
+    assert_eq!(answer("tmux", "seat-a"), "sent");
     assert_eq!(
-        answer("wrapper", "unlisted", "seat-a"),
-        refused,
-        "a tmux child its server does not list, as a wait-for"
-    );
-    assert_eq!(
-        answer("wrapper", "gone", "seat-a"),
-        refused,
-        "the wrapper no longer has that child"
-    );
-    assert_eq!(
-        answer("wrapper", "left", "seat-a"),
-        refused,
-        "the client left between the first look and the typing"
-    );
-    assert_eq!(
-        answer("wrapper", "attached", "seat-b"),
-        refused,
+        answer("tmux", "seat-b"),
+        "refused not_harness tmux",
         "another seat is on screen"
     );
     assert_eq!(
-        answer("shell", "attached", "seat-a"),
+        answer("wrapper", "seat-a"),
+        "refused wrapped bash",
+        "OpenRig's wrapper around an attached tmux client is refused, whatever the title"
+    );
+    assert_eq!(
+        answer("shell", "seat-a"),
         "refused not_harness zsh",
         "a shell in front is never answered"
     );

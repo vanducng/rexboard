@@ -31,6 +31,9 @@ pub fn answer(args: &AnswerArgs, json: bool) -> Result<()> {
             &[format!("rexboard jump {key}")],
         ));
     }
+    if row.pane.tmux && row.pane.process.as_deref() != Some("tmux") {
+        return Err(refused(send::WRAPPED, &[format!("rexboard jump {key}")]));
+    }
     if let Some(want) = &args.expect {
         expected(&row, want)?;
     }

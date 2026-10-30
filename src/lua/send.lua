@@ -43,6 +43,9 @@ end
 local was, is = wait(a.expect.state, a.expect.kind), wait(main and main.state, main and main.kind)
 if was ~= is then return refuse("status_changed", was .. " → " .. is) end
 
+local process, perr = rex.block.call(term, "process", where)
+if not process then return fail("process", perr) end
+local fg = process.foreground or {}
 local function agent(name)
   if not name then return false end
   name = name:match("[^/]+$") or name
@@ -56,40 +59,16 @@ local function agent(name)
   end
   return false
 end
-
--- OpenRig runs tmux under a `/bin/sh -c` wrapper, which is what Rex shows in front. Rex lists no
--- children, so rexboard names the wrapper, its tmux child and that child's server socket, and this
--- confirms on this host that the child is still under the wrapper and attached to the server.
-local function exec(argv)
-  local ok, out = pcall(rex.exec, argv)
-  return ok and out and out.stdout or ""
+local front = agent(fg.name) or agent(fg.argv0)
+-- A tmux seat's pane shows tmux; its title says which seat is on screen.
+if not front and fg.name == "tmux" and a.expect.title then
+  local title = rex.block.call(term, "title", where)
+  front = title ~= nil and title.title == a.expect.title
 end
-local function wrapped(fg)
-  local w = a.expect.wrapper
-  if not w or fg.pid ~= w.pid or not (fg.argv0 or ""):match("/sh$") then return false end
-  local ppid, comm = exec({ "ps", "-o", "ppid=,comm=", "-p", tostring(w.client) }):match("^%s*(%d+)%s+(.-)%s*$")
-  if tonumber(ppid) ~= w.pid or (comm or ""):match("[^/]*$") ~= "tmux" then return false end
-  for line in exec({ "tmux", "-S", w.socket, "list-clients", "-F", "#{client_pid}" }):gmatch("[^\n]+") do
-    if tonumber(line) == w.client then return true end
-  end
-  return false
-end
-
--- An agent, not a shell, is in front. A tmux seat's pane shows tmux; its title says which seat is
--- on screen.
-local function check_front()
-  local process, perr = rex.block.call(term, "process", where)
-  if not process then return fail("process", perr) end
-  local fg = process.foreground or {}
-  local front = agent(fg.name) or agent(fg.argv0)
-  if not front and (fg.name == "tmux" or wrapped(fg)) and a.expect.title then
-    local title = rex.block.call(term, "title", where)
-    front = title ~= nil and title.title == a.expect.title
-  end
-  if not front then return refuse("not_harness", fg.name or "nothing") end
-end
-local refused = check_front()
-if refused then return refused end
+-- OpenRig's `/bin/sh -c ... tmux attach` wrapper: input through Rex cannot be pinned to the
+-- pane's own tmux client, so it is refused.
+if not front and (fg.argv0 or ""):match("/sh$") then return refuse("wrapped", fg.name) end
+if not front then return refuse("not_harness", fg.name or "nothing") end
 
 local t = tail(a)
 if not t.ok then return t end
@@ -158,9 +137,6 @@ else
     { type = "key", payload = { key = "enter", action = "press" } },
   }
 end
--- The tail read took time: confirm the pane still shows the seat just before typing.
-refused = check_front()
-if refused then return refused end
 for i, event in ipairs(events) do
   local _, err = rex.call("block.event", { session_id = a.session_id, block_id = a.block_id, event = event })
   -- After a paste, a failed Enter leaves the text in the pane's input line.
