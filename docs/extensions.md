@@ -35,7 +35,7 @@ description = "A row's project: its session label up to the first separator"
 cmd = ["./adapter"]      # argv, no shell; a leading ./ is the extension's directory
 every = 10               # seconds between runs, at least 2
 timeout = 5              # seconds, at least 1 and less than every; a slower run is killed
-icon = "\uF487"          # one character, one cell wide: its mark on the card with "icons": "nerd"
+icon = "\uF487"          # one character, one cell wide: the extension's mark (the card draws the fields' own)
 [[fields]]
 name = "project"         # [a-z0-9-]+, stored on a row as session-prefix.project
 title = "PROJECT"        # the column's header; keep it the name in capitals, so it says what to type
@@ -46,7 +46,7 @@ status = false           # true lets it give rows with no record a status
 
 `description`, `every`, `timeout`, `icon`, `fields` (and each field's `icon`) and `provides` are optional; the values above for `every` and `timeout` are their defaults. A field needs both `name` and `title`. The extension is broken when the manifest has a key it does not know, a name that does not match the directory, a name or field name that is not `[a-z0-9-]+`, another contract, an empty `cmd`, `every` under 2, `timeout` of 0 or not less than `every`, a field declared twice, or an `icon` that is not one character one cell wide. `rexboard ext ls` says why, and serve skips it and logs why.
 
-The icons show only with `"icons": "nerd"` (see [TUI](tui.md#icons)): the card labels the extension's fields with its `icon` and puts each field's `icon` in place of its name, `<icon> <icon> api`. Without one, the card's package mark stands in and the extension's name and the field's name stay. In words mode, and everywhere else (column headers, `ls`, `--json`), titles and names are used as before; `ext ls --json` lists an extension's `icon`. A Nerd Font glyph from the Basic Multilingual Plane (U+E000 to U+F8FF) is the safe choice: one from plane 15 can draw two cells wide in some terminals. A rexboard older than this key does not know it, so it marks a manifest that has one broken.
+The icons show only with `"icons": "nerd"` (see [TUI](tui.md#icons)): the card labels each of the extension's fields with the field's `icon`, in place of its name. A field with no `icon` keeps its name. The extension's own `icon` is not drawn on the card, which has no extension row. In words mode, and everywhere else (column headers, `ls`, `--json`), titles and names are used as before; `ext ls --json` lists an extension's `icon`. A Nerd Font glyph from the Basic Multilingual Plane (U+E000 to U+F8FF) is the safe choice: one from plane 15 can draw two cells wide in some terminals. A rexboard older than this key does not know it, so it marks a manifest that has one broken.
 
 Extensions are found in `$XDG_CONFIG_HOME/rexboard/extensions` (`~/.config/rexboard/extensions`), then in each of `extensions.dirs`, one directory per extension. The first of a name wins; `ext ls` shows a later one as `broken: shadowed by an earlier extension named NAME`. Only the names in `extensions.enabled` run: a directory dropped in runs nothing by itself.
 

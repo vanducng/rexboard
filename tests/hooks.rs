@@ -947,3 +947,39 @@ fn uninstall_never_writes_back_a_backup_an_earlier_install_made() {
     assert_eq!(out["harnesses"][0]["state"], "removed", "{out}");
     assert!(!home.join(".codex/hooks.json").exists(), "install made it");
 }
+
+#[test]
+fn status_says_the_icons_are_off_with_the_font_check_and_how_to_turn_them_on() {
+    let home = tempfile::tempdir().unwrap();
+    let say = |envs: &[(&str, &str)]| {
+        let mut cmd = rexboard(home.path());
+        for (k, v) in envs {
+            cmd.env(k, v);
+        }
+        let out = cmd.args(["hooks", "status"]).output().unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let off = say(&[("REXBOARD_ICONS", "text")]);
+    let line = off.lines().find(|l| l.starts_with("icons")).expect(&off);
+    assert!(
+        line.contains("off (words)")
+            && line.contains("printf '|\\356\\257\\222|\\n'")
+            && line.contains("\"icons\": \"nerd\" in tui.json"),
+        "{line}"
+    );
+    assert_eq!(
+        off.lines().filter(|l| l.starts_with("icons")).count(),
+        1,
+        "one line"
+    );
+    let on = say(&[("REXBOARD_ICONS", "nerd")]);
+    assert!(on.lines().any(|l| l == "icons  nerd marks on"), "{on}");
+    let json = rexboard(home.path())
+        .args(["hooks", "status", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        !String::from_utf8(json.stdout).unwrap().contains("icons"),
+        "--json is unchanged"
+    );
+}

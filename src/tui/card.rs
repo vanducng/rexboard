@@ -91,7 +91,7 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
             theme::quiet(),
         ));
     }
-    let mut meta = super::meta::lines(app, row, text);
+    let mut meta = super::meta::lines(app, row, text, width);
     meta.insert(0, Line::default());
     let window = room.saturating_sub(1);
     let blocked = row.pane.state == "blocked";
@@ -723,41 +723,6 @@ mod tests {
     }
 
     #[test]
-    fn the_card_says_who_where_how_and_what_at_80_140_and_200() {
-        let app = asking("Bash: git push origin main --force-with-lease");
-        for (width, height) in [(80u16, 30u16), (140, 30), (200, 40), (140, 60)] {
-            let text = render(&app, width, height);
-            let card = card_of(&text);
-            assert!(
-                card[0].starts_with("━━ ! blocked · permission · seat-b · waiting 5h43m ━"),
-                "{width}: the bar says only what, who and how long:\n{text}"
-            );
-            assert!(
-                card[0].ends_with("━━"),
-                "{width}: the bar is full width:\n{text}"
-            );
-            assert_eq!(
-                card[1], " Bash: git push origin main --force-with-lease",
-                "{width}"
-            );
-            assert!(!text.contains('│'), "{width}: no pane on the right");
-            let words = |l: &String| l.split_whitespace().collect::<Vec<_>>().join(" ");
-            let facts: Vec<String> = card[2..].iter().map(words).collect();
-            assert_eq!(
-                facts,
-                [
-                    "",
-                    "where api › main › seat-b",
-                    "host mini harness claude",
-                    "title seat-b title source native"
-                ],
-                "{width}: one blank line, then the facts, where first, each once:\n{text}"
-            );
-            assert!(list_rows(&text) >= 3, "{width}:\n{text}");
-        }
-    }
-
-    #[test]
     fn a_done_row_shows_its_headline_then_its_body_at_most_120_wide() {
         let mut app = fuller();
         let long = "word ".repeat(80);
@@ -777,9 +742,10 @@ mod tests {
             card[0]
         );
         assert!(
-            card.iter()
-                .any(|l| l.starts_with(" host ") && l.trim_end().ends_with("turn    6m")),
-            "the turn is a fact: {text}"
+            render(&app, 120, 40)
+                .lines()
+                .any(|l| l.starts_with(" turn    6m")),
+            "the turn is a fact where the list has no TURN column: {text}"
         );
         assert_eq!(card[1], " Opened PR #31; CI is green.");
         assert!(card[2].starts_with("   word word"), "{text}");
@@ -924,73 +890,293 @@ mod tests {
     }
 
     #[test]
-    fn the_facts_share_rows_when_wide_and_take_one_each_when_narrow() {
-        let app = asking("Bash: ls");
-        let facts = |width: u16| -> Vec<String> {
-            let text = render(&app, width, 30);
+    fn the_card_says_who_where_how_and_what_at_80_140_and_200() {
+        let app = asking("Bash: git push origin main --force-with-lease");
+        for (width, height) in [(80u16, 30u16), (140, 30), (200, 40), (140, 60)] {
+            let text = render(&app, width, height);
             let card = card_of(&text);
-            let blank = card.iter().position(|l| l.trim().is_empty()).unwrap();
-            card[blank + 1..]
-                .iter()
-                .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
-                .collect()
+            assert!(
+                card[0].starts_with("━━ ! blocked · permission · seat-b · waiting 5h43m ━"),
+                "{width}: the bar says only what, who and how long:\n{text}"
+            );
+            assert!(
+                card[0].ends_with("━━"),
+                "{width}: the bar is full width:\n{text}"
+            );
+            assert_eq!(
+                card[1], " Bash: git push origin main --force-with-lease",
+                "{width}"
+            );
+            assert!(!text.contains('│'), "{width}: no pane on the right");
+            let words = |l: &String| l.split_whitespace().collect::<Vec<_>>().join(" ");
+            let facts: Vec<String> = card[2..].iter().map(words).collect();
+            // The list shows host, harness and, from 100, where; the card says the rest.
+            let mut want = vec!["", "where api › main › seat-b"];
+            if width >= 100 {
+                want.remove(1);
+            }
+            want.push("title seat-b title source native");
+            assert_eq!(facts, want, "{width}:\n{text}");
+            assert!(list_rows(&text) >= 3, "{width}:\n{text}");
+        }
+    }
+
+    /// One seat that has every fact: a last turn, usage, opt-in cost and 5h, and three extension
+    /// fields, `rig` and `project` first (they get columns from 120) and `role`.
+    fn grid_app() -> App {
+        use crate::client::Field;
+        let field = |name: &str, icon: &str| Field {
+            id: format!("fake.{name}"),
+            name: name.into(),
+            title: name.to_uppercase(),
+            icon: Some(icon.into()),
+            ..Field::default()
         };
-        assert_eq!(
-            facts(80),
-            [
-                "where api › main › seat-b",
-                "host mini harness claude",
-                "title seat-b title source native"
-            ]
+        let mut app = App::default();
+        let mut seat = row("local/seat-a", "done", "needs_you", false);
+        seat.pane.title = "✳ seat-a@demo".into();
+        seat.pane.source = "bridge".into();
+        seat.last_turn = Some(372);
+        seat.usage = Some(crate::harness::usage::Usage {
+            model: Some("claude-opus-4-5".into()),
+            ctx_pct: Some(25),
+            ctx_window: Some(1_000_000),
+            tok: Some(250_000),
+            cost_usd: Some(1.24),
+            quota_5h: Some(42),
+        });
+        for (name, value) in [("rig", "team-a"), ("project", "api"), ("role", "lead")] {
+            seat.ext.insert(format!("fake.{name}"), value.into());
+        }
+        app.set_extensions(
+            vec![
+                field("rig", "\u{f502}"),
+                field("project", "\u{f503}"),
+                field("role", "\u{f504}"),
+            ],
+            std::collections::BTreeMap::new(),
         );
+        app.set_rows(vec![seat], hosts());
+        app.selected = Some(Spot::Row("local/seat-a".into()));
+        app
+    }
+
+    /// The facts as drawn, from the row under the blank line to the card's last row.
+    fn facts_at(app: &App, width: u16) -> Vec<String> {
+        let card = card_of(&render(app, width, 40));
+        let blank = card.iter().position(|l| l.trim().is_empty()).unwrap();
+        card[blank + 1..].to_vec()
+    }
+
+    #[test]
+    fn the_facts_are_a_grid_of_tracks_in_three_groups_with_where_alone_on_top() {
+        let app = grid_app();
         assert_eq!(
-            facts(36),
+            facts_at(&app, 80),
             [
-                "where api › main › seat-b",
-                "host mini",
-                "harness claude",
-                "title seat-b title",
-                "source native"
+                " where   api › main › seat-a",
+                " turn    6m                     model   claude-opus-4-5",
+                " ctx     25% · 250k of 1.0M",
+                " rig     team-a                 project api",
+                " role    lead",
+                " title   seat-a@demo            source  bridge",
+            ],
+            "two tracks at 80: a group wraps, and its next row starts under the first track"
+        );
+        let mut opted = grid_app();
+        opted.columns = vec!["cost".into(), "5h".into()];
+        let rows = facts_at(&opted, 100);
+        assert_eq!(
+            rows[0],
+            " turn    6m                     model   claude-opus-4-5        ctx     25% · 250k of 1.0M"
+        );
+        assert_eq!(rows[1], " cost    $1.24                  5h      42%");
+    }
+
+    #[test]
+    fn tracks_to_a_row_follow_the_card_width_in_words_and_with_glyphs() {
+        let tracks = |app: &App, width: u16| {
+            let private = |c: char| ('\u{e000}'..='\u{f8ff}').contains(&c);
+            let line = facts_at(app, width)
+                .into_iter()
+                .find(|l| l.contains("6m") || l.contains("turn"))
+                .unwrap();
+            if app.nerd {
+                line.chars().filter(|c| private(*c)).count()
+            } else {
+                line.split_whitespace()
+                    .filter(|w| ["turn", "model", "ctx"].contains(w))
+                    .count()
+            }
+        };
+        let mut words = grid_app();
+        words.columns = Vec::new();
+        for (width, want) in [(58u16, 1), (59, 2), (90, 2), (91, 3), (120, 3)] {
+            assert_eq!(tracks(&words, width), want, "words at {width}");
+        }
+        let mut glyphs = grid_app();
+        glyphs.nerd = true;
+        for (width, want) in [(46u16, 1), (47, 2), (72, 2), (73, 3), (120, 3)] {
+            assert_eq!(tracks(&glyphs, width), want, "glyphs at {width}");
+        }
+    }
+
+    #[test]
+    fn with_glyphs_the_labels_are_one_cell_and_the_grid_takes_three_tracks_at_80() {
+        use crate::tui::icons;
+        let mut app = grid_app();
+        app.nerd = true;
+        let g = |i: icons::Icon| i.glyph;
+        assert_eq!(
+            facts_at(&app, 80),
+            [
+                format!(
+                    " {} api › {} main › {} seat-a",
+                    g(icons::SESSION),
+                    g(icons::WINDOW),
+                    g(icons::BLOCK)
+                ),
+                format!(
+                    " {} 6m                     {} claude-opus-4-5        {} 25% · 250k of 1.0M",
+                    g(icons::TURN),
+                    g(icons::MODEL),
+                    g(icons::CTX)
+                ),
+                " \u{f502} team-a                 \u{f503} api                    \u{f504} lead"
+                    .to_string(),
+                format!(
+                    " {} seat-a@demo            {} bridge",
+                    g(icons::TITLE),
+                    g(icons::source("bridge").unwrap())
+                ),
             ]
         );
     }
 
     #[test]
-    fn nerd_icons_label_each_fact_with_one_cell_at_60_100_and_140() {
-        let mut app = asking("Bash: ls");
-        let private = |c: char| ('\u{e000}'..='\u{f8ff}').contains(&c);
-        for nerd in [false, true] {
-            app.nerd = nerd;
-            for width in [60u16, 100, 140] {
-                let text = render(&app, width, 30);
-                assert!(
-                    text.lines().all(|l| l.width() <= usize::from(width)),
-                    "{width}:\n{text}"
-                );
-                let card = card_of(&text);
-                let blank = card.iter().position(|l| l.trim().is_empty()).unwrap();
-                let facts = &card[blank + 1..];
-                if !nerd {
-                    assert!(facts[0].starts_with(" where "), "{width}:\n{text}");
-                    assert!(!text.chars().any(private), "{width}: words only");
-                    continue;
-                }
-                for line in facts {
-                    let mut chars = line.chars();
-                    assert_eq!(chars.next(), Some(' '), "{line}");
-                    assert!(chars.next().is_some_and(private), "a glyph leads: {line}");
-                    assert_eq!(chars.next(), Some(' '), "one cell, then the value: {line}");
-                }
-                let place = facts.iter().find(|l| l.contains(" › ")).unwrap();
-                assert_eq!(
-                    place.chars().filter(|c| private(*c)).count(),
-                    3,
-                    "the session, window and block each lead: {place}"
-                );
-                assert!(place.ends_with("seat-b"), "{place}");
-                assert!(!text.contains(" host "), "{width}: no word labels:\n{text}");
-            }
+    fn a_fact_the_list_row_already_shows_in_a_visible_column_is_left_out() {
+        let words = |app: &App, width: u16| -> String {
+            facts_at(app, width)
+                .iter()
+                .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let app = grid_app();
+        // Host and harness never, at any width.
+        for width in [36u16, 80, 140, 200] {
+            let text = words(&app, width);
+            assert!(
+                !text.contains("host") && !text.contains("harness"),
+                "{width}:\n{text}"
+            );
         }
+        // The turn has a column from 140; where from 100, with every label whole.
+        assert!(words(&app, 120).contains("turn 6m") && !words(&app, 140).contains("turn"));
+        assert!(words(&app, 80).contains("where api › main › seat-a"));
+        assert!(!words(&app, 120).contains("where") && !words(&app, 140).contains("where"));
+        // rig and project have columns from 120, role from 160.
+        let at_140 = words(&app, 140);
+        assert!(
+            !at_140.contains("rig team-a") && !at_140.contains("project api"),
+            "{at_140}"
+        );
+        assert!(at_140.contains("role lead"), "{at_140}");
+        assert!(
+            !words(&app, 200).contains("role"),
+            "all three have columns at 200"
+        );
+        assert!(
+            words(&app, 100).contains("rig team-a"),
+            "no column below 120"
+        );
+        // A label the list cut keeps where.
+        let mut long = grid_app();
+        let mut rows = long.rows.clone();
+        rows[0].pane.session = "api-".to_owned() + &"x".repeat(40);
+        long.set_rows(rows, hosts());
+        assert!(
+            words(&long, 140).contains("where api-"),
+            "{}",
+            words(&long, 140)
+        );
+        // A title that repeats the block label is left out.
+        let mut same = grid_app();
+        let mut rows = same.rows.clone();
+        rows[0].pane.title = "✳ seat-a".into();
+        same.set_rows(rows, hosts());
+        let text = words(&same, 80);
+        assert!(
+            !text.contains("title") && text.contains("source bridge"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_missing_value_is_left_out_and_a_long_one_is_cut_at_its_track() {
+        let words = |app: &App, width: u16| -> Vec<String> {
+            facts_at(app, width)
+                .iter()
+                .map(|l| l.trim_end().to_owned())
+                .collect()
+        };
+        let mut bare = grid_app();
+        let mut rows = bare.rows.clone();
+        rows[0].last_turn = None;
+        rows[0].usage = None;
+        rows[0].ext.remove("fake.project");
+        bare.set_rows(rows, hosts());
+        assert_eq!(
+            words(&bare, 80),
+            [
+                " where   api › main › seat-a",
+                " rig     team-a                 role    lead",
+                " title   seat-a@demo            source  bridge",
+            ],
+            "no turn, usage or project: nothing prints `-`, the group closes up, no empty row"
+        );
+        let mut long = grid_app();
+        let mut rows = long.rows.clone();
+        rows[0].usage.as_mut().unwrap().model = Some("claude-sonnet-4-5-20251001-extended".into());
+        long.set_rows(rows, hosts());
+        let lines = words(&long, 80);
+        assert_eq!(
+            lines[1],
+            " turn    6m                     model   claude-sonnet-4-5-2…"
+        );
+        // Alone on its row, a value may use the rest of the width.
+        let narrow = words(&long, 50);
+        assert!(
+            narrow
+                .iter()
+                .any(|l| l == " model   claude-sonnet-4-5-20251001-extended"),
+            "{narrow:#?}"
+        );
+    }
+
+    #[test]
+    fn two_extensions_with_the_same_field_name_are_told_apart_by_their_ids() {
+        use crate::client::Field;
+        let mut app = grid_app();
+        let dup = |ext: &str| Field {
+            id: format!("{ext}.rig"),
+            name: format!("{ext}.rig"),
+            title: "RIG".into(),
+            ..Field::default()
+        };
+        let mut rows = app.rows.clone();
+        rows[0].ext.insert("alpha.rig".into(), "a-team".into());
+        rows[0].ext.insert("beta.rig".into(), "b-team".into());
+        app.set_extensions(
+            vec![dup("alpha"), dup("beta")],
+            std::collections::BTreeMap::new(),
+        );
+        app.set_rows(rows, hosts());
+        let text = facts_at(&app, 80).join("\n");
+        assert!(
+            text.contains("alp…rig a-team") && text.contains("bet…rig b-team"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -1027,7 +1213,7 @@ mod tests {
                 "{width}x{height}: from the top:\n{text}"
             );
             assert!(
-                card.iter().any(|line| line.contains("where   ")),
+                card.iter().any(|line| line.contains("source  native")),
                 "{width}x{height}: with room the facts show under the ask:\n{text}"
             );
         }

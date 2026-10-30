@@ -39,6 +39,8 @@ Agents inside tmux, and pi, report through hooks: run `rexboard hooks install` o
 | `?` | Every key |
 | `q` | Back, or quit |
 
+Under the list, the card shows what the selected agent said and the facts the list does not: a grid of labelled values, with `host`, `harness` and anything a visible column already shows left out. It uses words; for Nerd Font marks, `rexboard hooks status` says how to check your font and turn them on (`"icons": "nerd"` in `tui.json`).
+
 Press `?` on the board for every key. What the board shows is also a command with `--json`, such as `rexboard ls --json`.
 
 ## How it works

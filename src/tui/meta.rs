@@ -5,19 +5,17 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use super::app::App;
-use super::columns::{Col, opted};
+use super::columns::{Col, Columns, Tier, opted};
 use super::icons;
 use super::theme;
 use crate::board::Row;
 use crate::client::Field;
-use crate::output::{SEP, clean, context, dollars, fit, harness, labels, path, span};
+use crate::output::{SEP, clean, context, dollars, fit, labels, path, span, squeeze};
 use crate::pane::bare_title;
 
 /// A fact the card states. Its label is one token: a word, or with `"icons": "nerd"` a glyph.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Fact {
-    Host,
-    Harness,
     Turn,
     Model,
     Ctx,
@@ -32,13 +30,6 @@ impl Fact {
     pub fn label(self, row: &Row, nerd: bool) -> &'static str {
         if nerd {
             return match self {
-                Fact::Host => icons::HOST.glyph,
-                Fact::Harness => row
-                    .pane
-                    .harness
-                    .as_deref()
-                    .and_then(crate::harness::mark)
-                    .map_or("harness", |i| i.glyph),
                 Fact::Turn => icons::TURN.glyph,
                 Fact::Model => icons::MODEL.glyph,
                 Fact::Ctx => icons::CTX.glyph,
@@ -51,8 +42,6 @@ impl Fact {
             };
         }
         match self {
-            Fact::Host => "host",
-            Fact::Harness => "harness",
             Fact::Turn => "turn",
             Fact::Model => "model",
             Fact::Ctx => "ctx",
@@ -65,135 +54,145 @@ impl Fact {
     }
 }
 
-/// The most a short fact shows before it is cut, so a long title cannot push the columns apart.
-const VALUE: usize = 24;
-/// Short facts to a row at most, and the columns between them.
-const ACROSS: usize = 3;
+/// A track's value, in columns; the label cell before it is 7 in words and 1 in glyphs.
+const VALUE: usize = 20;
+/// The columns between tracks.
 const GAP: usize = 3;
+/// The card width from which two and three tracks fit a row, in words and with glyphs.
+const WORD_TRACKS: [usize; 2] = [59, 91];
+const GLYPH_TRACKS: [usize; 2] = [47, 73];
 
-/// The facts for `row` in `width` columns.
-pub fn lines(app: &App, row: &Row, width: usize) -> Vec<Line<'static>> {
+/// The facts for `row` in `width` columns of a `board` as wide, as a grid: each fact a track of
+/// a label and a value, one to three tracks to a row; the facts the list row already shows in a
+/// visible column are left out.
+pub fn lines(app: &App, row: &Row, width: usize, board: usize) -> Vec<Line<'static>> {
+    let columns = app.columns(u16::try_from(board).unwrap_or(u16::MAX), board);
     let title = bare_title(&row.pane.title);
     let usage = row.usage.as_ref();
-    // How the agent runs, then what the pane calls itself: each set starts its own row.
-    let labelled = |facts: Vec<Option<(Fact, String)>>| -> Vec<(&'static str, String)> {
-        facts
-            .into_iter()
-            .flatten()
-            .map(|(fact, value)| (fact.label(row, app.nerd), value))
-            .collect()
-    };
-    let runs = labelled(vec![
-        Some((Fact::Host, row.pane.host.clone())),
-        Some((Fact::Harness, harness(row))),
-        row.last_turn.map(|secs| (Fact::Turn, span(secs))),
+    let fact = |fact: Fact, value: String| (fact.label(row, app.nerd).to_owned(), value);
+    let opt = |col| opted(&app.columns, col);
+    let runs: Vec<_> = [
+        row.last_turn
+            .filter(|_| !columns.has(Col::Turn))
+            .map(|s| fact(Fact::Turn, span(s))),
         usage
             .and_then(|u| u.model.clone())
-            .map(|m| (Fact::Model, clean(&m))),
-        usage.and_then(context).map(|c| (Fact::Ctx, c)),
+            .map(|m| fact(Fact::Model, clean(&m))),
+        usage.and_then(context).map(|c| fact(Fact::Ctx, c)),
         usage
             .and_then(|u| u.cost_usd)
-            .filter(|_| opted(&app.columns, Col::Cost))
-            .map(|c| (Fact::Cost, dollars(c))),
+            .filter(|_| opt(Col::Cost))
+            .map(|c| fact(Fact::Cost, dollars(c))),
         usage
             .and_then(|u| u.quota_5h)
-            .filter(|_| opted(&app.columns, Col::Quota))
-            .map(|p| (Fact::Quota, format!("{p}%"))),
-    ]);
-    let names = labelled(vec![
-        (!title.is_empty()).then(|| (Fact::Title, clean(title))),
-        Some((Fact::Source, row.pane.source.clone())),
-    ]);
-    let groups = extension_groups(app, row);
-    let place_label = Fact::Where.label(row, app.nerd);
-    let short = || runs.iter().chain(&names);
-    // An extension's name runs on past the column, so a long one widens only its own row.
-    let label = short()
-        .map(|(l, _)| l.width())
-        .chain([place_label.width()])
-        .max()
-        .unwrap_or(0);
-    let room = width.saturating_sub(1);
-    let value = short()
-        .map(|(_, v)| v.width())
-        .max()
-        .unwrap_or(0)
-        .min(VALUE);
-    let cell = label + 1 + value;
-    let across = ((room + GAP) / (cell + GAP)).clamp(1, ACROSS);
-    // Alone on its row, a fact may run to the edge.
-    let shown = if across == 1 { room } else { cell };
-    let grid = |facts: &[(&str, String)]| -> Vec<Line<'static>> {
-        facts
-            .chunks(across)
-            .map(|row| {
-                let mut spans = vec![Span::raw(" ")];
-                for (i, (l, v)) in row.iter().enumerate() {
-                    if i > 0 {
-                        spans.push(Span::raw(" ".repeat(GAP)));
-                    }
-                    spans.extend(pair(l, v, label, shown, i + 1 == row.len()));
-                }
-                Line::from(spans)
-            })
-            .collect()
+            .filter(|_| opt(Col::Quota))
+            .map(|p| fact(Fact::Quota, format!("{p}%"))),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    // An extension's field is a fact named after it, unless its column shows it.
+    let fields: Vec<(String, String)> = app
+        .fields
+        .iter()
+        .filter(|(f, _)| {
+            !columns
+                .cols
+                .iter()
+                .any(|(c, _)| matches!(c.id, Col::Field(id) if id == f.id))
+        })
+        .filter_map(|(f, _)| Some((field_label(f, app.nerd), clean(row.ext.get(&f.id)?))))
+        .collect();
+    let repeats = title.is_empty() || title == clean(&crate::output::name(row));
+    let names = vec![
+        (!repeats).then(|| fact(Fact::Title, clean(title))),
+        Some(fact(Fact::Source, row.pane.source.clone())),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let groups = [runs, fields, names];
+    // Glyph labels are one cell; a word among them, as an extension field with no mark, keeps the
+    // words' label cell for the whole card.
+    let glyphs = app.nerd && groups.iter().flatten().all(|(l, _)| l.width() == 1);
+    let (label, thresholds) = if glyphs {
+        (1, GLYPH_TRACKS)
+    } else {
+        (7, WORD_TRACKS)
     };
-    let long = room.saturating_sub(label + 1);
-    // Where first: it is what tells two rows of the same name apart.
-    let place = place(row, long, app.nerd);
-    let mut lines = vec![long_line(
-        place_label,
-        vec![Span::styled(place, theme::plain())],
-        label,
-        room,
-    )];
-    lines.extend(grid(&runs));
-    lines.extend(
-        groups
-            .into_iter()
-            .map(|(name, parts)| long_line(&name, parts, label, room)),
-    );
-    lines.extend(grid(&names));
+    let across = 1 + thresholds.iter().filter(|t| width >= **t).count();
+    let room = width.saturating_sub(1);
+    let mut lines = Vec::new();
+    if !list_shows_place(&columns, row) {
+        let long = room.saturating_sub(label + 1);
+        let place_label = Fact::Where.label(row, app.nerd);
+        let mut spans = vec![Span::raw(" ")];
+        spans.extend(cell(
+            place_label,
+            &place(row, long, app.nerd),
+            label,
+            long,
+            true,
+        ));
+        lines.push(Line::from(spans));
+    }
+    for group in groups {
+        for chunk in group.chunks(across) {
+            let mut spans = vec![Span::raw(" ")];
+            for (i, (l, v)) in chunk.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::raw(" ".repeat(GAP)));
+                }
+                // Alone on its row, a value may run to the edge.
+                let shown = if across == 1 {
+                    room.saturating_sub(label + 1)
+                } else {
+                    VALUE
+                };
+                spans.extend(cell(l, v, label, shown, i + 1 == chunk.len()));
+            }
+            lines.push(Line::from(spans));
+        }
+    }
     lines
 }
 
-/// `label value` in `cell` columns, the label padded to the label column; the last on a row
-/// leaves no trailing spaces.
-fn pair(label: &str, value: &str, column: usize, cell: usize, last: bool) -> Vec<Span<'static>> {
-    let head = format!("{label:<column$} ");
-    let room = cell.saturating_sub(head.width()).max(1);
-    let mut shown = fit(value, room);
+/// An extension field's label: its own name, or with glyphs its declared mark.
+fn field_label(field: &Field, nerd: bool) -> String {
+    match (nerd, field.icon.as_deref()) {
+        (true, Some(icon)) => icon.to_owned(),
+        _ => field.name.clone(),
+    }
+}
+
+/// Whether the list row already says where the pane is: its SESSION, WINDOW and BLOCK, or WHERE
+/// with all three labels, and none of them cut.
+fn list_shows_place(columns: &Columns, row: &Row) -> bool {
+    let fits = |id: Col, text: &str| columns.has(id) && clean(text).width() < columns.width(id);
+    if columns.has(Col::Session) {
+        return fits(Col::Session, &row.pane.session)
+            && fits(Col::Window, &row.pane.tab)
+            && fits(Col::Block, &crate::output::name(row));
+    }
+    let whole = labels(row, false);
+    columns.tier == Tier::Wide
+        && columns.has(Col::Where)
+        && path(&whole, columns.width(Col::Where).saturating_sub(1))
+            == whole.iter().map(|l| clean(l)).collect::<Vec<_>>().join(SEP)
+}
+
+/// A track's label, padded to the label cell, and its value cut to `shown` columns; the last one
+/// on a row leaves no trailing spaces.
+fn cell(label: &str, value: &str, column: usize, shown: usize, last: bool) -> Vec<Span<'static>> {
+    let head = format!("{:<column$} ", squeeze(label, column));
+    let mut value = fit(value, shown);
     if last {
-        shown = shown.trim_end().to_owned();
+        value = value.trim_end().to_owned();
     }
     vec![
         Span::styled(head, theme::quiet()),
-        Span::styled(shown, theme::plain()),
+        Span::styled(value, theme::plain()),
     ]
-}
-
-/// A row of its own: a label, dim and padded to the label column or running past it, then
-/// `parts`, cut to `room`.
-fn long_line(label: &str, parts: Vec<Span<'static>>, column: usize, room: usize) -> Line<'static> {
-    let head = Span::styled(format!("{label:<column$} "), theme::quiet());
-    let mut left = room;
-    let mut spans = vec![Span::raw(" ")];
-    for span in std::iter::once(head).chain(parts) {
-        let wide = span.content.width();
-        if wide <= left {
-            left -= wide;
-            spans.push(span);
-            continue;
-        }
-        if left > 0 {
-            spans.push(Span::styled(
-                fit(&span.content, left).trim_end().to_owned(),
-                span.style,
-            ));
-        }
-        break;
-    }
-    Line::from(spans)
 }
 
 /// `session › window › block` in `max` columns; with glyphs the window and the block each lead
@@ -232,62 +231,4 @@ fn plain_place(row: &Row, max: usize) -> String {
         Some(room) if room >= 3 => format!("{}{SEP}{block}", path(&[session, window], room)),
         _ => fit(&block, max).trim_end().to_owned(),
     }
-}
-
-/// Each extension's fields on the row, as one group per extension in `enabled` order: its name
-/// (`session-prefix`), then each field's name and value (`project api`). A lone field named like
-/// its extension shows only its value (`lane`, `desk`). With glyphs a declared mark stands for the
-/// extension and for a field's name.
-fn extension_groups(app: &App, row: &Row) -> Vec<(String, Vec<Span<'static>>)> {
-    let mut groups: Vec<(&str, Vec<(&Field, String)>)> = Vec::new();
-    for (field, _) in &app.fields {
-        let Some(value) = row.ext.get(&field.id) else {
-            continue;
-        };
-        let ext = field
-            .id
-            .split_once('.')
-            .map_or(field.id.as_str(), |(e, _)| e);
-        let shown = (field, clean(value));
-        match groups.iter_mut().find(|(e, _)| *e == ext) {
-            Some((_, parts)) => parts.push(shown),
-            None => groups.push((ext, vec![shown])),
-        }
-    }
-    let quiet = |text: String| Span::styled(text, theme::quiet());
-    let mark = |field: &Field| match (app.nerd, field.icon.as_deref()) {
-        (true, Some(icon)) => icon.to_owned(),
-        _ => field.name.clone(),
-    };
-    groups
-        .into_iter()
-        .map(|(ext, parts)| {
-            let mut spans = Vec::new();
-            match &parts[..] {
-                [(field, value)] if field.name == ext => {
-                    spans.push(Span::styled(value.clone(), theme::plain()));
-                }
-                _ => {
-                    for (i, (field, value)) in parts.iter().enumerate() {
-                        if i > 0 {
-                            spans.push(quiet(" · ".to_owned()));
-                        }
-                        spans.push(quiet(format!("{} ", mark(field))));
-                        spans.push(Span::styled(value.clone(), theme::plain()));
-                    }
-                }
-            }
-            if !app.nerd {
-                return (ext.to_owned(), spans);
-            }
-            match parts[0].0.extension_icon.as_deref() {
-                Some(icon) => (icon.to_owned(), spans),
-                // The package mark cannot say which extension it is, so the name leads the value.
-                None => {
-                    spans.insert(0, quiet(format!("{ext} · ")));
-                    (icons::EXTENSION.glyph.to_owned(), spans)
-                }
-            }
-        })
-        .collect()
 }

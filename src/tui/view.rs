@@ -2530,25 +2530,22 @@ mod extension_tests {
     }
 
     #[test]
-    fn the_card_lists_each_extensions_fields_as_one_fact_after_how_it_runs() {
+    fn the_card_lists_each_extensions_fields_as_facts_named_after_the_field() {
         let mut app = with_fields(&[]);
         app.selected = Some(crate::tui::app::Spot::Row("mini/seat-b".into()));
         let text = render(&app, 80, 30);
-        let runs = text
-            .lines()
-            .position(|l| l.starts_with(" host "))
-            .expect(&text);
         let lines: Vec<&str> = text.lines().collect();
-        assert!(lines[runs - 1].starts_with(" where "), "{text}");
-        assert_eq!(lines[runs + 1], " fake    rig api");
+        let at = lines
+            .iter()
+            .position(|l| l.starts_with(" rig "))
+            .expect(&text);
         assert_eq!(
-            lines[runs + 2],
-            " session-prefix project api",
-            "a long name runs past the column and widens only its row"
+            lines[at], " rig     api                    project api",
+            "each field is a track of its own: no extension name, no run-on line"
         );
         assert!(
-            lines[runs].starts_with(" host    "),
-            "the built-in labels keep their width: {text}"
+            !text.contains("session-prefix") && !text.contains("fake "),
+            "{text}"
         );
         let mut lone = with_fields(&[field("lane.lane", "LANE")]);
         let mut rows = lone.rows.clone();
@@ -2557,36 +2554,22 @@ mod extension_tests {
         lone.selected = Some(crate::tui::app::Spot::Row(lone.rows[0].key.clone()));
         let text = render(&lone, 80, 30);
         assert!(
-            text.lines()
-                .any(|l| l.starts_with(" lane ") && l.ends_with(" desk")),
-            "a lone field named like its extension: {text}"
+            text.lines().any(|l| l.starts_with(" lane    desk")),
+            "a field named like its extension is one fact: {text}"
         );
         app.nerd = true;
         let text = render(&app, 80, 30);
-        let lines: Vec<&str> = text.lines().collect();
         assert!(
-            lines.iter().any(|l| l.ends_with(" fake · rig api"))
-                && lines
-                    .iter()
-                    .any(|l| l.ends_with(" session-prefix · project api")),
-            "a glyph cannot name its extension, so the value does:\n{text}"
+            text.lines().any(|l| l.starts_with(" rig     api")),
+            "a field with no declared mark keeps its name, and the card keeps the words' grid: {text}"
         );
         for (field, _) in &mut app.fields {
-            if field.id == "fake.rig" {
-                field.extension_icon = Some("\u{ea7e}".into());
-                field.icon = Some("\u{f502}".into());
-            }
+            field.icon = Some("\u{f502}".into());
         }
         let text = render(&app, 80, 30);
         assert!(
-            text.contains("\n \u{ea7e} \u{f502} api\n"),
-            "its own marks, and no name to repeat:\n{text}"
-        );
-        app.nerd = false;
-        let text = render(&app, 80, 30);
-        assert!(
-            !text.contains('\u{ea7e}') && text.contains(" fake    rig api"),
-            "words mode ignores them:\n{text}"
+            text.lines().any(|l| l.starts_with(" \u{f502} api")),
+            "its own mark leads, one cell: {text}"
         );
     }
 

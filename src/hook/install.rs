@@ -117,7 +117,21 @@ pub fn status(json: bool) -> Result<()> {
         ),
         None => {}
     }
+    println!("{}", icons_line());
     Ok(())
+}
+
+/// Whether the board draws Nerd Font marks, or how to check the font and turn them on. The board
+/// cannot tell the font, so it never turns them on by itself.
+fn icons_line() -> String {
+    if crate::tui::icons_on(&crate::tui::prefs()) {
+        return format!("{:<7}nerd marks on", "icons");
+    }
+    format!(
+        "{:<7}off (words). Nerd Font? printf '|\\356\\257\\222|\\n' should show one glyph between \
+         the bars; then set \"icons\": \"nerd\" in tui.json",
+        "icons"
+    )
 }
 
 /// `rexboard hooks install|uninstall [HARNESS...]`: every harness this host has, or the ones named.
