@@ -216,6 +216,7 @@ fn terminal_gone() -> bool {
 /// drop when it cannot show the cursor, and printing to a terminal that is gone panics inside
 /// the panic hook, which aborts. A signal can come just before its terminal goes.
 fn leave() -> ! {
+    crate::extension::action::stop_all();
     let _ = mouse_capture(&mut std::io::stdout(), false);
     let _ = ratatui::try_restore();
     let _ = ratatui::crossterm::execute!(std::io::stdout(), ratatui::crossterm::cursor::Show);
@@ -258,6 +259,7 @@ struct Restore;
 
 impl Drop for Restore {
     fn drop(&mut self) {
+        crate::extension::action::stop_all();
         let _ = mouse_capture(&mut std::io::stdout(), false);
         // try_restore: restore() prints its error, which panics once the terminal is gone.
         let _ = ratatui::try_restore();

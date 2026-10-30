@@ -40,6 +40,7 @@ pub(super) fn apply(app: &mut App, msg: Msg) -> Option<Effect> {
     match msg {
         Msg::Rows(rows) => {
             app.set_extensions(rows.fields, rows.extensions);
+            app.offered = rows.actions;
             app.set_rows(rows.rows, rows.hosts);
         }
         Msg::Gone(why) => {
@@ -110,6 +111,14 @@ pub(super) fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>)
                     .map_err(|err| format!("close failed: {err}"))
                     .and_then(|rex| send::close(&rex, &row.pane))
                     .map(|()| format!("closed {place} on {}", row.pane.host));
+                let _ = tx.send(Msg::Went(result));
+            });
+        }
+        Effect::Run { plan, title } => {
+            thread::spawn(move || {
+                let result = crate::extension::action::run(&plan)
+                    .map(|out| format!("{title}: {}", if out.is_empty() { "done" } else { &out }))
+                    .map_err(|why| format!("{title} failed: {why}"));
                 let _ = tx.send(Msg::Went(result));
             });
         }
