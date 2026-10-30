@@ -49,22 +49,27 @@ pub(crate) fn prefs() -> prefs::Prefs {
         .unwrap_or_default()
 }
 
+/// Whether the board draws Nerd Font marks: REXBOARD_ICONS, else tui.json's icons.
+pub(crate) fn icons_on(prefs: &prefs::Prefs) -> bool {
+    match std::env::var("REXBOARD_ICONS").as_deref() {
+        Ok("nerd") => true,
+        Ok("text") => false,
+        _ => prefs.icons == prefs::Icons::Nerd,
+    }
+}
+
 /// The board as tui.json, the environment and the pane it runs in set it up.
 fn start_app(pick: bool) -> App {
     let mut app = App::default();
     app.pick = pick;
     let prefs = prefs();
+    app.nerd = icons_on(&prefs);
     app.hidden = prefs.detail_hidden;
     app.motion = prefs.motion;
     app.icons = prefs.icons;
     app.card_height = prefs.card_height;
     app.columns = prefs.columns;
     app.widths = prefs.widths;
-    app.nerd = match std::env::var("REXBOARD_ICONS").as_deref() {
-        Ok("nerd") => true,
-        Ok("text") => false,
-        _ => prefs.icons == prefs::Icons::Nerd,
-    };
     theme::set_motion(
         prefs.motion == prefs::Motion::Full
             && std::env::var("REXBOARD_REDUCED_MOTION").as_deref() != Ok("1"),

@@ -24,8 +24,6 @@ pub const MODEL: Icon = icon("fa-microchip", "\u{f2db}");
 pub const CTX: Icon = icon("fa-tachometer", "\u{f0e4}");
 pub const COST: Icon = icon("fa-dollar", "\u{f155}");
 pub const QUOTA: Icon = icon("fa-pie_chart", "\u{f200}");
-/// An extension that declares no icon of its own.
-pub const EXTENSION: Icon = icon("oct-package", "\u{f487}");
 
 const NATIVE: Icon = icon("cod-verified", "\u{eb77}");
 const BRIDGE: Icon = icon("cod-plug", "\u{eb2d}");
@@ -45,8 +43,8 @@ pub fn source(source: &str) -> Option<Icon> {
 #[cfg(test)]
 pub fn all() -> Vec<Icon> {
     let own = [
-        HOST, TURN, TITLE, SESSION, WINDOW, BLOCK, MODEL, CTX, COST, QUOTA, EXTENSION, NATIVE,
-        BRIDGE, INFERRED,
+        HOST, TURN, TITLE, SESSION, WINDOW, BLOCK, MODEL, CTX, COST, QUOTA, NATIVE, BRIDGE,
+        INFERRED,
     ];
     let marks = crate::harness::BUILTIN.iter().filter_map(|h| h.mark());
     own.into_iter().chain(marks).collect()

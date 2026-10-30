@@ -339,7 +339,7 @@ It prints nothing and exits 0 whatever happens, an unknown harness or an argumen
 ## `rexboard hooks`
 
 ```bash
-rexboard hooks status                  # what each harness has, and what an install would change
+rexboard hooks status                  # what each harness has, and what an install would change; ends with whether the board's Nerd Font icons are on, and how to try them
 rexboard hooks install --dry-run       # the same changes, written nowhere
 rexboard hooks install                 # every harness this host has
 rexboard hooks install claude codex    # only these

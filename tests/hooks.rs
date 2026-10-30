@@ -947,3 +947,44 @@ fn uninstall_never_writes_back_a_backup_an_earlier_install_made() {
     assert_eq!(out["harnesses"][0]["state"], "removed", "{out}");
     assert!(!home.join(".codex/hooks.json").exists(), "install made it");
 }
+
+#[test]
+fn status_says_the_icons_are_off_with_the_font_check_and_how_to_turn_them_on() {
+    let home = tempfile::tempdir().unwrap();
+    let say = |envs: &[(&str, &str)]| {
+        let mut cmd = rexboard(home.path());
+        for (k, v) in envs {
+            cmd.env(k, v);
+        }
+        let out = cmd.args(["hooks", "status"]).output().unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let off = say(&[("REXBOARD_ICONS", "text")]);
+    let lines: Vec<&str> = off.lines().collect();
+    let at = lines
+        .iter()
+        .position(|l| l.starts_with("icons"))
+        .expect(&off);
+    let (first, second) = (lines[at], lines[at + 1]);
+    assert!(first.contains("off (words)"), "{first}");
+    assert!(
+        second.starts_with("       printf '|\\356\\257\\222|\\n'")
+            && second.contains("\"icons\": \"nerd\" in tui.json"),
+        "the check sits under the label: {second}"
+    );
+    assert!(
+        first.chars().count() <= 80 && second.chars().count() <= 80,
+        "neither wraps at 80: {first} / {second}"
+    );
+    assert_eq!(off.lines().filter(|l| l.starts_with("icons")).count(), 1);
+    let on = say(&[("REXBOARD_ICONS", "nerd")]);
+    assert!(on.lines().any(|l| l == "icons  nerd marks on"), "{on}");
+    let json = rexboard(home.path())
+        .args(["hooks", "status", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        !String::from_utf8(json.stdout).unwrap().contains("icons"),
+        "--json is unchanged"
+    );
+}
