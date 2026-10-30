@@ -228,7 +228,7 @@ pub struct App {
     /// tui.json's opt-in columns, written back the same way.
     pub columns: Vec<String>,
     /// tui.json's column widths, written back the same way.
-    pub widths: std::collections::BTreeMap<String, u16>,
+    pub widths: std::collections::BTreeMap<String, serde_json::Value>,
     /// Whether the card's facts take Nerd Font glyphs: REXBOARD_ICONS, else tui.json's icons.
     pub nerd: bool,
     /// The terminal's size at the last draw, which `<` and `>` move the pane against and a

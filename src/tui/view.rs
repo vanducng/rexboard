@@ -2015,16 +2015,19 @@ mod extension_tests {
         app
     }
 
+    const WIDE_MSG: &str = "Opened the pull request and queued the review for the api team today";
+
     /// `with_fields` with a third extension field, a long host name, and window labels as an
     /// orchestrator generates them.
     fn wide_board() -> App {
         let mut app = with_fields(&[field("fake.role", "ROLE")]);
         let mut rows = app.rows.clone();
         for row in &mut rows {
-            row.ext.insert("fake.role".into(), "lead.owner".into());
+            row.ext.insert("fake.role".into(), "seat".into());
             row.pane.tab = format!("1-team:rig:{}#0123456789abcdef#l6", row.pane.session);
+            row.pane.msg = Some(WIDE_MSG.into());
         }
-        rows[0].pane.host = "linux_build_01".into();
+        rows[0].pane.host = "build-host-01".into();
         app.set_rows(rows, hosts());
         app
     }
@@ -2039,11 +2042,11 @@ mod extension_tests {
         for width in [140u16, 200, 250] {
             let text = render(&app, width, 30);
             assert!(
-                text.contains("linux_build_01 "),
+                text.contains("build-host-01 "),
                 "{width}: HOST whole:\n{text}"
             );
             let columns = app.columns(width, usize::from(width));
-            assert_eq!(columns.width(Col::Host), 15, "{width}: 14 and a gap");
+            assert_eq!(columns.width(Col::Host), 14, "{width}: 13 and a gap");
         }
         let mut long = wide_board();
         let mut rows = long.rows.clone();
@@ -2091,7 +2094,9 @@ mod extension_tests {
         let app = wide_board();
         for width in [140u16, 200, 250] {
             let columns = app.columns(width, usize::from(width));
-            let floor = 40.max(usize::from(width) * 35 / 100);
+            let floor = 40
+                .max(usize::from(width) * 35 / 100)
+                .min(WIDE_MSG.len() + 1);
             assert!(
                 columns.width(Col::Msg) >= floor,
                 "{width}: MSG is {} wide, under its floor of {floor}:\n{}",
@@ -2117,16 +2122,139 @@ mod extension_tests {
         );
     }
 
+    /// `wide_board` with the first `fields` extension fields, MODEL and CTX (`usage` 1) or all
+    /// the usage columns (2), and Nerd marks or not.
+    fn configured(fields: usize, usage: u8, nerd: bool) -> App {
+        let mut app = wide_board();
+        let all = ["fake.rig", "session-prefix.project", "fake.role"];
+        let titles = ["RIG", "PROJECT", "ROLE"];
+        app.set_extensions(
+            (0..fields).map(|i| field(all[i], titles[i])).collect(),
+            BTreeMap::new(),
+        );
+        let mut rows = app.rows.clone();
+        for row in &mut rows {
+            row.usage = (usage > 0).then(|| crate::harness::usage::Usage {
+                model: Some("claude-model".into()),
+                ctx_pct: Some(40),
+                tok: Some(1000),
+                cost_usd: Some(0.5),
+                quota_5h: Some(10),
+                ..Default::default()
+            });
+        }
+        app.set_rows(rows, hosts());
+        if usage > 1 {
+            app.columns = vec!["tok".into(), "cost".into(), "5h".into()];
+        }
+        app.nerd = nerd;
+        app
+    }
+
+    #[test]
+    fn msg_keeps_its_floor_with_usage_icons_and_extension_columns_at_every_width() {
+        for width in [140u16, 200, 250, 1000] {
+            let floor = 40
+                .max(usize::from(width) * 35 / 100)
+                .min(WIDE_MSG.len() + 1);
+            for fields in 0..=3 {
+                for usage in 0..=2 {
+                    for nerd in [false, true] {
+                        let app = configured(fields, usage, nerd);
+                        let columns = app.columns(width, usize::from(width));
+                        let sum: usize = columns.cols.iter().map(|(_, w)| *w).sum();
+                        let case =
+                            format!("{width} cols, {fields} fields, usage {usage}, nerd {nerd}");
+                        assert!(sum <= usize::from(width), "{case}: {sum} cells");
+                        assert!(
+                            columns.width(Col::Msg) >= floor,
+                            "{case}: MSG is {}, under {floor}:\n{}",
+                            columns.width(Col::Msg),
+                            header(&app, width)
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_fixed_width_leaves_the_automatic_parts_to_give_way_and_a_fixed_msg_ends_the_floor() {
+        let mut app = wide_board();
+        app.widths = BTreeMap::from([("session".to_owned(), 90.into())]);
+        let columns = app.columns(250, 250);
+        assert_eq!(columns.width(Col::Session), 90);
+        assert!(
+            columns.width(Col::Msg) > WIDE_MSG.len(),
+            "the other parts gave way, not MSG: {}",
+            header(&app, 250)
+        );
+        let mut msg_one = wide_board();
+        msg_one.widths = BTreeMap::from([("msg".to_owned(), 1.into())]);
+        let columns = msg_one.columns(140, 140);
+        assert_eq!(columns.width(Col::Msg), 1);
+        let text = header(&msg_one, 140);
+        assert!(
+            text.contains("RIG") && text.contains("PROJECT"),
+            "a fixed msg keeps the extension columns: {text}"
+        );
+        let mut grow_last = configured(0, 0, false);
+        grow_last.widths = BTreeMap::from([
+            ("session".to_owned(), 180.into()),
+            ("window".to_owned(), 1.into()),
+            ("block".to_owned(), 1.into()),
+            ("msg".to_owned(), 500.into()),
+        ]);
+        let columns = grow_last.columns(250, 250);
+        assert_eq!(
+            [Col::Session, Col::Window, Col::Block].map(|c| columns.width(c)),
+            [180, 1, 1],
+            "the shrinks come back before the long one grows"
+        );
+        let mut too_much = wide_board();
+        too_much.widths = BTreeMap::from([
+            ("session".to_owned(), 300.into()),
+            ("window".to_owned(), 300.into()),
+        ]);
+        let columns = too_much.columns(140, 140);
+        let sum: usize = columns.cols.iter().map(|(_, w)| *w).sum();
+        assert!(
+            sum <= 140 && columns.width(Col::Msg) >= 5,
+            "{sum}: {}",
+            header(&too_much, 140)
+        );
+    }
+
+    #[test]
+    fn short_messages_do_not_cost_a_label_its_cut() {
+        let mut app = wide_board();
+        let mut rows = app.rows.clone();
+        for row in &mut rows {
+            row.pane.msg = Some("Done.".into());
+            row.pane.pane = "seat-with-a-name-20c".into();
+        }
+        app.set_rows(rows, hosts());
+        for width in [200u16, 250] {
+            let text = render(&app, width, 30);
+            assert!(
+                text.lines()
+                    .any(|l| l.contains("seat-with-a-name-20c ") && l.contains("Done.")),
+                "{width}: the block shows whole:\n{text}"
+            );
+        }
+    }
+
     #[test]
     fn tui_json_widths_fix_a_column_at_every_width_and_msg_floor_waits_for_msg() {
         let mut app = wide_board();
         app.widths = std::collections::BTreeMap::from([
-            ("host".to_owned(), 12),
-            ("session".to_owned(), 20),
-            ("window".to_owned(), 24),
-            ("block".to_owned(), 18),
-            ("msg".to_owned(), 60),
-            ("nonsense".to_owned(), 3),
+            ("host".to_owned(), 12.into()),
+            ("session".to_owned(), 20.into()),
+            ("window".to_owned(), 24.into()),
+            ("block".to_owned(), 18.into()),
+            ("msg".to_owned(), 60.into()),
+            ("nonsense".to_owned(), 3.into()),
+            ("bad".to_owned(), "wide".into()),
         ]);
         for width in [140u16, 200, 250] {
             let columns = app.columns(width, usize::from(width));
@@ -2146,7 +2274,7 @@ mod extension_tests {
             "HOST shows at 80 too"
         );
         let mut only_session = wide_board();
-        only_session.widths = std::collections::BTreeMap::from([("session".to_owned(), 30)]);
+        only_session.widths = std::collections::BTreeMap::from([("session".to_owned(), 30.into())]);
         let columns = only_session.columns(250, 250);
         assert_eq!(columns.width(Col::Session), 30);
         assert!(
@@ -2225,21 +2353,12 @@ mod extension_tests {
         assert!(!at(119).contains("RIG"), "{}", at(119));
         let mid = words(at(140));
         let host = mid.iter().position(|w| w.starts_with("HOST")).unwrap();
-        assert_eq!(&mid[host + 1..host + 2], ["RIG"], "{mid:?}");
+        assert_eq!(&mid[host + 1..host + 3], ["RIG", "PROJECT"], "{mid:?}");
         assert!(
-            !mid.contains(&"PROJECT".to_owned()) && !mid.contains(&"OWNER".to_owned()),
-            "MSG's floor takes the later fields at 140: {mid:?}"
+            !mid.contains(&"OWNER".to_owned()),
+            "only two below 160: {mid:?}"
         );
-        let wide = words(at(120));
-        assert!(
-            wide.contains(&"RIG".to_owned()) && wide.contains(&"PROJECT".to_owned()),
-            "{wide:?}"
-        );
-        assert!(
-            !wide.contains(&"OWNER".to_owned()),
-            "only two below 160: {wide:?}"
-        );
-        assert!(words(at(200)).contains(&"OWNER".to_owned()), "{}", at(200));
+        assert!(words(at(160)).contains(&"OWNER".to_owned()), "{}", at(160));
         let text = render(&app, 140, 30);
         let seat_b = text.lines().find(|l| l.contains("seat-b")).unwrap();
         assert!(seat_b.contains(" api "), "{seat_b}");

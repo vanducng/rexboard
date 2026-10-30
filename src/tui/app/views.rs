@@ -163,6 +163,10 @@ impl App {
             Some(Key::Host) => columns.resize(Col::Host, 0),
             _ => {}
         }
+        if self.nerd {
+            columns.marks = true;
+            columns.resize(Col::Harness, columns.width(Col::Harness) + 2);
+        }
         let widest = |text: &dyn Fn(&Row) -> String| {
             self.rows
                 .iter()
@@ -174,6 +178,7 @@ impl App {
             board,
             &Longest {
                 host: widest(&|row| clean(&row.pane.host)),
+                msg: widest(&|row| markdown::text(&markdown::msg(row))),
                 // The block's name has room for a twin's ` #N`.
                 parts: [
                     widest(&|row| clean(&row.pane.session)).min(LABEL_MAX),
@@ -183,10 +188,6 @@ impl App {
             },
             &self.widths,
         );
-        if self.nerd {
-            columns.marks = true;
-            columns.resize(Col::Harness, columns.width(Col::Harness) + 2);
-        }
         columns
     }
 

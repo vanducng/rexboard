@@ -30,25 +30,21 @@ pub struct Prefs {
     )]
     pub columns: Vec<String>,
     /// Fixed widths by column name (`host`, `session`, `window`, `block`, `msg`), kept as
-    /// written; a name or a value this build does not know is ignored when the list is drawn.
+    /// written; the list checks a name and a value only when it applies them.
     #[serde(
         default,
         deserialize_with = "widths",
         skip_serializing_if = "BTreeMap::is_empty"
     )]
-    pub widths: BTreeMap<String, u16>,
+    pub widths: BTreeMap<String, serde_json::Value>,
 }
 
-/// Anything but an object is none; an entry whose value is not a width from 1 to 500 is dropped.
-fn widths<'de, D: Deserializer<'de>>(d: D) -> Result<BTreeMap<String, u16>, D::Error> {
+/// Anything but an object is none.
+fn widths<'de, D: Deserializer<'de>>(
+    d: D,
+) -> Result<BTreeMap<String, serde_json::Value>, D::Error> {
     Ok(match serde_json::Value::deserialize(d)? {
-        serde_json::Value::Object(entries) => entries
-            .into_iter()
-            .filter_map(|(name, width)| {
-                let width = u16::try_from(width.as_u64()?).ok()?;
-                (1..=500).contains(&width).then_some((name, width))
-            })
-            .collect(),
+        serde_json::Value::Object(entries) => entries.into_iter().collect(),
         _ => BTreeMap::new(),
     })
 }
@@ -144,22 +140,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn widths_keep_every_whole_number_width_and_drop_the_rest() {
+    fn widths_are_kept_as_written_and_checked_only_when_applied() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("tui.json");
-        std::fs::write(
-            &path,
-            r#"{"widths": {"host": 12, "msg": 60, "later": 7, "zero": 0, "neg": -3, "text": "9", "huge": 9999, "frac": 2.5}}"#,
-        )
-        .unwrap();
+        let written = r#"{"widths": {"host": 12, "session": 0, "window": "auto", "future": 501, "flag": true}}"#;
+        std::fs::write(&path, written).unwrap();
+        let prefs = load(&path);
+        assert_eq!(prefs.widths.len(), 5, "every entry is kept");
+        save(&path, &prefs).unwrap();
+        let back: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(
-            load(&path).widths,
-            BTreeMap::from([
-                ("host".to_owned(), 12),
-                ("later".to_owned(), 7),
-                ("msg".to_owned(), 60)
-            ]),
-            "a name this build does not know is kept as written; a value that is no width is dropped"
+            back["widths"],
+            serde_json::from_str::<serde_json::Value>(written).unwrap()["widths"],
+            "a save writes back what was read, as the card toggle does"
         );
         std::fs::write(&path, r#"{"widths": [1, 2], "detail_hidden": true}"#).unwrap();
         assert!(load(&path).widths.is_empty() && load(&path).detail_hidden);
@@ -176,7 +170,10 @@ mod tests {
             icons: Icons::Nerd,
             card_height: Some(CardHeight::Percent(30)),
             columns: vec!["cost".into(), "5h".into()],
-            widths: BTreeMap::from([("host".to_owned(), 12), ("whatever".to_owned(), 9)]),
+            widths: BTreeMap::from([
+                ("host".to_owned(), 12.into()),
+                ("whatever".to_owned(), 9.into()),
+            ]),
         };
         save(&path, &kept).unwrap();
         assert_eq!(load(&path), kept);

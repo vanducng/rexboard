@@ -7,6 +7,7 @@ use std::ops::RangeInclusive;
 use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
+use serde_json::Value;
 
 use super::markdown::{self, Run};
 use super::theme;
@@ -86,6 +87,7 @@ enum Width {
 #[derive(Debug, Default)]
 pub struct Longest {
     pub host: usize,
+    pub msg: usize,
     pub parts: [usize; 3],
 }
 
@@ -97,6 +99,39 @@ const PART_MIN: usize = 10;
 const MSG_FLOOR: usize = 40;
 const MSG_SHARE: usize = 35;
 const FLOOR_FROM: u16 = 140;
+/// WHERE, unsplit, is not squeezed under this; MSG is not squeezed under MSG_LEAST by a fixed width.
+const WHERE_MIN: usize = 20;
+const MSG_LEAST: usize = 5;
+
+/// How `limit` columns divide among labels of the `longest` widths: each its label and a
+/// two-column gap (one when that does not all fit), none under `least`; when together they want
+/// more, the short ones keep their fit and the long ones share the rest.
+fn parts_share(longest: &[usize], limit: usize, least: usize) -> Vec<usize> {
+    let limit = limit.max(least * longest.len());
+    let wanted =
+        |gap: usize| -> Vec<usize> { longest.iter().map(|n| (n + gap).max(least)).collect() };
+    let mut want = if wanted(2).iter().sum::<usize>() <= limit {
+        wanted(2)
+    } else {
+        wanted(1)
+    };
+    let mut left = limit;
+    let mut open: Vec<usize> = (0..want.len()).collect();
+    // Water-filling: a part that needs no more than an equal share of what is left gets its fit.
+    while !open.is_empty() {
+        let share = left / open.len();
+        match open.iter().position(|&i| want[i] <= share) {
+            Some(at) => left -= want[open.remove(at)],
+            None => {
+                for (k, &i) in open.iter().enumerate() {
+                    want[i] = left / open.len() + usize::from(k < left % open.len());
+                }
+                break;
+            }
+        }
+    }
+    want
+}
 
 /// The board width from which WHERE splits into SESSION, WINDOW and BLOCK.
 pub const SPLIT: u16 = 132;
@@ -588,48 +623,72 @@ impl Columns {
         }
     }
 
-    /// Fits the list's columns to what the rows hold, then to tui.json's `widths`. HOST takes the
-    /// longest host name. Once WHERE is split, SESSION, WINDOW and BLOCK take their longest
-    /// labels, none past LABEL_MAX, and MSG keeps a floor from FLOOR_FROM columns: the parts give
-    /// way to it first, then the extension columns, last one first.
-    pub fn fit(&mut self, board: u16, longest: &Longest, widths: &BTreeMap<String, u16>) {
-        let set = |name: &str| widths.get(name).map(|w| usize::from(*w));
-        let host = set("host").unwrap_or((longest.host + 1).clamp(8, 16));
-        self.resize(Col::Host, host);
-        let parts = [Col::Session, Col::Window, Col::Block];
-        if parts.iter().all(|id| self.has(*id)) {
-            let total: usize = self.cols.iter().map(|(_, w)| *w).sum();
-            let floor = if board >= FLOOR_FROM {
-                MSG_FLOOR.max(total * MSG_SHARE / 100)
-            } else {
-                0
-            };
-            // What the parts may share: the list less every other column and MSG's floor. When
-            // that is under their least, the last extension column goes, and again.
-            let limit = loop {
-                let others: usize = (self.cols.iter())
-                    .filter(|(c, _)| !parts.contains(&c.id) && c.id != Col::Msg)
-                    .map(|(_, w)| *w)
-                    .sum();
-                let limit = total.saturating_sub(others + floor);
-                let field = (self.cols.iter().rev()).find(|(c, _)| matches!(c.id, Col::Field(_)));
-                match field {
-                    Some((field, _)) if limit < PART_MIN * 3 => self.resize(field.id, 0),
-                    _ => break limit,
+    /// Fits the list's columns, last, to what the rows hold and to tui.json's `widths`: HOST takes
+    /// the longest host name; WHERE, or SESSION, WINDOW and BLOCK, take what is left over MSG's
+    /// floor. From FLOOR_FROM columns MSG keeps the least of FLOOR and its longest message; a fixed
+    /// `msg` replaces that. The location columns give way to it first, then the extension
+    /// columns and then the usage ones, each the last one first. A fixed width is not fitted.
+    pub fn fit(&mut self, board: u16, longest: &Longest, widths: &BTreeMap<String, Value>) {
+        let set = |name: &str| {
+            let width = widths.get(name)?.as_u64()?;
+            (1..=500).contains(&width).then_some(width as usize)
+        };
+        let total: usize = self.cols.iter().map(|(_, w)| *w).sum();
+        let floor = match set("msg") {
+            Some(_) => 0,
+            None if board < FLOOR_FROM => 0,
+            None => MSG_FLOOR.max(total * MSG_SHARE / 100).min(longest.msg + 1),
+        };
+        self.apply(vec![(
+            Col::Host,
+            set("host").unwrap_or((longest.host + 1).clamp(8, 16)),
+        )]);
+        // The location columns: SESSION, WINDOW and BLOCK once WHERE is split, else WHERE.
+        let split = [Col::Session, Col::Window, Col::Block];
+        let (group, need, each) = if split.iter().all(|id| self.has(*id)) {
+            (split.to_vec(), longest.parts.to_vec(), PART_MIN)
+        } else {
+            (vec![Col::Where], vec![self.width(Col::Where)], WHERE_MIN)
+        };
+        let (mut wants, mut free, mut wanted) = (Vec::new(), Vec::new(), Vec::new());
+        for (i, id) in group.iter().enumerate() {
+            let fixed = ["session", "window", "block"]
+                .get(i)
+                .filter(|_| group.len() > 1);
+            match fixed.and_then(|name| set(name)) {
+                Some(width) => wants.push((*id, width)),
+                None => {
+                    free.push(*id);
+                    wanted.push(need[i]);
                 }
-            };
-            self.fit_parts(longest.parts, limit);
-        }
-        for (name, id) in [
-            ("session", Col::Session),
-            ("window", Col::Window),
-            ("block", Col::Block),
-        ] {
-            if let Some(width) = set(name) {
-                self.resize(id, width);
             }
         }
-        // MSG is what the others leave, so a fixed width can only be narrower.
+        let fixed_sum: usize = wants.iter().map(|(_, w)| *w).sum();
+        // Room for the free location columns: the list less everything else and MSG's floor. Under
+        // their least, the last extension column goes, then the last usage column, and again.
+        let rank = |id: Col| (!matches!(id, Col::Field(_)), !is_usage(id));
+        let limit = loop {
+            let others: usize = (self.cols.iter())
+                .filter(|(c, _)| !group.contains(&c.id) && c.id != Col::Msg)
+                .map(|(_, w)| *w)
+                .sum();
+            let limit = total.saturating_sub(others + fixed_sum + floor);
+            let gone = (self.cols.iter().rev())
+                .map(|(c, _)| c.id)
+                .min_by_key(|id| rank(*id))
+                .filter(|id| rank(*id) != (true, true));
+            match gone {
+                Some(id) if limit < each * free.len() => self.resize(id, 0),
+                _ => break limit,
+            }
+        };
+        let held: usize = free.iter().map(|id| self.width(*id)).sum();
+        wants.extend(
+            free.iter()
+                .copied()
+                .zip(parts_share(&wanted, held.min(limit), each)),
+        );
+        self.apply(wants);
         if let (Some(width), Some(msg)) = (
             set("msg"),
             (self.cols.iter()).position(|(c, _)| c.id == Col::Msg),
@@ -638,40 +697,13 @@ impl Columns {
         }
     }
 
-    /// Fits SESSION, WINDOW and BLOCK to their `longest` labels and a gap, two columns when that
-    /// all fits in `limit` (or what they hold, if less), else one; MSG takes what they free. When
-    /// together they want more, the short ones keep their fit and the long ones share the rest.
-    fn fit_parts(&mut self, longest: [usize; 3], limit: usize) {
-        let parts = [Col::Session, Col::Window, Col::Block];
-        let held: usize = parts.iter().map(|id| self.width(*id)).sum();
-        let held = held.min(limit).max(PART_MIN * 3);
-        // Never narrower than the header word with its gap and sort arrow.
-        let wanted = |gap: usize| longest.map(|n| (n + gap).max(PART_MIN));
-        let mut want = if wanted(2).iter().sum::<usize>() <= held {
-            wanted(2)
-        } else {
-            wanted(1)
-        };
-        let mut left = held;
-        let mut open: Vec<usize> = (0..3).collect();
-        // Water-filling: a part that needs no more than an equal share of what is left gets its fit.
-        while !open.is_empty() {
-            let share = left / open.len();
-            match open.iter().position(|&i| want[i] <= share) {
-                Some(at) => left -= want[open.remove(at)],
-                None => {
-                    for (k, &i) in open.iter().enumerate() {
-                        want[i] = left / open.len() + usize::from(k < left % open.len());
-                    }
-                    break;
-                }
-            }
-        }
-        // Shrinks first, so the room they give back is there for the parts that grow.
-        let mut order: Vec<usize> = (0..3).collect();
-        order.sort_by_key(|&i| want[i] as isize - self.width(parts[i]) as isize);
-        for i in order {
-            self.resize(parts[i], want[i]);
+    /// Gives each column its width, the ones that shrink first, so the room they give back is
+    /// there for those that grow; MSG gives up all but MSG_LEAST of what it has.
+    fn apply(&mut self, mut wants: Vec<(Col, usize)>) {
+        wants.sort_by_key(|(id, width)| *width as isize - self.width(*id) as isize);
+        for (id, width) in wants {
+            let spare = self.width(Col::Msg).saturating_sub(MSG_LEAST);
+            self.resize(id, width.min(self.width(id) + spare));
         }
     }
 
@@ -1248,33 +1280,24 @@ mod tests {
 
     #[test]
     fn labels_longer_than_their_share_split_it_and_never_starve_msg() {
-        let mut columns = Columns::new(160, 160, &[]);
-        let msg = columns.width(Col::Msg);
-        columns.fit_parts([1, 1, 1], usize::MAX);
         assert_eq!(
-            [Col::Session, Col::Window, Col::Block].map(|c| columns.width(c)),
+            parts_share(&[1, 1, 1], 100, 10),
             [10, 10, 10],
             "never narrower than the header word"
         );
-        assert!(columns.width(Col::Msg) > msg, "MSG takes the freed width");
-        let mut columns = Columns::new(160, 160, &[]);
-        columns.fit_parts([199, 11, 11], usize::MAX);
-        assert_eq!(columns.width(Col::Window), 12);
-        assert_eq!(columns.width(Col::Block), 12);
+        let shares = parts_share(&[199, 11, 11], 150, 10);
+        assert_eq!(shares[1..], [12, 12], "the short ones keep their fit");
         assert_eq!(
-            columns.width(Col::Msg),
-            Columns::new(160, 160, &[]).width(Col::Msg)
+            shares.iter().sum::<usize>(),
+            150,
+            "the long one takes the rest"
         );
-        let mut limited = Columns::new(160, 160, &[]);
-        limited.fit_parts([199, 199, 199], 60);
         assert_eq!(
-            [Col::Session, Col::Window, Col::Block]
-                .map(|c| limited.width(c))
-                .iter()
-                .sum::<usize>(),
+            parts_share(&[199, 199, 199], 60, 10).iter().sum::<usize>(),
             60,
             "the limit is what they share"
         );
+        assert_eq!(parts_share(&[3, 3, 3], 100, 10), [10, 10, 10]);
     }
 
     #[test]
