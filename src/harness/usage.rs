@@ -288,6 +288,51 @@ pub struct Tmux {
     pub panes: BTreeSet<String>,
 }
 
+/// Every process's parent and command, from one `ps`, for finding a pane's tmux client when the
+/// pane runs tmux under a wrapper.
+#[derive(Debug, Default)]
+pub struct Procs(Vec<(u32, u32, String)>);
+
+impl Procs {
+    pub fn read() -> Self {
+        let out = Command::new("ps")
+            .args(["-axo", "pid=,ppid=,comm="])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output();
+        out.map(|out| Self::parse(&String::from_utf8_lossy(&out.stdout)))
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn parse(out: &str) -> Self {
+        Self(
+            out.lines()
+                .filter_map(|line| {
+                    let (pid, rest) = line.trim_start().split_once(char::is_whitespace)?;
+                    let (ppid, comm) = rest.trim_start().split_once(char::is_whitespace)?;
+                    Some((
+                        pid.parse().ok()?,
+                        ppid.parse().ok()?,
+                        comm.trim().to_owned(),
+                    ))
+                })
+                .collect(),
+        )
+    }
+
+    /// The tmux client that is the one tmux child of `parent`: a pane runs one under OpenRig's
+    /// `sh -c ... tmux attach` wrapper, which is what Rex reports as the foreground process. With
+    /// two, which one the pane shows is a guess, so there is none.
+    pub fn tmux_child(&self, parent: u32) -> Option<u32> {
+        let mut found = self
+            .0
+            .iter()
+            .filter(|(_, ppid, comm)| *ppid == parent && comm.rsplit('/').next() == Some("tmux"))
+            .map(|(pid, ..)| *pid);
+        found.next().filter(|_| found.next().is_none())
+    }
+}
+
 /// One `ps` per client, and `tmux list-clients` and `list-panes -a` per socket; a client whose
 /// socket or pane cannot be read is left out.
 pub fn tmux_keys(pids: &[u32]) -> Tmux {
@@ -392,6 +437,33 @@ mod tests {
 
     fn parse(harness: &str, payload: &serde_json::Value) -> Option<Usage> {
         crate::harness::by_name(harness).unwrap().usage(payload)
+    }
+
+    #[test]
+    fn a_wrappers_tmux_child_is_its_client() {
+        let procs = Procs::parse(
+            "    1     0 /sbin/launchd\n  \
+             200     1 /usr/local/bin/tmux\n  \
+             310   100 /bin/sh\n  \
+             311   310 /usr/local/bin/tmux\n  \
+             320   100 /bin/sh\n  \
+             321   320 /usr/bin/tail\n  \
+             330   100 /Apps/My Tool/tmux\n  \
+             410   400 /bin/sh\n  \
+             411   410 /usr/local/bin/tmux\n  \
+             412   410 /usr/local/bin/tmux\n  \
+             garbage\n",
+        );
+        assert_eq!(procs.tmux_child(310), Some(311), "tmux under its wrapper");
+        assert_eq!(procs.tmux_child(320), None, "a wrapper of something else");
+        assert_eq!(procs.tmux_child(311), None, "a client has no client");
+        assert_eq!(procs.tmux_child(100), Some(330), "a path with a space");
+        assert_eq!(
+            procs.tmux_child(410),
+            None,
+            "two tmux children: which is shown is a guess"
+        );
+        assert_eq!(Procs::default().tmux_child(1), None);
     }
 
     #[test]

@@ -252,7 +252,20 @@ struct Reducer {
 struct UsagePane {
     row: String,
     block: String,
+    /// The foreground process, which is the tmux client or a wrapper around it.
+    front: Option<u32>,
     tmux_client: Option<u32>,
+}
+
+/// Each pane's tmux client, found among the children of the wrapper it runs under when the
+/// foreground process is not tmux itself.
+fn with_clients(mut panes: Vec<UsagePane>, procs: &usage::Procs) -> Vec<UsagePane> {
+    for pane in &mut panes {
+        if pane.tmux_client.is_none() {
+            pane.tmux_client = pane.front.and_then(|front| procs.tmux_child(front));
+        }
+    }
+    panes
 }
 
 /// How often the usage files and tmux clients are read again.
@@ -271,9 +284,13 @@ fn watch_usage(
         loop {
             thread::sleep(USAGE_EVERY);
             let known = panes.lock().unwrap_or_else(PoisonError::into_inner).clone();
-            let panes = known.clone().unwrap_or_default();
+            let mut panes = known.clone().unwrap_or_default();
+            let any = usage::any_tmux(&state);
+            if any {
+                panes = with_clients(panes, &usage::Procs::read());
+            }
             let pids: Vec<u32> = panes.iter().filter_map(|p| p.tmux_client).collect();
-            let asked = !pids.is_empty() && usage::any_tmux(&state);
+            let asked = !pids.is_empty() && any;
             let tmux = if asked {
                 usage::tmux_keys(&pids)
             } else {
@@ -637,6 +654,7 @@ impl Reducer {
             .into_iter()
             .filter(|row| row.pane.host == "local")
             .map(|row| UsagePane {
+                front: row.pane.pid,
                 tmux_client: row
                     .pane
                     .pid
@@ -836,6 +854,29 @@ mod tests {
         assert!(!subs.owed());
         let last: Vec<String> = rx.try_iter().collect();
         assert_eq!(last, ["rows 3"], "the reader resumes on the current rows");
+    }
+
+    #[test]
+    fn a_pane_under_a_wrapper_gets_the_tmux_client_below_it() {
+        let procs =
+            usage::Procs::parse("310 100 /bin/sh\n311 310 /usr/bin/tmux\n320 100 /bin/sh\n");
+        let pane = |row: &str, front, tmux_client| UsagePane {
+            row: row.into(),
+            block: format!("block:{row}"),
+            front,
+            tmux_client,
+        };
+        let panes = with_clients(
+            vec![
+                pane("wrapped", Some(310), None),
+                pane("bare", Some(320), None),
+                pane("direct", Some(900), Some(900)),
+                pane("none", None, None),
+            ],
+            &procs,
+        );
+        let clients: Vec<_> = panes.iter().map(|p| p.tmux_client).collect();
+        assert_eq!(clients, [Some(311), None, Some(900), None]);
     }
 
     #[test]
