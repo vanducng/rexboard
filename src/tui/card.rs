@@ -64,12 +64,17 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
                 (if title.is_empty() { "-" } else { title }).to_owned(),
                 false,
             )]);
-            lines.extend(laid_out(
-                headline.unwrap_or(&title),
-                " ",
-                text,
-                theme::strong(),
-            ));
+            match headline {
+                Some(Block::Text(runs)) if !runs.iter().all(|(_, strong)| *strong) => {
+                    lines.extend(laid_out(&lead(runs), " ", text, theme::plain()));
+                }
+                headline => lines.extend(laid_out(
+                    headline.unwrap_or(&title),
+                    " ",
+                    text,
+                    theme::strong(),
+                )),
+            }
             for block in segments {
                 lines.extend(laid_out(block, "   ", text, theme::plain()));
             }
@@ -92,8 +97,9 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
     let blocked = row.pane.state == "blocked";
     let tail = peek.map_or_else(Vec::new, |peek| {
         let rows = match blocked.then(|| dialog_rows(peek, text)).flatten() {
-            // The dialog is the ask, so it is whole however far the card scrolls.
-            Some(dialog) => dialog,
+            // The dialog is the ask, so it is whole however far the card scrolls; with room to
+            // spare, the screen above it fills the card.
+            Some(dialog) => dialog.max(window.saturating_sub(lines.len() + meta.len())),
             // As much as fits under the ask, with a row left for the facts' `↓` below.
             None if blocked => window.saturating_sub(lines.len() + 1),
             None => window.saturating_sub(lines.len() + meta.len()),
@@ -320,6 +326,52 @@ fn laid_out(block: &Block, lead: &str, width: usize, style: Style) -> Vec<Line<'
     }
 }
 
+/// The longest first sentence the card sets strong; a longer one would be a heavy block.
+const LEAD_MAX: usize = 120;
+
+/// Whether the sentence ends at `i`: a `.`, `!` or `?` and then a space or the end. A `.` also
+/// needs a capital, a quote or a bracket after the space, and no `e.g.`-style dot before it, so
+/// `e.g. the docs` and `v1. 2 files` do not end it.
+fn sentence_stop(text: &[char], i: usize) -> bool {
+    if !matches!(text[i], '.' | '!' | '?') {
+        return false;
+    }
+    match text.get(i + 1) {
+        None => true,
+        Some(c) if !c.is_whitespace() => false,
+        Some(_) if text[i] != '.' => true,
+        Some(_) => {
+            let abbreviation = i >= 2 && text[i - 2] == '.';
+            let next = text[i + 1..].iter().find(|c| !c.is_whitespace());
+            !abbreviation && next.is_none_or(|c| c.is_uppercase() || "\"'([`".contains(*c))
+        }
+    }
+}
+
+/// The headline paragraph with only its first sentence strong, and only when that is short, so a
+/// long opening reads as plain text and not as a heavy block.
+fn lead(runs: &[Run]) -> Block {
+    let whole: Vec<char> = runs.iter().flat_map(|(text, _)| text.chars()).collect();
+    let end = (0..whole.len())
+        .find(|&i| sentence_stop(&whole, i))
+        .map_or(whole.len(), |i| i + 1);
+    let strong = if end <= LEAD_MAX { end } else { 0 };
+    let mut at = 0;
+    let mut out = Vec::new();
+    for (text, was) in runs {
+        let len = text.chars().count();
+        let head = strong.saturating_sub(at).min(len);
+        if head > 0 {
+            out.push((text.chars().take(head).collect(), true));
+        }
+        if head < len {
+            out.push((text.chars().skip(head).collect(), *was));
+        }
+        at += len;
+    }
+    Block::Text(out)
+}
+
 /// `lead`, then `runs` with strong ones in the strong role, on `style`.
 fn styled(lead: &str, runs: &[Run], style: Style) -> Line<'static> {
     let spans = runs.iter().map(|(text, strong)| {
@@ -452,6 +504,72 @@ mod tests {
                     .collect::<String>()
             })
             .collect()
+    }
+
+    #[test]
+    fn only_a_short_first_sentence_leads_in_strong() {
+        let strong = |text: &str| -> (String, String) {
+            let Block::Text(runs) = lead(&[(text.to_owned(), false)]) else {
+                unreachable!()
+            };
+            let of = |on: bool| {
+                runs.iter()
+                    .filter(|(_, s)| *s == on)
+                    .map(|(t, _)| t.as_str())
+                    .collect()
+            };
+            (of(true), of(false))
+        };
+        assert_eq!(
+            strong("Ready for review"),
+            ("Ready for review".into(), String::new())
+        );
+        assert_eq!(
+            strong("Tests pass. Next I run the benchmarks."),
+            ("Tests pass.".into(), " Next I run the benchmarks.".into()),
+            "the first sentence leads"
+        );
+        assert_eq!(
+            strong("Opened PR #31. See it."),
+            ("Opened PR #31.".into(), " See it.".into())
+        );
+        assert_eq!(
+            strong("See e.g. the docs. Then more."),
+            ("See e.g. the docs.".into(), " Then more.".into()),
+            "e.g. does not end it"
+        );
+        assert_eq!(
+            strong("Bumped to v1. 2 files changed. Done."),
+            ("Bumped to v1. 2 files changed.".into(), " Done.".into()),
+            "a number after the stop does not end it"
+        );
+        assert_eq!(
+            strong("Is it ready? yes. Next."),
+            ("Is it ready?".into(), " yes. Next.".into()),
+            "a question ends it"
+        );
+        let long = format!(
+            "I refactored {} so it reads. And then more.",
+            "the tokenizer ".repeat(12)
+        );
+        assert_eq!(
+            strong(&long),
+            (String::new(), long.clone()),
+            "a long opening is plain, not a heavy block"
+        );
+        let Block::Text(runs) = lead(&[
+            ("Root cause: ".into(), true),
+            ("Tokenizer::peek. Then more.".into(), false),
+        ]) else {
+            unreachable!()
+        };
+        assert_eq!(
+            runs.iter()
+                .filter(|(_, s)| *s)
+                .map(|(t, _)| t.as_str())
+                .collect::<String>(),
+            "Root cause: Tokenizer::peek."
+        );
     }
 
     #[test]
@@ -740,7 +858,12 @@ mod tests {
             let text = render(app, 80, 30);
             text.lines().position(|l| l.starts_with("━━")).unwrap()
         };
-        assert_eq!(bar(&app), 30 - 1 - 10, "40% of a 27-row body");
+        assert!(
+            bar(&app) < 30 - 1 - 10,
+            "by default the card takes what the short list leaves, more than 40%"
+        );
+        app.card_height = Some(CardHeight::Percent(40));
+        assert_eq!(bar(&app), 30 - 1 - 10, "40% of a 27-row body, as set");
         app.card_height = Some(CardHeight::Rows(12));
         assert_eq!(bar(&app), 30 - 1 - 12);
         app.card_height = Some(CardHeight::Percent(50));
@@ -904,8 +1027,8 @@ mod tests {
                 "{width}x{height}: from the top:\n{text}"
             );
             assert!(
-                card.last().unwrap().ends_with(" more · ctrl-e"),
-                "{width}x{height}: the facts below:\n{text}"
+                card.iter().any(|line| line.contains("where   ")),
+                "{width}x{height}: with room the facts show under the ask:\n{text}"
             );
         }
         let text = render(&app, 80, 30);

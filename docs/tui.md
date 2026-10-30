@@ -16,7 +16,7 @@ The board is built to live in a narrow column, so the narrow layout is the main 
   | under 60 | `AGE` · `WHERE` (`session › block`) · `MSG` |
   | 60-99 | adds `HARNESS` and `HOST` |
   | 100-131 | adds `STATE`, and the window in `WHERE`: `session › window › block` |
-  | 132-139 | splits `WHERE` into `SESSION`, `WINDOW` and `BLOCK` |
+  | 132-139 | splits `WHERE` into `SESSION`, `WINDOW` and `BLOCK`, each as wide as its longest label and a two-column gap (one when that does not fit; at least 10 columns) while together they stay within WHERE's share; `MSG` takes what they free |
   | 140 and up | adds `TURN`, and `MODEL` and `CTX` while some row reports what its turn used; `TOK`, `COST` and `5H` too when `tui.json` asks for them. Below 160, while they show, `WHERE` stays one column so `MSG` keeps its room |
 
   The list is as wide as the board at every width (the turn card sits under it), and `pick` uses the same columns.
@@ -188,7 +188,7 @@ The card is the selected row in full, under the list, as wide as the board:
 ```
 
 1. **The bar:** what you scan first. The glyph and the state (with its kind, as in `blocked · permission`), the block, and how the turn stands: `ended 4m ago` for a done row, `waiting 12s` for a blocked one, `failed 2m ago`, or `for 2m` in any other state. On the right, how fresh the pane's tail is: `captured 11:21:14 · 8s`, or `newer report · space refreshes` once the row has reported since.
-2. **The headline**, in bold: the message's first line (see [Agent status](agent-status.md)), else the title.
+2. **The headline**, in bold: the first sentence of the message's first paragraph, when it is 120 characters or fewer; a longer first sentence is shown plain, not as a heavy block. A paragraph with no sentence stop is one sentence, so a short one (`Ready for review`) is all bold and a long one is plain. A sentence ends at `.`, `!` or `?` followed by a space (a `.` also needs a capital letter after it, and no `e.g.`-style dot before it, so `e.g. the docs` and `v1. 2 files` do not end it). With no message, the title. See [Agent status](agent-status.md).
 3. **The ask or the body:** the message's other lines, wrapped, whole.
 4. A failed jump's reason, and `may be stale:` for a suspect row.
 5. The pane's tail, when it has been read, newest line at the bottom.
@@ -199,7 +199,7 @@ The card keeps one height for every row, so the list holds still while you move 
 
 A row with no status record says `no status from this pane` and `space captures the screen`.
 
-The card is 40% of the body, and at least 8 rows, or what `"card_height"` in `tui.json` says: a number of rows (`12`) or a share of the body (`"30%"`, at least 8 rows); any other value is the default. It always leaves the list 3 rows under its column header, and its last row, above the footer, stays blank. Its text starts under its bar, so the bar holds its row as the selection moves. The key table takes its own rows instead, and answer mode as many as its options need. Text wraps at 120 columns however wide the board. `c` hides it.
+The card is 40% of the body, and at least 8 rows, and more when the list is short: it takes the rows the list leaves, so it sits right under the list with no blank band between them (the list keeps its own rows, and the card shrinks back to 40% as the list grows). Or what `"card_height"` in `tui.json` says: a number of rows (`12`) or a share of the body (`"30%"`, at least 8 rows); any other value is the default. It always leaves the list 3 rows under its column header, and its last row, above the footer, stays blank. Its text starts under its bar, so the bar holds its row as the selection moves. The key table takes its own rows instead, and answer mode as many as its options need. Text wraps at 120 columns however wide the board. `c` hides it.
 
 Reading a card does not mark a row seen. `m` does, and so does `n` or `tab` off a `done` row whose card has shown for at least a second. The tail of a blocked row is read by itself once its card has shown for 300 ms, once per report, so the ask can be checked against the screen; moving through rows reads none.
 

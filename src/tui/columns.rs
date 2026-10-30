@@ -571,6 +571,45 @@ impl Columns {
         }
     }
 
+    /// Once WHERE is split, fits SESSION, WINDOW and BLOCK to their `longest` labels and a gap,
+    /// two columns when that all fits, else one; MSG takes what they free. When together they
+    /// want more than they hold, the short ones keep their fit and the long ones share the rest.
+    pub fn fit_parts(&mut self, longest: [usize; 3]) {
+        let parts = [Col::Session, Col::Window, Col::Block];
+        if parts.iter().any(|id| !self.has(*id)) {
+            return;
+        }
+        let held: usize = parts.iter().map(|id| self.width(*id)).sum();
+        // Never narrower than the header word with its gap and sort arrow.
+        let wanted = |gap: usize| longest.map(|n| (n + gap).max(10));
+        let mut want = if wanted(2).iter().sum::<usize>() <= held {
+            wanted(2)
+        } else {
+            wanted(1)
+        };
+        let mut left = held;
+        let mut open: Vec<usize> = (0..3).collect();
+        // Water-filling: a part that needs no more than an equal share of what is left gets its fit.
+        while !open.is_empty() {
+            let share = left / open.len();
+            match open.iter().position(|&i| want[i] <= share) {
+                Some(at) => left -= want[open.remove(at)],
+                None => {
+                    for (k, &i) in open.iter().enumerate() {
+                        want[i] = left / open.len() + usize::from(k < left % open.len());
+                    }
+                    break;
+                }
+            }
+        }
+        // Shrinks first, so the room they give back is there for the parts that grow.
+        let mut order: Vec<usize> = (0..3).collect();
+        order.sort_by_key(|&i| want[i] as isize - self.width(parts[i]) as isize);
+        for i in order {
+            self.resize(parts[i], want[i]);
+        }
+    }
+
     pub fn width(&self, id: Col) -> usize {
         self.cols
             .iter()
@@ -788,7 +827,7 @@ mod tests {
             let buf = buffer(&app, width, 30);
             let list = usize::from(width);
             let header: String = line(&buf, 2).chars().take(list).collect();
-            let columns = Columns::new(width, list, &[]);
+            let columns = app.columns(width, list);
             let row_y = (3..buf.area.height)
                 .find(|&y| line(&buf, y).contains("seat-b msg"))
                 .unwrap();
@@ -1036,6 +1075,163 @@ mod tests {
     }
 
     #[test]
+    fn the_card_follows_a_short_list_without_a_blank_band_at_80_140_and_200() {
+        use crate::tui::app::testkit::render;
+        let app = app();
+        for width in [80u16, 140, 200] {
+            let text = render(&app, width, 40);
+            let lines: Vec<&str> = text.lines().collect();
+            let bar = lines.iter().position(|l| l.starts_with("━━")).unwrap();
+            let last = lines[..bar]
+                .iter()
+                .rposition(|l| !l.trim().is_empty())
+                .unwrap();
+            assert!(
+                bar - last <= 2,
+                "{width}: {} blank rows between the list and the card:\n{text}",
+                bar - last - 1
+            );
+        }
+    }
+
+    #[test]
+    fn msg_takes_the_width_that_session_window_and_block_do_not_need() {
+        let app = app();
+        for width in [140u16, 200] {
+            let header = line(&buffer(&app, width, 30), 2);
+            let msg = header.find("MSG").unwrap();
+            assert!(
+                msg <= 80,
+                "{width}: MSG starts at {msg}, not where SESSION, WINDOW and BLOCK left room:\n{header}"
+            );
+        }
+        let parts = |width| {
+            let columns = app.columns(width, usize::from(width));
+            [Col::Session, Col::Window, Col::Block].map(|c| columns.width(c))
+        };
+        assert!(parts(140).iter().all(|w| *w >= 10), "{:?}", parts(140));
+        let narrow = app.columns(80, 80);
+        assert_eq!(
+            narrow.cols.iter().map(|(_, w)| *w).collect::<Vec<_>>(),
+            Columns::new(80, 80, &[])
+                .cols
+                .iter()
+                .map(|(_, w)| *w)
+                .collect::<Vec<_>>(),
+            "below the split nothing changes"
+        );
+    }
+
+    #[test]
+    fn a_session_label_that_fits_its_share_is_shown_whole_at_240_columns() {
+        let width = 240u16;
+        let mut app = App::default();
+        let label = format!("api-{}-end", "x".repeat(102));
+        let mut seat = row("mini/seat", "working", "working", true);
+        seat.pane.session = label.clone();
+        seat.pane.tab = "main".into();
+        seat.pane.pane = "seat".into();
+        app.set_rows(vec![seat], hosts());
+        let columns = app.columns(width, usize::from(width));
+        assert_eq!(columns.width(Col::Session), 111, "label and one gap");
+        let buf = buffer(&app, width, 40);
+        let shown = (0..40)
+            .map(|y| line(&buf, y))
+            .find(|line| line.contains("seat msg"))
+            .unwrap();
+        assert!(shown.contains(&label), "no ellipsis: {shown}");
+        assert_eq!(
+            columns.width(Col::Msg),
+            Columns::new(width, usize::from(width), &[]).width(Col::Msg),
+            "MSG keeps its own share"
+        );
+    }
+
+    #[test]
+    fn session_window_and_block_sit_two_columns_apart_when_there_is_room() {
+        let mut app = App::default();
+        let mut seat = row("local/seat", "working", "working", true);
+        seat.pane.session = "api-gateway".into();
+        seat.pane.tab = "integration-checks".into();
+        seat.pane.pane = "seat".into();
+        app.set_rows(vec![seat], hosts());
+        for width in [140u16, 200] {
+            let columns = app.columns(width, usize::from(width));
+            assert_eq!(columns.width(Col::Session), 13, "{width}: label and two");
+            assert_eq!(columns.width(Col::Window), 20, "{width}: label and two");
+        }
+        // Too little room for two: one column each, as before.
+        let mut tight = App::default();
+        let mut seat = row("local/seat", "working", "working", true);
+        seat.pane.session = "s".repeat(40);
+        seat.pane.tab = "w".repeat(40);
+        seat.pane.pane = "b".repeat(40);
+        tight.set_rows(vec![seat], hosts());
+        let columns = tight.columns(132, 132);
+        let parts = [Col::Session, Col::Window, Col::Block].map(|c| columns.width(c));
+        assert_eq!(
+            parts.iter().sum::<usize>(),
+            Columns::new(132, 132, &[])
+                .cols
+                .iter()
+                .filter(|(c, _)| matches!(c.id, Col::Session | Col::Window | Col::Block))
+                .map(|(_, w)| w)
+                .sum::<usize>(),
+            "{parts:?}"
+        );
+    }
+
+    #[test]
+    fn labels_longer_than_their_share_split_it_and_never_starve_msg() {
+        let mut app = App::default();
+        let long = |key: &str, text: &str| {
+            let mut r = placed(key, text, text);
+            r.pane.pane = text.into();
+            r
+        };
+        let label = "x".repeat(60);
+        app.set_rows(
+            vec![long("local/a", &label), long("local/b", "short")],
+            hosts(),
+        );
+        let fitted = app.columns(140, 140);
+        let plain = Columns::new(140, 140, &[]);
+        assert_eq!(
+            [Col::Session, Col::Window, Col::Block]
+                .map(|c| fitted.width(c))
+                .iter()
+                .sum::<usize>(),
+            [Col::Session, Col::Window, Col::Block]
+                .map(|c| plain.width(c))
+                .iter()
+                .sum::<usize>(),
+            "together they hold what they held"
+        );
+        assert_eq!(
+            fitted.width(Col::Msg),
+            plain.width(Col::Msg),
+            "and MSG keeps its own"
+        );
+        let mut columns = Columns::new(160, 160, &[]);
+        let msg = columns.width(Col::Msg);
+        columns.fit_parts([1, 1, 1]);
+        assert_eq!(
+            [Col::Session, Col::Window, Col::Block].map(|c| columns.width(c)),
+            [10, 10, 10],
+            "never narrower than the header word"
+        );
+        assert!(columns.width(Col::Msg) > msg, "MSG takes the freed width");
+        let mut columns = Columns::new(160, 160, &[]);
+        columns.fit_parts([199, 11, 11]);
+        assert_eq!(columns.width(Col::Window), 12);
+        assert_eq!(columns.width(Col::Block), 12);
+        assert_eq!(
+            columns.width(Col::Msg),
+            Columns::new(160, 160, &[]).width(Col::Msg)
+        );
+    }
+
+    #[test]
     fn where_and_msg_keep_their_100_column_widths_at_every_board_width() {
         let app = app();
         for width in 100..=240u16 {
@@ -1251,12 +1447,20 @@ mod tests {
     fn rows_that_only_read_the_same_once_squeezed_are_numbered() {
         let lines = seats(
             vec![
-                seat("local/blk-1", "api-gateway-one-production", "window:a"),
-                seat("local/blk-2", "api-gateway-two-production", "window:b"),
+                seat(
+                    "local/blk-1",
+                    &format!("{}-one-{}", "a".repeat(40), "b".repeat(40)),
+                    "window:a",
+                ),
+                seat(
+                    "local/blk-2",
+                    &format!("{}-two-{}", "a".repeat(40), "b".repeat(40)),
+                    "window:b",
+                ),
             ],
             132,
         );
-        assert!(lines[0].contains("…roduction"), "squeezed: {lines:#?}");
+        assert!(lines[0].contains("…bbb"), "squeezed: {lines:#?}");
         assert!(
             lines[0].contains("seat #1") && lines[1].contains("seat #2"),
             "{lines:#?}"
@@ -1272,8 +1476,14 @@ mod tests {
         };
         let lines = seats(
             vec![
-                named("local/blk-1", "seat-review-agent-one-claude-code"),
-                named("local/blk-2", "seat-review-agent-two-claude-code"),
+                named(
+                    "local/blk-1",
+                    &format!("seat-{}-one-{}", "a".repeat(36), "b".repeat(40)),
+                ),
+                named(
+                    "local/blk-2",
+                    &format!("seat-{}-two-{}", "a".repeat(36), "b".repeat(40)),
+                ),
             ],
             132,
         );
