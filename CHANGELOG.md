@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.16.1](https://github.com/vanducng/rexboard/compare/v0.16.0...v0.16.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **serve:** announce blocks that Rex places after creating them ([c63a671](https://github.com/vanducng/rexboard/commit/c63a67128bfbf1672de8e7524003ed39d2716c92))
+* **serve:** find a pane's tmux client under its wrapper ([f67cca5](https://github.com/vanducng/rexboard/commit/f67cca53edcd730fa160a6334639efb8f88a440c))
+
 ## [0.16.0](https://github.com/vanducng/rexboard/compare/v0.15.0...v0.16.0) (2026-10-27)
 
 
