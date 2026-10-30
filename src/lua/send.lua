@@ -65,6 +65,9 @@ if not front and fg.name == "tmux" and a.expect.title then
   local title = rex.block.call(term, "title", where)
   front = title ~= nil and title.title == a.expect.title
 end
+-- OpenRig's `/bin/sh -c ... tmux attach` wrapper: input through Rex cannot be pinned to the
+-- pane's own tmux client, so it is refused.
+if not front and (fg.argv0 or ""):match("/sh$") then return refuse("wrapped", fg.name) end
 if not front then return refuse("not_harness", fg.name or "nothing") end
 
 local t = tail(a)

@@ -23,6 +23,10 @@ impl App {
             self.say("this pane reports no status, so it cannot be answered here · enter jumps");
             return None;
         };
+        if row.pane.tmux && row.pane.process.as_deref() != Some("tmux") {
+            self.say("a seat behind the tmux wrapper cannot be answered here yet · enter jumps");
+            return None;
+        }
         let row = row.clone();
         self.full = None;
         self.keys = false;
@@ -384,6 +388,21 @@ mod tests {
                 .starts_with("this pane reports no status")
         );
         assert!(app.answer.is_none());
+    }
+
+    #[test]
+    fn answer_is_refused_on_a_seat_behind_the_tmux_wrapper_and_points_to_enter() {
+        let mut app = app();
+        let mut rows = rows();
+        rows[0].pane.process = Some("bash".into());
+        rows[0].pane.tmux = true;
+        app.set_rows(rows, hosts());
+        assert_eq!(press(&mut app, KeyCode::Char('a')), None);
+        assert_eq!(
+            app.toast(),
+            Some("a seat behind the tmux wrapper cannot be answered here yet · enter jumps")
+        );
+        assert!(app.answer.is_none(), "answer mode never opens");
     }
 
     #[test]

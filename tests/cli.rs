@@ -452,7 +452,9 @@ fn ls_json_adds_board_fields() {
     assert_eq!(codex["process"], "codex");
     assert_eq!(claude["ext"], serde_json::json!({}), "no extension enabled");
     assert_eq!(claude["usage"], serde_json::Value::Null, "no usage file");
-    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 29));
+    assert_eq!(by_block(&panes, "block:api-seat-a")["tmux"], true);
+    assert_eq!(codex["tmux"], false);
+    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 30));
 }
 
 /// A status line for the fixture's idle seat on `host`, sent after the recorded stream ends.
@@ -3148,6 +3150,75 @@ fn close_asks_on_a_terminal_and_needs_yes_without_one() {
         .args(["close", "local/block:api-seat-a", "--yes"])
         .assert()
         .success();
+}
+
+#[test]
+fn a_wrapped_tmux_pane_is_protected_on_close_and_not_answered() {
+    let serve = Serve::new();
+    let snapshot = serde_json::json!({ "v": 1, "type": "snapshot", "rex_version": "0.0.1-test",
+        "sessions": [{ "session_id": "session:api", "label": "api", "windows": [{
+            "window_id": "window:main", "label": "main", "blocks": [
+                { "block_id": "block:api-wrapped", "label": "seat-w", "title": "seat-w@demo",
+                  "process": { "name": "bash", "argv0": "/bin/sh", "pid": 4242 }, "records": {} },
+                { "block_id": "block:api-wrapped-seat", "label": "seat-x", "title": "seat-x@demo",
+                  "process": { "name": "bash", "argv0": "/bin/sh", "pid": 4243 },
+                  "records": [{ "state": "blocked", "kind": "permission", "app": "claude-code",
+                                "updated_at": "2026-01-01T00:00:00Z" }] }
+            ] }] }] });
+    let path = serve.dir.path().join("observer-studio-wrapped.ndjson");
+    std::fs::write(&path, format!("{snapshot}\n")).unwrap();
+    serve
+        .cmd()
+        .env("FAKE_REX_OBSERVER_studio", &path)
+        .args(["serve"])
+        .assert()
+        .success();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while serve.rows(&["--all", "--host", "local"]).len() < 2 {
+        assert!(std::time::Instant::now() < deadline, "the row never came");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let rows = serve.rows(&["--all", "--host", "local"]);
+    assert_eq!(
+        row(&rows, "local/block:api-wrapped")["source"],
+        "inferred",
+        "no status record"
+    );
+    serve
+        .cmd()
+        .args([
+            "answer",
+            "local/block:api-wrapped-seat",
+            "--pick",
+            "1",
+            "--dialog",
+            "x",
+            "--json",
+        ])
+        .assert()
+        .code(1)
+        .stderr(
+            predicate::str::contains("cannot be answered from rexboard yet; nothing sent").and(
+                predicate::str::contains("rexboard jump local/block:api-wrapped-seat"),
+            ),
+        );
+    serve
+        .cmd()
+        .env("TMUX", "/tmp/tmux-501/default,1,0")
+        .env("REX_BLOCK", "block:other")
+        .args(["close", "local/block:api-wrapped", "--yes", "--json"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "you are inside tmux and this pane runs tmux, so it may be the one you are in; it stays open",
+        ));
+    serve
+        .cmd()
+        .env_remove("TMUX")
+        .args(["close", "local/block:api-wrapped", "--json"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("(tmux keeps running)"));
 }
 
 #[test]

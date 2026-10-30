@@ -50,6 +50,9 @@ pub struct Expect {
     pub title: Option<String>,
 }
 
+/// Why a seat behind OpenRig's `sh -c ... tmux attach` wrapper is not answered.
+pub const WRAPPED: &str = "a seat behind OpenRig's sh wrapper around tmux cannot be answered from rexboard yet; nothing sent";
+
 /// Sends `action` to the pane if it still shows `expect`; else why nothing was sent.
 pub fn send(
     rex: &Path,
@@ -97,6 +100,7 @@ pub fn send(
             "{} is in front, not the agent; nothing sent",
             field("detail")
         ),
+        Some("wrapped") => WRAPPED.to_owned(),
         Some("prompt_changed") => "the screen changed since it was read; nothing sent".to_owned(),
         Some("gone") => "the pane is gone; nothing sent".to_owned(),
         Some(code) => format!("{}; nothing sent", clean(code)),
@@ -261,6 +265,7 @@ mod tests {
                 json!({ "code": "not_harness", "detail": "zsh" }),
                 "zsh is in front, not the agent; nothing sent",
             ),
+            (json!({ "code": "wrapped", "detail": "bash" }), WRAPPED),
             (
                 json!({ "code": "prompt_changed" }),
                 "the screen changed since it was read; nothing sent",

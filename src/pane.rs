@@ -53,6 +53,7 @@ pub struct BlockSnap {
 #[derive(Debug, Default, Deserialize)]
 struct Process {
     name: Option<String>,
+    argv0: Option<String>,
     pid: Option<u32>,
 }
 
@@ -82,6 +83,8 @@ pub struct Source {
     pub label: String,
     pub title: String,
     pub process: Option<String>,
+    /// The foreground process's first argument as it shows it.
+    pub argv0: Option<String>,
     pub pid: Option<u32>,
     /// Keyed by record id; `""` is the pane's main record.
     pub records: BTreeMap<String, Record>,
@@ -90,6 +93,22 @@ pub struct Source {
 }
 
 impl Source {
+    /// Whether Rex shows OpenRig's `sh -c ... tmux attach` wrapper in front: a shell started
+    /// by path as `sh`, which no one types into and which keeps a tmux client below it. A plain
+    /// shell shows `zsh` or `-zsh`.
+    pub fn is_wrapper(&self) -> bool {
+        self.argv0.as_deref().is_some_and(|a| a.ends_with("/sh"))
+    }
+
+    /// The process the pane shows: `tmux` for the wrapper around one.
+    pub fn front(&self) -> Option<&str> {
+        if self.is_wrapper() {
+            Some("tmux")
+        } else {
+            self.process.as_deref()
+        }
+    }
+
     pub fn new(session_id: &str, window_id: &str, block: BlockSnap) -> Self {
         Self {
             session_id: session_id.to_owned(),
@@ -98,6 +117,7 @@ impl Source {
             label: block.label,
             title: block.title.unwrap_or_default(),
             process: block.process.name,
+            argv0: block.process.argv0,
             pid: block.process.pid,
             records: block
                 .records
@@ -121,6 +141,10 @@ pub struct Pane {
     pub title: String,
     /// The foreground process, as in `zsh` or `tmux`.
     pub process: Option<String>,
+    /// Whether the pane shows a tmux client: tmux in front, or the `/bin/sh` wrapper OpenRig runs
+    /// around one.
+    #[serde(default)]
+    pub tmux: bool,
     /// Its pid, on its host; for a tmux client, what finds the tmux pane it shows.
     #[serde(default)]
     pub pid: Option<u32>,
@@ -137,6 +161,10 @@ impl Pane {
     /// A pane with a status record or a known harness; the rest are plain shells.
     pub fn is_agent(&self) -> bool {
         self.source != "inferred" || self.harness.is_some()
+    }
+
+    pub fn in_tmux(&self) -> bool {
+        self.tmux || self.process.as_deref() == Some("tmux")
     }
 }
 
@@ -208,7 +236,7 @@ pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
             *children.entry(record.state.clone()).or_insert(0) += 1;
         }
     }
-    let process = src.process.as_deref();
+    let process = src.front();
     let harness = crate::harness::name_of(
         main.and_then(|r| r.effective_app.clone().or_else(|| r.app.clone())),
         process,
@@ -258,6 +286,7 @@ pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
         pane: src.label.clone(),
         title: src.title.clone(),
         process: src.process.clone(),
+        tmux: process == Some("tmux"),
         pid: src.pid,
         harness,
         state,
@@ -392,6 +421,47 @@ mod tests {
         }
         assert_eq!(bare_title("✳seat-a"), "✳seat-a");
         assert_eq!(bare_title("Fix the parser"), "Fix the parser");
+    }
+
+    #[test]
+    fn a_sh_wrapper_around_tmux_is_a_tmux_pane() {
+        let pane = |argv0: Option<&str>, title: &str, record: bool| {
+            let records = if record {
+                serde_json::json!([{ "state": "working", "owner": { "name": "bash" } }])
+            } else {
+                serde_json::json!([])
+            };
+            let block = serde_json::json!({
+                "block_id": "b", "label": "seat", "title": title, "records": records,
+                "process": { "name": "bash", "argv0": argv0, "pid": 310 },
+            });
+            derive(
+                "local",
+                "api",
+                "main",
+                &Source::new("s", "w", parse_block(&block).unwrap()),
+            )
+        };
+        let wrapped = pane(Some("/bin/sh"), "api | gpt-5.1", true);
+        assert_eq!(wrapped.source, "bridge");
+        assert!(pane(Some("/bin/sh"), "", false).tmux, "with no record too");
+        assert_eq!(
+            wrapped.harness.as_deref(),
+            Some("codex"),
+            "the tmux title hint"
+        );
+        assert!(wrapped.in_tmux());
+        assert_eq!(
+            wrapped.process.as_deref(),
+            Some("bash"),
+            "the row keeps Rex's name"
+        );
+        for argv0 in [Some("-bash"), Some("bash"), Some("-sh"), None] {
+            let plain = pane(argv0, "api | gpt-5.1", true);
+            assert_eq!(plain.source, "native", "{argv0:?}");
+            assert_eq!(plain.harness, None, "{argv0:?}: only a tmux pane");
+            assert!(!plain.in_tmux() && !plain.tmux, "{argv0:?}");
+        }
     }
 
     #[test]

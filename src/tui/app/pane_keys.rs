@@ -76,12 +76,12 @@ impl App {
         let tmux = tmux_note(row);
         let full = self.place(row, usize::MAX);
         let ending = ending(row);
-        // A narrow footer drops what it ends before it cuts the place.
-        let rest = [ending.as_str(), ""]
+        // A narrow footer drops the tmux note, then what it ends, before it cuts the place.
+        let rest = [(ending.as_str(), tmux), (ending.as_str(), ""), ("", "")]
             .into_iter()
-            .map(|ending| format!(" on {}{ending}?{tmux} y closes", row.pane.host))
+            .map(|(ending, tmux)| format!(" on {}{ending}?{tmux} y closes", row.pane.host))
             .find(|rest| "close ".width() + full.width() + rest.width() <= width)
-            .unwrap_or_else(|| format!(" on {}?{tmux} y closes", row.pane.host));
+            .unwrap_or_else(|| format!(" on {}? y closes", row.pane.host));
         let room = width.saturating_sub("close ".width() + rest.width());
         Some(format!("close {}{rest}", self.place(row, room)))
     }
@@ -161,7 +161,7 @@ pub(crate) fn ending(row: &Row) -> String {
 
 /// Closing a tmux client leaves its session running, which the question says.
 pub(crate) fn tmux_note(row: &Row) -> &'static str {
-    if row.pane.process.as_deref() == Some("tmux") {
+    if row.pane.in_tmux() {
         " (tmux keeps running)"
     } else {
         ""
@@ -172,6 +172,18 @@ pub(crate) fn tmux_note(row: &Row) -> &'static str {
 mod tests {
     use super::*;
     use crate::tui::app::testkit::*;
+
+    #[test]
+    fn the_tmux_note_covers_the_wrapper_around_tmux_with_or_without_a_status() {
+        let mut row = rows().remove(0);
+        assert_eq!(tmux_note(&row), "");
+        row.pane.process = Some("bash".into());
+        for source in ["bridge", "inferred"] {
+            row.pane.source = source.into();
+            row.pane.tmux = true;
+            assert_eq!(tmux_note(&row), " (tmux keeps running)", "{source}");
+        }
+    }
 
     #[test]
     fn dd_asks_and_only_y_closes() {
@@ -222,6 +234,42 @@ mod tests {
                 .is_none(),
             "y after a pause does not bring the question back"
         );
+    }
+
+    #[test]
+    fn a_narrow_close_question_drops_the_tmux_note_before_what_it_ends() {
+        let mut app = app();
+        let mut row = row("local/claude", "working", "working", true);
+        row.pane.process = Some("claude".into());
+        row.pane.tmux = true;
+        app.set_rows(vec![row], hosts());
+        app.selected = Some(Spot::Row("local/claude".into()));
+        typed(&mut app, "dd");
+        let ask = |width| app.close_question(width).unwrap();
+        let full = ask(usize::MAX);
+        assert!(full.contains("ending claude (working)? (tmux keeps running) y closes"));
+        let no_note = full.replace(" (tmux keeps running)", "");
+        assert_eq!(ask(no_note.chars().count()), no_note, "the note goes first");
+        let no_ending = ask(no_note.chars().count() - 1);
+        assert!(!no_ending.contains("ending"), "{no_ending}");
+    }
+
+    #[test]
+    fn a_long_target_at_80_columns_never_brings_the_tmux_note_back() {
+        let mut app = app();
+        let mut row = row("local/claude", "working", "working", true);
+        row.pane.process = Some("claude".into());
+        row.pane.tmux = true;
+        row.pane.session = "api-gateway-component-with-a-long-session-label".into();
+        row.pane.tab = "integration-checks-with-a-long-window-label".into();
+        row.pane.pane = "seat-a".into();
+        app.set_rows(vec![row], hosts());
+        app.selected = Some(Spot::Row("local/claude".into()));
+        typed(&mut app, "dd");
+        let ask = app.close_question(80).unwrap();
+        assert!(ask.width() <= 80, "{ask}");
+        assert!(ask.ends_with(" on local? y closes"), "{ask}");
+        assert!(!ask.contains("tmux keeps running"), "{ask}");
     }
 
     #[test]

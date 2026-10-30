@@ -31,6 +31,9 @@ pub fn answer(args: &AnswerArgs, json: bool) -> Result<()> {
             &[format!("rexboard jump {key}")],
         ));
     }
+    if row.pane.tmux && row.pane.process.as_deref() != Some("tmux") {
+        return Err(refused(send::WRAPPED, &[format!("rexboard jump {key}")]));
+    }
     if let Some(want) = &args.expect {
         expected(&row, want)?;
     }
@@ -197,7 +200,7 @@ fn is_callers(row: &Row) -> bool {
 /// Whether `row` may be the pane the caller runs in. Inside tmux, REX_BLOCK names the pane that
 /// started the tmux server, not the caller's, so any local pane running tmux may be it.
 fn may_be_own(row: &Row) -> bool {
-    inside_tmux() && row.pane.host == "local" && row.pane.process.as_deref() == Some("tmux")
+    inside_tmux() && row.pane.host == "local" && row.pane.in_tmux()
 }
 
 /// `--expect STATE[:KIND]`: the row must still be in it.

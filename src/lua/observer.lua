@@ -21,7 +21,7 @@ local block_events = {
   end,
   process_changed = function(ev)
     if ev.foreground then
-      return { type = "process", name = ev.foreground.name, cwd = ev.foreground.cwd, pid = ev.foreground.pid }
+      return { type = "process", name = ev.foreground.name, argv0 = ev.foreground.argv0, cwd = ev.foreground.cwd, pid = ev.foreground.pid }
     end
   end,
   child_exited = function(ev)
