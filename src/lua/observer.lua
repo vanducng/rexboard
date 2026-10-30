@@ -38,17 +38,51 @@ rex.on("block_event", function(_, ev)
   end
 end)
 
-rex.on("block_created", function(_, ev)
-  local listed = rex.call("session.list_blocks", { session_id = ev.session_id }) or {}
+local unplaced = {}
+
+local function terminal_blocks(session_id)
+  local listed = rex.call("session.list_blocks", { session_id = session_id }) or {}
+  local out = {}
   for _, b in ipairs(listed.blocks or {}) do
-    if b.block_id == ev.block_id and b.creator_name == term and b.placement == "placed" then
-      emit({ type = "block_created", session_id = ev.session_id, window_id = b.window_id,
-        block = block(rex, ev.session_id, b) })
+    if b.creator_name == term then out[#out + 1] = b end
+  end
+  return out
+end
+
+local function announce(session_id, b)
+  emit({ type = "block_created", session_id = session_id, window_id = b.window_id,
+    block = block(rex, session_id, b) })
+end
+
+-- Rex can send block_created before it places the block; session_view_changed follows the placement.
+rex.on("block_created", function(_, ev)
+  for _, b in ipairs(terminal_blocks(ev.session_id)) do
+    if b.block_id == ev.block_id then
+      if b.placement == "placed" then
+        announce(ev.session_id, b)
+      else
+        unplaced[ev.block_id] = ev.session_id
+      end
+    end
+  end
+end)
+
+rex.on("session_view_changed", function(_, ev)
+  local waiting = false
+  for _, session_id in pairs(unplaced) do
+    waiting = waiting or session_id == ev.session_id
+  end
+  if not waiting then return end
+  for _, b in ipairs(terminal_blocks(ev.session_id)) do
+    if unplaced[b.block_id] and b.placement == "placed" then
+      unplaced[b.block_id] = nil
+      announce(ev.session_id, b)
     end
   end
 end)
 
 rex.on("block_closed", function(_, ev)
+  unplaced[ev.block_id] = nil
   emit({ type = "block_closed", session_id = ev.session_id, block_id = ev.block_id })
 end)
 rex.on("window_created", function(_, ev)
@@ -70,6 +104,9 @@ rex.on("session_created", function(_, ev)
   if ev.session then emit({ type = "session_created", session = session_entry(rex, ev.session) }) end
 end)
 rex.on("session_destroyed", function(_, ev)
+  for id, session_id in pairs(unplaced) do
+    if session_id == ev.session_id then unplaced[id] = nil end
+  end
   emit({ type = "session_destroyed", session_id = ev.session_id })
 end)
 rex.every(30, function() emit({ type = "tick" }) end)
