@@ -60,6 +60,7 @@ In a terminal each line fits its width: `WHAT` is cut first, then `WHERE` (a lon
 | `pane` | string | Block (pane) label |
 | `title` | string | Terminal title, `""` when none |
 | `process` | string or null | The pane's foreground process, as in `zsh`, `tmux`, or a version such as `2.1.310` (Claude Code runs under its version number) |
+| `tmux` | boolean | `true` when the pane shows a tmux client: `tmux` in front, or the `/bin/sh -c ... tmux attach` wrapper OpenRig runs around one (a shell started as `/bin/sh`). Whether or not the pane reports a status |
 | `pid` | integer or null | That process's pid on its host |
 | `harness` | string or null | `effective_app` (else `app`) of the record, else the foreground process (`codex`, `pi`; `claude`, or a version string like `2.1.310`, is `claude-code`), else `claude-code` for a title that starts with a Claude state glyph, else `codex` for a tmux pane titled `DIR | MODEL` (exactly one ` | `, a `DIR` with no spaces, a `MODEL` of letters, digits, `.` and `-` with at least one letter and one digit) |
 | `state` | string | `blocked`, `error`, `done`, `working` or `idle` from the record; with no record, from the title glyph (`✳ ` is `idle`, a braille spinner or `◐`/`◑` is `working`), else `unknown` |

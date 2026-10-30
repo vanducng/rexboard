@@ -1,8 +1,11 @@
 -- Runs src/lua/send.lua against a stand-in for Rex's Lua API, for one pane in front.
--- Usage: lua send-harness.lua <src/lua dir> <front> <wrapper_pid|-> <title seen>
--- <front> is "tmux", "wrapper" (a sh -c wrapper, pid 310) or "shell". Prints "sent" when the pane
--- got its input, else "refused <code> <detail>".
-local dir, front, wrapper_pid, seen = arg[1], arg[2], arg[3], arg[4]
+-- Usage: lua send-harness.lua <src/lua dir> <front> <proof> <title seen>
+-- <front> is "tmux", "wrapper" (a sh -c wrapper, pid 310) or "shell". <proof> is what rexboard
+-- names for the wrapper, and what the host then shows: "-" names none; "attached" a tmux child
+-- (311) the server lists; "unlisted" one the server does not list (a tmux wait-for); "left" one
+-- that is listed until the pane is read again; "gone" one that is not the wrapper's child (its parent is another process).
+-- Prints "sent" when the pane got its input, else "refused <code> <detail>".
+local dir, front, proof, seen = arg[1], arg[2], arg[3], arg[4]
 
 local foreground = ({
   tmux = { pid = 311, name = "tmux", argv0 = "tmux" },
@@ -10,8 +13,16 @@ local foreground = ({
   shell = { pid = 320, name = "zsh", argv0 = "-zsh" },
 })[front]
 
-local sent = {}
+local sent, listed = {}, 0
 rex = {
+  exec = function(argv)
+    if argv[1] == "ps" then
+      return { stdout = proof == "gone" and "  1 /usr/bin/tmux\n" or "  310 /usr/bin/tmux\n" }
+    end
+    listed = listed + 1
+    local lists = proof == "attached" or proof == "gone" or (proof == "left" and listed == 1)
+    return { stdout = lists and "311\n312\n" or "312\n" }
+  end,
   args = {
     session_id = "session:api",
     block_id = "block:seat-a",
@@ -23,7 +34,7 @@ rex = {
       state = "idle",
       fingerprint = "\n❯ \n",
       title = "seat-a",
-      wrapper_pid = wrapper_pid ~= "-" and tonumber(wrapper_pid) or nil,
+      wrapper = proof ~= "-" and { pid = 310, client = 311, socket = "/tmp/probe.sock" } or nil,
     },
   },
   call = function(method)

@@ -40,16 +40,11 @@ fn observer_announces_a_block_once_rex_places_it() {
     );
 }
 
-fn answer(front: &str, wrapper_pid: &str, title: &str) -> String {
+fn answer(front: &str, proof: &str, title: &str) -> String {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let out = Command::new(lua())
         .arg(root.join("tests/fixtures/send-harness.lua"))
-        .args([
-            root.join("src/lua").to_str().unwrap(),
-            front,
-            wrapper_pid,
-            title,
-        ])
+        .args([root.join("src/lua").to_str().unwrap(), front, proof, title])
         .output()
         .unwrap();
     assert!(
@@ -61,26 +56,33 @@ fn answer(front: &str, wrapper_pid: &str, title: &str) -> String {
 }
 
 #[test]
-fn answer_goes_to_a_tmux_client_or_the_wrapper_rexboard_proved_holds_one() {
+fn answer_goes_to_a_tmux_client_or_a_wrapper_around_an_attached_one() {
+    let refused = "refused not_harness bash";
     assert_eq!(answer("tmux", "-", "seat-a"), "sent");
-    assert_eq!(answer("wrapper", "310", "seat-a"), "sent");
+    assert_eq!(answer("wrapper", "attached", "seat-a"), "sent");
+    assert_eq!(answer("wrapper", "-", "seat-a"), refused, "no proof");
     assert_eq!(
-        answer("wrapper", "-", "seat-a"),
-        "refused not_harness bash",
-        "no proof of a tmux child: a sh wrapper of anything else"
+        answer("wrapper", "unlisted", "seat-a"),
+        refused,
+        "a tmux child its server does not list, as a wait-for"
     );
     assert_eq!(
-        answer("wrapper", "999", "seat-a"),
-        "refused not_harness bash",
-        "the proof was for another process"
+        answer("wrapper", "gone", "seat-a"),
+        refused,
+        "the wrapper no longer has that child"
     );
     assert_eq!(
-        answer("wrapper", "310", "seat-b"),
-        "refused not_harness bash",
+        answer("wrapper", "left", "seat-a"),
+        refused,
+        "the client left between the first look and the typing"
+    );
+    assert_eq!(
+        answer("wrapper", "attached", "seat-b"),
+        refused,
         "another seat is on screen"
     );
     assert_eq!(
-        answer("shell", "320", "seat-a"),
+        answer("shell", "attached", "seat-a"),
         "refused not_harness zsh",
         "a shell in front is never answered"
     );

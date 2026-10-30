@@ -174,12 +174,15 @@ mod tests {
     use crate::tui::app::testkit::*;
 
     #[test]
-    fn the_tmux_note_covers_a_pane_whose_status_came_through_tmux() {
+    fn the_tmux_note_covers_the_wrapper_around_tmux_with_or_without_a_status() {
         let mut row = rows().remove(0);
         assert_eq!(tmux_note(&row), "");
         row.pane.process = Some("bash".into());
-        row.pane.source = "bridge".into();
-        assert_eq!(tmux_note(&row), " (tmux keeps running)");
+        for source in ["bridge", "inferred"] {
+            row.pane.source = source.into();
+            row.pane.tmux = true;
+            assert_eq!(tmux_note(&row), " (tmux keeps running)", "{source}");
+        }
     }
 
     #[test]

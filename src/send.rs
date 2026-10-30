@@ -1,14 +1,14 @@
 //! Acts on a pane: answers it (one `rex do` with `send.lua` re-checks the pane and sends a digit
 //! or a line), or closes it.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
 use serde_json::{Value, json};
 
 use crate::error::Error;
-use crate::harness::usage::Procs;
+use crate::harness::usage::{self, Procs};
 use crate::output::clean;
 use crate::pane::Pane;
 use crate::rex;
@@ -51,14 +51,21 @@ pub struct Expect {
     pub title: Option<String>,
 }
 
-/// The pid of a `sh -c ... tmux attach` wrapper in front of `pane`, which send.lua then accepts as
-/// the pane's tmux client. Rex reports no children, so only a pane on this host, whose process
-/// table `ps` reads, can prove the wrapper holds one; any other wrapper is refused.
-fn wrapper_pid(pane: &Pane, procs: impl FnOnce() -> Procs) -> Option<u32> {
+/// What send.lua needs to accept a `/bin/sh` wrapper in front as a tmux client: its pid, the one
+/// tmux child under it, and the socket of the server that lists the child as an attached client.
+/// Rex lists no children, so only a pane on this host, whose process table `ps` reads, can have
+/// it; any other wrapper is refused. send.lua checks all of it again just before it types.
+fn wrapper_proof(
+    pane: &Pane,
+    procs: impl FnOnce() -> Procs,
+    attached: impl FnOnce(u32) -> Option<PathBuf>,
+) -> Option<Value> {
     let pid = pane
         .pid
-        .filter(|_| pane.host == "local" && pane.source == "bridge")?;
-    procs().tmux_child(pid).map(|_| pid)
+        .filter(|_| pane.host == "local" && pane.tmux && pane.process.as_deref() != Some("tmux"))?;
+    let client = procs().tmux_child(pid)?;
+    let socket = attached(client)?;
+    Some(json!({ "pid": pid, "client": client, "socket": socket }))
 }
 
 /// Sends `action` to the pane if it still shows `expect`; else why nothing was sent.
@@ -77,7 +84,7 @@ pub fn send(
             "kind": expect.kind,
             "fingerprint": expect.fingerprint,
             "title": expect.title,
-            "wrapper_pid": wrapper_pid(pane, Procs::read),
+            "wrapper": wrapper_proof(pane, Procs::read, usage::attached_socket),
         },
         "harness": crate::harness::processes(),
         "harness_prefixes": crate::harness::process_prefixes(),
@@ -192,29 +199,42 @@ mod tests {
     }
 
     #[test]
-    fn answer_names_a_wrapper_only_on_this_host_and_only_with_one_tmux_child() {
+    fn answer_names_a_wrapper_only_with_one_attached_tmux_child_on_this_host() {
         let procs = || Procs::parse("310 100 /bin/sh\n311 310 /usr/bin/tmux\n320 100 /bin/sh\n");
-        let wrapped = |host: &str, pid: u32, source: &str| {
+        let socket = || Some(PathBuf::from("/tmp/probe.sock"));
+        let proof = |host: &str, pid: u32, tmux: bool, attached: Option<PathBuf>| {
             let mut pane = pane(host);
             pane.pid = Some(pid);
-            pane.source = source.into();
-            wrapper_pid(&pane, procs)
+            pane.tmux = tmux;
+            wrapper_proof(&pane, procs, |_| attached)
         };
-        assert_eq!(wrapped("local", 310, "bridge"), Some(310));
         assert_eq!(
-            wrapped("local", 320, "bridge"),
+            proof("local", 310, true, socket()),
+            Some(json!({ "pid": 310, "client": 311, "socket": "/tmp/probe.sock" }))
+        );
+        assert_eq!(
+            proof("local", 310, true, None),
+            None,
+            "a child no server lists"
+        );
+        assert_eq!(
+            proof("local", 320, true, socket()),
             None,
             "a wrapper of something else"
         );
         assert_eq!(
-            wrapped("mini", 310, "bridge"),
+            proof("mini", 310, true, socket()),
             None,
-            "this host's ps knows no other host"
+            "ps knows no other host"
         );
-        assert_eq!(wrapped("local", 310, "native"), None, "not a tmux pane");
+        assert_eq!(
+            proof("local", 310, false, socket()),
+            None,
+            "not a tmux pane"
+        );
         let mut no_pid = pane("local");
-        no_pid.source = "bridge".into();
-        assert_eq!(wrapper_pid(&no_pid, procs), None);
+        no_pid.tmux = true;
+        assert_eq!(wrapper_proof(&no_pid, procs, |_| socket()), None);
     }
 
     #[test]

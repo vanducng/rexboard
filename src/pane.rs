@@ -141,6 +141,10 @@ pub struct Pane {
     pub title: String,
     /// The foreground process, as in `zsh` or `tmux`.
     pub process: Option<String>,
+    /// Whether the pane shows a tmux client: tmux in front, or the `/bin/sh` wrapper OpenRig runs
+    /// around one.
+    #[serde(default)]
+    pub tmux: bool,
     /// Its pid, on its host; for a tmux client, what finds the tmux pane it shows.
     #[serde(default)]
     pub pid: Option<u32>,
@@ -159,10 +163,8 @@ impl Pane {
         self.source != "inferred" || self.harness.is_some()
     }
 
-    /// Whether the pane shows a tmux client: tmux in front, or a status that came through
-    /// tmux, as from the `sh -c ... tmux attach` wrapper OpenRig runs.
     pub fn in_tmux(&self) -> bool {
-        self.process.as_deref() == Some("tmux") || self.source == "bridge"
+        self.tmux || self.process.as_deref() == Some("tmux")
     }
 }
 
@@ -284,6 +286,7 @@ pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
         pane: src.label.clone(),
         title: src.title.clone(),
         process: src.process.clone(),
+        tmux: process == Some("tmux"),
         pid: src.pid,
         harness,
         state,
@@ -441,6 +444,7 @@ mod tests {
         };
         let wrapped = pane(Some("/bin/sh"), "api | gpt-5.1", true);
         assert_eq!(wrapped.source, "bridge");
+        assert!(pane(Some("/bin/sh"), "", false).tmux, "with no record too");
         assert_eq!(
             wrapped.harness.as_deref(),
             Some("codex"),
@@ -456,7 +460,7 @@ mod tests {
             let plain = pane(argv0, "api | gpt-5.1", true);
             assert_eq!(plain.source, "native", "{argv0:?}");
             assert_eq!(plain.harness, None, "{argv0:?}: only a tmux pane");
-            assert!(!plain.in_tmux(), "{argv0:?}");
+            assert!(!plain.in_tmux() && !plain.tmux, "{argv0:?}");
         }
     }
 

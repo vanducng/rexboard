@@ -347,23 +347,36 @@ pub fn tmux_keys(pids: &[u32]) -> Tmux {
         let Some(name) = socket.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        let ask = |args: &[&str]| {
-            Command::new("tmux")
-                .arg("-S")
-                .arg(&socket)
-                .args(args)
-                .stdin(Stdio::null())
-                .stderr(Stdio::null())
-                .output()
-                .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
-                .unwrap_or_default()
-        };
+        let ask = |args: &[&str]| tmux_out(&socket, args);
         let listed = ask(&["list-clients", "-F", "#{client_pid} #{pid} #{pane_id}"]);
         tmux.shown.extend(clients(&listed, name, &wanted));
         let listed = ask(&["list-panes", "-a", "-F", "#{pid} #{pane_id}"]);
         tmux.panes.extend(panes(&listed, name));
     }
     tmux
+}
+
+fn tmux_out(socket: &Path, args: &[&str]) -> String {
+    Command::new("tmux")
+        .arg("-S")
+        .arg(socket)
+        .args(args)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+        .unwrap_or_default()
+}
+
+/// The socket of the tmux server `client` is attached to, which only a client its server lists
+/// has: a `tmux wait-for` or another command named tmux has none.
+pub fn attached_socket(client: u32) -> Option<PathBuf> {
+    let socket = client_socket(client)?;
+    let listed = tmux_out(&socket, &["list-clients", "-F", "#{client_pid}"]);
+    listed
+        .lines()
+        .any(|line| line.trim().parse() == Ok(client))
+        .then_some(socket)
 }
 
 /// `list-panes -a` lines (`server_pid pane_id`) as pane keys.
