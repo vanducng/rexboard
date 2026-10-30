@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.16.2](https://github.com/vanducng/rexboard/compare/v0.16.1...v0.16.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* **serve:** follow a block that moves between windows and drop one that is detached ([#98](https://github.com/vanducng/rexboard/issues/98)) ([9598a2a](https://github.com/vanducng/rexboard/commit/9598a2aa13e257494199695185d4ecfc0e34634c))
+* **tui:** card follows a short list, columns fit their labels, only a short lead is bold ([#99](https://github.com/vanducng/rexboard/issues/99)) ([d358440](https://github.com/vanducng/rexboard/commit/d358440e5f7076c313434862de9a1dee16f75ae3))
+* **tui:** treat the sh wrapper around tmux as tmux for status and close ([#96](https://github.com/vanducng/rexboard/issues/96)) ([b7bb62f](https://github.com/vanducng/rexboard/commit/b7bb62f33016fc7e98798707a7e286a3b6140130))
+
 ## [0.16.1](https://github.com/vanducng/rexboard/compare/v0.16.0...v0.16.1) (2026-10-30)
 
 
