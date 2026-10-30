@@ -88,7 +88,7 @@ impl Entry {
                 "%H:%M"
             });
         // Under tmux the title is tmux's and keeps its idle glyph while the agent works.
-        let process = self.src.process.as_deref();
+        let process = self.src.front();
         if process != Some("tmux") && p.title.starts_with("✳ ") {
             return Some(format!("reported working at {at}; the title shows idle"));
         }
@@ -237,10 +237,12 @@ impl Board {
             Event::Process {
                 block_id,
                 name,
+                argv0,
                 pid,
                 ..
             } => Ok(self.change(host, block_id, now, |src| {
                 src.process.clone_from(name);
+                src.argv0.clone_from(argv0);
                 src.pid = *pid;
             })),
             Event::BlockCreated {
@@ -941,6 +943,32 @@ mod tests {
         json!({ "block_id": id, "label": "seat-a", "title": title, "process": { "name": process },
             "records": [{ "state": "working", "app": "claude-code", "updated_at": updated_at,
                           "owner": { "name": "tmux" } }] })
+    }
+
+    #[test]
+    fn a_working_seat_behind_the_sh_wrapper_is_not_suspect() {
+        let block = |id: &str, argv0: &str| {
+            json!({ "block_id": id, "label": "seat-a", "title": "✳ seat-a@demo",
+                "process": { "name": "bash", "argv0": argv0 },
+                "records": [{ "state": "working", "app": "claude-code",
+                              "updated_at": "2026-01-01T00:00:00Z", "owner": { "name": "bash" } }] })
+        };
+        let mut board = Board::default();
+        let blocks = json!([
+            block("block:wrapped", "/bin/sh"),
+            block("block:shell", "-bash")
+        ]);
+        board.apply("mini", &snapshot(blocks), at(5)).unwrap();
+        let rows = board.rows(at(SUSPECT_AFTER_SECS + 1));
+        let get = |id: &str| rows.iter().find(|r| r.pane.block_id == id).unwrap();
+        assert!(
+            !get("block:wrapped").suspect,
+            "bash here is the wrapper above a tmux client, and the title is tmux's"
+        );
+        assert!(
+            get("block:shell").suspect,
+            "a login shell in front is still suspect"
+        );
     }
 
     #[test]

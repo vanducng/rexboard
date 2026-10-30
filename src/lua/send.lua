@@ -60,8 +60,12 @@ local function agent(name)
   return false
 end
 local front = agent(fg.name) or agent(fg.argv0)
--- A tmux seat's pane shows tmux; its title says which seat is on screen.
-if not front and fg.name == "tmux" and a.expect.title then
+-- A tmux seat's pane shows tmux; its title says which seat is on screen. OpenRig runs tmux under
+-- a `sh -c` wrapper, which is what Rex shows in front. Rex lists no children, so rexboard proved
+-- the tmux child on this host and names the wrapper's pid.
+local wrapped = a.expect.wrapper_pid ~= nil and fg.pid == a.expect.wrapper_pid
+  and (fg.argv0 or ""):match("/sh$") ~= nil
+if not front and (fg.name == "tmux" or wrapped) and a.expect.title then
   local title = rex.block.call(term, "title", where)
   front = title ~= nil and title.title == a.expect.title
 end

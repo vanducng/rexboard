@@ -66,7 +66,7 @@ In a terminal each line fits its width: `WHAT` is cut first, then `WHERE` (a lon
 | `kind` | string or null | The record's `kind`, such as `permission` |
 | `msg` | string or null | The record's message, ` ⏎ ` between lines; from `rexboard hook`, an empty line between paragraphs and each line's leading spaces kept |
 | `updated_at` | string or null | RFC 3339 time Rex received the record. It changes on every report, not only on a state change |
-| `source` | string | `native`: the agent in the pane reports its own status. `bridge`: the record came through tmux (tmux wrote it, or is the pane's foreground process). `inferred`: no record, state read from the title. An extension's name: no record, and that extension gave the row a fallback status. See [Agent status](agent-status.md) |
+| `source` | string | `native`: the agent in the pane reports its own status. `bridge`: the record came through tmux (tmux wrote it, or is the pane's foreground process, or `sh` started as `/bin/sh` is, which is OpenRig's `sh -c ... tmux attach` wrapper). `inferred`: no record, state read from the title. An extension's name: no record, and that extension gave the row a fallback status. See [Agent status](agent-status.md) |
 | `children` | object | Counts by state of the pane's other records, such as Claude subagents: `{"working": 1}` |
 | `since` | string | RFC 3339 UTC time the pane entered its current `state` and `kind`. A report in the same state keeps it |
 | `since_estimated` | boolean | `true` when rexboard did not see the change: a row first seen in a snapshot that is `working` (its `updated_at` is the last report, not the start) or has no record, or an `updated_at` that is not RFC 3339. That last case also prints `warning: HOST: updated_at "VALUE" is not RFC 3339 (Rex VERSION); time in state is estimated` on stderr, once per host. A row with no record still has a `since` in `--json`; the text table and the board show its age as `-` |
@@ -74,7 +74,7 @@ In a terminal each line fits its width: `WHAT` is cut first, then `WHERE` (a lon
 | `last_turn` | integer or null | Seconds from entering `working` to the next `done` or `blocked`. Short when the turn was already running when rexboard started |
 | `seen` | boolean | `false` after the pane enters `done`, `blocked` or `error`; `true` once it enters `working` again. A `done`, `blocked` or `error` first seen in a snapshot starts unseen. `rexboard seen KEY`, a jump, or `m` on the board marks it seen |
 | `stale` | boolean | `true` while the host's observer is down; the next snapshot clears it |
-| `suspect` | boolean | `true` when the record says `working`, its last report is more than 120 seconds old, and the pane disagrees: its title starts with Claude's idle `✳ ` (not checked when `tmux` is in front, since the title is then tmux's and keeps the idle glyph while the agent works), or a shell (`zsh`, `bash`, `fish`, `sh`) is back in front. A hook that never reported the end of a turn leaves this behind. `state` keeps the record's value; the board and the `ls` table show `idle?` |
+| `suspect` | boolean | `true` when the record says `working`, its last report is more than 120 seconds old, and the pane disagrees: its title starts with Claude's idle `✳ ` (not checked when `tmux` or that wrapper is in front, since the title is then tmux's and keeps the idle glyph while the agent works), or a shell (`zsh`, `bash`, `fish`, `sh`) is back in front. A hook that never reported the end of a turn leaves this behind. `state` keeps the record's value; the board and the `ls` table show `idle?` |
 | `suspect_reason` | string or null | Why, as in `reported working at 14:02; the title shows idle`. A report a day old or more gives its date: `reported working at Oct 24 14:02; zsh is back in front` |
 | `group` | string | `needs_you` (`blocked`, `error`, unseen `done`), `working`, `quiet` (`idle`, seen `done`), or `unreported` (`source` is `inferred`, `state` is `unknown`, `stale`, or `suspect`) |
 | `ext` | object | Fields from [extensions](extensions.md), by id: `{"session-prefix.project": "api"}` |
@@ -132,7 +132,7 @@ A missing value is `null`. `ids` is `[]` when empty.
 | `status` | `session_id`, `block_id`, `record_id`, `record` | A pane reported a status. `record` is Rex's record (`state`, `kind`, `msg`, `app`, `effective_app`, `owner`, `updated_at`). `record_id` is `""` or `null` for the pane's main record, else the sub-record's id, such as a Claude subagent |
 | `status_removed` | `session_id`, `block_id`, `ids`, `reason` | Status records were cleared |
 | `title` | `session_id`, `block_id`, `title` | The terminal title changed |
-| `process` | `session_id`, `block_id`, `name`, `cwd`, `pid` | The foreground process changed |
+| `process` | `session_id`, `block_id`, `name`, `argv0`, `cwd`, `pid` | The foreground process changed |
 | `child_exited` | `session_id`, `block_id`, `exit_code` | The pane's process exited |
 | `block_created` | `session_id`, `window_id`, `block` | A terminal pane opened. `block` has the same shape as a block in `snapshot` |
 | `block_closed` | `session_id`, `block_id` | A pane closed |

@@ -36,6 +36,8 @@ pub enum Event {
         session_id: String,
         block_id: String,
         name: Option<String>,
+        #[serde(default)]
+        argv0: Option<String>,
         cwd: Option<String>,
         #[serde(default)]
         pid: Option<u32>,

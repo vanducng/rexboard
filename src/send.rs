@@ -8,6 +8,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use crate::error::Error;
+use crate::harness::usage::Procs;
 use crate::output::clean;
 use crate::pane::Pane;
 use crate::rex;
@@ -50,6 +51,16 @@ pub struct Expect {
     pub title: Option<String>,
 }
 
+/// The pid of a `sh -c ... tmux attach` wrapper in front of `pane`, which send.lua then accepts as
+/// the pane's tmux client. Rex reports no children, so only a pane on this host, whose process
+/// table `ps` reads, can prove the wrapper holds one; any other wrapper is refused.
+fn wrapper_pid(pane: &Pane, procs: impl FnOnce() -> Procs) -> Option<u32> {
+    let pid = pane
+        .pid
+        .filter(|_| pane.host == "local" && pane.source == "bridge")?;
+    procs().tmux_child(pid).map(|_| pid)
+}
+
 /// Sends `action` to the pane if it still shows `expect`; else why nothing was sent.
 pub fn send(
     rex: &Path,
@@ -66,6 +77,7 @@ pub fn send(
             "kind": expect.kind,
             "fingerprint": expect.fingerprint,
             "title": expect.title,
+            "wrapper_pid": wrapper_pid(pane, Procs::read),
         },
         "harness": crate::harness::processes(),
         "harness_prefixes": crate::harness::process_prefixes(),
@@ -177,6 +189,32 @@ mod tests {
         let argv = std::fs::read_to_string(dir.join("argv")).unwrap();
         let (head, args) = argv.trim().split_once(" --args ").unwrap();
         (head.to_owned(), serde_json::from_str(args).unwrap())
+    }
+
+    #[test]
+    fn answer_names_a_wrapper_only_on_this_host_and_only_with_one_tmux_child() {
+        let procs = || Procs::parse("310 100 /bin/sh\n311 310 /usr/bin/tmux\n320 100 /bin/sh\n");
+        let wrapped = |host: &str, pid: u32, source: &str| {
+            let mut pane = pane(host);
+            pane.pid = Some(pid);
+            pane.source = source.into();
+            wrapper_pid(&pane, procs)
+        };
+        assert_eq!(wrapped("local", 310, "bridge"), Some(310));
+        assert_eq!(
+            wrapped("local", 320, "bridge"),
+            None,
+            "a wrapper of something else"
+        );
+        assert_eq!(
+            wrapped("mini", 310, "bridge"),
+            None,
+            "this host's ps knows no other host"
+        );
+        assert_eq!(wrapped("local", 310, "native"), None, "not a tmux pane");
+        let mut no_pid = pane("local");
+        no_pid.source = "bridge".into();
+        assert_eq!(wrapper_pid(&no_pid, procs), None);
     }
 
     #[test]

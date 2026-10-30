@@ -161,7 +161,7 @@ pub(crate) fn ending(row: &Row) -> String {
 
 /// Closing a tmux client leaves its session running, which the question says.
 pub(crate) fn tmux_note(row: &Row) -> &'static str {
-    if row.pane.process.as_deref() == Some("tmux") {
+    if row.pane.in_tmux() {
         " (tmux keeps running)"
     } else {
         ""
@@ -172,6 +172,15 @@ pub(crate) fn tmux_note(row: &Row) -> &'static str {
 mod tests {
     use super::*;
     use crate::tui::app::testkit::*;
+
+    #[test]
+    fn the_tmux_note_covers_a_pane_whose_status_came_through_tmux() {
+        let mut row = rows().remove(0);
+        assert_eq!(tmux_note(&row), "");
+        row.pane.process = Some("bash".into());
+        row.pane.source = "bridge".into();
+        assert_eq!(tmux_note(&row), " (tmux keeps running)");
+    }
 
     #[test]
     fn dd_asks_and_only_y_closes() {

@@ -13,7 +13,7 @@ cargo build
 cargo run -- --help
 ```
 
-The tests run against `tests/fixtures/fake-rex`, so you do not need Rex to work on most of the code. `tests/observer.rs` runs `observer.lua` under a Lua interpreter (`lua`, `lua5.4` or `luajit`) against a stand-in for Rex's API. To try the board against your own Rex, `cargo run` is enough; to install from source, `cargo install --locked --git https://github.com/vanducng/rexboard`.
+The tests run against `tests/fixtures/fake-rex`, so you do not need Rex to work on most of the code. `tests/lua.rs` runs `observer.lua` and `send.lua` under a Lua interpreter (`lua`, `lua5.4` or `luajit`) against a stand-in for Rex's API. To try the board against your own Rex, `cargo run` is enough; to install from source, `cargo install --locked --git https://github.com/vanducng/rexboard`.
 
 ## The three checks
 
