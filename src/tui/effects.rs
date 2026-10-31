@@ -3,11 +3,10 @@
 
 use super::*;
 
-/// Peek keeps this many lines from the end of the pane, enough for a 200-row pane; each draw shows
-/// the newest that fit, so a resize needs no new capture.
-const PEEK_LINES: usize = 200;
+use super::prefs::DEFAULT_TAIL as PEEK_LINES;
 
-/// A peek reads at most this much of the end of a pane, and gives up after PEEK_WITHIN.
+/// A peek of PEEK_LINES lines reads at most this much of the end of a pane (more lines scale it),
+/// and gives up after PEEK_WITHIN.
 const PEEK_BYTES: usize = 48 * 1024;
 
 /// The same end with its colours: about 2x the bytes per line (2.0x on a Claude Code pane, 2.5x
@@ -136,12 +135,13 @@ pub(super) fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>)
             session,
             block,
             vt,
+            lines,
         } => {
             let mine = PEEK_GEN.fetch_add(1, Ordering::SeqCst) + 1;
             thread::spawn(move || {
                 let current = || PEEK_GEN.load(Ordering::SeqCst) == mine;
                 let lines = match rex::locate() {
-                    Ok(rex) => peek(&rex, &host, &session, &block, vt, &|| !current()),
+                    Ok(rex) => peek(&rex, &host, &session, &block, (vt, lines), &|| !current()),
                     Err(err) => Some(Err(format!("peek failed: {err}"))),
                 };
                 if let Some(lines) = lines.filter(|_| current()) {
@@ -233,20 +233,22 @@ fn peek(
     host: &str,
     session: &str,
     block: &str,
-    vt: bool,
+    (vt, lines): (bool, usize),
     cancelled: &dyn Fn() -> bool,
 ) -> Option<std::result::Result<Vec<String>, String>> {
-    let (bytes, format) = if vt {
+    let (base, format) = if vt {
         (PEEK_VT_BYTES, "vt")
     } else {
         (PEEK_BYTES, "text")
     };
+    let bytes = base * lines / PEEK_LINES;
     let args =
         json!({ "session_id": session, "block_id": block, "max_bytes": bytes, "format": format });
     match capture(rex, host, &args, rex::TAIL, cancelled) {
         Ok(reply) => Some(Ok(peek_lines(
             reply["text"].as_str().unwrap_or_default(),
             vt,
+            lines,
         ))),
         Err(Error::Cancelled) => None,
         Err(err) => Some(Err(said(err, "peek failed"))),
@@ -258,7 +260,14 @@ fn peek(
 pub(crate) fn tail(row: &Row, lines: usize) -> Result<Vec<String>> {
     let rex = rex::locate()?;
     let p = &row.pane;
-    match peek(&rex, &p.host, &p.session_id, &p.block_id, false, &|| false) {
+    match peek(
+        &rex,
+        &p.host,
+        &p.session_id,
+        &p.block_id,
+        (false, PEEK_LINES),
+        &|| false,
+    ) {
         Some(Ok(all)) => Ok(all[all.len().saturating_sub(lines)..].to_vec()),
         Some(Err(why)) => Err(Error::Rex(why)),
         None => Err(Error::Cancelled),
@@ -318,7 +327,7 @@ fn capture(
 /// The last lines of captured pane text, with every escape sequence and control character
 /// removed but, for `vt`, the colours: the text comes from whatever runs in that pane. Trailing
 /// blank lines go too, so a padded line does not wrap into empty rows.
-fn peek_lines(text: &str, vt: bool) -> Vec<String> {
+fn peek_lines(text: &str, vt: bool, keep: usize) -> Vec<String> {
     let mut lines: Vec<String> = text
         .lines()
         .map(|line| {
@@ -332,7 +341,7 @@ fn peek_lines(text: &str, vt: bool) -> Vec<String> {
     {
         lines.pop();
     }
-    lines[lines.len().saturating_sub(PEEK_LINES)..].to_vec()
+    lines[lines.len().saturating_sub(keep)..].to_vec()
 }
 
 /// What `s` reports. A blocked or erroring pane stays in NEEDS YOU, so it says why.
@@ -388,9 +397,16 @@ mod tests {
             &json!({ "ok": true, "text": text, "total": 9000, "cut": true }),
             0,
         );
-        let lines = peek(&rex, "mini", "session:1", "block:2", false, &|| false)
-            .unwrap()
-            .unwrap();
+        let lines = peek(
+            &rex,
+            "mini",
+            "session:1",
+            "block:2",
+            (false, PEEK_LINES),
+            &|| false,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(lines.len(), PEEK_LINES);
         assert_eq!(lines.last().unwrap(), "RED", "trailing blank lines dropped");
         assert!(
@@ -404,7 +420,14 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(args).unwrap(),
             json!({ "session_id": "session:1", "block_id": "block:2", "max_bytes": 49152, "format": "text" })
         );
-        peek(&rex, "local", "session:1", "block:2", false, &|| false);
+        peek(
+            &rex,
+            "local",
+            "session:1",
+            "block:2",
+            (false, PEEK_LINES),
+            &|| false,
+        );
         let argv = std::fs::read_to_string(dir.path().join("argv")).unwrap();
         assert!(
             argv.starts_with("do - --json --args "),
@@ -413,11 +436,44 @@ mod tests {
     }
 
     #[test]
+    fn a_peek_keeps_as_many_lines_as_asked_and_reads_bytes_in_proportion() {
+        let dir = tempfile::tempdir().unwrap();
+        let text: String = (1..=6000).map(|n| format!("line {n}\n")).collect();
+        let rex = fake_rex(
+            dir.path(),
+            &json!({ "ok": true, "text": text, "total": 9000, "cut": true }),
+            0,
+        );
+        let asked = |vt: bool, lines: usize| {
+            let kept = peek(&rex, "local", "s", "b", (vt, lines), &|| false)
+                .unwrap()
+                .unwrap();
+            let argv = std::fs::read_to_string(dir.path().join("argv")).unwrap();
+            let args: serde_json::Value =
+                serde_json::from_str(argv.trim().split_once(" --args ").unwrap().1).unwrap();
+            (kept.len(), args["max_bytes"].as_u64().unwrap())
+        };
+        assert_eq!(asked(false, 200), (200, 48 * 1024), "today's read");
+        assert_eq!(asked(true, 200), (200, 96 * 1024));
+        assert_eq!(
+            asked(true, 1000),
+            (1000, 96 * 1024 * 5),
+            "5x the lines, 5x the bytes"
+        );
+        assert_eq!(asked(true, 5000), (5000, 96 * 1024 * 25));
+        assert_eq!(
+            asked(false, 4),
+            (4, 48 * 1024 * 4 / 200),
+            "a strip reads little"
+        );
+    }
+
+    #[test]
     fn a_full_view_peek_reads_vt_and_keeps_only_the_colours() {
         let dir = tempfile::tempdir().unwrap();
         let text = "\x1b[1C\x1b[0m\x1b[38;2;255;0;0m-\x1b[1Cold\x1b[0m\x1b]0;t\x07\r\n\x1b[2K\r\n";
         let rex = fake_rex(dir.path(), &json!({ "ok": true, "text": text }), 0);
-        let lines = peek(&rex, "local", "s", "b", true, &|| false)
+        let lines = peek(&rex, "local", "s", "b", (true, PEEK_LINES), &|| false)
             .unwrap()
             .unwrap();
         assert_eq!(lines, [" \x1b[0m\x1b[38;2;255;0;0m- old\x1b[0m"]);
@@ -436,7 +492,7 @@ mod tests {
         let reply = json!({ "ok": false, "step": "blob_read", "error": "not_found" });
         let rex = fake_rex(dir.path(), &reply, 0);
         assert_eq!(
-            peek(&rex, "local", "s", "b", false, &|| false),
+            peek(&rex, "local", "s", "b", (false, PEEK_LINES), &|| false),
             Some(Err("peek failed: blob_read: not_found".to_owned()))
         );
     }
@@ -446,7 +502,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let rex = fake_rex(dir.path(), &json!({ "ok": true, "text": "late" }), 5);
         let started = std::time::Instant::now();
-        let got = peek(&rex, "mini", "s", "b", false, &|| false);
+        let got = peek(&rex, "mini", "s", "b", (false, PEEK_LINES), &|| false);
         let took = started.elapsed();
         assert_eq!(
             got,
@@ -470,7 +526,7 @@ mod tests {
                 thread::sleep(Duration::from_millis(200));
                 newer.store(true, Ordering::SeqCst);
             });
-            peek(&rex, "local", "s", "b", false, &|| {
+            peek(&rex, "local", "s", "b", (false, PEEK_LINES), &|| {
                 newer.load(Ordering::SeqCst)
             })
         });
@@ -484,7 +540,7 @@ mod tests {
 
     #[test]
     fn a_line_padded_with_blanks_takes_one_row() {
-        let lines = peek_lines(&format!("foo{}\n", " ".repeat(120)), false);
+        let lines = peek_lines(&format!("foo{}\n", " ".repeat(120)), false, PEEK_LINES);
         assert_eq!(lines, ["foo"]);
         assert_eq!(
             crate::output::chop(&lines[0], 45).len(),
@@ -501,7 +557,7 @@ mod tests {
         text.push_str("title \x1b]0;set by the pane\x1b\\end\n");
         text.push_str("c1 \u{9b}2Jend\n");
         text.push_str("tab\there\r\n");
-        let lines = peek_lines(&text, false);
+        let lines = peek_lines(&text, false, PEEK_LINES);
         assert_eq!(lines.len(), PEEK_LINES);
         assert_eq!(lines.last().unwrap(), "tab here");
         assert!(

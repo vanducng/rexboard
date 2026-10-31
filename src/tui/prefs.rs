@@ -7,10 +7,24 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Prefs {
-    /// `c` hid the card; missing is shown. The name is from when the card was a side pane, kept
-    /// so an existing choice carries over.
-    #[serde(default)]
-    pub detail_hidden: bool,
+    /// `"card": "on"`: `c` has the card showing. Missing is off; another value is missing too.
+    #[serde(
+        default,
+        deserialize_with = "switch",
+        serialize_with = "switch_out",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub card: Option<bool>,
+    /// `"preview": "on"`: `p` has the preview strip showing. Missing is off.
+    #[serde(
+        default,
+        deserialize_with = "switch",
+        serialize_with = "switch_out",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub preview: Option<bool>,
+    #[serde(flatten)]
+    pub tuning: Tuning,
     #[serde(default)]
     pub motion: Motion,
     #[serde(default)]
@@ -37,6 +51,83 @@ pub struct Prefs {
         skip_serializing_if = "BTreeMap::is_empty"
     )]
     pub widths: BTreeMap<String, serde_json::Value>,
+}
+
+/// The settings the board only reads, kept as written so a save carries them: `detail_hidden`
+/// is from when the card was shown by default and counts only while `card` is missing.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Tuning {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail_hidden: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "count",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub preview_lines: Option<u64>,
+    #[serde(
+        default,
+        deserialize_with = "count",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub preview_every: Option<u64>,
+    #[serde(
+        default,
+        deserialize_with = "count",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub tail_lines: Option<u64>,
+}
+
+impl Tuning {
+    /// The strip's tail lines, 1-12; anything else is 4.
+    pub fn lines(&self) -> usize {
+        within(self.preview_lines, 1..=12, 4) as usize
+    }
+
+    /// Seconds between the strip's reads, 1-10; anything else is 2.
+    pub fn every(&self) -> u64 {
+        within(self.preview_every, 1..=10, 2)
+    }
+
+    /// The tail the card and the full view keep, 50-5000 lines; anything else is 200.
+    pub fn tail(&self) -> usize {
+        within(self.tail_lines, 50..=5000, DEFAULT_TAIL as u64) as usize
+    }
+}
+
+/// The tail a peek keeps by default.
+pub const DEFAULT_TAIL: usize = 200;
+
+fn within(n: Option<u64>, range: std::ops::RangeInclusive<u64>, default: u64) -> u64 {
+    n.filter(|n| range.contains(n)).unwrap_or(default)
+}
+
+impl Prefs {
+    /// Whether the card shows: `card`, else the old `detail_hidden` turned round, else off.
+    pub fn card_on(&self) -> bool {
+        self.card
+            .or(self.tuning.detail_hidden.map(|hidden| !hidden))
+            .unwrap_or(false)
+    }
+}
+
+/// `"on"` or `"off"`; anything else is missing.
+fn switch<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    Ok(match serde_json::Value::deserialize(d)?.as_str() {
+        Some("on") => Some(true),
+        Some("off") => Some(false),
+        _ => None,
+    })
+}
+
+fn switch_out<S: Serializer>(on: &Option<bool>, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_str(if on.unwrap_or(false) { "on" } else { "off" })
+}
+
+/// A whole number, as written; its range is checked where it is used.
+fn count<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+    Ok(serde_json::Value::deserialize(d)?.as_u64())
 }
 
 /// Anything but an object is none.
@@ -156,7 +247,7 @@ mod tests {
             "a save writes back what was read, as the card toggle does"
         );
         std::fs::write(&path, r#"{"widths": [1, 2], "detail_hidden": true}"#).unwrap();
-        assert!(load(&path).widths.is_empty() && load(&path).detail_hidden);
+        assert!(load(&path).widths.is_empty() && load(&path).tuning.detail_hidden == Some(true));
     }
 
     #[test]
@@ -165,7 +256,14 @@ mod tests {
         let path = dir.path().join("rexboard/tui.json");
         assert_eq!(load(&path), Prefs::default(), "missing");
         let kept = Prefs {
-            detail_hidden: true,
+            card: Some(true),
+            preview: Some(false),
+            tuning: Tuning {
+                detail_hidden: Some(true),
+                preview_lines: Some(6),
+                preview_every: Some(3),
+                tail_lines: Some(1000),
+            },
             motion: Motion::Reduced,
             icons: Icons::Nerd,
             card_height: Some(CardHeight::Percent(30)),
@@ -178,20 +276,22 @@ mod tests {
         save(&path, &kept).unwrap();
         assert_eq!(load(&path), kept);
         std::fs::write(&path, r#"{"detail": 0.4, "detail_hidden": true}"#).unwrap();
-        assert!(
-            load(&path).detail_hidden,
+        assert_eq!(
+            load(&path).tuning.detail_hidden,
+            Some(true),
             "a file with the old width keeps its choice"
         );
         std::fs::write(&path, r#"{"detail_hidden": true, "motion": "still"}"#).unwrap();
         assert_eq!(
             load(&path),
             Prefs {
-                detail_hidden: true,
+                tuning: Tuning {
+                    detail_hidden: Some(true),
+                    ..Tuning::default()
+                },
                 motion: Motion::Full,
                 icons: Icons::Text,
-                card_height: None,
-                columns: Vec::new(),
-                widths: BTreeMap::new(),
+                ..Prefs::default()
             },
             "an unknown motion is full and keeps the rest"
         );
@@ -199,12 +299,8 @@ mod tests {
         assert_eq!(
             load(&path),
             Prefs {
-                detail_hidden: false,
                 motion: Motion::Reduced,
-                icons: Icons::Text,
-                card_height: None,
-                columns: Vec::new(),
-                widths: BTreeMap::new(),
+                ..Prefs::default()
             },
             "unknown icons are words and keep the rest"
         );
@@ -239,10 +335,68 @@ mod tests {
             assert_eq!(prefs.motion, Motion::Reduced, "{text} keeps the rest");
         }
         std::fs::write(&path, r#"{"detail": 0.4}"#).unwrap();
-        assert!(!load(&path).detail_hidden, "a file from before c shows it");
+        assert!(
+            !load(&path).card_on(),
+            "a file with neither key has the card off"
+        );
         for bad in ["{", "[]", r#"{"detail_hidden": "yes"}"#] {
             std::fs::write(&path, bad).unwrap();
             assert_eq!(load(&path), Prefs::default(), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_old_detail_hidden_is_read_for_the_card_and_kept_on_a_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tui.json");
+        for (text, card) in [
+            ("{}", false),
+            (r#"{"detail_hidden": true}"#, false),
+            (r#"{"detail_hidden": false}"#, true),
+            (r#"{"card": "off", "detail_hidden": false}"#, false),
+            (r#"{"card": "on", "detail_hidden": true}"#, true),
+            (r#"{"card": "maybe", "detail_hidden": false}"#, true),
+            (r#"{"card": true}"#, false),
+        ] {
+            std::fs::write(&path, text).unwrap();
+            assert_eq!(load(&path).card_on(), card, "{text}");
+        }
+        std::fs::write(&path, r#"{"detail_hidden": false, "motion": "reduced"}"#).unwrap();
+        let mut prefs = load(&path);
+        prefs.card = Some(false);
+        prefs.preview = Some(true);
+        save(&path, &prefs).unwrap();
+        let back: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(back["card"], "off");
+        assert_eq!(back["preview"], "on");
+        assert_eq!(back["detail_hidden"], false, "kept as it was read");
+        assert_eq!(back["motion"], "reduced");
+        assert!(!load(&path).card_on(), "the card key wins from then on");
+    }
+
+    #[test]
+    fn preview_and_tail_settings_are_checked_when_used_and_kept_as_written() {
+        let tune = |text: &str| -> Tuning { serde_json::from_str::<Prefs>(text).unwrap().tuning };
+        assert_eq!(
+            (tune("{}").lines(), tune("{}").every(), tune("{}").tail()),
+            (4, 2, 200)
+        );
+        for (n, want) in [(0, 4), (1, 1), (12, 12), (13, 4)] {
+            assert_eq!(tune(&format!(r#"{{"preview_lines": {n}}}"#)).lines(), want);
+        }
+        for (n, want) in [(0, 2), (1, 1), (10, 10), (11, 2)] {
+            assert_eq!(tune(&format!(r#"{{"preview_every": {n}}}"#)).every(), want);
+        }
+        for (n, want) in [(49, 200), (50, 50), (5000, 5000), (5001, 200)] {
+            assert_eq!(tune(&format!(r#"{{"tail_lines": {n}}}"#)).tail(), want);
+        }
+        assert_eq!(
+            tune(r#"{"tail_lines": "1000"}"#).tail(),
+            200,
+            "not a number"
+        );
+        let kept = tune(r#"{"tail_lines": 9999}"#);
+        assert_eq!(kept.tail_lines, Some(9999), "kept as written for a save");
     }
 }

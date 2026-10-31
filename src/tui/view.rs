@@ -10,7 +10,7 @@ use ratatui::crossterm::event::KeyCode;
 
 use super::app::{App, CardDrawn, Item, Link, NUMBERED, Spot};
 use super::columns::{Col, Columns, Sort, Tier, Tone, column_of, tier};
-use super::keys::{self, Act};
+use super::keys;
 use super::prefs::CardHeight;
 use super::status::ALL;
 use super::theme;
@@ -79,7 +79,8 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
     let area = frame.area();
     app.card_drawn.set(CardDrawn::default());
     let card = app.card_shown();
-    let ruled = !card && tier(area.width) != Tier::Wide && area.height >= 20;
+    let strip = app.strip_shown();
+    let ruled = !card && !strip && tier(area.width) != Tier::Wide && area.height >= 20;
     let [top, _gap, body, above_footer, bottom] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(u16::from(area.height >= HEADED)),
@@ -89,8 +90,16 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
     ])
     .areas(area);
     header(frame, top, app, now);
+    let headed = area.height >= HEADED;
     let height = if card {
-        card_height(app, now, body, area.height >= HEADED)
+        card_height(app, now, body, headed)
+    } else if strip {
+        // The bar and its lines, leaving the list its floor; too little room shows no strip.
+        let room = body.height.saturating_sub(LIST_FLOOR + u16::from(headed));
+        let wanted = 1 + app.tuning.lines() as u16;
+        Some(wanted.min(room))
+            .filter(|rows| *rows >= 2)
+            .unwrap_or(0)
     } else {
         0
     };
@@ -100,8 +109,15 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
         list(frame, list_area, app, area, now);
     }
     if height > 0 {
-        let room = card_area.height.saturating_sub(FOOTER_GAP);
-        let lines = super::card::lines(app, now, usize::from(body.width), usize::from(room));
+        let room = card_area
+            .height
+            .saturating_sub(u16::from(card) * FOOTER_GAP);
+        let width = usize::from(body.width);
+        let lines = if card {
+            super::card::lines(app, now, width, usize::from(room))
+        } else {
+            super::card::strip(app, now, width, usize::from(room))
+        };
         let card_area = Rect {
             height: room,
             ..card_area
@@ -703,16 +719,13 @@ fn key_bar(app: &App, width: usize) -> Line<'static> {
         spans.push(Span::styled(kept, theme::strong()));
         spans.push(Span::styled(" · esc clears · ", theme::quiet()));
     }
-    // `keys::FOOTER` ranks the keys, and a hidden card adds `c card`; once fitted, `v` shows
-    // after `/` and `space` after `c`.
+    // `keys::FOOTER` ranks the keys; once fitted, `v` shows after `/`.
     let keys: Vec<(&str, &str)> = if app.pick {
         vec![("enter", "go"), ("j/k", "move"), ("/", "filter")]
     } else {
-        let mut acts = keys::FOOTER.to_vec();
-        if app.hidden {
-            acts.insert(4, Act::Card);
-        }
-        acts.into_iter()
+        keys::FOOTER
+            .iter()
+            .copied()
             .filter_map(|act| keys::entry(keys::BOARD, act))
             .map(|entry| (keys::short(entry), entry.word))
             .collect()
@@ -733,7 +746,7 @@ fn key_bar(app: &App, width: usize) -> Line<'static> {
         used += piece;
         shown.push((key, what));
     }
-    for (moved, after) in [("v", "/"), ("space", "c")] {
+    for (moved, after) in [("v", "/")] {
         if let Some(at) = shown.iter().position(|&(key, _)| key == moved) {
             let piece = shown.remove(at);
             let to = shown
@@ -989,7 +1002,8 @@ mod tests {
         let mut app = fuller();
         app.pick = true;
         assert_eq!(press(&mut app, KeyCode::Char('c')), None);
-        assert!(!app.hidden);
+        assert_eq!(press(&mut app, KeyCode::Char('p')), None);
+        assert!((app.card, app.preview) == (true, false), "neither toggled");
     }
 
     #[test]
@@ -1253,7 +1267,7 @@ mod tests {
         }
         press(&mut app, KeyCode::Char('?'));
         // One column of 30 keys under the shortest list.
-        let text = render(&app, 50, 38);
+        let text = render(&app, 50, 40);
         for (key, _) in listed() {
             assert!(
                 text.lines().any(|l| l.trim_start().starts_with(key)),
@@ -1296,6 +1310,7 @@ mod tests {
     #[test]
     fn at_100_columns_where_keeps_what_tells_rows_apart() {
         let mut app = App::default();
+        app.card = true;
         let tab = "2-toolrig:rig:demo-team#0123456789abcdef#l2";
         let mut rows = Vec::new();
         for (key, session) in [("local/gw", "api-gateway"), ("local/fe", "web-frontend")] {
@@ -1586,7 +1601,7 @@ mod tests {
     #[test]
     fn the_footer_ranks_n_next_above_v_next_view_and_shows_v_after_filter() {
         let app = fuller();
-        let wide = render(&app, 120, 30);
+        let wide = render(&app, 140, 30);
         assert!(
             wide.lines()
                 .last()
@@ -1804,9 +1819,7 @@ mod tests {
     fn c_hides_the_card_and_keeps_the_choice() {
         let mut app = fuller();
         let effect = press(&mut app, KeyCode::Char('c'));
-        assert!(matches!(effect, Some(Effect::SavePrefs(prefs)) if prefs.detail_hidden));
-        assert_eq!(app.toast(), Some("the card is hidden · c shows it"));
-        app.toast = None;
+        assert!(matches!(effect, Some(Effect::SavePrefs(prefs)) if prefs.card == Some(false)));
         let text = render(&app, 140, 30);
         assert!(!text.contains("━━"), "{text}");
         assert!(text.lines().last().unwrap().contains("c card"), "{text}");
@@ -1896,7 +1909,7 @@ mod tests {
         assert_eq!(app.current().unwrap().key, "local/claude");
         press(&mut app, KeyCode::Char('f'));
         press(&mut app, KeyCode::Char('c'));
-        assert!(!app.hidden, "c after f belongs to f");
+        assert!(app.card, "c after f belongs to f");
         assert_eq!(app.toast(), Some("f takes w d q p e u i; ff clears"));
         crate::tui::app::testkit::sort(&mut app, 's');
         assert!(app.sort.is_some(), "o s sorts");
