@@ -964,7 +964,20 @@ fn serve_stop_finds_a_serve_whose_binary_was_deleted() {
         .envs(serve.envs())
         .spawn()
         .unwrap();
-    eventually("the copied serve answers", || serve.socket().exists());
+    // Answering, not just a socket file: serve binds the socket, then sets its mode, then starts
+    // accepting, and a socket removed in between fails its chmod and ends serve with ENOENT.
+    eventually("the copied serve answers", || {
+        use std::io::{BufRead, Write};
+        std::os::unix::net::UnixStream::connect(serve.socket())
+            .and_then(|mut stream| {
+                stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
+                stream.write_all(b"{\"cmd\":\"rows\"}\n")?;
+                let mut line = String::new();
+                std::io::BufReader::new(stream).read_line(&mut line)?;
+                Ok(!line.is_empty())
+            })
+            .unwrap_or(false)
+    });
     let pid = serve.pid();
     // A failed assertion must not leave the copied serve running and cargo test waiting on sh.
     struct Kill(i64);
