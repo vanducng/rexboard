@@ -330,102 +330,138 @@ fn quoted(text: &str) -> String {
 /// host whatever the install method; this is for a hand-kept file, and is recognised as rexboard's.
 const PORTABLE: &str =
     r#"B=$HOME/.local/bin/rexboard; [ -x "$B" ] || B=/opt/homebrew/bin/rexboard"#;
+/// The two spellings of a `$HOME` path to rexboard that are recognised, as written.
+const HOME_BINS: [&str; 2] = ["$HOME/.local/bin/rexboard", "\"$HOME/.local/bin/rexboard\""];
 
-/// A hook rexboard's, by any path: what install wrote, a bare `rexboard`, a `$HOME` path, or the
-/// portable form.
-fn ours(hook: &Value) -> bool {
-    hook["command"].as_str().and_then(installed_bin).is_some()
+/// What a hook command install could have written runs: rexboard as spelled, and the harness and
+/// event it reports.
+struct Owned {
+    bin: String,
+    harness: String,
+    event: String,
 }
 
-/// A hook of rexboard's that would run here: not an absolute path to a file this host lacks, so a
-/// stale path is still repaired by install, and a path from another host is reported missing.
-fn present(hook: &Value) -> bool {
-    hook["command"]
-        .as_str()
-        .and_then(installed_bin)
-        .is_some_and(|bin| !bin.starts_with('/') || Path::new(&bin).is_file())
+/// A hook command that is exactly one of the spellings rexboard owns, else None: `REXBOARD hook
+/// HARNESS EVENT`, alone or with `|| true`, bare, by an absolute path or by `$HOME/.local/bin`,
+/// inside `sh -c` or not; or the portable form. Quoting is read as the shell reads it, so a
+/// `$HOME` that a quote keeps literal, or an outer shell would expand early, is not accepted. A
+/// hook of the user's that also runs something else is theirs.
+fn owned(command: &str) -> Option<Owned> {
+    let mut tokens = shell_tokens(command);
+    if let [(shell, _), (flag, _), (script, raw)] = &tokens[..]
+        && Path::new(shell).file_name().is_some_and(|n| n == "sh")
+        && flag == "-c"
+        && !expands(raw)
+    {
+        let call = script
+            .strip_prefix(PORTABLE)
+            .and_then(|rest| rest.strip_prefix("; \"$B\" hook "))
+            .and_then(|rest| rest.strip_suffix(" || true"));
+        if let Some([harness, event]) = call.map(|c| c.split(' ').collect::<Vec<_>>()).as_deref() {
+            return slot(HOME_BINS[0], harness, event);
+        }
+        tokens = shell_tokens(script);
+    }
+    let [(bin, raw), (verb, _), (harness, _), (event, _), tail @ ..] = &tokens[..] else {
+        return None;
+    };
+    let whole = match tail {
+        [] => true,
+        [(or, _), (yes, _)] => or == "||" && yes == "true",
+        _ => false,
+    };
+    (whole && verb == "hook" && rexboard_spelling(bin, raw))
+        .then(|| slot(bin, harness, event))
+        .flatten()
 }
 
-/// Whether `script` is the portable form of `rexboard hook HARNESS EVENT`.
-fn portable_hook(script: &str) -> bool {
-    let call = script
-        .strip_prefix(PORTABLE)
-        .and_then(|rest| rest.strip_prefix("; \"$B\" hook "))
-        .and_then(|rest| rest.strip_suffix(" || true"));
-    call.is_some_and(|call| {
-        matches!(call.split(' ').collect::<Vec<_>>()[..], [harness, event]
-            if [harness, event].iter().all(|w| !w.is_empty() && w.chars().all(char::is_alphanumeric)))
+fn slot(bin: &str, harness: &str, event: &str) -> Option<Owned> {
+    let word = |w: &str| !w.is_empty() && w.chars().all(char::is_alphanumeric);
+    (word(harness) && word(event)).then(|| Owned {
+        bin: bin.to_owned(),
+        harness: harness.to_owned(),
+        event: event.to_owned(),
     })
 }
 
-/// The rexboard a hook install wrote runs, as written, or None for any other hook. After one
-/// `sh -c`, its words are exactly `REXBOARD hook HARNESS EVENT`, alone or with `|| true`, or it is
-/// the portable form; a hook of the user's that also runs something else is theirs.
-fn installed_bin(command: &str) -> Option<String> {
-    let mut words = shell_words(command);
-    if let [shell, flag, script] = &words[..]
-        && Path::new(shell).file_name().is_some_and(|n| n == "sh")
-        && flag == "-c"
-    {
-        if portable_hook(script) {
-            return Some("$HOME/.local/bin/rexboard".into());
-        }
-        words = shell_words(script);
-    }
-    let whole = match &words[..] {
-        [_, _, _, _] => true,
-        [_, _, _, _, or, yes] => or == "||" && yes == "true",
-        _ => false,
-    };
-    let [bin, verb, ..] = &words[..] else {
-        return None;
-    };
-    let named = Path::new(bin).file_name().is_some_and(|n| n == "rexboard");
-    (whole && named && verb == "hook").then(|| bin.clone())
+/// Whether `raw`, which unquotes to `value`, names rexboard unambiguously: bare, an absolute path
+/// the shell leaves as it is, or one of the two `$HOME` spellings.
+fn rexboard_spelling(value: &str, raw: &str) -> bool {
+    raw == "rexboard"
+        || HOME_BINS.contains(&raw)
+        || value.starts_with('/')
+            && !expands(raw)
+            && Path::new(value)
+                .file_name()
+                .is_some_and(|n| n == "rexboard")
 }
 
-/// A hook that reports to Rex: rexboard's own, or the `rex-agent-status` bridge it replaces.
-fn reports(hook: &Value) -> bool {
-    let command = hook["command"].as_str().unwrap_or_default();
-    command.contains("rex-agent-status") || runs_hook(command, 2) || ours(hook)
-}
-
-/// Whether `command`, read as a shell reads it, runs `rexboard hook`: its program is a file named
-/// `rexboard` and its first argument `hook`, also inside `sh -c '…'`, however the path is quoted.
-fn runs_hook(command: &str, depth: u8) -> bool {
-    let words = shell_words(command);
-    let named = |word: &str| {
-        Path::new(word)
-            .file_name()
-            .is_some_and(|name| name == "rexboard")
-    };
-    if depth > 0
-        && let [shell, flag, script, ..] = &words[..]
-        && Path::new(shell)
-            .file_name()
-            .is_some_and(|name| name == "sh")
-        && flag == "-c"
-    {
-        return runs_hook(script, depth - 1);
-    }
-    matches!(&words[..], [program, verb, ..] if named(program) && verb == "hook")
-}
-
-/// `command` split into words as a POSIX shell splits them: whitespace between, `'…'` literal,
-/// `"…"` with `\` before `"`, `\`, `$` and `` ` ``, and `\` quoting the next character.
-fn shell_words(command: &str) -> Vec<String> {
-    let mut words = Vec::new();
-    let mut word: Option<String> = None;
-    let mut chars = command.chars();
+/// Whether a shell would expand anything in `raw` (a `$` or a backtick outside single quotes).
+fn expands(raw: &str) -> bool {
+    let (mut single, mut chars) = (false, raw.chars());
     while let Some(c) = chars.next() {
         match c {
-            c if c.is_whitespace() => words.extend(word.take()),
+            '\'' => single = !single,
+            '\\' if !single => {
+                chars.next();
+            }
+            '$' | '`' if !single => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+/// A hook install added, in any slot, by any path.
+fn ours(hook: &Value) -> bool {
+    hook["command"].as_str().and_then(owned).is_some()
+}
+
+/// A hook of rexboard's for this event that would run here: not an absolute path to a file this
+/// host lacks or cannot execute (read from its mode; never run), so a stale path is still
+/// repaired and one from another host is reported missing.
+fn present(hook: &Value, harness: &str, event: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    hook["command"].as_str().and_then(owned).is_some_and(|o| {
+        (o.harness, o.event) == (harness.to_owned(), event.to_owned())
+            && (!o.bin.starts_with('/')
+                || std::fs::metadata(&o.bin)
+                    .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
+    })
+}
+
+/// A hook that reports to Rex and that install may replace or take out: rexboard's own exact
+/// spellings, or the `rex-agent-status` bridge it replaces. Anything else is the user's.
+fn reports(hook: &Value) -> bool {
+    hook["command"]
+        .as_str()
+        .is_some_and(|c| c.contains("rex-agent-status"))
+        || ours(hook)
+}
+
+/// `command` split into words as a POSIX shell splits them, each with the text it was written
+/// as: whitespace between, `'…'` literal, `"…"` with `\` before `"`, `\`, `$` and `` ` ``, and `\`
+/// quoting the next character.
+fn shell_tokens(command: &str) -> Vec<(String, String)> {
+    let mut words = Vec::new();
+    let mut word: Option<(String, usize)> = None;
+    let mut chars = command.chars();
+    loop {
+        let at = command.len() - chars.as_str().len();
+        let Some(c) = chars.next() else { break };
+        match c {
+            c if c.is_whitespace() => {
+                words.extend(
+                    word.take()
+                        .map(|(w, from)| (w, command[from..at].to_owned())),
+                );
+            }
             '\'' => {
-                let w = word.get_or_insert_with(String::new);
+                let (w, _) = word.get_or_insert_with(|| (String::new(), at));
                 w.extend(chars.by_ref().take_while(|&c| c != '\''));
             }
             '"' => {
-                let w = word.get_or_insert_with(String::new);
+                let (w, _) = word.get_or_insert_with(|| (String::new(), at));
                 while let Some(c) = chars.next() {
                     match c {
                         '"' => break,
@@ -441,12 +477,22 @@ fn shell_words(command: &str) -> Vec<String> {
                     }
                 }
             }
-            '\\' => word.get_or_insert_with(String::new).extend(chars.next()),
-            c => word.get_or_insert_with(String::new).push(c),
+            '\\' => word
+                .get_or_insert_with(|| (String::new(), at))
+                .0
+                .extend(chars.next()),
+            c => word.get_or_insert_with(|| (String::new(), at)).0.push(c),
         }
     }
-    words.extend(word);
+    words.extend(word.map(|(w, from)| (w, command[from..].to_owned())));
     words
+}
+
+fn shell_words(command: &str) -> Vec<String> {
+    shell_tokens(command)
+        .into_iter()
+        .map(|(word, _)| word)
+        .collect()
 }
 
 /// A hook that exits 0 whatever happens, since exit 2 blocks the agent: a missing rexboard, or one
@@ -567,8 +613,8 @@ fn before_install(
 ) -> Option<(String, Value)> {
     let mut bins = vec![bin.to_owned()];
     for hook in every_hook(live) {
-        if let Some(found) = hook["command"].as_str().and_then(installed_bin) {
-            bins.push(quoted(&found));
+        if let Some(found) = hook["command"].as_str().and_then(owned) {
+            bins.push(quoted(&found.bin));
         }
     }
     bins.dedup();
@@ -657,18 +703,17 @@ fn stripped(live: &Value) -> Value {
 /// chained, Some(None) for one install added, None for one install did not write.
 fn unchained(current: &Value) -> Option<Option<String>> {
     let command = current["command"].as_str()?;
-    // The portable form runs `"$B"`, found by the words before it.
+    // The portable form runs `"$B"`, found by the words before it; any other, rexboard as the
+    // user spelled it, so the wrapper is matched and restored as written.
     let (bin, body) = match command
         .strip_prefix(PORTABLE)
         .and_then(|rest| rest.strip_prefix("; "))
     {
         Some(body) => ("\"$B\"".to_owned(), body),
         None => {
-            let program = shell_words(command).into_iter().next()?;
-            if Path::new(&program).file_name()? != "rexboard" {
-                return None;
-            }
-            (quoted(&program), command)
+            let (program, raw) = shell_tokens(command).into_iter().next()?;
+            rexboard_spelling(&program, &raw).then_some(())?;
+            (raw, command)
         }
     };
     if body == format!("{bin} usage claude") {
@@ -719,7 +764,7 @@ fn merged(live: &Value, harness: &str, events: &[Event], bin: &str) -> Value {
             .into_iter()
             .flatten()
             .flat_map(|group| group["hooks"].as_array().into_iter().flatten())
-            .any(present);
+            .any(|h| present(h, harness, &event));
         for group in hooks
             .get(&event)
             .and_then(Value::as_array)
@@ -730,7 +775,7 @@ fn merged(live: &Value, harness: &str, events: &[Event], bin: &str) -> Value {
             // A rexboard hook that would run stays as it is; the rest that report go.
             let rest: Vec<Value> = all
                 .iter()
-                .filter(|h| !reports(h) || present(h))
+                .filter(|h| !reports(h) || present(h, harness, &event))
                 .cloned()
                 .collect();
             if rest.len() < all.len() && !placed && !has {
@@ -1256,7 +1301,7 @@ mod tests {
             ("rexboard usage claude".into(), None),
             ("echo rexboard hook claude Stop".into(), None),
         ] {
-            assert_eq!(installed_bin(&command).as_deref(), bin, "{command}");
+            assert_eq!(owned(&command).map(|o| o.bin).as_deref(), bin, "{command}");
         }
     }
 
@@ -1282,6 +1327,15 @@ mod tests {
         ]
     }
 
+    /// A `rexboard` in `dir` that can be executed.
+    fn executable(dir: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let file = dir.join("rexboard");
+        std::fs::write(&file, "").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        file
+    }
+
     fn codex_file(dir: &Path, command: &str) -> PathBuf {
         let hooks: serde_json::Map<String, Value> = CODEX_EVENTS
             .iter()
@@ -1301,8 +1355,7 @@ mod tests {
     #[test]
     fn a_hook_is_present_by_any_path_and_in_the_portable_form_and_install_leaves_it() {
         let dir = tempfile::tempdir().unwrap();
-        let here = dir.path().join("rexboard");
-        std::fs::write(&here, "").unwrap();
+        let here = executable(dir.path());
         for (name, command) in forms(&here.display().to_string()) {
             let file = codex_file(dir.path(), &command);
             let before = std::fs::read_to_string(&file).unwrap();
@@ -1396,24 +1449,25 @@ mod tests {
             &std::fs::read_to_string(dir.path().join("hooks.json")).unwrap(),
         )
         .unwrap();
-        assert!(every_hook(&live).all(ours) && !every_hook(&live).any(present));
+        assert!(every_hook(&live).all(ours));
+        assert!(!every_hook(&live).any(|h| present(h, "codex", "Stop")));
     }
 
     #[test]
     fn only_the_whole_portable_form_is_rexboards_not_one_with_more_in_it() {
         let portable =
             |tail: &str| format!("/bin/sh -c '{PORTABLE}; \"$B\" hook codex Stop{tail}'");
-        assert!(installed_bin(&portable(" || true")).is_some());
+        assert!(owned(&portable(" || true")).is_some());
         for tail in [
             "",
             " || true; rm -rf x",
             " extra || true",
             " && other || true",
         ] {
-            assert_eq!(installed_bin(&portable(tail)), None, "{tail:?}");
+            assert!(owned(&portable(tail)).is_none(), "{tail:?}");
         }
         assert_eq!(
-            installed_bin("/bin/sh -c 'B=/tmp/mine; \"$B\" hook codex Stop || true'"),
+            owned("/bin/sh -c 'B=/tmp/mine; \"$B\" hook codex Stop || true'").map(|o| o.bin),
             None,
             "another assignment is not the portable form"
         );
@@ -1451,5 +1505,167 @@ mod tests {
             Some(Some(theirs.to_owned())),
             "an absolute path too"
         );
+    }
+
+    fn hook(command: &str) -> Value {
+        json!({ "type": "command", "command": command, "timeout": 5 })
+    }
+
+    /// Codex's events, each holding `holds` in `Stop` and its own hook everywhere else.
+    fn stop_holding(holds: &[&str]) -> Value {
+        let mut hooks = serde_json::Map::new();
+        for (event, _) in CODEX_EVENTS {
+            let own = hook_command("rexboard", "codex", event);
+            let list: Vec<Value> = if *event == "Stop" {
+                holds.iter().map(|c| hook(c)).collect()
+            } else {
+                vec![hook(&own)]
+            };
+            hooks.insert(event.to_string(), json!([{ "hooks": list }]));
+        }
+        json!({ "hooks": hooks })
+    }
+
+    fn stop_commands(live: &Value) -> Vec<String> {
+        live["hooks"]["Stop"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|g| g["hooks"].as_array().unwrap())
+            .map(|h| h["command"].as_str().unwrap().to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn a_hook_for_another_event_or_harness_does_not_satisfy_this_one() {
+        let own = hook_command("rexboard", "codex", "Stop");
+        let portable =
+            |event: &str| format!("/bin/sh -c '{PORTABLE}; \"$B\" hook codex {event} || true'");
+        for wrong in [
+            hook_command("rexboard", "codex", "SessionStart"),
+            hook_command("rexboard", "claude", "Stop"),
+            portable("SessionEnd"),
+        ] {
+            let live = stop_holding(&[&wrong]);
+            let after = merged(&live, "codex", CODEX_EVENTS, "rexboard");
+            assert_eq!(
+                stop_commands(&after),
+                std::slice::from_ref(&own),
+                "replaced: {wrong}"
+            );
+            assert_eq!(changes(&live, &after, CODEX_EVENTS).len(), 1, "{wrong}");
+        }
+        let live = stop_holding(&[&portable("Stop")]);
+        assert_eq!(
+            merged(&live, "codex", CODEX_EVENTS, "rexboard"),
+            live,
+            "its own event is present"
+        );
+    }
+
+    #[test]
+    fn only_spellings_the_shell_reads_as_rexboard_are_rexboards() {
+        let run = |script: &str| format!("/bin/sh -c {}", quoted(script));
+        let broken = [
+            // `$HOME` stays literal in single quotes.
+            run("'$HOME/.local/bin/rexboard' hook codex Stop || true"),
+            // The outer shell expands `$B` before the script assigns it.
+            r#"/bin/sh -c "B=$HOME/.local/bin/rexboard; [ -x \"$B\" ] || B=/opt/homebrew/bin/rexboard; \"$B\" hook codex Stop || true""#.to_owned(),
+            // Command substitution in the executable.
+            run("\"$(echo rexboard)\" hook codex Stop || true"),
+        ];
+        for command in &broken {
+            assert!(owned(command).is_none(), "{command}");
+        }
+        for command in [
+            run("$HOME/.local/bin/rexboard hook codex Stop || true"),
+            run("\"$HOME/.local/bin/rexboard\" hook codex Stop || true"),
+            run("'/opt/it'\\''s/rexboard' hook codex Stop"),
+        ] {
+            assert!(owned(&command).is_some(), "{command}");
+        }
+    }
+
+    #[test]
+    fn an_absolute_rexboard_that_cannot_be_executed_is_not_present_and_is_repaired() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let file = executable(dir.path());
+        let command = hook_command(&file.display().to_string(), "codex", "Stop");
+        let live = stop_holding(&[&command]);
+        assert_eq!(
+            merged(&live, "codex", CODEX_EVENTS, "/new/rexboard"),
+            live,
+            "executable: left"
+        );
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let after = merged(&live, "codex", CODEX_EVENTS, "/new/rexboard");
+        assert_eq!(
+            stop_commands(&after),
+            [hook_command("/new/rexboard", "codex", "Stop")],
+            "mode 0644: replaced"
+        );
+    }
+
+    #[test]
+    fn a_users_composite_that_starts_with_rexboards_command_is_never_removed() {
+        let own = hook_command("rexboard", "codex", "Stop");
+        for theirs in [
+            "rexboard hook codex Stop || true; printf user-work",
+            "/bin/sh -c 'rexboard hook codex Stop || true; printf user-work'",
+            "rexboard hook codex Stop && notify-send done",
+        ] {
+            // Alone, the event is missing its own hook, so one is added beside theirs.
+            let live = stop_holding(&[theirs]);
+            let after = merged(&live, "codex", CODEX_EVENTS, "rexboard");
+            assert_eq!(
+                stop_commands(&after),
+                [theirs.to_owned(), own.clone()],
+                "{theirs}"
+            );
+            // With its own already there, nothing changes.
+            let live = stop_holding(&[&own, theirs]);
+            assert_eq!(
+                merged(&live, "codex", CODEX_EVENTS, "rexboard"),
+                live,
+                "{theirs}"
+            );
+            // Uninstall leaves theirs too.
+            assert!(
+                stripped(&live)["hooks"]["Stop"][0]["hooks"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|h| h["command"] == theirs)
+            );
+        }
+    }
+
+    #[test]
+    fn a_status_line_wrapped_with_rexboard_as_the_user_spelled_it_is_restored_as_they_wrote_it() {
+        for theirs in [
+            r#""$HOME/.local/bin/agent-statusline""#,
+            "echo it's \"$HOME\" costs $5",
+            "printf one \\\ntwo",
+        ] {
+            for bin in [
+                "rexboard",
+                "$HOME/.local/bin/rexboard",
+                "\"$HOME/.local/bin/rexboard\"",
+            ] {
+                let theirs_line = quoted(theirs);
+                let command = format!(
+                    "{bin} usage --help >/dev/null 2>&1 && exec {bin} usage claude -- /bin/sh -c {theirs_line} || exec /bin/sh -c {theirs_line}"
+                );
+                let line = json!({ "type": "command", "command": command });
+                assert_eq!(usage_line(&line, "/x/rexboard"), None, "{command}");
+                assert_eq!(unchained(&line), Some(Some(theirs.to_owned())), "{command}");
+            }
+        }
+        // Not rexboard's: a single-quoted `$HOME`, or a different program.
+        for bin in ["'$HOME/.local/bin/rexboard'", "/usr/bin/other"] {
+            let command = format!("{bin} usage claude");
+            assert_eq!(unchained(&json!({ "command": command })), None, "{bin}");
+        }
     }
 }

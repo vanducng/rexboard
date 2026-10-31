@@ -1636,3 +1636,131 @@ fn a_hook_file_naming_rexboard_by_any_path_or_the_portable_form_is_installed_and
         assert!(!file.exists(), "{name}: every hook taken out");
     }
 }
+
+/// A Codex `hooks.json` in a new home with `stop` as the only hook of `Stop` and the right hook
+/// in every other event; returns the home.
+fn codex_home_with_stop(stop: &[&str]) -> tempfile::TempDir {
+    let home = tempfile::tempdir().unwrap();
+    let file = home.path().join(".codex/hooks.json");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let own = |event: &str| format!("/bin/sh -c 'rexboard hook codex {event} || true'");
+    let hooks: serde_json::Map<String, Value> = [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PermissionRequest",
+        "Stop",
+        "SessionEnd",
+    ]
+    .iter()
+    .map(|event| {
+        let commands: Vec<String> = if *event == "Stop" {
+            stop.iter().map(|c| c.to_string()).collect()
+        } else {
+            vec![own(event)]
+        };
+        let list: Vec<Value> = commands
+            .iter()
+            .map(|c| json!({ "type": "command", "command": c, "timeout": 5 }))
+            .collect();
+        (event.to_string(), json!([{ "hooks": list }]))
+    })
+    .collect();
+    std::fs::write(&file, json!({ "hooks": hooks }).to_string()).unwrap();
+    home
+}
+
+fn codex_state(home: &Path) -> Value {
+    let out = rexboard(home)
+        .args(["hooks", "status", "--json"])
+        .output()
+        .unwrap();
+    let status: Value = serde_json::from_slice(&out.stdout).unwrap();
+    status["harnesses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h["harness"] == "codex")
+        .unwrap()
+        .clone()
+}
+
+#[test]
+fn a_hook_that_cannot_report_this_event_leaves_it_missing_and_install_adds_the_right_one() {
+    let portable = |event: &str| {
+        format!(
+            "/bin/sh -c 'B=$HOME/.local/bin/rexboard; [ -x \"$B\" ] || B=/opt/homebrew/bin/rexboard; \"$B\" hook codex {event} || true'"
+        )
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let plain = dir.path().join("rexboard");
+    std::fs::write(&plain, "").unwrap();
+    let not_executable = format!("/bin/sh -c '{} hook codex Stop || true'", plain.display());
+    for (what, stop) in [
+        ("another event", "/bin/sh -c 'rexboard hook codex SessionStart || true'".to_owned()),
+        ("another harness", "/bin/sh -c 'rexboard hook claude Stop || true'".to_owned()),
+        ("the portable form for another event", portable("SessionEnd")),
+        ("a literal $HOME", "/bin/sh -c ''\\''$HOME/.local/bin/rexboard'\\'' hook codex Stop || true'".to_owned()),
+        (
+            "a portable script expanded early",
+            r#"/bin/sh -c "B=$HOME/.local/bin/rexboard; [ -x \"$B\" ] || B=/opt/homebrew/bin/rexboard; \"$B\" hook codex Stop || true""#.to_owned(),
+        ),
+        ("a file that cannot be executed", not_executable),
+    ] {
+        let home = codex_home_with_stop(&[&stop]);
+        assert_eq!(codex_state(home.path())["state"], "changes", "{what}");
+    }
+}
+
+#[test]
+fn install_never_removes_a_user_command_that_only_starts_with_rexboards() {
+    let theirs = "rexboard hook codex Stop || true; printf user-work";
+    let home = codex_home_with_stop(&["/bin/sh -c 'rexboard hook codex Stop || true'", theirs]);
+    let file = home.path().join(".codex/hooks.json");
+    let before = std::fs::read_to_string(&file).unwrap();
+    rexboard(home.path())
+        .args(["hooks", "install", "codex"])
+        .assert()
+        .success();
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        before,
+        "left as written"
+    );
+    let home = codex_home_with_stop(&[theirs]);
+    rexboard(home.path())
+        .args(["hooks", "install", "codex"])
+        .assert()
+        .success();
+    let after = std::fs::read_to_string(home.path().join(".codex/hooks.json")).unwrap();
+    assert!(after.contains("printf user-work"), "kept: {after}");
+}
+
+#[test]
+fn uninstall_gives_back_a_status_line_wrapped_with_rexboard_spelled_with_home() {
+    for bin in [
+        "\"$HOME/.local/bin/rexboard\"",
+        "$HOME/.local/bin/rexboard",
+        "rexboard",
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let file = home.path().join(".claude/settings.json");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let theirs = "echo it's \"$HOME\" costs $5";
+        let quoted = format!("'{}'", theirs.replace('\'', "'\\''"));
+        let command = format!(
+            "{bin} usage --help >/dev/null 2>&1 && exec {bin} usage claude -- /bin/sh -c {quoted} || exec /bin/sh -c {quoted}"
+        );
+        std::fs::write(
+            &file,
+            json!({ "statusLine": { "type": "command", "command": command } }).to_string(),
+        )
+        .unwrap();
+        rexboard(home.path())
+            .args(["hooks", "uninstall", "claude"])
+            .assert()
+            .success();
+        let after: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(after["statusLine"]["command"], theirs, "{bin}");
+    }
+}
