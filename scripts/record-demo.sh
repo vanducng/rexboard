@@ -270,18 +270,18 @@ tmux -L "$tmux_socket" capture-pane -p -t demo | grep -qF 'NEEDS YOU' || { echo 
 sleep 1.5
 touch "$go"
 # The board opens list first, every row numbered. `3` selects row 3 by its number; `p` opens the
-# live preview strip, which follows `j` and `k`; `c` shows the card, scrolled with ctrl-e to its facts (model and context come from
+# live preview strip, which follows `k` up to the error and the permission ask, then `j` back; `c` shows the card, scrolled with ctrl-e to its facts (model and context come from
 # the pane's usage record), and hides it again; the permission row's ask is answered with `a`, `2`
 # once to show that a lasting option asks again, then `1`; `/docs` narrows the list to the docs
 # row, whose live, coloured full view follows its diff; `dd` asks before `y` closes it; `x s`
 # types a line to the question row, whose confirm says it waits on a dialog, and `y` sends it.
 # Every opener (`a`, the first `d`, `x`) comes after a pause, as the typing guard asks.
 sleep 2.5; k 3; sleep 1.8
-k p; sleep 2.5; k j; sleep 2; k j; sleep 2; k k; sleep 0.8; k k; sleep 1.5
+k p; sleep 2.2; k k; sleep 1.8; k k; sleep 2.2; k j j; sleep 1.2
 k c; sleep 2; k C-e C-e C-e C-e C-e; sleep 3; k c; sleep 1; k p; sleep 1.2
 k / s e a t - a Enter; sleep 1.2
 k a; sleep 3; k 2; sleep 2; k 1; sleep 2.5; k Escape; sleep 1
-k / d o c s Enter; sleep 1.5; k Space; sleep 2.5; k q; sleep 1.2
+k / d o c s Enter; sleep 1.5; k Space; sleep 4; k q; sleep 1.2
 k d d; sleep 2; k y; sleep 1.8; k Escape; sleep 1.5
 k / s e a t - c Enter; sleep 1.2; k x; sleep 2; k s; sleep 0.8
 lit "use vitest, it fits the Vite build"; sleep 0.6; k Enter; sleep 3.5; k y; sleep 2.5; k Escape; sleep 1
