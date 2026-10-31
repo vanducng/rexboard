@@ -20,24 +20,70 @@ fn rexboard(home: &Path) -> Command {
         cmd.env_remove(name);
     }
     cmd.env("HOME", home)
+        .env("FAKE_TMUX_TTY", home.join("tty"))
+        .env("FAKE_TMUX_CALLS", home.join("calls"))
         .env("XDG_STATE_HOME", home.join("state"))
         .env("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
     cmd
 }
 
-/// A `tmux` that says the pane's tty is `tty` and logs every other call to `calls`.
+/// The directory holding the fake `tmux`, which every test shares and which is written once.
+///
+/// A test used to write its own script and run it at once. Linux refuses to exec a file while any
+/// process holds it open for writing, and a child that another test thread forks while the script
+/// is being written keeps that descriptor until its own exec. Then the hook's `tmux` failed with
+/// ETXTBSY, and a hook fails open: it skipped the pane, so the fake tty stayed empty.
+///
+/// So the script is written once, by whichever test needs it first (the others wait), and takes
+/// its answers from the environment each test sets (`rexboard()` sets them). Once written, the
+/// only thing that can still hold it open is a child forked before the write ended, and that
+/// ends by itself within moments of its exec. So the writer runs the script once and waits, up
+/// to a deadline, for ETXTBSY to stop; after that no process has it open and every exec works.
+fn fake_tmux_dir() -> &'static Path {
+    static DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    // `keep` below leaves the directory for the whole run; this removes it when the process ends.
+    extern "C" fn remove() {
+        if let Some(dir) = DIR.get() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+    DIR.get_or_init(|| {
+        let bin = tempfile::Builder::new()
+            .prefix("fake-tmux-")
+            .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+            .unwrap()
+            .keep();
+        let tmux = bin.join("tmux");
+        // `display-message` gives the pane's tty, `list-panes` the rows replay reads, and any
+        // other call is logged.
+        std::fs::write(
+            &tmux,
+            "#!/bin/sh\n\
+             case \"$1\" in\n\
+             display-message) echo \"$FAKE_TMUX_TTY\" ;;\n\
+             list-panes) printf '%s' \"${FAKE_TMUX_LIST-}\" ;;\n\
+             *) [ -z \"${FAKE_TMUX_CALLS-}\" ] || echo \"$@\" >> \"$FAKE_TMUX_CALLS\" ;;\n\
+             esac\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while let Err(err) = std::process::Command::new(&tmux).arg("probe").status() {
+            assert!(
+                err.raw_os_error() == Some(libc::ETXTBSY) && std::time::Instant::now() < deadline,
+                "the fake tmux does not run: {err}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        unsafe { libc::atexit(remove) };
+        bin
+    })
+}
+
+/// The PATH that finds the fake `tmux`, after making `dir`'s fake tty (`dir/tty`, empty).
 fn fake_tmux(dir: &Path) -> String {
-    let bin = dir.join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    let script = format!(
-        "#!/bin/sh\ncase \"$1\" in display-message) echo {tty};; *) echo \"$@\" >> {calls};; esac\n",
-        tty = dir.join("tty").display(),
-        calls = dir.join("calls").display(),
-    );
-    std::fs::write(bin.join("tmux"), script).unwrap();
-    std::fs::set_permissions(bin.join("tmux"), std::fs::Permissions::from_mode(0o755)).unwrap();
     std::fs::write(dir.join("tty"), "").unwrap();
-    format!("{}:/usr/bin:/bin", bin.display())
+    format!("{}:/usr/bin:/bin", fake_tmux_dir().display())
 }
 
 fn corpus(app: &str, event: &str) -> Value {
@@ -431,20 +477,13 @@ fn install_refuses_a_linked_harness_directory_and_writes_nothing_through_it() {
 #[test]
 fn replay_sends_each_panes_kept_status_again() {
     let home = tempfile::tempdir().unwrap();
-    let bin = home.path().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
     let (one, two) = (home.path().join("tty1"), home.path().join("tty2"));
     std::fs::write(&one, "").unwrap();
     std::fs::write(&two, "").unwrap();
-    let script = format!(
-        "#!/bin/sh\nprintf '%s app=pi:state=done\\n%s \\n' {} {}\n",
-        one.display(),
-        two.display()
-    );
-    std::fs::write(bin.join("tmux"), script).unwrap();
-    std::fs::set_permissions(bin.join("tmux"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let rows = format!("{} app=pi:state=done\n{} \n", one.display(), two.display());
     rexboard(home.path())
-        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("PATH", fake_tmux(home.path()))
+        .env("FAKE_TMUX_LIST", rows)
         .args(["hooks", "replay", "zz"])
         .assert()
         .success();
