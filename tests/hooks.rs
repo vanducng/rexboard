@@ -1503,6 +1503,9 @@ fn uninstall_never_writes_back_a_backup_an_earlier_install_made() {
         assert!(out.status.success());
     };
     install(&linked);
+    // The first install's path goes away (an upgrade that moved the binary), so a hook that
+    // points at it is stale and the second install writes its own path over it.
+    std::fs::remove_file(bin.join("rexboard")).unwrap();
     install("/usr/bin:/bin");
     assert_eq!(
         backups(&home.join(".codex")),
@@ -1558,4 +1561,78 @@ fn status_says_the_icons_are_off_with_the_font_check_and_how_to_turn_them_on() {
         !String::from_utf8(json.stdout).unwrap().contains("icons"),
         "--json is unchanged"
     );
+}
+
+#[test]
+fn a_hook_file_naming_rexboard_by_any_path_or_the_portable_form_is_installed_and_left_alone() {
+    let portable = "/bin/sh -c 'B=$HOME/.local/bin/rexboard; [ -x \"$B\" ] || B=/opt/homebrew/bin/rexboard; \"$B\" hook codex EVENT || true'";
+    let events = [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PermissionRequest",
+        "Stop",
+        "SessionEnd",
+    ];
+    let here = assert_cmd::cargo::cargo_bin("rexboard");
+    let absolute = format!("/bin/sh -c '{} hook codex EVENT || true'", here.display());
+    for (name, command) in [
+        ("absolute", absolute.as_str()),
+        ("bare", "/bin/sh -c 'rexboard hook codex EVENT || true'"),
+        (
+            "home",
+            "/bin/sh -c '$HOME/.local/bin/rexboard hook codex EVENT || true'",
+        ),
+        ("portable", portable),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let file = home.path().join(".codex/hooks.json");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let hooks: serde_json::Map<String, Value> = events
+            .iter()
+            .map(|event| {
+                let command = command.replace("EVENT", event);
+                (
+                    event.to_string(),
+                    json!([{ "hooks": [{ "type": "command", "command": command, "timeout": 5 }] }]),
+                )
+            })
+            .collect();
+        let text = json!({ "hooks": hooks }).to_string();
+        std::fs::write(&file, &text).unwrap();
+        let run = |args: &[&str]| -> Value {
+            let out = rexboard(home.path())
+                .arg("hooks")
+                .args(args)
+                .arg("--json")
+                .output()
+                .unwrap();
+            serde_json::from_slice(&out.stdout).unwrap()
+        };
+        let status = run(&["status"]);
+        let codex = status["harnesses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|h| h["harness"] == "codex")
+            .unwrap();
+        assert_eq!(codex["state"], "installed", "{name}: {codex}");
+        let install = run(&["install", "codex"]);
+        assert_eq!(
+            install["harnesses"][0]["state"], "installed",
+            "{name}: {install}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            text,
+            "{name}: left alone"
+        );
+        assert_eq!(backups(file.parent().unwrap()), 0, "{name}");
+        let uninstall = run(&["uninstall", "codex"]);
+        assert_eq!(
+            uninstall["harnesses"][0]["state"], "removed",
+            "{name}: {uninstall}"
+        );
+        assert!(!file.exists(), "{name}: every hook taken out");
+    }
 }

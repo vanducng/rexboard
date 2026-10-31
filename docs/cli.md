@@ -359,7 +359,15 @@ rexboard hooks replay SESSION          # from tmux, when a client attaches
 | `pi` | `rexboard.js` in `$PI_CODING_AGENT_DIR/extensions`, else `~/.pi/agent/extensions` | An extension that runs `rexboard hook pi` on pi's events and `rexboard usage pi` at each turn's end |
 | `grok` | | Nothing: grok reports to a Rex pane itself, and reads a status line only from `~/.grok/config.toml`, which rexboard does not edit. For its usage, add the lines below there by hand |
 
-A settings file is merged, never replaced. Hooks that already report to Rex (rexboard's, or the `rex-agent-status` bridge it replaces) give way to rexboard's, where the first of them was; every other key and hook stays, in its order. Before it writes, the old file is kept beside it as `FILE.bak-<UTC>`, with the file's own permissions, and the write is a rename. A second install changes nothing. `REXBOARD` is rexboard by full path, since an agent may run its hooks with a shorter `PATH` than your shell's: the `rexboard` on `PATH` as found (`/opt/homebrew/bin/rexboard`, which stays put across upgrades) when it is this binary, else this binary's own path. Run `install` again after moving rexboard.
+A settings file is merged, never replaced. A hook of rexboard's that would run here stays as it is, whatever path it names (see below); the `rex-agent-status` bridge it replaces, and a rexboard hook that points at a file this host lacks, give way to rexboard's, where the first of them was; every other key and hook stays, in its order. An event that has no rexboard hook gets one, and no other event is touched. Before it writes, the old file is kept beside it as `FILE.bak-<UTC>`, with the file's own permissions, and the write is a rename. A second install changes nothing. `REXBOARD` is rexboard by full path, since an agent may run its hooks with a shorter `PATH` than your shell's: the `rexboard` on `PATH` as found (`/opt/homebrew/bin/rexboard`, which stays put across upgrades) when it is this binary, else this binary's own path. Run `install` again after moving rexboard: a hook that names a path this host no longer has is replaced, one that still runs is not.
+
+**A file shared by several hosts** (a dotfiles checkout linked into each home) cannot hold one absolute path. `install` keeps writing this host's own path, which is right whatever the install method (`install.sh`, Homebrew, `cargo install`), but `status`, `install` and `uninstall` also accept these as rexboard's, and `status` says `installed` for a file that has them: a bare `rexboard` or `$HOME/.local/bin/rexboard` in place of `REXBOARD`, an absolute path that exists on this host, and the portable form, which runs the copy `install.sh` puts at `~/.local/bin`, else Homebrew's:
+
+```
+/bin/sh -c 'B=$HOME/.local/bin/rexboard; [ -x "$B" ] || B=/opt/homebrew/bin/rexboard; "$B" hook HARNESS EVENT || true'
+```
+
+An absolute path to a file this host lacks, such as `/opt/homebrew/bin/rexboard` on a Linux host, is reported as `changes` (its hooks would not run there), and `uninstall` still takes it out. Claude's `statusLine` has a portable form too, with `"$B" usage …` in place of `REXBOARD usage …` after the same two assignments; `status` and `uninstall` treat it like the one `install` writes.
 
 What `install` leaves alone:
 - a harness whose settings directory is missing (`absent`);
@@ -379,7 +387,7 @@ command = "rexboard usage grok"
 Inside tmux a status reaches Rex only through tmux passthrough, so tmux needs `set -g allow-passthrough on` in `tmux.conf`. `status` says when the default tmux server has it off.
 
 `uninstall` takes out exactly what `install` put in, with the same rules (a backup first, a linked file or directory left alone, `--dry-run` and `--json` as for `install`):
-- the hooks install writes, `REXBOARD hook HARNESS EVENT` alone or with `|| true`, inside `sh -c` or not. A hook of yours that also runs something else stays, as do your other hooks and keys, also ones added after install;
+- the hooks install writes, `REXBOARD hook HARNESS EVENT` alone or with `|| true`, inside `sh -c` or not, `REXBOARD` being any path or a bare name, and the portable form above. A hook of yours that also runs something else stays, as do your other hooks and keys, also ones added after install;
 - Claude's `statusLine`: one install chained goes back to your own command, with its other keys as they are, and one install added goes. A status line install did not write is left alone;
 - pi's `rexboard.js`, only while it is the file rexboard wrote. One you changed is `not ours` and stays;
 - a file install made (no backup holds what it was) that holds nothing else now, such as Codex's `hooks.json` on a fresh machine, is removed after a backup. A file of yours is never removed.
