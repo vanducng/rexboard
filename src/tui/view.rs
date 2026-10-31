@@ -747,15 +747,13 @@ fn key_bar(app: &App, width: usize) -> Line<'static> {
         used += piece;
         shown.push((key, what));
     }
-    for (moved, after) in [("v", "/")] {
-        if let Some(at) = shown.iter().position(|&(key, _)| key == moved) {
-            let piece = shown.remove(at);
-            let to = shown
-                .iter()
-                .position(|&(key, _)| key == after)
-                .map_or(at, |i| i + 1);
-            shown.insert(to, piece);
-        }
+    if let Some(at) = shown.iter().position(|&(key, _)| key == "v") {
+        let piece = shown.remove(at);
+        let to = shown
+            .iter()
+            .position(|&(key, _)| key == "/")
+            .map_or(at, |i| i + 1);
+        shown.insert(to, piece);
     }
     for (i, (key, what)) in shown.into_iter().enumerate() {
         spans.push(Span::styled(
