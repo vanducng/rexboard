@@ -647,11 +647,7 @@ mod board_tests {
     fn msg_is_cut_by_what_shows_not_by_its_markers() {
         let lines = screen(&board(), 80);
         let row = lines.iter().find(|l| l.0.contains("✓")).unwrap();
-        assert!(
-            row.0.ends_with("Tests pass: ran cargo test o…"),
-            "{}",
-            row.0
-        );
+        assert!(row.0.ends_with("Tests pass: ran cargo test…"), "{}", row.0);
         assert!(bold(row, "Tests pass") && !bold(row, "…"));
     }
 

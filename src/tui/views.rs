@@ -422,12 +422,13 @@ mod tests {
     }
 
     #[test]
-    fn digits_count_needs_you_rows_in_the_order_shown() {
+    fn digits_count_the_rows_in_the_order_shown() {
         let mut app = App::default();
         app.set_rows(mixed(), hosts());
         sort(&mut app, 'a');
         sort(&mut app, 'a');
         assert_eq!(app.sort, Some((Col::Age, Dir::Up)));
+        crate::tui::app::testkit::render(&app, 100, 30);
         press(&mut app, KeyCode::Char('1'));
         assert_eq!(
             app.selected,

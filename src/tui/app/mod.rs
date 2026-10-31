@@ -42,6 +42,9 @@ const TOO_FAST_TO_CLOSE: &str = "keys came too fast; nothing closed · dd closes
 const HIDDEN: &str = "the card is hidden · c shows it";
 /// A blocked row's tail is read once its card has shown this long, so j/k across rows reads none.
 const SETTLE: Duration = Duration::from_millis(300);
+/// Rows are numbered up to here, and a first digit waits this long for its second.
+pub const NUMBERED: usize = 99;
+const NUMBER_WAIT: Duration = Duration::from_millis(400);
 /// `tab` off a done row whose card showed at least this long marks it seen.
 const READ: Duration = Duration::from_secs(1);
 
@@ -187,6 +190,8 @@ pub struct App {
     pub filtering: bool,
     /// `f` and a letter: only rows with that status show.
     pub status: Option<Status>,
+    /// A row number's first digit, and when it came, while a second may still follow.
+    pub number: Option<(usize, Instant)>,
     /// A prefix key (`g o z y f d`) waiting for the key after it.
     pub pending: Option<char>,
     /// The `:` prompt: a view name being typed.
@@ -441,6 +446,24 @@ impl App {
             self.keep_selection_visible();
             return None;
         }
+        if let Some((first, _)) = self.number.take() {
+            let digit = match key.code {
+                KeyCode::Char(c) if k.is_some_and(|k| !k.1) => c.to_digit(10),
+                _ => None,
+            };
+            match (digit, key.code) {
+                (Some(second), _) => {
+                    self.select_number(first * 10 + second as usize);
+                    return None;
+                }
+                (_, KeyCode::Esc) => return None,
+                (_, KeyCode::Enter) => {
+                    self.select_number(first);
+                    return None;
+                }
+                _ => self.select_number(first),
+            }
+        }
         let k = k?;
         // A ctrl chord after a prefix keeps its own meaning, so ctrl-c still quits.
         if let Some(prefix) = self.pending.take()
@@ -532,7 +555,7 @@ impl App {
                 );
                 return self.next_waiting(now, true);
             }
-            Act::Nth => self.nth(k.char()? as usize - '1' as usize),
+            Act::Nth => self.number_key(k.char()? as usize - '0' as usize, now),
             Act::Jump => return self.jump(),
             Act::Back => return self.back(),
             Act::Filter => self.filtering = true,
