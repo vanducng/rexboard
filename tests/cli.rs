@@ -214,6 +214,45 @@ fn ls_record_without_state_is_a_rex_error() {
 }
 
 #[test]
+fn ls_direct_json_keeps_the_raw_model_and_adds_its_alias_only_where_models_has_one() {
+    let usage = |model: &str| format!(r#"{{"v":1,"m":"{model}","e":"high","c":4}}"#);
+    let block = |id: &str, model: &str| {
+        serde_json::json!({ "block_id": id, "label": id, "title": "", "process": { "name": "2.1.0" },
+            "records": [
+                { "state": "working", "app": "claude-code", "updated_at": "2026-01-01T00:00:00Z" },
+                { "id": "usage", "state": "done", "app": "claude-code", "msg": usage(model),
+                  "updated_at": "2026-01-01T00:00:01Z" } ] })
+    };
+    let snapshot = fixture_with_mini(serde_json::json!({ "host": "mini", "sessions": [{
+        "session_id": "session:web", "label": "web",
+        "windows": [{ "window_id": "window:web", "label": "seats", "blocks": [
+            block("block:web-a", "model-x"), block("block:web-b", "model-y")
+        ]}]
+    }]}));
+    let config = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(config.path().join("rexboard")).unwrap();
+    std::fs::write(
+        config.path().join("rexboard/config.toml"),
+        "[models]\nmodel-x = \"nice-x\"\n",
+    )
+    .unwrap();
+    let rows = ls_json(
+        ls().env("FAKE_REX_FIXTURE", snapshot.path())
+            .env("XDG_CONFIG_HOME", config.path()),
+    );
+    let usage = |block: &str| by_block(&rows, block)["usage"].clone();
+    assert_eq!(
+        usage("block:web-a"),
+        serde_json::json!({ "model": "model-x", "model_display": "nice-x", "effort": "high", "ctx_pct": 4 })
+    );
+    assert_eq!(
+        usage("block:web-b"),
+        serde_json::json!({ "model": "model-y", "effort": "high", "ctx_pct": 4 }),
+        "no alias, no model_display"
+    );
+}
+
+#[test]
 fn ls_text_drops_the_title_glyph() {
     ls().assert()
         .success()
@@ -3741,8 +3780,13 @@ fn serve_keeps_a_local_panes_usage_while_it_lives_and_removes_a_gone_panes_file(
 #[test]
 fn a_remote_rows_usage_comes_from_its_usage_record_and_a_local_file_wins_for_a_local_row() {
     let serve = Serve::new();
-    let report =
-        |model: &str, ctx: u32| format!(r#"{{"v":1,"m":"{model}","c":{ctx},"t":{}}}"#, ctx * 1000);
+    serve.config("[models]\nremote = \"alias-r\"\n");
+    let report = |model: &str, ctx: u32| {
+        format!(
+            r#"{{"v":1,"m":"{model}","e":"xhigh","c":{ctx},"t":{}}}"#,
+            ctx * 1000
+        )
+    };
     let block = |id: &str, usage: &str| {
         serde_json::json!({ "block_id": id, "label": id.trim_start_matches("block:"),
             "title": "", "process": { "name": "2.1.0" },
@@ -3808,8 +3852,11 @@ fn a_remote_rows_usage_comes_from_its_usage_record_and_a_local_file_wins_for_a_l
     let all = rows();
     assert_eq!(
         usage(&all, "mini/block:web-remote"),
-        Some(serde_json::json!({ "model": "remote", "ctx_pct": 3, "tok": 3000 })),
-        "a remote row has what its host's hook told Rex"
+        Some(serde_json::json!({
+            "model": "remote", "model_display": "alias-r", "effort": "xhigh",
+            "ctx_pct": 3, "tok": 3000,
+        })),
+        "a remote row has what its host's hook told Rex, and the alias [models] gives its model"
     );
     eventually_within("the local file's usage", 30, || {
         usage(&rows(), "local/block:api-file")
@@ -3817,7 +3864,9 @@ fn a_remote_rows_usage_comes_from_its_usage_record_and_a_local_file_wins_for_a_l
     });
     assert_eq!(
         usage(&all, "local/block:api-record"),
-        Some(serde_json::json!({ "model": "local-record", "ctx_pct": 2, "tok": 2000 })),
+        Some(serde_json::json!({
+            "model": "local-record", "effort": "xhigh", "ctx_pct": 2, "tok": 2000,
+        })),
         "a local row with no file uses the record"
     );
     assert_eq!(

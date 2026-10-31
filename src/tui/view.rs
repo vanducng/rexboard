@@ -767,6 +767,102 @@ mod tests {
 
     use std::time::{Duration, Instant};
 
+    /// `fuller` with usage on its first two rows: a model each, an effort on the first only.
+    fn with_effort() -> App {
+        use crate::harness::usage::Usage;
+        let mut app = fuller();
+        let mut rows = app.rows.clone();
+        let models = [("claude-opus-5-5", Some("xhigh")), ("Opus 5.5", None)];
+        for (row, (model, effort)) in rows.iter_mut().zip(models) {
+            row.pane.msg = Some("Opened the review".into());
+            row.usage = Some(Usage {
+                model: Some(model.into()),
+                effort: effort.map(str::to_owned),
+                ctx_pct: Some(9),
+                ..Usage::default()
+            });
+        }
+        app.set_rows(rows, app.hosts.clone());
+        app
+    }
+
+    #[test]
+    fn effort_sits_right_after_model_from_140_8_wide_and_msg_keeps_its_floor() {
+        let app = with_effort();
+        for board in [140u16, 200] {
+            let columns = app.columns(board, usize::from(board));
+            let order: Vec<Col> = columns.cols.iter().map(|(c, _)| c.id).collect();
+            let at = |id| order.iter().position(|c| *c == id).unwrap();
+            assert_eq!(
+                at(Col::Effort),
+                at(Col::Model) + 1,
+                "{board}: right after MODEL"
+            );
+            assert_eq!(at(Col::Ctx), at(Col::Effort) + 1, "{board}: CTX follows");
+            assert_eq!(
+                columns.width(Col::Effort),
+                8,
+                "{board}: 7 for `minimal` and a gap"
+            );
+            assert!(
+                columns.width(Col::Msg) >= 18,
+                "{board}: MSG keeps its floor, its text and a gap"
+            );
+            let text = render(&app, board, 30);
+            let header = text.lines().find(|l| l.contains("HARNESS")).unwrap();
+            assert!(
+                header.find("MODEL").unwrap() < header.find("EFFORT").unwrap(),
+                "{header}"
+            );
+            let high = text.lines().find(|l| l.contains("xhigh")).expect(&text);
+            let none = text.lines().find(|l| l.contains("Opus 5.5")).expect(&text);
+            let at = |line: &str, word: &str| line.find(word).map(|b| line[..b].chars().count());
+            let col = at(header, "EFFORT").unwrap();
+            assert_eq!(
+                at(high, "xhigh"),
+                Some(col),
+                "under its header:\n{header}\n{high}"
+            );
+            let cell: String = none.chars().skip(col).take(8).collect();
+            assert_eq!(cell.trim(), "-", "not reported: -\n{none}");
+        }
+        let plain = fuller().columns(200, 200);
+        assert!(!plain.has(Col::Effort), "no row reports one, no column");
+        assert!(
+            !with_effort().columns(130, 130).has(Col::Effort),
+            "below 140, none"
+        );
+    }
+
+    #[test]
+    fn a_models_alias_shows_in_the_column_and_the_card_and_the_raw_name_does_not() {
+        let mut app = with_effort();
+        let mut rows = app.rows.clone();
+        let models = std::collections::BTreeMap::from([(
+            "claude-opus-5-5".to_owned(),
+            "opus-5.5".to_owned(),
+        )]);
+        rows.iter_mut()
+            .filter_map(|r| r.usage.as_mut())
+            .for_each(|u| u.alias(&models));
+        app.set_rows(rows, app.hosts.clone());
+        let text = render(&app, 200, 30);
+        assert!(
+            text.contains("opus-5.5") && !text.contains("claude-opus-5-5"),
+            "{text}"
+        );
+        assert!(
+            text.contains("Opus 5.5"),
+            "a name with no alias stays as reported"
+        );
+        let card = card_of(&text);
+        assert!(
+            card.iter()
+                .any(|l| l.contains("effort ") && l.contains("xhigh")),
+            "{card:#?}"
+        );
+    }
+
     #[test]
     fn usage_shows_model_and_ctx_from_140_the_rest_when_asked_and_the_card_says_it() {
         use crate::harness::usage::Usage;
@@ -787,6 +883,7 @@ mod tests {
                     tok: Some(176_000),
                     cost_usd: Some(4.2),
                     quota_5h: Some(12),
+                    ..Usage::default()
                 });
             }
         }

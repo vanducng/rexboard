@@ -51,6 +51,7 @@ pub enum Col {
     Window,
     Block,
     Model,
+    Effort,
     Ctx,
     Tok,
     Cost,
@@ -175,7 +176,15 @@ const USAGE_WIDE: u16 = 160;
 /// MODEL's width, the gap after it included: below USAGE_WIDE always the least.
 const MODEL_MIN: usize = 13;
 const MODEL_MAX: usize = 21;
-pub const USAGE: [Col; 5] = [Col::Model, Col::Ctx, Col::Tok, Col::Cost, Col::Quota];
+pub const USAGE: [Col; 6] = [
+    Col::Model,
+    Col::Effort,
+    Col::Ctx,
+    Col::Tok,
+    Col::Cost,
+    Col::Quota,
+];
+/// MODEL and CTX show with any usage; EFFORT only while some row reports one.
 pub const USAGE_SHOWN: [Col; 2] = [Col::Model, Col::Ctx];
 
 pub fn is_usage(id: Col) -> bool {
@@ -272,7 +281,7 @@ const fn column(
 /// HARNESS, so what runs and how full it is read together. Sort letters, after `o`: s state, a age, t turn, h harness, o host,
 /// w where, e session, n window, b block, d model, x ctx, k tok, c cost, 5 5h, m msg. The usage
 /// letters are rare first letters, so an extension field keeps its own.
-pub const COLUMNS: [Column; 17] = [
+pub const COLUMNS: [Column; 18] = [
     column(
         Col::Num,
         "#",
@@ -334,6 +343,15 @@ pub const COLUMNS: [Column; 17] = [
         Dir::Up,
         USAGE_FROM..=u16::MAX,
         Width::Model,
+        Tone::Soft,
+    ),
+    column(
+        Col::Effort,
+        "EFFORT",
+        Some('f'),
+        Dir::Up,
+        USAGE_FROM..=u16::MAX,
+        Width::Fixed(8),
         Tone::Soft,
     ),
     column(
@@ -521,7 +539,8 @@ fn sort_key(id: Col, row: &Row) -> Option<SortKey> {
         Col::Session => text(&row.pane.session),
         Col::Window => text(&row.pane.tab),
         Col::Block => text(&name(row)),
-        Col::Model => row.usage.as_ref()?.model.as_deref().and_then(text),
+        Col::Model => row.usage.as_ref()?.shown_model().and_then(text),
+        Col::Effort => row.usage.as_ref()?.effort.as_deref().and_then(text),
         Col::Ctx => Some(SortKey::Num(row.usage.as_ref()?.ctx_pct?.into())),
         Col::Tok => Some(SortKey::Num(row.usage.as_ref()?.tok?.try_into().ok()?)),
         // Cents, which order the same as dollars.
@@ -873,7 +892,8 @@ impl Columns {
                     Col::Session => squeeze(&clean(&row.pane.session), width.saturating_sub(1)),
                     Col::Window => squeeze(&clean(&row.pane.tab), width.saturating_sub(1)),
                     Col::Block => squeeze(place, width.saturating_sub(1)),
-                    Col::Model => usage(row, |u| u.model.clone()),
+                    Col::Model => usage(row, |u| u.shown_model().map(str::to_owned)),
+                    Col::Effort => usage(row, |u| u.effort.clone()),
                     Col::Ctx => usage(row, |u| u.ctx_pct.map(|p| format!("{p}%"))),
                     Col::Tok => usage(row, |u| u.tok.map(crate::output::tokens)),
                     Col::Cost => usage(row, |u| u.cost_usd.map(crate::output::dollars)),

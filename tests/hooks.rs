@@ -676,7 +676,7 @@ fn a_status_line_reports_usage_to_rex_only_on_a_change_and_not_oftener_than_ever
     assert_eq!(
         reported(&tty),
         [
-            json!({ "v": 1, "m": "Opus 5.5", "c": 7, "w": 1_000_000, "t": 67910, "u": 0.5435, "q": 5 })
+            json!({ "v": 1, "m": "Opus 5.5", "e": "high", "c": 7, "w": 1_000_000, "t": 67910, "u": 0.5435, "q": 5 })
         ]
     );
     let calls = std::fs::read_to_string(home.path().join("calls")).unwrap();

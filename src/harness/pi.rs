@@ -1,5 +1,5 @@
 use super::Harness;
-use super::usage::{Usage, percent};
+use super::usage::{Usage, effort, percent};
 use crate::tui::icons::{Icon, icon};
 
 pub struct Pi;
@@ -21,7 +21,8 @@ impl Harness for Pi {
         &["pi"]
     }
 
-    /// What its extension sends at a turn's end: `{"model", "context": ctx.getContextUsage(),
+    /// What its extension sends at a turn's end: `{"model", "effort": pi.getThinkingLevel(),
+    /// "context": ctx.getContextUsage(),
     /// "usage", "cost"}`, where the context is `{tokens, contextWindow, percent}` and `usage` is
     /// the last assistant message's. TOK is that message's prompt side, as for every harness:
     /// the context's `tokens` counts its reply too.
@@ -34,6 +35,8 @@ impl Harness for Pi {
             .sum::<Option<u64>>();
         let usage = Usage {
             model: payload["model"].as_str().map(str::to_owned),
+            model_display: None,
+            effort: payload["effort"].as_str().and_then(effort),
             ctx_pct: percent(&ctx["percent"]),
             ctx_window: ctx["contextWindow"].as_u64(),
             tok: prompt.filter(|tok| *tok > 0),

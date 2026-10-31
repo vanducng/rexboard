@@ -140,15 +140,23 @@ impl App {
             .rows
             .iter()
             .filter_map(|row| row.usage.as_ref())
-            .map(|usage| usage.model.as_deref().unwrap_or_default())
+            .map(|usage| usage.shown_model().unwrap_or_default())
             .collect();
+        let effort = self
+            .rows
+            .iter()
+            .any(|row| row.usage.as_ref().is_some_and(|u| u.effort.is_some()));
         if models.is_empty() {
             return UsageShown::default();
         }
         UsageShown {
             cols: USAGE
                 .into_iter()
-                .filter(|c| USAGE_SHOWN.contains(c) || opted(&self.columns, *c))
+                .filter(|c| {
+                    USAGE_SHOWN.contains(c)
+                        || opted(&self.columns, *c)
+                        || (*c == Col::Effort && effort)
+                })
                 .collect(),
             model: models.iter().map(|m| m.width()).max().unwrap_or_default(),
         }

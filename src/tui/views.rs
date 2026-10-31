@@ -368,6 +368,7 @@ mod tests {
         let mut app = app();
         app.rows[0].usage = Some(crate::harness::usage::Usage {
             ctx_pct: Some(7),
+            effort: Some("high".into()),
             ..Default::default()
         });
         sort(&mut app, 'c');

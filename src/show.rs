@@ -87,7 +87,8 @@ fn text(row: &Row, fields: &[Field], tail: Option<&[String]>) -> String {
     if let Some(usage) = &row.usage {
         use crate::tui::columns::{Col, opted};
         let columns = crate::tui::prefs().columns;
-        facts.extend(usage.model.as_deref().map(|m| ("model", clean(m))));
+        facts.extend(usage.shown_model().map(|m| ("model", clean(m))));
+        facts.extend(usage.effort.as_deref().map(|e| ("effort", clean(e))));
         facts.extend(crate::output::context(usage).map(|c| ("ctx", c)));
         if opted(&columns, Col::Cost) {
             facts.extend(usage.cost_usd.map(|c| ("cost", crate::output::dollars(c))));

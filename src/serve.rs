@@ -241,6 +241,8 @@ struct Reducer {
     rows_due: Option<Instant>,
     save_due: Option<Instant>,
     extensions: Running,
+    /// `[models]` from config.toml, read again with the extensions.
+    models: BTreeMap<String, String>,
     usage: BTreeMap<String, Usage>,
     /// The local rows the usage watcher joins its files to.
     usage_panes: Arc<Mutex<Option<Vec<UsagePane>>>>,
@@ -361,6 +363,7 @@ impl Reducer {
             rows_due: None,
             save_due: None,
             extensions: Running::new(ext_tx),
+            models: BTreeMap::new(),
             usage: BTreeMap::new(),
             usage_panes: Arc::default(),
         }
@@ -589,11 +592,14 @@ impl Reducer {
         self.board.mark_stale(host)
     }
 
-    /// Re-reads the extensions; one that stopped takes its fields and status off the rows, since
-    /// no later run of it will.
+    /// Re-reads the extensions and the model aliases; an extension that stopped takes its fields
+    /// and status off the rows, since no later run of it will.
     fn sync_extensions(&mut self) {
         let now = chrono::Utc::now();
         let mut changed = false;
+        if let Ok(config) = crate::config::load() {
+            changed = std::mem::replace(&mut self.models, config.models) != self.models;
+        }
         for name in self.extensions.sync() {
             changed |= !self
                 .board
@@ -672,6 +678,9 @@ impl Reducer {
             // The row has what the host's hook told Rex; a local file wins over it, whole.
             if let Some(local) = self.usage.get(&row.key) {
                 row.usage = Some(local.clone());
+            }
+            if let Some(usage) = &mut row.usage {
+                usage.alias(&self.models);
             }
         }
         json!({

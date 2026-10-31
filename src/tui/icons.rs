@@ -21,6 +21,7 @@ pub const SESSION: Icon = icon("cod-layers", "\u{ebd2}");
 pub const WINDOW: Icon = icon("cod-window", "\u{eb7f}");
 pub const BLOCK: Icon = icon("cod-split_horizontal", "\u{eb56}");
 pub const MODEL: Icon = icon("fa-microchip", "\u{f2db}");
+pub const EFFORT: Icon = icon("fa-bolt", "\u{f0e7}");
 pub const CTX: Icon = icon("fa-tachometer", "\u{f0e4}");
 pub const COST: Icon = icon("fa-dollar", "\u{f155}");
 pub const QUOTA: Icon = icon("fa-pie_chart", "\u{f200}");
@@ -43,7 +44,7 @@ pub fn source(source: &str) -> Option<Icon> {
 #[cfg(test)]
 pub fn all() -> Vec<Icon> {
     let own = [
-        HOST, TURN, TITLE, SESSION, WINDOW, BLOCK, MODEL, CTX, COST, QUOTA, NATIVE, BRIDGE,
+        HOST, TURN, TITLE, SESSION, WINDOW, BLOCK, MODEL, EFFORT, CTX, COST, QUOTA, NATIVE, BRIDGE,
         INFERRED,
     ];
     let marks = crate::harness::BUILTIN.iter().filter_map(|h| h.mark());
