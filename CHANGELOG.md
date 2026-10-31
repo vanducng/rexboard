@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.20.0](https://github.com/vanducng/rexboard/compare/v0.19.0...v0.20.0) (2026-10-31)
+
+
+### Features
+
+* **tui:** MODEL and CTX follow HARNESS, with TOK, COST and 5H after CTX ([#121](https://github.com/vanducng/rexboard/issues/121)) ([3b39618](https://github.com/vanducng/rexboard/commit/3b396180f5265bf2890abb6c84cd157ddd169e0c))
+
+
+### Bug Fixes
+
+* **hooks:** status, install and uninstall know rexboard's hooks by any path and in a portable form ([#120](https://github.com/vanducng/rexboard/issues/120)) ([d21644b](https://github.com/vanducng/rexboard/commit/d21644b8eae1d4ca4cff7cd923ace56bac3a80ae))
+
 ## [0.19.0](https://github.com/vanducng/rexboard/compare/v0.18.0...v0.19.0) (2026-10-31)
 
 
