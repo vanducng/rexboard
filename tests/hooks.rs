@@ -23,7 +23,10 @@ fn rexboard(home: &Path) -> Command {
         .env("FAKE_TMUX_TTY", home.join("tty"))
         .env("FAKE_TMUX_CALLS", home.join("calls"))
         .env("XDG_STATE_HOME", home.join("state"))
-        .env("PI_CODING_AGENT_DIR", home.join(".pi/agent"));
+        .env("PI_CODING_AGENT_DIR", home.join(".pi/agent"))
+        // A hook that is slow to start on a loaded machine must still count as quick, so the tests
+        // that expect a report do not depend on the machine; the slow ones set it back.
+        .env("REXBOARD_HOOK_REPORT_WITHIN_MS", "60000");
     cmd
 }
 
@@ -813,7 +816,10 @@ fn a_figure_that_did_not_reach_the_pane_is_reported_again_and_a_new_session_with
     assert_eq!((sent.len(), &sent[1]["c"]), (2, &json!(8)), "{sent:?}");
 }
 
-/// A hook given the 5 s its agent allows, with tmux taking 1.75 s over every command.
+/// A hook given the 5 s its agent allows, with tmux taking 0.3 s over every command: its status
+/// takes 0.6 s, past the 500 ms after which a hook leaves its usage report to the next one. Load
+/// only makes it slower, so it is slow on any machine; and 0.3 s a command stays far from the 2 s
+/// a hook waits for one.
 fn slow_hook(home: &Path, args: &[&str], stdin: String) -> std::time::Duration {
     let started = std::time::Instant::now();
     rexboard(home)
@@ -823,7 +829,8 @@ fn slow_hook(home: &Path, args: &[&str], stdin: String) -> std::time::Duration {
         )
         .env("TMUX", "/tmp/tmux-501/seats,1234,0")
         .env("TMUX_PANE", "%3")
-        .env("FAKE_TMUX_SLEEP", "1.75")
+        .env("FAKE_TMUX_SLEEP", "0.3")
+        .env_remove("REXBOARD_HOOK_REPORT_WITHIN_MS")
         .timeout(std::time::Duration::from_secs(5))
         .args(args)
         .write_stdin(stdin)
@@ -841,7 +848,7 @@ fn a_hook_tells_its_status_first_and_drops_its_usage_when_tmux_is_slow() {
         "{}/tests/fixtures/harness/usage/codex-rollout.jsonl",
         env!("CARGO_MANIFEST_DIR")
     );
-    // Codex's Stop carries usage too. Its status is what must land inside the hook's 5 s.
+    // Codex's Stop carries usage too. Its status is what lands, and no usage work follows it.
     let stop =
         json!({ "hook_event_name": "Stop", "model": "gpt-5.5-codex", "transcript_path": rollout });
     let took = slow_hook(home.path(), &["hook", "codex", "Stop"], stop.to_string());
@@ -855,11 +862,16 @@ fn a_hook_tells_its_status_first_and_drops_its_usage_when_tmux_is_slow() {
         reported(&tty).is_empty(),
         "the usage was dropped, not started late"
     );
-    // SessionEnd used to clear the usage as well, and ran over: now it only clears the status.
-    let took = slow_hook(home.path(), &["hook", "claude", "SessionEnd"], "{}".into());
-    assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+    let calls = std::fs::read_to_string(home.path().join("calls")).unwrap();
+    assert!(
+        calls.contains("@rex_status") && !calls.contains("@rex_usage"),
+        "no usage call after the status: {calls}"
+    );
+    // SessionEnd used to clear the usage as well: now it only clears the status.
+    slow_hook(home.path(), &["hook", "claude", "SessionEnd"], "{}".into());
     let calls = std::fs::read_to_string(home.path().join("calls")).unwrap();
     assert!(calls.contains("-u -t %3 @rex_status"), "{calls}");
+    assert!(!calls.contains("@rex_usage"), "{calls}");
 }
 
 #[test]
@@ -873,30 +885,16 @@ fn a_slow_stop_still_keeps_the_local_usage_and_a_fast_one_still_reports() {
     );
     let stop =
         json!({ "hook_event_name": "Stop", "model": "gpt-5.5-codex", "transcript_path": rollout });
-    // Two tmux commands of 0.3 s put the status past the quick limit: the local file is still
-    // written, and Rex is not told.
-    let run = |sleep: &str| {
-        rexboard(home.path())
-            .env(
-                "PATH",
-                format!("{}:/usr/bin:/bin", fake_tmux_dir().display()),
-            )
-            .env("TMUX", "/tmp/tmux-501/seats,1234,0")
-            .env("TMUX_PANE", "%3")
-            .env("FAKE_TMUX_SLEEP", sleep)
-            .args(["hook", "codex", "Stop"])
-            .write_stdin(stop.to_string())
-            .assert()
-            .success();
-    };
-    run("0.3");
+    // A slow status: the local file is still written, and Rex is not told.
+    slow_hook(home.path(), &["hook", "codex", "Stop"], stop.to_string());
     let kept: Value =
         serde_json::from_slice(&std::fs::read(usage_file(home.path())).unwrap()).unwrap();
     assert_eq!(kept["model"], "gpt-5.5-codex", "{kept}");
     assert!(kept["sent"].is_null(), "nothing was sent to Rex: {kept}");
     assert!(reported(&tty).is_empty());
-    // A fast Stop with the same figures still reports them: they were never sent.
-    run("0");
+    // A quick Stop with the same figures still reports them: they were never sent. Quick is set
+    // by the limit, not by how fast the machine happens to be.
+    in_tmux(home.path(), &["hook", "codex", "Stop"], stop.to_string());
     assert_eq!(reported(&tty).len(), 1);
 }
 
