@@ -67,10 +67,42 @@ ours=1
 hosts=$(rex hosts --json | python3 -c 'import json, sys; print(len(json.load(sys.stdin).get("hosts") or []))')
 [[ "$hosts" == 0 ]] || { echo "the demo Rex server has hosts; refusing to record" >&2; exit 1; }
 
-# The repo's example extension gives each row a PROJECT column: its session label up to the `-`.
-mkdir -p "$XDG_CONFIG_HOME/rexboard/extensions"
-cp -R "$repo/examples/extensions/session-prefix" "$XDG_CONFIG_HOME/rexboard/extensions/"
-printf '[extensions]\nenabled = ["session-prefix"]\n' >"$XDG_CONFIG_HOME/rexboard/config.toml"
+# A demo extension: a PROJECT column (the session label up to the `-`), a hidden seat field, and
+# a send action whose program only writes the message to a file here and says it was sent.
+ext="$XDG_CONFIG_HOME/rexboard/extensions/team"
+mkdir -p "$ext"
+cat >"$ext/extension.toml" <<'TOML'
+name = "team"
+contract = 1
+description = "Each row's project, and a message to the seat in it"
+cmd = ["./adapter"]
+every = 3
+timeout = 2
+
+[[fields]]
+name = "project"
+title = "PROJECT"
+
+[[fields]]
+name = "seat"
+title = "SEAT"
+hidden = true
+
+[[actions]]
+name = "send"
+title = "Send message"
+key = "s"
+cmd = ["./send", "--", "{field:seat}", "{text}"]
+confirm = "send to {field:seat}"
+when = ["seat"]
+TOML
+cat >"$ext/adapter" <<'ADAPTER'
+#!/bin/sh
+exec jq -c '{contract: 1, rows: (.rows | map(select((.pane // "") | test("^seat-")) | ((.session // "") | split("-")[0]) as $p | {key, value: {fields: {project: $p, seat: "\(.pane)@\($p)"}}}) | from_entries)}'
+ADAPTER
+printf '#!/bin/sh\nshift\nprintf "%%s: %%s\\n" "$1" "$2" >>"%s/sent"\necho "Sent to $1"\n' "$root" >"$ext/send"
+chmod +x "$ext/adapter" "$ext/send"
+printf '[extensions]\nenabled = ["team"]\n' >"$XDG_CONFIG_HOME/rexboard/config.toml"
 # A clipboard that is a file here, whichever tool the board picks.
 for copy in pbcopy wl-copy xclip; do
   printf '#!/bin/sh\ncat >"%s/clipboard"\n' "$root" >"$root/bin/$copy"
@@ -215,6 +247,8 @@ tmux -L "$tmux_socket" new-session -d -x "$cols" -y "$rows" -s demo \
    --title \"$title\" --command '$board board'"
 tmux -L "$tmux_socket" set-option -t demo status off >/dev/null
 k() { local key; for key in "$@"; do tmux -L "$tmux_socket" send-keys -t demo "$key"; sleep 0.35; done; }
+# lit TEXT: typed into an open input line, a character at a time.
+lit() { local i; for ((i = 0; i < ${#1}; i++)); do tmux -L "$tmux_socket" send-keys -t demo -l -- "${1:i:1}"; sleep 0.07; done; }
 for _ in $(seq 1 100); do
   tmux -L "$tmux_socket" capture-pane -p -t demo 2>/dev/null | grep -qF 'NEEDS YOU' && break
   sleep 0.1
@@ -235,6 +269,9 @@ k a; sleep 3; k 2; sleep 2; k 1; sleep 2.5
 k z; sleep 1.5; k a; sleep 1.2; k z a; sleep 0.8
 k / d o c s Enter; sleep 1.5; k Space; sleep 4; k q; sleep 1.2
 k d d; sleep 3; k y; sleep 1.8; k Escape; sleep 1.5
+# `x s` on the review row: type a line, read the red confirm, `y` sends it through the extension.
+k / s e a t - b Enter; sleep 1.2; k x; sleep 1.2; k s; sleep 0.8
+lit "thanks, merging now"; sleep 0.6; k Enter; sleep 2.2; k y; sleep 2.5; k Escape; sleep 1
 k q
 for _ in $(seq 1 300); do tmux -L "$tmux_socket" has-session -t demo 2>/dev/null || break; sleep 0.1; done
 
