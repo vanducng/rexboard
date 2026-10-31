@@ -846,11 +846,19 @@ mod tests {
         files.read(dir.path(), Some(&live), now);
         assert!(lock.exists(), "held");
         drop(held);
+        // Gone on the first read after nobody holds it. Another test's fork can still carry a
+        // copy of the descriptor until it execs, which holds the lock a moment after the holder
+        // let go, so the reads go on until that copy is closed.
+        let until = std::time::Instant::now() + Duration::from_secs(10);
         files.read(dir.path(), Some(&live), now);
-        assert!(
-            !lock.exists(),
-            "old, unheld and without its pane's file: gone"
-        );
+        while lock.exists() {
+            assert!(
+                std::time::Instant::now() < until,
+                "old, unheld and without its pane's file: gone"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+            files.read(dir.path(), Some(&live), now);
+        }
     }
 
     #[test]
