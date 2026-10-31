@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0](https://github.com/vanducng/rexboard/compare/v0.18.0...v0.19.0) (2026-10-31)
+
+
+### Features
+
+* **tui:** list first, p shows a live preview strip, c the card, and tail_lines sets the tail ([#119](https://github.com/vanducng/rexboard/issues/119)) ([5f1d0f6](https://github.com/vanducng/rexboard/commit/5f1d0f627cdf87fc42b032304d52449c5e915091))
+* **tui:** number the rows on screen, and 1-99 selects by number ([#117](https://github.com/vanducng/rexboard/issues/117)) ([d31edeb](https://github.com/vanducng/rexboard/commit/d31edeb08646ffae997b474e6c921ee93b1d6284))
+
 ## [0.18.0](https://github.com/vanducng/rexboard/compare/v0.17.0...v0.18.0) (2026-10-31)
 
 
