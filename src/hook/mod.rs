@@ -49,15 +49,23 @@ pub fn run(name: &str, event: Option<&str>) -> Result<()> {
         .usage_hook()
         .is_some_and(|hook| Some(hook) == name.as_deref())
     {
-        let quick = started.elapsed() < REPORT_ONLY_IF_QUICK;
+        let quick = started.elapsed() < report_within();
         crate::harness::usage::keep(harness, &payload, true, quick);
     }
     Ok(())
 }
 
 /// A hook reports usage to Rex only if the status took less than this: what is left of the 5 s an
-/// agent gives a hook must cover the lock and two tmux commands of up to 2 s.
+/// agent gives a hook must cover the lock and two tmux commands of up to 2 s. A host that is slow
+/// all the time can raise it with `REXBOARD_HOOK_REPORT_WITHIN_MS`.
 const REPORT_ONLY_IF_QUICK: Duration = Duration::from_millis(500);
+
+fn report_within() -> Duration {
+    std::env::var("REXBOARD_HOOK_REPORT_WITHIN_MS")
+        .ok()
+        .and_then(|ms| ms.parse().ok())
+        .map_or(REPORT_ONLY_IF_QUICK, Duration::from_millis)
+}
 
 /// Writes the status to the agent's pane: wrapped for tmux and kept on the tmux pane for a
 /// client that attaches later, or straight to the agent's tty in a Rex pane where the agent does
