@@ -162,6 +162,9 @@ impl Running {
                         entry[key] = json!(icon);
                     }
                 }
+                if let Some(width) = field.width {
+                    entry["width"] = json!(width);
+                }
                 fields.push(entry);
             }
         }

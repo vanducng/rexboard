@@ -2304,6 +2304,114 @@ mod extension_tests {
         app
     }
 
+    /// `with_fields` with long values: a project id and a rig of 17 and 15 cells.
+    fn long_fields() -> App {
+        let mut app = with_fields(&[]);
+        let mut rows = app.rows.clone();
+        for row in &mut rows {
+            row.ext
+                .insert("session-prefix.project".into(), "team.platform-api".into());
+            row.ext.insert("fake.rig".into(), "conductor-pod-a".into());
+            row.pane.msg = Some(WIDE_MSG.into());
+        }
+        app.set_rows(rows, hosts());
+        app
+    }
+
+    #[test]
+    fn a_field_column_fits_its_longest_value_between_its_title_and_24() {
+        let app = long_fields();
+        for width in [200u16, 250] {
+            let columns = app.columns(width, usize::from(width));
+            let (rig, project) = ("fake.rig", "session-prefix.project");
+            assert_eq!(columns.width(Col::Field(rig)), 16, "{width}: 15 and a gap");
+            assert_eq!(
+                columns.width(Col::Field(project)),
+                18,
+                "{width}: 17 and a gap"
+            );
+            let text = render(&app, width, 30);
+            assert!(
+                text.contains("team.platform-api "),
+                "{width}: whole:\n{text}"
+            );
+            assert!(text.contains("conductor-pod-a "), "{width}: whole:\n{text}");
+        }
+        // Where the fit does not all fit, a column takes what the location columns leave over
+        // MSG's floor, the first one first, and the same columns show as at 12.
+        let mut short = long_fields();
+        let mut rows = short.rows.clone();
+        rows.iter_mut()
+            .for_each(|r| r.pane.msg = Some("Opened the review".into()));
+        short.set_rows(rows, hosts());
+        let at_140 = short.columns(140, 140);
+        assert!(at_140.width(Col::Field("fake.rig")) > 12, "grows at 140");
+        assert!(at_140.width(Col::Msg) >= 18, "MSG keeps its floor");
+        let tight = app.columns(160, 160);
+        let (rig, project) = (Col::Field("fake.rig"), Col::Field("session-prefix.project"));
+        assert!(
+            tight.has(rig) && tight.has(project),
+            "both still show at 160"
+        );
+        assert!(tight.width(rig) + tight.width(project) < 34, "narrowed");
+        assert!(
+            tight.width(rig).min(tight.width(project)) >= 12,
+            "not under 12"
+        );
+        let mut app = app;
+        let mut rows = app.rows.clone();
+        rows[0].ext.insert("fake.rig".into(), "r".repeat(40));
+        rows[1]
+            .ext
+            .insert("session-prefix.project".into(), "p".into());
+        app.set_rows(rows, hosts());
+        let columns = app.columns(200, 200);
+        assert_eq!(columns.width(Col::Field("fake.rig")), 24, "at most 24");
+        let short = with_fields(&[]).columns(200, 200);
+        assert_eq!(
+            short.width(Col::Field("fake.rig")),
+            5,
+            "short values keep the title and its gap and arrow: RIG and 2"
+        );
+        assert_eq!(
+            short.width(Col::Field("session-prefix.project")),
+            9,
+            "PROJECT and 2"
+        );
+        assert_eq!(
+            long_fields()
+                .columns(120, 120)
+                .width(Col::Field("fake.rig")),
+            12,
+            "below 140 the width is what it was"
+        );
+    }
+
+    #[test]
+    fn a_manifest_width_fixes_a_field_and_tui_json_beats_it_by_id_or_by_name() {
+        let mut app = long_fields();
+        let width = |app: &App, id: &'static str| app.columns(200, 200).width(Col::Field(id));
+        app.fields[0].0.width = Some(30);
+        assert_eq!(width(&app, "fake.rig"), 30, "the manifest's");
+        app.widths = BTreeMap::from([("rig".to_owned(), 8.into())]);
+        assert_eq!(width(&app, "fake.rig"), 8, "tui.json by name beats it");
+        app.widths
+            .insert("fake.rig".to_owned(), serde_json::json!(10));
+        assert_eq!(width(&app, "fake.rig"), 10, "by id beats the name");
+        app.widths
+            .insert("fake.rig".to_owned(), serde_json::json!(0));
+        assert_eq!(
+            width(&app, "fake.rig"),
+            8,
+            "a value out of range is ignored"
+        );
+        assert_eq!(
+            width(&app, "session-prefix.project"),
+            18,
+            "the others still fit"
+        );
+    }
+
     const WIDE_MSG: &str = "Opened the pull request and queued the review for the api team today";
 
     /// `with_fields` with a third extension field, a long host name, and window labels as an

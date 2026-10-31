@@ -61,6 +61,9 @@ pub struct Field {
     /// Its extension's mark.
     #[serde(default)]
     pub extension_icon: Option<String>,
+    /// The width its manifest gives the column.
+    #[serde(default)]
+    pub width: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]

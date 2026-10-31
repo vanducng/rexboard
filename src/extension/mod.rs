@@ -61,6 +61,10 @@ pub struct Field {
     /// filter key or card fact.
     #[serde(default)]
     pub hidden: bool,
+    /// The column's width in cells, gap included, for every user of the extension; a user's
+    /// `tui.json` `widths` beats it. Without one the column fits its values.
+    #[serde(default)]
+    pub width: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -223,6 +227,12 @@ fn check(m: &Manifest, dir: &Path) -> Result<(), String> {
                 field.name
             ));
         }
+        if let Some(width) = field.width.filter(|w| !(4..=60).contains(w)) {
+            return Err(format!(
+                "field {:?}'s width {width} must be a whole number from 4 to 60",
+                field.name
+            ));
+        }
         if !seen.insert(&field.name) {
             return Err(format!("field {:?} is declared twice", field.name));
         }
@@ -340,6 +350,18 @@ pub mod tests {
     }
 
     #[test]
+    fn a_field_may_fix_its_columns_width_from_4_to_60() {
+        let root = tempfile::tempdir().unwrap();
+        for width in [4, 60] {
+            let text = manifest("wide", &["rig"]) + &format!("width = {width}\n");
+            let ext = load(&write(root.path(), "wide", &text)).unwrap();
+            assert_eq!(ext.manifest.fields[0].width, Some(width));
+        }
+        let plain = load(&write(root.path(), "plain", &manifest("plain", &["rig"]))).unwrap();
+        assert_eq!(plain.manifest.fields[0].width, None, "optional");
+    }
+
+    #[test]
     fn a_bad_manifest_says_why() {
         let root = tempfile::tempdir().unwrap();
         let cases = [
@@ -382,6 +404,16 @@ pub mod tests {
             ("pair", with_icon("pair", &[], "ab"), "one character"),
             ("ctl", with_icon("ctl", &[], "\\u001b"), "one character"),
             ("none", with_icon("none", &[], ""), "one character"),
+            (
+                "thin",
+                manifest("thin", &["rig"]) + "width = 3\n",
+                "field \"rig\"'s width 3 must be a whole number from 4 to 60",
+            ),
+            (
+                "broad",
+                manifest("broad", &["rig"]) + "width = 61\n",
+                "field \"rig\"'s width 61 must be a whole number from 4 to 60",
+            ),
             (
                 "mark",
                 manifest("mark", &["rig"]) + "icon = \"ab\"\n",
