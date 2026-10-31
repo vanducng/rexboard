@@ -10,7 +10,7 @@ use ratatui::crossterm::event::KeyCode;
 
 use super::app::{App, CardDrawn, Item, Link, NUMBERED, Spot};
 use super::columns::{Col, Columns, Sort, Tier, Tone, column_of, tier};
-use super::keys;
+use super::keys::{self, Act};
 use super::prefs::CardHeight;
 use super::status::ALL;
 use super::theme;
@@ -726,6 +726,7 @@ fn key_bar(app: &App, width: usize) -> Line<'static> {
         keys::FOOTER
             .iter()
             .copied()
+            .filter(|&act| act != Act::CardDown || app.card_shown())
             .filter_map(|act| keys::entry(keys::BOARD, act))
             .map(|entry| (keys::short(entry), entry.word))
             .collect()

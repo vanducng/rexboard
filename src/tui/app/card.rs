@@ -228,6 +228,11 @@ mod tests {
             "{text}"
         );
         assert!(lines.last().unwrap().contains("p preview"), "{text}");
+        let wide = render(&app, 200, 30);
+        assert!(
+            !wide.lines().last().unwrap().contains("scroll card"),
+            "{wide}"
+        );
         app.tuning.preview_lines = Some(2);
         let text = render(&app, 100, 30);
         assert_eq!(
