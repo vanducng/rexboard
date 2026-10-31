@@ -80,7 +80,7 @@ impl App {
     /// the strip is hidden. The lines it has stay up between reads.
     pub fn preview_read(&mut self, now: Instant) -> Option<Effect> {
         let every = Duration::from_secs(self.tuning.every());
-        let strip = self.strip.as_mut()?;
+        let strip = self.strip.as_mut().filter(|_| self.strip_drawn.get())?;
         let due = match strip.asked {
             None => now.duration_since(strip.since) >= SETTLE,
             Some(at) => !strip.reading && now.duration_since(at) >= every,
@@ -169,6 +169,13 @@ mod tests {
             !text.contains("━━") && !text.contains("capturing"),
             "{text}"
         );
+        for width in [80, 140, 200] {
+            let text = render(&app, width, 30);
+            assert!(
+                !text.contains('─'),
+                "no rule above the footer at {width}:\n{text}"
+            );
+        }
         let saved = |effect: Option<Effect>| match effect {
             Some(Effect::SavePrefs(prefs)) => (prefs.card, prefs.preview),
             other => panic!("{other:?}"),
@@ -219,9 +226,14 @@ mod tests {
             .position(|l| l.starts_with("━━ ! blocked"))
             .expect(&text);
         assert_eq!(
-            lines[bar + 1..lines.len() - 1].len(),
+            lines[bar + 1..lines.len() - 2].len(),
             4,
             "the default 4 lines:\n{text}"
+        );
+        assert_eq!(
+            lines[lines.len() - 2],
+            "",
+            "a blank row above the footer:\n{text}"
         );
         assert!(
             lines[bar + 1].contains("out 6") && lines[bar + 4].contains("out 9"),
@@ -233,7 +245,7 @@ mod tests {
             !wide.lines().last().unwrap().contains("scroll card"),
             "{wide}"
         );
-        app.tuning.preview_lines = Some(2);
+        app.tuning.preview_lines = Some(2.into());
         let text = render(&app, 100, 30);
         assert_eq!(
             text.lines().filter(|l| l.contains("│ out")).count(),
@@ -269,6 +281,7 @@ mod tests {
             );
         }
         press(&mut app, KeyCode::Char('p'));
+        render(&app, 100, 30);
         app.note_card(t0);
         assert_eq!(app.preview_read(t0), None, "a row passing by is not read");
         let read = app.preview_read(t0 + SETTLE + T);
@@ -293,7 +306,7 @@ mod tests {
             Some(Effect::Peek { .. })
         ));
         app.peeked("mini/seat-b", Ok(vec!["two".into()]));
-        app.tuning.preview_every = Some(5);
+        app.tuning.preview_every = Some(5.into());
         let again = asked + Duration::from_secs(2);
         assert_eq!(app.preview_read(again + Duration::from_secs(4)), None);
         assert!(
@@ -304,6 +317,7 @@ mod tests {
         app.peeked("mini/seat-b", Ok(vec!["three".into()]));
         let moved = again + Duration::from_secs(10);
         press(&mut app, KeyCode::Char('j'));
+        render(&app, 100, 30);
         app.note_card(moved);
         assert_eq!(app.preview_read(moved), None);
         let read = app.preview_read(moved + SETTLE + T);
@@ -323,6 +337,24 @@ mod tests {
     }
 
     #[test]
+    fn a_strip_with_no_room_to_draw_reads_nothing_and_the_choice_stays() {
+        let mut app = listed();
+        press(&mut app, KeyCode::Char('p'));
+        let t0 = Instant::now();
+        // Five rows leave the list its floor and no room for a bar, a line and the blank row.
+        let text = render(&app, 100, 5);
+        assert!(!text.contains("━━"), "{text}");
+        app.note_card(t0);
+        assert!(app.preview, "the preference is kept");
+        assert_eq!(app.preview_read(t0 + Duration::from_secs(60)), None);
+        render(&app, 100, 30);
+        assert!(
+            app.preview_read(t0 + Duration::from_secs(61)).is_some(),
+            "room again"
+        );
+    }
+
+    #[test]
     fn the_card_and_the_full_view_ask_for_tail_lines() {
         let mut app = listed();
         app.selected = Some(Spot::Row("mini/seat-b".into()));
@@ -331,7 +363,7 @@ mod tests {
             other => panic!("{other:?}"),
         };
         assert_eq!(lines(app.tail()), 200, "the default");
-        app.tuning.tail_lines = Some(1000);
+        app.tuning.tail_lines = Some(1000.into());
         assert_eq!(lines(app.tail()), 1000);
         assert_eq!(
             lines(press(&mut app, KeyCode::Char(' '))),
@@ -339,7 +371,7 @@ mod tests {
             "the full view too"
         );
         app.peeked("mini/seat-b", Ok(vec![]));
-        app.tuning.tail_lines = Some(5001);
+        app.tuning.tail_lines = Some(5001.into());
         assert_eq!(
             lines(app.live(Instant::now() + Duration::from_secs(3600))),
             200,

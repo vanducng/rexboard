@@ -21,8 +21,6 @@ const WARN: Color = Color::Yellow;
 pub const RULE: &str = "━";
 /// Each end of a bar.
 pub const BAR_END: &str = "━━";
-/// Above the footer while the card is hidden.
-pub const LINE: &str = "─";
 /// After a group header's title.
 pub const GROUP_FILL: &str = "┄";
 pub const FOLDED: &str = "▸ ";

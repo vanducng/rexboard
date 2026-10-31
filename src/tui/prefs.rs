@@ -59,48 +59,43 @@ pub struct Prefs {
 pub struct Tuning {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail_hidden: Option<bool>,
-    #[serde(
-        default,
-        deserialize_with = "count",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub preview_lines: Option<u64>,
-    #[serde(
-        default,
-        deserialize_with = "count",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub preview_every: Option<u64>,
-    #[serde(
-        default,
-        deserialize_with = "count",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub tail_lines: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_lines: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_every: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tail_lines: Option<serde_json::Value>,
 }
 
 impl Tuning {
     /// The strip's tail lines, 1-12; anything else is 4.
     pub fn lines(&self) -> usize {
-        within(self.preview_lines, 1..=12, 4) as usize
+        within(&self.preview_lines, 1..=12, 4) as usize
     }
 
     /// Seconds between the strip's reads, 1-10; anything else is 2.
     pub fn every(&self) -> u64 {
-        within(self.preview_every, 1..=10, 2)
+        within(&self.preview_every, 1..=10, 2)
     }
 
     /// The tail the card and the full view keep, 50-5000 lines; anything else is 200.
     pub fn tail(&self) -> usize {
-        within(self.tail_lines, 50..=5000, DEFAULT_TAIL as u64) as usize
+        within(&self.tail_lines, 50..=5000, DEFAULT_TAIL as u64) as usize
     }
 }
 
 /// The tail a peek keeps by default.
 pub const DEFAULT_TAIL: usize = 200;
 
-fn within(n: Option<u64>, range: std::ops::RangeInclusive<u64>, default: u64) -> u64 {
-    n.filter(|n| range.contains(n)).unwrap_or(default)
+fn within(
+    n: &Option<serde_json::Value>,
+    range: std::ops::RangeInclusive<u64>,
+    default: u64,
+) -> u64 {
+    n.as_ref()
+        .and_then(serde_json::Value::as_u64)
+        .filter(|n| range.contains(n))
+        .unwrap_or(default)
 }
 
 impl Prefs {
@@ -123,11 +118,6 @@ fn switch<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
 
 fn switch_out<S: Serializer>(on: &Option<bool>, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_str(if on.unwrap_or(false) { "on" } else { "off" })
-}
-
-/// A whole number, as written; its range is checked where it is used.
-fn count<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
-    Ok(serde_json::Value::deserialize(d)?.as_u64())
 }
 
 /// Anything but an object is none.
@@ -260,9 +250,9 @@ mod tests {
             preview: Some(false),
             tuning: Tuning {
                 detail_hidden: Some(true),
-                preview_lines: Some(6),
-                preview_every: Some(3),
-                tail_lines: Some(1000),
+                preview_lines: Some(6.into()),
+                preview_every: Some(3.into()),
+                tail_lines: Some(1000.into()),
             },
             motion: Motion::Reduced,
             icons: Icons::Nerd,
@@ -396,7 +386,26 @@ mod tests {
             200,
             "not a number"
         );
-        let kept = tune(r#"{"tail_lines": 9999}"#);
-        assert_eq!(kept.tail_lines, Some(9999), "kept as written for a save");
+        // Whatever was written comes back on a save, valid or not.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tui.json");
+        let written = r#"{"preview_lines": -1, "preview_every": 1.5, "tail_lines": "many"}"#;
+        std::fs::write(&path, written).unwrap();
+        let mut prefs = load(&path);
+        assert_eq!(
+            (
+                prefs.tuning.lines(),
+                prefs.tuning.every(),
+                prefs.tuning.tail()
+            ),
+            (4, 2, 200)
+        );
+        prefs.card = Some(true);
+        save(&path, &prefs).unwrap();
+        let back: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(back["preview_lines"], -1);
+        assert_eq!(back["preview_every"], 1.5);
+        assert_eq!(back["tail_lines"], "many");
     }
 }

@@ -65,12 +65,12 @@ The board is built to live in a narrow column, so the narrow layout is the main 
   - **Overflow:** when rows do not fit, the last line says how many are below (`↓ 4 more`).
 - Nothing under the list by default: the list fills the body. `c` shows the **turn card** for the selected row, under the list at full width, at every width (see [Turn card](#turn-card)); `p` shows a **preview strip** above the footer instead, a bar and the last lines of the row's pane (see [Preview strip](#preview-strip)). With both on, the card wins.
 - **Footer:** one of these:
-  - the keys that fit, most needed first: `j/k move · m seen · / filter · ? keys` at 50 columns, then `n needs you`, `enter jump`, `p preview`, `c card`, `a answer`, `space full`, `v next view` and `1-99 select` as they fit, so 80 columns ends at `enter jump`, 100 columns at `c card`, and the rest follow as the board widens (`v next view` shows after `/ filter`), and `q quit` sits at the right edge (`esc cancel` in `pick`). A kept filter starts it with `/mini · esc clears ·`;
+  - the keys that fit, most needed first: `j/k move · enter jump · space full · p preview · ? keys · n needs you · / filter · m seen · a answer · c card · v next view · 1-99 select`, then `ctrl-e/y scroll card` while a card shows. A narrow board drops them from the end, so 80 columns ends at `n needs you`, and `q quit` sits at the right edge (`esc cancel` in `pick`). A kept filter starts it with `/mini · esc clears ·`;
   - a waiting prefix's next keys;
   - the filter being typed;
   - a message, for 3 seconds.
 
-  A filter that matches nothing says `no rows match "mini" · esc clears` in the list. With no card and no strip, below 100 columns, a rule sits above the footer when the screen is 20 rows or more.
+  A filter that matches nothing says `no rows match "mini" · esc clears` in the list.
 
 Long labels are cut to fit: a session, window or block label to 24 columns with `…` in the middle (a label of ` · ` parts keeps those separators, and its longest part is cut inside), and every cell at its column's edge with `…`. Widths count CJK and emoji as two columns. Colours are ANSI named colours only, so the terminal's theme carries through.
 
@@ -222,7 +222,7 @@ Reading a card does not mark a row seen. `m` does, and so does `n` or `tab` off 
 
 ### Preview strip
 
-`p` shows the selected row's pane above the footer, with the list above it:
+The card and the preview are both off by default: `c` and `p` turn them on, and `space` opens the full view. `p` shows the selected row's pane above the footer, with the list above it:
 
 ```
 ── seat-a · working · for 2m ───────────────────────────── captured 11:21:14 · 1s ──
@@ -232,7 +232,7 @@ Reading a card does not mark a row seen. `m` does, and so does `n` or `tab` off 
  │ Allow Bash: cargo test? (y/n)
 ```
 
-The bar is the card's: the row's state, its name, how long it has been so, and how fresh the tail is. Under it are the last `preview_lines` lines of the pane (1 to 12, 4 by default), wrapped to the board's width. The strip follows the selection: a row that stays selected for 300 ms is read, then again every `preview_every` seconds (1 to 10, 2 by default). Each read is one bounded Rex tail read of only those lines, never started while the last one is still out, and while the strip is hidden nothing is read. The lines already shown stay up between reads. The list always keeps its 3 least rows, so a short screen shows a shorter strip, or none.
+The bar is the card's: the row's state, its name, how long it has been so, and how fresh the tail is. Under it are the last `preview_lines` lines of the pane (1 to 12, 4 by default), wrapped to the board's width. The strip follows the selection: a row that stays selected for 300 ms is read, then again every `preview_every` seconds (1 to 10, 2 by default). Each read is one bounded Rex tail read of only those lines, never started while the last one is still out, and while the strip is hidden nothing is read. The lines already shown stay up between reads. A blank row separates the strip from the footer, as it does the card. The list always keeps its 3 least rows, so a short screen shows a shorter strip, or none, and then nothing is read for it; the choice stays.
 
 The card and the strip are both inline detail, so only one shows: with `c` on, the card shows and `p` only says so (`the card is showing, so no preview`). `p` and `c` are kept separately in `tui.json`, so turning the card off brings the strip back. `pick` shows neither.
 

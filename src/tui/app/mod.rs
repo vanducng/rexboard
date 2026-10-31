@@ -243,6 +243,8 @@ pub struct App {
     pub tuning: super::prefs::Tuning,
     /// The row the strip shows, while it does, and how its reads are going.
     strip: Option<card::Strip>,
+    /// Whether the last draw had room for the strip: with none, nothing is read for it.
+    pub strip_drawn: std::cell::Cell<bool>,
     /// tui.json's motion, written back when `c` saves the file.
     pub motion: super::prefs::Motion,
     /// tui.json's icons, written back the same way.

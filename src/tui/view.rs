@@ -9,7 +9,7 @@ use unicode_width::UnicodeWidthStr;
 use ratatui::crossterm::event::KeyCode;
 
 use super::app::{App, CardDrawn, Item, Link, NUMBERED, Spot};
-use super::columns::{Col, Columns, Sort, Tier, Tone, column_of, tier};
+use super::columns::{Col, Columns, Sort, Tier, Tone, column_of};
 use super::keys::{self, Act};
 use super::prefs::CardHeight;
 use super::status::ALL;
@@ -78,14 +78,13 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
     }
     let area = frame.area();
     app.card_drawn.set(CardDrawn::default());
+    app.strip_drawn.set(false);
     let card = app.card_shown();
     let strip = app.strip_shown();
-    let ruled = !card && !strip && tier(area.width) != Tier::Wide && area.height >= 20;
-    let [top, _gap, body, above_footer, bottom] = Layout::vertical([
+    let [top, _gap, body, bottom] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(u16::from(area.height >= HEADED)),
         Constraint::Min(3),
-        Constraint::Length(u16::from(ruled)),
         Constraint::Length(1),
     ])
     .areas(area);
@@ -94,12 +93,13 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
     let height = if card {
         card_height(app, now, body, headed)
     } else if strip {
-        // The bar and its lines, leaving the list its floor; too little room shows no strip.
+        // The bar, its lines and the blank row above the footer, leaving the list its floor; too
+        // little room shows no strip, and then nothing is read for it.
         let room = body.height.saturating_sub(LIST_FLOOR + u16::from(headed));
-        let wanted = 1 + app.tuning.lines() as u16;
-        Some(wanted.min(room))
-            .filter(|rows| *rows >= 2)
-            .unwrap_or(0)
+        let wanted = 1 + app.tuning.lines() as u16 + FOOTER_GAP;
+        let rows = wanted.min(room);
+        app.strip_drawn.set(rows >= 3);
+        if rows >= 3 { rows } else { 0 }
     } else {
         0
     };
@@ -109,9 +109,7 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
         list(frame, list_area, app, area, now);
     }
     if height > 0 {
-        let room = card_area
-            .height
-            .saturating_sub(u16::from(card) * FOOTER_GAP);
+        let room = card_area.height.saturating_sub(FOOTER_GAP);
         let width = usize::from(body.width);
         let lines = if card {
             super::card::lines(app, now, width, usize::from(room))
@@ -129,7 +127,6 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
             app.card_drawn.set(drawn);
         }
     }
-    frame.render_widget(rule_line(above_footer.width), above_footer);
     footer(frame, bottom, app);
 }
 
@@ -263,10 +260,6 @@ fn status_keys(app: &App, width: usize) -> Line<'static> {
         fit(&format!("f {} · ff clears", short.join(" ")), width),
         theme::strong(),
     )
-}
-
-fn rule_line(width: u16) -> Paragraph<'static> {
-    Paragraph::new(theme::LINE.repeat(usize::from(width))).style(theme::quiet())
 }
 
 /// `1 host`, `2 hosts`.
@@ -719,7 +712,7 @@ fn key_bar(app: &App, width: usize) -> Line<'static> {
         spans.push(Span::styled(kept, theme::strong()));
         spans.push(Span::styled(" · esc clears · ", theme::quiet()));
     }
-    // `keys::FOOTER` ranks the keys; once fitted, `v` shows after `/`.
+    // `keys::FOOTER` ranks the keys; a narrow board drops them from the end.
     let keys: Vec<(&str, &str)> = if app.pick {
         vec![("enter", "go"), ("j/k", "move"), ("/", "filter")]
     } else {
@@ -746,14 +739,6 @@ fn key_bar(app: &App, width: usize) -> Line<'static> {
         }
         used += piece;
         shown.push((key, what));
-    }
-    if let Some(at) = shown.iter().position(|&(key, _)| key == "v") {
-        let piece = shown.remove(at);
-        let to = shown
-            .iter()
-            .position(|&(key, _)| key == "/")
-            .map_or(at, |i| i + 1);
-        shown.insert(to, piece);
     }
     for (i, (key, what)) in shown.into_iter().enumerate() {
         spans.push(Span::styled(
@@ -1261,7 +1246,7 @@ mod tests {
         let mut app = fuller();
         let text = render(&app, 50, 30);
         let bar = text.lines().last().unwrap();
-        for want in ["j/k move", "m seen", "/ filter", "? keys", "q quit"] {
+        for want in ["j/k move", "enter jump", "q quit"] {
             assert!(bar.contains(want), "{bar}");
         }
         press(&mut app, KeyCode::Char('?'));
@@ -1598,32 +1583,34 @@ mod tests {
     }
 
     #[test]
-    fn the_footer_ranks_n_next_above_v_next_view_and_shows_v_after_filter() {
+    fn the_footer_lists_the_keys_in_ranked_order_and_a_narrow_board_drops_from_the_end() {
         let app = fuller();
-        let wide = render(&app, 140, 30);
-        assert!(
-            wide.lines()
-                .last()
-                .unwrap()
-                .contains("/ filter · v next view · ? keys"),
-            "{wide}"
-        );
-        for width in [50, 64, 65, 80] {
+        let bar = |width: u16| {
             let text = render(&app, width, 30);
-            let bar = text.lines().last().unwrap();
-            assert!(bar.contains("? keys"), "{width}: {bar}");
+            text.lines().last().unwrap().to_owned()
+        };
+        let at_80 = bar(80);
+        assert!(
+            at_80.starts_with(
+                "j/k move · enter jump · space full · p preview · ? keys · n needs you "
+            ) && at_80.trim_end().ends_with(" q quit"),
+            "{at_80}"
+        );
+        assert!(
+            bar(200).starts_with(
+                "j/k move · enter jump · space full · p preview · ? keys · n needs you · / filter · m seen · a answer · c card · v next view · 1-99 select"
+            ),
+            "{}",
+            bar(200)
+        );
+        for width in [50, 64, 100, 140] {
+            let bar = bar(width);
+            assert!(bar.starts_with("j/k move · enter jump"), "{width}: {bar}");
             assert!(
-                !bar.contains("v next view") || bar.contains("n needs you"),
-                "{width}: n next outranks v next view: {bar}"
+                !bar.contains("scroll card"),
+                "{width}: no card, no hint: {bar}"
             );
         }
-        let at_80 = render(&app, 80, 30);
-        let bar = at_80.lines().last().unwrap();
-        assert!(
-            bar.starts_with("j/k move · m seen · / filter · ? keys · n needs you · enter jump ")
-                && bar.trim_end().ends_with(" q quit"),
-            "{bar}"
-        );
     }
 
     #[test]
@@ -2033,6 +2020,7 @@ mod tests {
         laid.selected = Some(Spot::Row("local/claude".into()));
         let mut narrow = App::default();
         narrow.set_rows(laid.rows.clone(), hosts());
+        narrow.card = true;
         narrow.selected = laid.selected.clone();
         screens.push(("card layout 80", narrow, 80, 48));
         screens.push(("card layout 140", laid, 140, 44));
