@@ -19,6 +19,18 @@ The turn card shows `source`, and `rexboard ls --json` has it on every row ([JSO
 
 An agent's own `done` record carries no message. A hook can add a sub-record with the id `turn` that carries the turn's final message, and rexboard uses its `msg` when the pane's own record has none. It is not counted as a child record. While the pane is `done` the `turn` message always applies, since the agent's own `done` lands just after it; in any other state it applies only when it is not older than the pane's record.
 
+## Usage on every host
+
+`MODEL`, `CTX`, `TOK`, `COST` and `5H` come from what each agent's last turn used. On serve's own host the harness hands them to [`rexboard usage`](cli.md#rexboard-usage), which keeps a file per pane. Another host's files are not readable from here ([1](decisions/0001-reach-rex-only-through-the-rex-cli.md)), so the same call also tells Rex, in a second record on the pane next to the agent's own status:
+
+- The record's `id` is `usage`. Rex drops keys it does not know from a status sequence, so the figures travel in the record's `msg`, as one line of JSON: `{"v":1,"m":"Opus 5.5","c":42,"w":200000,"t":84210,"u":1.2345,"q":17}`. `m` is the model (64 characters at most), `c` the context percent, `w` the window, `t` the prompt tokens of the last request, `u` the cost in dollars and `q` the five-hour quota percent. A figure the harness does not report is left out, never `0`. Nothing else leaves the host, and no one sees more than `MODEL`, `CTX`, `TOK`, `COST` and `5H` show.
+- It is sent only when the figures changed, at most once every 5 seconds per pane, and at once when a turn ends (a Codex `Stop` hook, pi's turn end), so the turn's last figures are not held back. The `SessionEnd` hook clears it. Inside tmux it also rides tmux passthrough and is kept on the tmux pane (`@rex_usage`), and `rexboard hooks replay` sends it again with the status when a client attaches later.
+- Serve reads it with the rest of the pane. It is neither the pane's status nor a child record: a pane with only a `usage` record is still `inferred`. A pane's usage file on serve's own host wins over the record, whole; every other row has the record's figures.
+- A pane keeps its last figures while it lives, as locally: Rex keeps the record until the pane goes or the hook clears it.
+- `REXBOARD_NO_USAGE_REPORT=1` in the agent's environment turns the sending off.
+
+A rexboard older than this ignores the record, apart from counting it as a child record of the pane in `ls --json`. Upgrade the host that runs serve first, then the others. A running agent picks the hooks up only when it next starts, so a host's panes show usage after its rexboard is upgraded and each agent has been started again; nothing here asks you to restart one.
+
 ## Setting it up
 
 Straight in a Rex pane, Claude Code and Codex report on their own. Inside tmux they need hooks, and pi needs its extension everywhere:

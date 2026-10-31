@@ -3725,6 +3725,95 @@ fn serve_keeps_a_local_panes_usage_while_it_lives_and_removes_a_gone_panes_file(
     assert!(path("block:api-seat-a").exists(), "a live pane's stays");
 }
 
+#[test]
+fn a_remote_rows_usage_comes_from_its_usage_record_and_a_local_file_wins_for_a_local_row() {
+    let serve = Serve::new();
+    let report =
+        |model: &str, ctx: u32| format!(r#"{{"v":1,"m":"{model}","c":{ctx},"t":{}}}"#, ctx * 1000);
+    let block = |id: &str, usage: &str| {
+        serde_json::json!({ "block_id": id, "label": id.trim_start_matches("block:"),
+            "title": "", "process": { "name": "2.1.0" },
+            "records": [
+                { "state": "working", "app": "claude-code", "updated_at": "2026-01-01T00:00:00Z" },
+                { "id": "usage", "state": "done", "app": "claude-code", "msg": usage,
+                  "updated_at": "2026-01-01T00:00:01Z" } ] })
+    };
+    let observer = |name: &str, host: &str, blocks: Vec<serde_json::Value>| {
+        let snapshot = serde_json::json!({ "v": 1, "type": "snapshot", "rex_version": "0.0.1-test",
+            "sessions": [{ "session_id": format!("session:{host}"), "label": host, "windows": [
+                { "window_id": format!("window:{host}"), "label": "main", "blocks": blocks }] }] });
+        let path = serve.dir.path().join(name);
+        std::fs::write(&path, format!("{snapshot}\n")).unwrap();
+        path
+    };
+    let studio = observer(
+        "observer-studio-usage.ndjson",
+        "api",
+        vec![
+            block("block:api-file", &report("record", 1)),
+            block("block:api-record", &report("local-record", 2)),
+        ],
+    );
+    let mini = observer(
+        "observer-mini-usage.ndjson",
+        "web",
+        vec![
+            block("block:web-remote", &report("remote", 3)),
+            block("block:web-garbage", "not json"),
+        ],
+    );
+    let dir = serve.file("usage");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("block-api-file.json"),
+        serde_json::json!({ "key": "block:api-file", "ts": "2020-01-01T00:00:00.000Z",
+            "harness": "claude-code", "model": "file", "ctx_pct": 90 })
+        .to_string(),
+    )
+    .unwrap();
+    let rows = || {
+        let out = serve
+            .cmd()
+            .env("FAKE_REX_OBSERVER_studio", &studio)
+            .env("FAKE_REX_OBSERVER_mini", &mini)
+            .args(["ls", "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        serde_json::from_slice::<Vec<serde_json::Value>>(&out).unwrap()
+    };
+    let usage = |rows: &[serde_json::Value], key: &str| {
+        rows.iter()
+            .find(|r| r["key"] == key)
+            .map(|r| r["usage"].clone())
+    };
+    eventually_within("the remote row's usage", 30, || {
+        usage(&rows(), "mini/block:web-remote").is_some_and(|u| !u.is_null())
+    });
+    let all = rows();
+    assert_eq!(
+        usage(&all, "mini/block:web-remote"),
+        Some(serde_json::json!({ "model": "remote", "ctx_pct": 3, "tok": 3000 })),
+        "a remote row has what its host's hook told Rex"
+    );
+    eventually_within("the local file's usage", 30, || {
+        usage(&rows(), "local/block:api-file")
+            == Some(serde_json::json!({ "model": "file", "ctx_pct": 90 }))
+    });
+    assert_eq!(
+        usage(&all, "local/block:api-record"),
+        Some(serde_json::json!({ "model": "local-record", "ctx_pct": 2, "tok": 2000 })),
+        "a local row with no file uses the record"
+    );
+    assert_eq!(
+        usage(&all, "mini/block:web-garbage"),
+        Some(serde_json::Value::Null),
+        "a record that is not a report says nothing"
+    );
+}
+
 /// Runs `ext run --yes` as a real process, interrupts it with `signal` once the action has
 /// started, and says what became of the action: the CLI's exit code and stderr, and whether the
 /// action got to write its marker after the CLI was gone.

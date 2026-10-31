@@ -550,26 +550,225 @@ fn install_refuses_a_linked_harness_directory_and_writes_nothing_through_it() {
 }
 
 #[test]
-fn replay_sends_each_panes_kept_status_again() {
+fn replay_sends_each_panes_kept_status_and_usage_again() {
     let home = tempfile::tempdir().unwrap();
-    let (one, two) = (home.path().join("tty1"), home.path().join("tty2"));
-    std::fs::write(&one, "").unwrap();
-    std::fs::write(&two, "").unwrap();
-    let rows = format!("{} app=pi:state=done\n{} \n", one.display(), two.display());
+    let ttys: Vec<_> = (1..=3)
+        .map(|n| home.path().join(format!("tty{n}")))
+        .collect();
+    for tty in &ttys {
+        std::fs::write(tty, "").unwrap();
+    }
+    // One pane with both, one with only a status (a pane an older rexboard kept), one with none.
+    let rows = format!(
+        "{}|app=pi:state=done|id=usage:app=pi:state=done:msg=e30=\n{}|app=pi:state=idle|\n{}||\n",
+        ttys[0].display(),
+        ttys[1].display(),
+        ttys[2].display()
+    );
     rexboard(home.path())
         .env("PATH", fake_tmux(home.path()))
         .env("FAKE_TMUX_LIST", rows)
         .args(["hooks", "replay", "zz"])
         .assert()
         .success();
+    let wrapped = |pairs: &str| format!("\x1bPtmux;\x1b\x1b]7501;{pairs}\x07\x1b\\");
     assert_eq!(
-        std::fs::read_to_string(&one).unwrap(),
-        "\x1bPtmux;\x1b\x1b]7501;app=pi:state=done\x07\x1b\\"
+        std::fs::read_to_string(&ttys[0]).unwrap(),
+        wrapped("app=pi:state=done") + &wrapped("id=usage:app=pi:state=done:msg=e30=")
     );
     assert_eq!(
-        std::fs::read_to_string(&two).unwrap(),
+        std::fs::read_to_string(&ttys[1]).unwrap(),
+        wrapped("app=pi:state=idle"),
+        "an older rexboard kept only a status"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&ttys[2]).unwrap(),
         "",
         "a pane with none gets nothing"
+    );
+}
+
+/// What a tty got of the usage report: the `usage` records in it, their JSON decoded.
+fn reported(tty: &Path) -> Vec<Value> {
+    let text = std::fs::read_to_string(tty).unwrap();
+    text.split("]7501;")
+        .filter_map(|part| part.split('\x07').next())
+        .filter(|pairs| pairs.starts_with("id=usage:app="))
+        .map(|pairs| {
+            let state = pairs
+                .split(':')
+                .find_map(|p| p.strip_prefix("state="))
+                .unwrap();
+            match pairs.split(':').find_map(|p| p.strip_prefix("msg=")) {
+                Some(msg) => serde_json::from_slice(&unbase64(msg)).unwrap(),
+                None => json!({ "state": state }),
+            }
+        })
+        .collect()
+}
+
+fn unbase64(text: &str) -> Vec<u8> {
+    const ABC: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = Vec::new();
+    let (mut bits, mut have) = (0u32, 0);
+    for c in text.trim_end_matches('=').chars() {
+        bits = bits << 6 | ABC.find(c).unwrap() as u32;
+        have += 6;
+        if have >= 8 {
+            have -= 8;
+            out.push((bits >> have & 0xff) as u8);
+        }
+    }
+    out
+}
+
+/// A tmux pane's usage file, rewritten as if its last report had been `seconds` ago.
+fn age_last_report(home: &Path, seconds: i64) {
+    let dir = home.join("state/rexboard/usage");
+    let file = std::fs::read_dir(&dir)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let mut kept: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    kept["sent"]["ts"] = (chrono::Utc::now() - chrono::Duration::seconds(seconds))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        .into();
+    std::fs::write(&file, kept.to_string()).unwrap();
+}
+
+/// Runs rexboard in a tmux pane with the fake tmux, which `fake_tmux(home)` made once before.
+fn in_tmux(home: &Path, args: &[&str], stdin: String) {
+    rexboard(home)
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin", fake_tmux_dir().display()),
+        )
+        .env("TMUX", "/tmp/tmux-501/seats,1234,0")
+        .env("TMUX_PANE", "%3")
+        .args(args)
+        .write_stdin(stdin)
+        .assert()
+        .success();
+}
+
+fn status_line(ctx: u32) -> String {
+    let mut payload: Value = serde_json::from_str(include_str!(
+        "fixtures/harness/usage/claude-statusline.json"
+    ))
+    .unwrap();
+    payload["context_window"]["used_percentage"] = ctx.into();
+    payload.to_string()
+}
+
+#[test]
+fn a_status_line_reports_usage_to_rex_only_on_a_change_and_not_oftener_than_every_5_seconds() {
+    let home = tempfile::tempdir().unwrap();
+    fake_tmux(home.path());
+    let tty = home.path().join("tty");
+    let report = |ctx| in_tmux(home.path(), &["usage", "claude"], status_line(ctx));
+    report(7);
+    assert_eq!(
+        reported(&tty),
+        [
+            json!({ "v": 1, "m": "Opus 5.5", "c": 7, "w": 1_000_000, "t": 67910, "u": 0.5435, "q": 5 })
+        ]
+    );
+    let calls = std::fs::read_to_string(home.path().join("calls")).unwrap();
+    assert!(
+        calls
+            .starts_with("set-option -p -t %3 @rex_usage id=usage:app=claude-code:state=done:msg="),
+        "{calls}"
+    );
+    report(7);
+    assert_eq!(
+        reported(&tty).len(),
+        1,
+        "the same figures are not sent again"
+    );
+    report(8);
+    assert_eq!(reported(&tty).len(), 1, "a change inside 5 s waits");
+    age_last_report(home.path(), 6);
+    report(9);
+    let sent = reported(&tty);
+    assert_eq!(
+        (sent.len(), &sent[1]["c"]),
+        (2, &json!(9)),
+        "a change after 5 s goes"
+    );
+    // Rex gets what was sent; the local file has what the harness said last.
+    report(10);
+    assert_eq!(reported(&tty).len(), 2);
+    let file = std::fs::read_dir(home.path().join("state/rexboard/usage"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let kept: Value = serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
+    assert_eq!(
+        (&kept["ctx_pct"], &kept["sent"]["usage"]["ctx_pct"]),
+        (&json!(10), &json!(9))
+    );
+}
+
+#[test]
+fn a_turn_end_reports_at_once_what_the_throttle_would_hold() {
+    let home = tempfile::tempdir().unwrap();
+    fake_tmux(home.path());
+    let tty = home.path().join("tty");
+    in_tmux(home.path(), &["usage", "claude"], status_line(7));
+    // Codex's Stop hook is a turn end: a changed figure goes inside the 5 s.
+    let rollout = format!(
+        "{}/tests/fixtures/harness/usage/codex-rollout.jsonl",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let stop =
+        json!({ "hook_event_name": "Stop", "model": "gpt-5.5-codex", "transcript_path": rollout });
+    in_tmux(home.path(), &["hook", "codex", "Stop"], stop.to_string());
+    let sent = reported(&tty);
+    assert_eq!(sent.len(), 2, "{sent:?}");
+    assert_eq!(
+        (&sent[1]["m"], &sent[1]["c"]),
+        (&json!("gpt-5.5-codex"), &json!(4))
+    );
+}
+
+#[test]
+fn session_end_clears_the_report_and_the_off_switch_keeps_it_local() {
+    let home = tempfile::tempdir().unwrap();
+    fake_tmux(home.path());
+    let tty = home.path().join("tty");
+    in_tmux(home.path(), &["usage", "claude"], status_line(7));
+    in_tmux(home.path(), &["hook", "claude", "SessionEnd"], "{}".into());
+    let sent = reported(&tty);
+    assert_eq!(sent[1], json!({ "state": "clear" }));
+    let calls = std::fs::read_to_string(home.path().join("calls")).unwrap();
+    assert!(
+        calls.contains("set-option -p -u -t %3 @rex_usage\n"),
+        "{calls}"
+    );
+    let quiet = tempfile::tempdir().unwrap();
+    rexboard(quiet.path())
+        .env("PATH", fake_tmux(quiet.path()))
+        .env("TMUX", "/tmp/tmux-501/seats,1234,0")
+        .env("TMUX_PANE", "%3")
+        .env("REXBOARD_NO_USAGE_REPORT", "1")
+        .args(["usage", "claude"])
+        .write_stdin(status_line(7))
+        .assert()
+        .success();
+    assert_eq!(
+        std::fs::read_to_string(quiet.path().join("tty")).unwrap(),
+        ""
+    );
+    assert_eq!(
+        std::fs::read_dir(quiet.path().join("state/rexboard/usage"))
+            .unwrap()
+            .count(),
+        1,
+        "the local file is still kept"
     );
 }
 

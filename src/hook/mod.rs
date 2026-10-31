@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use crate::error::Result;
+use crate::harness::usage::{REPORT_ID as USAGE, Usage};
 use report::{fields, osc, turn_record, wrap};
 
 /// `rexboard hook HARNESS [EVENT]`, with the hook's JSON on stdin. EVENT fills in
@@ -43,7 +44,7 @@ pub fn run(name: &str, event: Option<&str>) -> Result<()> {
         .usage_hook()
         .is_some_and(|hook| Some(hook) == name.as_deref())
     {
-        crate::harness::usage::keep(harness, &payload);
+        crate::harness::usage::keep(harness, &payload, true);
     }
     tell(harness.id(), name.as_deref(), &payload);
     Ok(())
@@ -61,6 +62,9 @@ fn tell(app: &str, name: Option<&str>, event: &Value) {
         return log(name, pane.as_deref(), "skipped: no status for this event");
     };
     let pairs = || fields(app, status.state, status.kind, status.msg.as_deref(), None);
+    if status.state == "clear" {
+        send_usage(&fields(app, "clear", None, None, Some(USAGE)), true);
+    }
     let Some(pane) = pane else {
         match app {
             "codex" => log(name, None, "skipped: codex reports to a Rex pane itself"),
@@ -110,8 +114,36 @@ fn tell(app: &str, name: Option<&str>, event: &Value) {
     log(name, Some(&pane), &format!("wrote {}", status.state));
 }
 
-/// `rexboard hooks replay SESSION`: re-sends each pane's last status, for a tmux client that
-/// just attached to SESSION.
+/// Tells Rex what the agent's last turn used: a `usage` sub-record beside its own status, so
+/// serve on any host reads it with the row. Where it goes is where `tell` sends a status.
+pub fn report_usage(app: &str, usage: &Usage) {
+    let pairs = fields(app, "done", None, Some(&usage.to_report()), Some(USAGE));
+    send_usage(&pairs, false);
+}
+
+/// The record's pairs to the agent's pane: wrapped for tmux, and kept on the tmux pane for a
+/// client that attaches later (`clear` drops what was kept), or straight to the agent's tty in a
+/// plain Rex pane. Anywhere else it goes nowhere.
+fn send_usage(pairs: &str, clear: bool) {
+    if let Some(pane) = seat_pane() {
+        let Some(tty) = tmux(&["display-message", "-p", "-t", &pane, "#{pane_tty}"]) else {
+            return;
+        };
+        write(&tty, &wrap(pairs));
+        if clear {
+            tmux(&["set-option", "-p", "-u", "-t", &pane, "@rex_usage"]);
+        } else {
+            tmux(&["set-option", "-p", "-t", &pane, "@rex_usage", pairs]);
+        }
+    } else if env("REX_BLOCK").is_some()
+        && let Some((_, tty)) = agent_tty()
+    {
+        write(&tty, &osc(pairs));
+    }
+}
+
+/// `rexboard hooks replay SESSION`: re-sends each pane's last status and usage, for a tmux
+/// client that just attached to SESSION.
 pub fn replay(session: &str) -> Result<()> {
     let rows = tmux(&[
         "list-panes",
@@ -119,13 +151,16 @@ pub fn replay(session: &str) -> Result<()> {
         "-t",
         session,
         "-F",
-        "#{pane_tty} #{@rex_status}",
+        "#{pane_tty}|#{@rex_status}|#{@rex_usage}",
     ]);
     for row in rows.unwrap_or_default().lines() {
-        if let Some((tty, pairs)) = row.split_once(' ')
-            && !pairs.is_empty()
-        {
-            write(tty, &wrap(pairs));
+        let mut parts = row.splitn(3, '|');
+        let Some(tty) = parts.next().filter(|tty| !tty.is_empty()) else {
+            continue;
+        };
+        let sequences: String = parts.filter(|pairs| !pairs.is_empty()).map(wrap).collect();
+        if !sequences.is_empty() {
+            write(tty, &sequences);
         }
     }
     Ok(())
@@ -218,7 +253,8 @@ fn output(exes: &[&str], args: &[&str]) -> Option<String> {
 }
 
 fn write(tty: &str, text: &str) {
-    if let Ok(mut file) = std::fs::OpenOptions::new().write(true).open(tty) {
+    // Appended, as a terminal takes it, so a second report after the first never overwrites it.
+    if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(tty) {
         let _ = file.write_all(text.as_bytes());
     }
 }

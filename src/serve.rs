@@ -669,7 +669,10 @@ impl Reducer {
         let actions = self.extensions.actions();
         let mut rows = self.board.rows(chrono::Utc::now());
         for row in &mut rows {
-            row.usage = self.usage.get(&row.key).cloned();
+            // The row has what the host's hook told Rex; a local file wins over it, whole.
+            if let Some(local) = self.usage.get(&row.key) {
+                row.usage = Some(local.clone());
+            }
         }
         json!({
             "v": VERSION,
