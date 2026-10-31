@@ -26,7 +26,7 @@ board="$repo/target/debug/rexboard"
 denied=$(printf '%s\n' "$(id -un)" "$(hostname -s)" "$HOME")
 # Dracula-like colours, with palette 8 (the board's selected row) a quiet raise over the page.
 theme=282a36,f8f8f2,21222c,ff5555,50fa7b,f1fa8c,8be9fd,ff79c6,8be9fd,f8f8f2,3a3f52,ff6e6e,69ff94,ffffa5,a4ffff,ff92df,a4ffff,ffffff
-cols=140 rows=30
+cols=120 rows=28
 title="rexboard: an attention board for agent panes across Rex hosts"
 
 # A short root, since unix socket paths are limited to about 100 bytes.
@@ -93,14 +93,14 @@ name = "send"
 title = "Send message"
 key = "s"
 cmd = ["./send", "--", "{field:seat}", "{text}"]
-confirm = "send to {field:seat}"
+confirm = "send to {field:seat} on {host}"
 when = ["seat"]
 TOML
 cat >"$ext/adapter" <<'ADAPTER'
 #!/bin/sh
 exec jq -c '{contract: 1, rows: (.rows | map(select((.pane // "") | test("^seat-")) | ((.session // "") | split("-")[0]) as $p | {key, value: {fields: {project: $p, seat: "\(.pane)@\($p)"}}}) | from_entries)}'
 ADAPTER
-printf '#!/bin/sh\nshift\nprintf "%%s: %%s\\n" "$1" "$2" >>"%s/sent"\necho "Sent to $1"\n' "$root" >"$ext/send"
+printf '#!/bin/sh\nshift\nprintf "%%s: %%s\\n" "$1" "$2" >>"%s/sent"\necho "delivered to $1"\n' "$root" >"$ext/send"
 chmod +x "$ext/adapter" "$ext/send"
 printf '[extensions]\nenabled = ["team"]\n' >"$XDG_CONFIG_HOME/rexboard/config.toml"
 # A clipboard that is a file here, whichever tool the board picks.
@@ -265,20 +265,18 @@ sleep 1.5
 touch "$go"
 # The spinners and every shape; a done row's card, then `m` marks it seen; the permission row's
 # ask, `a` on its own, `2` once to show that a lasting option asks again, then `1` answers it
-# from the board; `z` shows what may follow it and `za` folds a group and opens it again;
-# `/docs` narrows the list to the docs row, whose live, coloured full view follows its diff; `q`
-# back as it finishes, then `dd` asks before `y` closes it. Every opener (`a`, the first `d`)
+# from the board; `/docs` narrows the list to the docs row, whose live, coloured full view
+# follows its diff; `q` back as it finishes, then `dd` asks before `y` closes it. Every opener (`a`, the first `d`)
 # comes after a pause, as the typing guard asks.
 sleep 2.5; k 3; sleep 2.2
 k m; sleep 1.2
 k 2; sleep 2
 k a; sleep 3; k 2; sleep 2; k 1; sleep 2.5
-k z; sleep 1.5; k a; sleep 1.2; k z a; sleep 0.8
-k / d o c s Enter; sleep 1.5; k Space; sleep 4; k q; sleep 1.2
-k d d; sleep 3; k y; sleep 1.8; k Escape; sleep 1.5
+k / d o c s Enter; sleep 1.5; k Space; sleep 2.5; k q; sleep 1.2
+k d d; sleep 2; k y; sleep 1.8; k Escape; sleep 1.5
 # `x s` on the review row: type a line, read the red confirm, `y` sends it through the extension.
-k / s e a t - b Enter; sleep 1.2; k x; sleep 1.2; k s; sleep 0.8
-lit "thanks, merging now"; sleep 0.6; k Enter; sleep 2.2; k y; sleep 2.5; k Escape; sleep 1
+k / s e a t - b Enter; sleep 1.2; k x; sleep 2; k s; sleep 0.8
+lit "thanks, merging now"; sleep 0.6; k Enter; sleep 3; k y; sleep 2.5; k Escape; sleep 1
 k q
 for _ in $(seq 1 300); do tmux -L "$tmux_socket" has-session -t demo 2>/dev/null || break; sleep 0.1; done
 
@@ -307,6 +305,6 @@ if found:
 open(path, "w").write(blob + "\n")
 PY
 cp "$cast" "$repo/docs/assets/demo.cast"
-agg --theme "$theme" --font-size 12 --idle-time-limit 2 --fps-cap 8 --last-frame-duration 3 \
+agg --theme "$theme" --font-size 14 --idle-time-limit 2 --fps-cap 8 --last-frame-duration 3 \
   "$repo/docs/assets/demo.cast" "$repo/docs/assets/demo.gif" >/dev/null 2>&1
 echo "wrote docs/assets/demo.cast and .gif"
