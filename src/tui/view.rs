@@ -864,7 +864,7 @@ mod tests {
         let header = sorted((Col::Ctx, crate::tui::columns::Dir::Down));
         assert!(header.contains(" ↓CTX "), "in its own room: {header}");
         let header = sorted((Col::Host, crate::tui::columns::Dir::Up));
-        assert!(header.contains(" 5H HOST↑"), "never joins 5H: {header}");
+        assert!(header.contains(" 5H  HOST↑"), "never joins 5H: {header}");
         app.sort = None;
         let columns = Columns::with_usage(160, 160, &[], &app.usage_columns());
         let cells = columns.cells(app.current().unwrap(), None, "", &[], Utc::now());
@@ -913,6 +913,54 @@ mod tests {
                 header[at("HARNESS")..at("MODEL")].trim_end().len() <= 10,
                 "{width}: MODEL follows HARNESS at once: {header}"
             );
+        }
+    }
+
+    #[test]
+    fn the_last_usage_column_keeps_two_cells_before_host_and_where_leaves_no_hole_before_msg() {
+        let mut app = app();
+        let mut rows = app.rows.clone();
+        for row in &mut rows {
+            row.usage = Some(crate::harness::usage::Usage {
+                model: Some("Opus 5.5".into()),
+                ctx_pct: Some(3),
+                tok: Some(1000),
+                cost_usd: Some(1.5),
+                quota_5h: Some(5),
+                ..Default::default()
+            });
+        }
+        app.set_rows(rows, hosts());
+        for (width, opted) in [(140, false), (200, false), (200, true)] {
+            app.columns = if opted {
+                vec!["tok".into(), "cost".into(), "5h".into()]
+            } else {
+                Vec::new()
+            };
+            let text = render(&app, width, 30);
+            let header = text.lines().find(|l| l.contains("HARNESS")).unwrap();
+            let host = header.find("HOST").unwrap();
+            let last = if opted { "5H" } else { "CTX" };
+            assert_eq!(
+                host - (header.find(last).unwrap() + last.len()),
+                2,
+                "{width}: two cells after {last}: {header}"
+            );
+            let row = text.lines().find(|l| l.contains("seat-b msg")).unwrap();
+            let chars: Vec<char> = row.chars().collect();
+            assert!(
+                chars[host - 1] == ' ' && chars[host - 2] == ' ' && chars[host - 3] != ' ',
+                "{width}: {row}"
+            );
+            if width == 140 {
+                // WHERE takes what its longest label needs, and MSG the rest, above its floor.
+                let (place, msg) = (header.find("WHERE").unwrap(), header.find("MSG").unwrap());
+                assert!(msg - place <= 28, "no hole between WHERE and MSG: {header}");
+                assert!(
+                    usize::from(width) - msg >= 40,
+                    "MSG keeps its floor: {header}"
+                );
+            }
         }
     }
 

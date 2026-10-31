@@ -91,6 +91,8 @@ pub struct Longest {
     pub host: usize,
     pub msg: usize,
     pub parts: [usize; 3],
+    /// The longest WHERE label with room for a twin's ` #N`, as drawn unsplit.
+    pub place: usize,
 }
 
 /// A session, window or block label is cut to this many columns, as docs/tui.md says.
@@ -538,6 +540,9 @@ pub struct Columns {
     pub cols: Vec<(&'static Column, usize)>,
     /// HARNESS leads with the harness's mark, where it has one.
     pub marks: bool,
+    /// The last usage column, right-aligned, which keeps a gap of two before HOST so its figure
+    /// does not run into the next column's text.
+    spaced: Option<Col>,
 }
 
 impl Columns {
@@ -610,10 +615,15 @@ impl Columns {
             tier,
             cols,
             marks: false,
+            spaced: None,
         };
         // `opencode?`, the longest harness word with the `?` of a guess, and its gap. The room
         // comes from MSG, so WHERE keeps its width.
         columns.resize(Col::Harness, 10);
+        columns.spaced = USAGE.into_iter().rev().find(|id| columns.has(*id));
+        if let Some(id) = columns.spaced {
+            columns.resize(id, columns.width(id) + 1);
+        }
         columns
     }
 
@@ -663,7 +673,17 @@ impl Columns {
         let (group, need, each) = if split.iter().all(|id| self.has(*id)) {
             (split.to_vec(), longest.parts.to_vec(), PART_MIN)
         } else {
-            (vec![Col::Where], vec![self.width(Col::Where)], WHERE_MIN)
+            (
+                vec![Col::Where],
+                // With usage columns showing, WHERE stays whole at 140 and takes only what its
+                // labels need; the rest is MSG's, not a hole between them.
+                vec![if USAGE.iter().any(|id| self.has(*id)) {
+                    self.width(Col::Where).min(longest.place)
+                } else {
+                    self.width(Col::Where)
+                }],
+                WHERE_MIN,
+            )
         };
         let (mut free, mut wanted) = (Vec::new(), Vec::new());
         for (i, id) in group.iter().enumerate() {
@@ -761,6 +781,11 @@ impl Columns {
         None
     }
 
+    /// The cells a column keeps blank after its text: one, or two for the `spaced` column.
+    fn gap(&self, id: Col) -> usize {
+        1 + usize::from(self.spaced == Some(id))
+    }
+
     pub fn has(&self, id: Col) -> bool {
         self.cols.iter().any(|(c, _)| c.id == id)
     }
@@ -815,13 +840,14 @@ impl Columns {
                     Col::Quota => Tone::Fill(figure(|u| u.quota_5h)),
                     _ => c.tone,
                 };
-                let fitted = fit(&text, width.saturating_sub(1));
+                let gap = self.gap(c.id);
+                let fitted = fit(&text, width.saturating_sub(gap));
                 let fitted = if right(c.id) {
                     align_right(&fitted)
                 } else {
                     fitted
                 };
-                vec![(fitted + " ", tone)]
+                vec![(fitted + &" ".repeat(gap), tone)]
             })
             .collect()
     }
@@ -848,7 +874,7 @@ impl Columns {
         let room = if id == Col::Msg {
             width
         } else {
-            width.saturating_sub(1)
+            width.saturating_sub(self.gap(id))
         };
         // A right-aligned name has its own room before it.
         let pad = room.saturating_sub(column.header.len());
@@ -875,7 +901,10 @@ impl Columns {
             .map(|(c, width)| {
                 let text = match c.id {
                     Col::Msg => fit(c.header, *width),
-                    id if right(id) => align_right(&fit(c.header, width.saturating_sub(1))) + " ",
+                    id if right(id) => {
+                        let gap = self.gap(id);
+                        align_right(&fit(c.header, width.saturating_sub(gap))) + &" ".repeat(gap)
+                    }
                     _ => fit(c.header, width.saturating_sub(1)) + " ",
                 };
                 let name = text.trim_start();
