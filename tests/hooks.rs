@@ -558,9 +558,15 @@ fn a_rexboard_whose_path_has_a_space_or_a_quote_installs_once() {
         let home = home.path();
         std::fs::create_dir_all(home.join(".claude")).unwrap();
         std::fs::create_dir_all(home.join(".codex")).unwrap();
-        let bin = home.join(dir).join("rexboard");
+        // A hard link, not a copy. A copy is written through a file descriptor, and a child that
+        // another test forks while it is open keeps it until its exec, so on Linux executing the
+        // copy then fails with ETXTBSY ("Text file busy"). A link has no write descriptor. It
+        // has to be on the binary's own filesystem, so its directory is made beside the binary.
+        let built = assert_cmd::cargo::cargo_bin("rexboard");
+        let beside = tempfile::tempdir_in(built.parent().unwrap()).unwrap();
+        let bin = beside.path().join(dir).join("rexboard");
         std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
-        std::fs::copy(assert_cmd::cargo::cargo_bin("rexboard"), &bin).unwrap();
+        std::fs::hard_link(&built, &bin).unwrap();
         let install = || {
             let mut cmd = Command::new(&bin);
             for name in [
@@ -599,6 +605,11 @@ fn a_rexboard_whose_path_has_a_space_or_a_quote_installs_once() {
             "{dir}: one group, not two"
         );
         let command = stop[0]["hooks"][0]["command"].as_str().unwrap().to_owned();
+        let link_dir = beside.path().file_name().unwrap().to_str().unwrap();
+        assert!(
+            command.contains(link_dir),
+            "{dir}: the hook names the linked path, not the binary it links to: {command}"
+        );
         let ran = std::process::Command::new("/bin/sh")
             .args(["-c", &command])
             .env("REXBOARD_HOOK_LOG", home.join("hook.log"))
