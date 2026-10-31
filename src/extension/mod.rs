@@ -1,6 +1,7 @@
 //! Extensions: a directory with `extension.toml` and an adapter command. rexboard runs the
 //! enabled ones over a versioned stdin/stdout contract and knows no tool by name.
 
+pub mod action;
 pub mod cli;
 pub mod contract;
 pub mod runner;
@@ -10,6 +11,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+
+pub use action::Action;
 
 /// The contract version this rexboard speaks.
 pub const CONTRACT: u32 = 1;
@@ -33,6 +36,9 @@ pub struct Manifest {
     /// The mark the card gives this extension's fields with `"icons": "nerd"`.
     #[serde(default)]
     pub icon: Option<String>,
+    /// What a user can start on a row: a key, a typed line and a confirm.
+    #[serde(default)]
+    pub actions: Vec<Action>,
 }
 
 fn every() -> u64 {
@@ -51,6 +57,10 @@ pub struct Field {
     /// The field's own mark on the card with `"icons": "nerd"`.
     #[serde(default)]
     pub icon: Option<String>,
+    /// A value on the row (for `ls --json` and an action's placeholders) with no column, view,
+    /// filter key or card fact.
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -217,6 +227,20 @@ fn check(m: &Manifest, dir: &Path) -> Result<(), String> {
             return Err(format!("field {:?} is declared twice", field.name));
         }
     }
+    let declared: BTreeSet<&str> = m.fields.iter().map(|f| f.name.as_str()).collect();
+    let (mut names, mut keys) = (BTreeSet::new(), BTreeSet::new());
+    for action in &m.actions {
+        action.check(&declared)?;
+        if !names.insert(&action.name) {
+            return Err(format!("action {:?} is declared twice", action.name));
+        }
+        if !keys.insert(&action.key) {
+            return Err(format!(
+                "action {:?}: the key {:?} is already an action's",
+                action.name, action.key
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -245,13 +269,13 @@ pub fn field_id(extension: &str, field: &str) -> String {
 pub fn field_names(enabled: &[&Extension]) -> BTreeMap<String, String> {
     let mut count: BTreeMap<&str, usize> = BTreeMap::new();
     for ext in enabled {
-        for field in &ext.manifest.fields {
+        for field in ext.manifest.fields.iter().filter(|f| !f.hidden) {
             *count.entry(field.name.as_str()).or_default() += 1;
         }
     }
     let mut names = BTreeMap::new();
     for ext in enabled {
-        for field in &ext.manifest.fields {
+        for field in ext.manifest.fields.iter().filter(|f| !f.hidden) {
             let id = field_id(ext.name(), &field.name);
             let shown = if count[field.name.as_str()] == 1 {
                 field.name.clone()

@@ -472,9 +472,11 @@ rexboard ext ls                       # each extension found: contract, enabled,
 rexboard ext test my-tool             # run it once against serve's rows and check the answer
 rexboard ext test my-tool --rows f    # against the rows in f (`rexboard ls --json --all > f`)
 rexboard ext new my-tool              # start one from the example
+rexboard ext run my-tool send local/block:b1 --text hi --dry-run   # what an action would run
+rexboard ext run my-tool send local/block:b1 --text hi --yes       # run it
 ```
 
-`ext ls` never starts serve; without it, `LAST RUN` shows `-`. `ext test` exits 1 with `EXTENSION` when the answer breaks contract 1, when the run fails, or when there is no such extension, after printing the fields per row and every problem. `ext new` fails with `EXTENSION` when the directory is already there. A `NAME` that is not `[a-z0-9-]+`, or a `--rows` file that cannot be read as rows, fails with `USAGE` (exit 2), and a bad config.toml with `CONFIG`. [Extensions](extensions.md#commands) has the output of each, and the contract.
+`ext ls` never starts serve; without it, `LAST RUN` shows `-`. `ext test` exits 1 with `EXTENSION` when the answer breaks contract 1, when the run fails, or when there is no such extension, after printing the fields per row and every problem. `ext new` fails with `EXTENSION` when the directory is already there. A `NAME` that is not `[a-z0-9-]+`, or a `--rows` file that cannot be read as rows, fails with `USAGE` (exit 2), and a bad config.toml with `CONFIG`. `ext run` exits 1 with `EXTENSION` when the extension, action or row is not there, when the action does not apply to the row, when the text is refused, when the run fails or times out, and, without `--yes` or `--dry-run` on no terminal, before running anything; a terminal gets the confirm line and `[y/N]`. [Extensions](extensions.md#commands) has the output of each, and the contract.
 
 ## `rexboard upgrade`
 

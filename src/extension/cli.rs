@@ -23,6 +23,26 @@ pub fn run(command: &ExtCommand, json: bool) -> Result<()> {
     match command {
         ExtCommand::Ls => ls(json),
         ExtCommand::Test { name, rows } => test(name, rows.as_deref(), json),
+        ExtCommand::Run {
+            name,
+            action,
+            key,
+            text,
+            yes,
+            dry_run,
+            rows,
+        } => act(
+            &Go {
+                name,
+                action,
+                key,
+                text,
+                yes: *yes,
+                dry_run: *dry_run,
+            },
+            rows.as_deref(),
+            json,
+        ),
         ExtCommand::New { name } => new(name, json),
     }
 }
@@ -38,6 +58,8 @@ struct Entry {
     /// Why it cannot run: broken, or enabled but found nowhere.
     problem: Option<String>,
     icon: Option<String>,
+    /// Each action's name.
+    actions: Vec<String>,
 }
 
 fn ls(json: bool) -> Result<()> {
@@ -57,7 +79,7 @@ fn ls(json: bool) -> Result<()> {
                 json!({
                     "name": e.name, "contract": e.contract, "enabled": e.enabled,
                     "dir": e.dir, "last_run": runs.get(&e.name),
-                    "problem": e.problem, "icon": e.icon,
+                    "problem": e.problem, "icon": e.icon, "actions": e.actions,
                 })
             })
             .collect();
@@ -93,6 +115,12 @@ fn entries(found: &Discovery, enabled: &[String], runs: &Value) -> Vec<Entry> {
             last: runs.get(ext.name()).map(last_run),
             problem: None,
             icon: ext.manifest.icon.clone(),
+            actions: ext
+                .manifest
+                .actions
+                .iter()
+                .map(|a| a.name.clone())
+                .collect(),
         })
         .collect();
     for problem in &found.problems {
@@ -108,6 +136,7 @@ fn entries(found: &Discovery, enabled: &[String], runs: &Value) -> Vec<Entry> {
             last: None,
             problem: Some(format!("broken: {}", problem.why)),
             icon: None,
+            actions: Vec::new(),
         });
     }
     for name in enabled {
@@ -120,6 +149,7 @@ fn entries(found: &Discovery, enabled: &[String], runs: &Value) -> Vec<Entry> {
                 last: None,
                 problem: Some("enabled, but not found".to_owned()),
                 icon: None,
+                actions: Vec::new(),
             });
         }
     }
@@ -206,7 +236,7 @@ fn test(name: &str, rows: Option<&Path>, json: bool) -> Result<()> {
     let started = Instant::now();
     let result = super::runner::run_once(ext, &config.settings(name), &sent, &|| false);
     let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    let parsed = match result {
+    let mut parsed = match result {
         Ok(parsed) => parsed,
         Err(why) => {
             return Err(Error::extension(
@@ -215,23 +245,198 @@ fn test(name: &str, rows: Option<&Path>, json: bool) -> Result<()> {
             ));
         }
     };
+    let contract = parsed.problems.len();
+    parsed.problems.extend(action_problems(ext, &rows, &parsed));
     let enabled = config.enabled.iter().any(|e| e == name);
+    let actions: Vec<String> = ext
+        .manifest
+        .actions
+        .iter()
+        .map(|a| a.name.clone())
+        .collect();
     if json {
-        println!("{}", answer_json(name, &parsed, sent.len(), ms));
+        let mut answer = answer_json(name, &parsed, sent.len(), ms);
+        answer["actions"] = json!(actions);
+        println!("{answer}");
     } else {
         print!("{}", answer_text(name, enabled, &parsed, sent.len(), ms));
+        if !actions.is_empty() {
+            println!("actions: {}", actions.join(", "));
+        }
     }
     if parsed.problems.is_empty() {
         return Ok(());
     }
-    let count = parsed.problems.len();
+    let (count, what) = match contract {
+        0 => (parsed.problems.len(), "'s actions have"),
+        n => (n, "'s answer breaks contract 1 in"),
+    };
+    let (many, noun) = (count != 1, if contract == 0 { "problem" } else { "way" });
     Err(Error::extension(
-        format!(
-            "{name}'s answer breaks contract 1 in {count} way{}",
-            if count == 1 { "" } else { "s" }
-        ),
+        format!("{name}{what} {count} {noun}{}", if many { "s" } else { "" }),
         &[DOC],
     ))
+}
+
+/// What would stop each action from running, found without running it: a program that is not
+/// there or not executable, and a placeholder the first row the action applies to cannot fill.
+fn action_problems(ext: &super::Extension, rows: &[Row], parsed: &Parsed) -> Vec<String> {
+    let mut problems = Vec::new();
+    for action in &ext.manifest.actions {
+        let at = |why: String| format!("action {}: {why}", action.name);
+        let first = &action.cmd[0];
+        if super::action::program(&ext.dir, first).is_none() {
+            let place = if first.contains('/') {
+                ext.dir.join(first).display().to_string()
+            } else {
+                format!("{first} on PATH")
+            };
+            problems.push(at(format!("{place} is not an executable file")));
+        }
+        let offered = super::action::Offered {
+            extension: ext.name().to_owned(),
+            dir: ext.dir.clone(),
+            settings: Value::Null,
+            action: action.clone(),
+        };
+        let sample = rows.iter().find_map(|row| {
+            let mut row = row.clone();
+            row.ext = parsed
+                .rows
+                .get(&row.key)
+                .map_or_else(BTreeMap::new, |item| {
+                    item.fields
+                        .iter()
+                        .map(|(k, v)| (super::field_id(ext.name(), k), v.clone()))
+                        .collect()
+                });
+            offered.applies(&row).then_some(row)
+        });
+        match sample {
+            Some(row) => {
+                if let Err(why) = offered.plan(&row, "x") {
+                    problems.push(at(format!("on {}: {why}", row.key)));
+                }
+            }
+            None => eprintln!(
+                "note: no row has {} to check action {} against",
+                action.when.join(", "),
+                action.name
+            ),
+        }
+    }
+    problems
+}
+
+/// What `ext run` was asked.
+struct Go<'a> {
+    name: &'a str,
+    action: &'a str,
+    key: &'a str,
+    text: &'a str,
+    yes: bool,
+    dry_run: bool,
+}
+
+/// `ext run`: the board's action on one row, from the command line.
+fn act(go: &Go, rows: Option<&Path>, json: bool) -> Result<()> {
+    use std::io::IsTerminal;
+    let config = crate::config::load()?.extensions;
+    let found = discover(&roots(&config.dirs()));
+    let ext = found.found.get(go.name).ok_or_else(|| {
+        Error::extension(
+            format!("no extension named {}", go.name),
+            &["rexboard ext ls"],
+        )
+    })?;
+    let action = ext
+        .manifest
+        .actions
+        .iter()
+        .find(|a| a.name == go.action)
+        .ok_or_else(|| {
+            let names: Vec<&str> = ext
+                .manifest
+                .actions
+                .iter()
+                .map(|a| a.name.as_str())
+                .collect();
+            Error::extension(
+                format!("{} has no action named {}", go.name, go.action),
+                &[&format!("actions: {}", names.join(", "))],
+            )
+        })?;
+    let rows = match rows {
+        Some(file) => read_rows(file)?,
+        None => crate::client::all_rows()?,
+    };
+    let row = rows
+        .iter()
+        .find(|r| r.key == go.key)
+        .ok_or_else(|| Error::extension(format!("no row {}", go.key), &["rexboard ls"]))?;
+    let offered = super::action::Offered {
+        extension: go.name.to_owned(),
+        dir: ext.dir.clone(),
+        settings: config.settings(go.name),
+        action: action.clone(),
+    };
+    let plan = offered
+        .plan(row, go.text)
+        .map_err(|why| Error::extension(why, &[]))?;
+    let report = |output: Option<&str>| {
+        if json {
+            println!(
+                "{}",
+                json!({
+                    "ok": true, "extension": go.name, "action": go.action, "key": go.key,
+                    "argv": plan.argv, "confirm": plan.line(),
+                    "dry_run": go.dry_run, "output": output,
+                })
+            );
+        } else if go.dry_run {
+            println!("{}", plan.line());
+            println!(
+                "would run: {}",
+                plan.argv
+                    .iter()
+                    .map(|a| format!("{a:?}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+        } else {
+            println!(
+                "{}: {}",
+                action.title,
+                output.filter(|o| !o.is_empty()).unwrap_or("done")
+            );
+        }
+    };
+    if go.dry_run {
+        report(None);
+        return Ok(());
+    }
+    if !go.yes {
+        if !std::io::stdin().is_terminal() {
+            return Err(Error::extension(
+                format!("{} runs only when you say so", action.title),
+                &[
+                    "add --yes to run it",
+                    "add --dry-run to see what it would run",
+                ],
+            ));
+        }
+        eprint!("{} [y/N] ", plan.line());
+        let mut answer = String::new();
+        let _ = std::io::stdin().read_line(&mut answer);
+        if answer.trim() != "y" {
+            return Err(Error::extension(format!("{} cancelled", action.title), &[]));
+        }
+    }
+    super::action::stop_on_signals();
+    let output = super::action::run(&plan)
+        .map_err(|why| Error::extension(format!("{} failed: {why}", action.title), &[]))?;
+    report(Some(&output));
+    Ok(())
 }
 
 /// Rows as `rexboard ls --json` prints them.
