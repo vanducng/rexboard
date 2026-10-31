@@ -248,7 +248,14 @@ tmux -L "$tmux_socket" new-session -d -x "$cols" -y "$rows" -s demo \
 tmux -L "$tmux_socket" set-option -t demo status off >/dev/null
 k() { local key; for key in "$@"; do tmux -L "$tmux_socket" send-keys -t demo "$key"; sleep 0.35; done; }
 # lit TEXT: typed into an open input line, a character at a time.
-lit() { local i; for ((i = 0; i < ${#1}; i++)); do tmux -L "$tmux_socket" send-keys -t demo -l -- "${1:i:1}"; sleep 0.07; done; }
+# tmux reads a lone `;` argument as a command separator, so it goes as `\;`.
+lit() {
+  local i c
+  for ((i = 0; i < ${#1}; i++)); do
+    c=${1:i:1}; [[ $c == ";" ]] && c='\;'
+    tmux -L "$tmux_socket" send-keys -t demo -l -- "$c"; sleep 0.07
+  done
+}
 for _ in $(seq 1 100); do
   tmux -L "$tmux_socket" capture-pane -p -t demo 2>/dev/null | grep -qF 'NEEDS YOU' && break
   sleep 0.1
