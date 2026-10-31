@@ -140,12 +140,30 @@ fn run_loop(
     }
 }
 
-/// Runs the adapter once on `rows`, within the manifest's timeout, and reads its answer.
+/// How long a finished run waits for the adapter's stderr to close.
+const STDERR_GRACE: Duration = Duration::from_millis(500);
+
+/// Runs the adapter once on `rows`, within the manifest's timeout, and reads its answer. What it
+/// said on stderr goes to ours, each line as `ext NAME: LINE`.
 pub fn run_once(
     ext: &Extension,
     settings: &Value,
     rows: &[RowIn],
     stopped: &dyn Fn() -> bool,
+) -> Result<Parsed, String> {
+    run_once_with(ext, settings, rows, stopped, &|line| {
+        eprintln!("ext {}: {line}", ext.name());
+    })
+}
+
+/// `run_once`, giving each line of the adapter's stderr to `emit` before it returns, so a command
+/// that ends with the run (`ext test`) has not lost them.
+pub fn run_once_with(
+    ext: &Extension,
+    settings: &Value,
+    rows: &[RowIn],
+    stopped: &dyn Fn() -> bool,
+    emit: &dyn Fn(&str),
 ) -> Result<Parsed, String> {
     let name = ext.name().to_owned();
     let request = Request {
@@ -180,13 +198,21 @@ pub fn run_once(
         let _ = out_tx.send(out);
     });
     let stderr = child.stderr.take().expect("piped stderr");
+    let (err_tx, err_rx) = std::sync::mpsc::channel();
     thread::spawn(move || {
-        for line in stderr_lines(stderr) {
-            eprintln!("ext {name}: {line}");
-        }
+        let _ = err_tx.send(stderr_lines(stderr));
     });
     let limit = Duration::from_secs(ext.manifest.timeout);
     let deadline = Instant::now() + limit;
+    // Said here, on this thread: a reader thread that prints on its own can lose the race with a
+    // process that exits when the run does. Once the adapter has exited and its group is killed
+    // its stderr is closed, so the lines come at once; only something that left the group
+    // (setsid) can hold it open, and that is given STDERR_GRACE before the lines are let go.
+    let say = || {
+        for line in err_rx.recv_timeout(STDERR_GRACE).unwrap_or_default() {
+            emit(&line);
+        }
+    };
     let pid = child.id() as i32;
     let status = loop {
         if exited(pid) {
@@ -198,6 +224,7 @@ pub fn run_once(
         if late || stopped() {
             kill_group(pid);
             let _ = child.wait();
+            say();
             return Err(if late {
                 format!("timed out after {}s and was stopped", limit.as_secs())
             } else {
@@ -206,6 +233,7 @@ pub fn run_once(
         }
         thread::sleep(Duration::from_millis(10));
     };
+    say();
     // A process that left the group (setsid) can still hold stdout open; the run's deadline
     // bounds the wait for it, and the reader thread is left behind.
     let out = out_rx
@@ -315,6 +343,51 @@ mod tests {
         rows[0].session = "web.app-v2".into();
         let parsed = run_once(&ext, &dot, &rows, &|| false).unwrap();
         assert_eq!(parsed.rows["local/b1"].fields["project"], "web");
+    }
+
+    /// What `run_once_with` gave `emit`, and how the run ended.
+    fn said(ext: &Extension) -> (Vec<String>, Result<Parsed, String>) {
+        let lines = std::sync::Mutex::new(Vec::new());
+        let result = run_once_with(ext, &Value::Null, &rows(), &|| false, &|line| {
+            lines.lock().unwrap().push(line.to_owned());
+        });
+        (lines.into_inner().unwrap(), result)
+    }
+
+    #[test]
+    fn what_an_adapter_said_on_stderr_is_given_out_before_the_run_returns() {
+        let root = tempfile::tempdir().unwrap();
+        // A failed run and a good one both: a command that ends with the run must not lose it.
+        let failing = adapter(
+            root.path(),
+            "cat >/dev/null; echo oops >&2; echo and more >&2; exit 3",
+            "",
+        );
+        let (lines, result) = said(&failing);
+        assert_eq!(lines, ["oops", "and more"]);
+        assert!(result.unwrap_err().starts_with("exited with"));
+        let again = tempfile::tempdir().unwrap();
+        let good = adapter(
+            again.path(),
+            "cat >/dev/null; echo note >&2; echo '{\"contract\": 1, \"rows\": {}}'",
+            "",
+        );
+        let (lines, result) = said(&good);
+        assert_eq!(lines, ["note"]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn what_a_timed_out_adapter_said_before_it_was_stopped_is_given_out_too() {
+        let root = tempfile::tempdir().unwrap();
+        let ext = adapter(
+            root.path(),
+            "echo before >&2; sleep 30",
+            "every = 2\ntimeout = 1\n",
+        );
+        let (lines, result) = said(&ext);
+        assert_eq!(lines, ["before"]);
+        assert_eq!(result.unwrap_err(), "timed out after 1s and was stopped");
     }
 
     #[test]
