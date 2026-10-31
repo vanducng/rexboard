@@ -26,7 +26,7 @@ board="$repo/target/debug/rexboard"
 denied=$(printf '%s\n' "$(id -un)" "$(hostname -s)" "$HOME")
 # Dracula-like colours, with palette 8 (the board's selected row) a quiet raise over the page.
 theme=282a36,f8f8f2,21222c,ff5555,50fa7b,f1fa8c,8be9fd,ff79c6,8be9fd,f8f8f2,3a3f52,ff6e6e,69ff94,ffffa5,a4ffff,ff92df,a4ffff,ffffff
-cols=140 rows=30
+cols=120 rows=28
 title="rexboard: an attention board for agent panes across Rex hosts"
 
 # A short root, since unix socket paths are limited to about 100 bytes.
@@ -67,10 +67,42 @@ ours=1
 hosts=$(rex hosts --json | python3 -c 'import json, sys; print(len(json.load(sys.stdin).get("hosts") or []))')
 [[ "$hosts" == 0 ]] || { echo "the demo Rex server has hosts; refusing to record" >&2; exit 1; }
 
-# The repo's example extension gives each row a PROJECT column: its session label up to the `-`.
-mkdir -p "$XDG_CONFIG_HOME/rexboard/extensions"
-cp -R "$repo/examples/extensions/session-prefix" "$XDG_CONFIG_HOME/rexboard/extensions/"
-printf '[extensions]\nenabled = ["session-prefix"]\n' >"$XDG_CONFIG_HOME/rexboard/config.toml"
+# A demo extension: a PROJECT column (the session label up to the `-`), a hidden seat field, and
+# a send action whose program only writes the message to a file here and says it was sent.
+ext="$XDG_CONFIG_HOME/rexboard/extensions/team"
+mkdir -p "$ext"
+cat >"$ext/extension.toml" <<'TOML'
+name = "team"
+contract = 1
+description = "Each row's project, and a message to the seat in it"
+cmd = ["./adapter"]
+every = 3
+timeout = 2
+
+[[fields]]
+name = "project"
+title = "PROJECT"
+
+[[fields]]
+name = "seat"
+title = "SEAT"
+hidden = true
+
+[[actions]]
+name = "send"
+title = "Send message"
+key = "s"
+cmd = ["./send", "--", "{field:seat}", "{text}"]
+confirm = "send to {field:seat} on {host}"
+when = ["seat"]
+TOML
+cat >"$ext/adapter" <<'ADAPTER'
+#!/bin/sh
+exec jq -c '{contract: 1, rows: (.rows | map(select((.pane // "") | test("^seat-")) | ((.session // "") | split("-")[0]) as $p | {key, value: {fields: {project: $p, seat: "\(.pane)@\($p)"}}}) | from_entries)}'
+ADAPTER
+printf '#!/bin/sh\nshift\nprintf "%%s: %%s\\n" "$1" "$2" >>"%s/sent"\necho "delivered to $1"\n' "$root" >"$ext/send"
+chmod +x "$ext/adapter" "$ext/send"
+printf '[extensions]\nenabled = ["team"]\n' >"$XDG_CONFIG_HOME/rexboard/config.toml"
 # A clipboard that is a file here, whichever tool the board picks.
 for copy in pbcopy wl-copy xclip; do
   printf '#!/bin/sh\ncat >"%s/clipboard"\n' "$root" >"$root/bin/$copy"
@@ -97,6 +129,8 @@ report() { # state, message (lines joined with " ⏎ "), [kind]
   [ -n "${3:-}" ] && kind=":kind=$3"
   printf '\033]7501;state=%s%s:app=%s:msg=%s\007' "$1" "$kind" "$app" "$(printf '%s' "$2" | base64)"
 }
+# usage JSON: the model and context the pane's harness would report, as a usage record.
+usage() { printf '\033]7501;id=usage:app=%s:state=done:msg=%s\007' "$app" "$(printf '%s' "$1" | base64)"; }
 # at N: wait until N seconds after the go file appears.
 now=0
 at() { while [ ! -e "$go" ]; do sleep 0.1; done; sleep $(($1 - now)); now=$1; }
@@ -104,6 +138,7 @@ case "$seat" in
   seat-a)
     title "⠋ seat-a@demo"; printf '● Fixing the nested parser case.\n\n'
     report working "Fixing the nested parser case"
+    usage '{"v":1,"m":"opus-4","c":38,"w":200000,"t":76000,"u":0.84,"q":21}'
     at 5
     printf '● Bash(cargo test --workspace --features full)\n\n'
     printf ' Bash command\n\n   cargo test --workspace --features full\n   Run the full test suite\n\n'
@@ -119,9 +154,11 @@ case "$seat" in
     report done "Tests pass: 12 passed ⏎ The nested parser case is fixed and covered by a new test." ;;
   seat-b)
     title "✳ seat-b@demo"; printf '● Posted 2 comments on the parser change.\n'
+    usage '{"v":1,"m":"gpt-5","c":61,"w":400000,"t":244000}'
     report done "Review posted with 2 comments ⏎ Both are about naming in src/parser.rs; nothing blocks the merge. ⏎ 1. parse_block: rename depth to nesting, since it counts open blocks, not lines. ⏎ 2. tokens: the comment filter reads better as its own small function. ⏎ Tests: 12 passed, 0 failed, on the branch head. ⏎ Clippy and fmt are clean. ⏎ The change is 48 lines in two files. ⏎ Next step is yours: answer the two comments, then merge." ;;
   seat-c)
     title "✳ seat-c@demo"
+    usage '{"v":1,"m":"sonnet-4","c":17,"w":200000,"t":34000,"u":0.12}'
     printf ' ☐ Test runner\n\nWhich test runner should the web package use?\n\n'
     printf '❯ 1. vitest\n     Fast, native ESM, works with Vite\n  2. jest\n     Familiar, more plugins\n  3. Type something.\n\n'
     printf 'Enter to select · ↑/↓ to navigate · Esc to cancel\n'
@@ -129,6 +166,7 @@ case "$seat" in
   seat-d)
     # A coloured diff that grows while the full view follows it, then a done report.
     title "⠋ seat-d@demo"; report working "Updating the style docs"
+    usage '{"v":1,"m":"opus-4","c":54,"w":200000,"t":108000,"u":1.31}'
     printf '\033[1mdiff --git a/docs/tui.md b/docs/tui.md\033[0m\n\033[36m@@ -36,6 +36,18 @@ ## Style\033[0m\n'
     printf ' One table says how each state looks.\n'
     printf '\033[31m-  Glyphs: blocked, error, done, working, idle.\033[0m\n'
@@ -215,6 +253,15 @@ tmux -L "$tmux_socket" new-session -d -x "$cols" -y "$rows" -s demo \
    --title \"$title\" --command '$board board'"
 tmux -L "$tmux_socket" set-option -t demo status off >/dev/null
 k() { local key; for key in "$@"; do tmux -L "$tmux_socket" send-keys -t demo "$key"; sleep 0.35; done; }
+# lit TEXT: typed into an open input line, a character at a time.
+# tmux reads a lone `;` argument as a command separator, so it goes as `\;`.
+lit() {
+  local i c
+  for ((i = 0; i < ${#1}; i++)); do
+    c=${1:i:1}; [[ $c == ";" ]] && c='\;'
+    tmux -L "$tmux_socket" send-keys -t demo -l -- "$c"; sleep 0.07
+  done
+}
 for _ in $(seq 1 100); do
   tmux -L "$tmux_socket" capture-pane -p -t demo 2>/dev/null | grep -qF 'NEEDS YOU' && break
   sleep 0.1
@@ -222,19 +269,22 @@ done
 tmux -L "$tmux_socket" capture-pane -p -t demo | grep -qF 'NEEDS YOU' || { echo "the board never showed NEEDS YOU" >&2; exit 1; }
 sleep 1.5
 touch "$go"
-# The spinners and every shape; a done row's card, then `m` marks it seen; the permission row's
-# ask, `a` on its own, `2` once to show that a lasting option asks again, then `1` answers it
-# from the board; `z` shows what may follow it and `za` folds a group and opens it again;
-# `/docs` narrows the list to the docs row, whose live, coloured full view follows its diff; `q`
-# back as it finishes, then `dd` asks before `y` closes it. Every opener (`a`, the first `d`)
-# comes after a pause, as the typing guard asks.
-sleep 2.5; k 3; sleep 2.2
-k m; sleep 1.2
-k 2; sleep 2
-k a; sleep 3; k 2; sleep 2; k 1; sleep 2.5
-k z; sleep 1.5; k a; sleep 1.2; k z a; sleep 0.8
+# The board opens list first, every row numbered. `3` selects row 3 by its number; `p` opens the
+# live preview strip, which follows `k` up to the error and the permission ask, then `j` back; `c` shows the card, scrolled with ctrl-e to its facts (model and context come from
+# the pane's usage record), and hides it again; the permission row's ask is answered with `a`, `2`
+# once to show that a lasting option asks again, then `1`; `/docs` narrows the list to the docs
+# row, whose live, coloured full view follows its diff; `dd` asks before `y` closes it; `x s`
+# types a line to the question row, whose confirm says it waits on a dialog, and `y` sends it.
+# Every opener (`a`, the first `d`, `x`) comes after a pause, as the typing guard asks.
+sleep 2.5; k 3; sleep 1.8
+k p; sleep 2.2; k k; sleep 1.8; k k; sleep 2.2; k j j; sleep 1.2
+k c; sleep 2; k C-e C-e C-e C-e C-e; sleep 3; k c; sleep 1; k p; sleep 1.2
+k / s e a t - a Enter; sleep 1.2
+k a; sleep 3; k 2; sleep 2; k 1; sleep 2.5; k Escape; sleep 1
 k / d o c s Enter; sleep 1.5; k Space; sleep 4; k q; sleep 1.2
-k d d; sleep 3; k y; sleep 1.8; k Escape; sleep 1.5
+k d d; sleep 2; k y; sleep 1.8; k Escape; sleep 1.5
+k / s e a t - c Enter; sleep 1.2; k x; sleep 2; k s; sleep 0.8
+lit "use vitest, it fits the Vite build"; sleep 0.6; k Enter; sleep 3.5; k y; sleep 2.5; k Escape; sleep 1
 k q
 for _ in $(seq 1 300); do tmux -L "$tmux_socket" has-session -t demo 2>/dev/null || break; sleep 0.1; done
 
@@ -263,6 +313,6 @@ if found:
 open(path, "w").write(blob + "\n")
 PY
 cp "$cast" "$repo/docs/assets/demo.cast"
-agg --theme "$theme" --font-size 12 --idle-time-limit 2 --fps-cap 8 --last-frame-duration 3 \
+agg --theme "$theme" --font-size 14 --idle-time-limit 2 --fps-cap 8 --last-frame-duration 3 \
   "$repo/docs/assets/demo.cast" "$repo/docs/assets/demo.gif" >/dev/null 2>&1
 echo "wrote docs/assets/demo.cast and .gif"
