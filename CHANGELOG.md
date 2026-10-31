@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.18.0](https://github.com/vanducng/rexboard/compare/v0.17.0...v0.18.0) (2026-10-31)
+
+
+### Features
+
+* **usage:** usage reaches every host through a usage record in the status Rex keeps ([#116](https://github.com/vanducng/rexboard/issues/116)) ([2561e21](https://github.com/vanducng/rexboard/commit/2561e212a509f94cbf3a4c25b2f3e0b6bcc3c97c))
+
+
+### Bug Fixes
+
+* **ext:** the adapter's stderr is given out before a run returns ([#112](https://github.com/vanducng/rexboard/issues/112)) ([f229920](https://github.com/vanducng/rexboard/commit/f22992090dffd718178f2e307645560274d010b3))
+
 ## [0.17.0](https://github.com/vanducng/rexboard/compare/v0.16.3...v0.17.0) (2026-10-31)
 
 
