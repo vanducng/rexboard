@@ -40,15 +40,23 @@ pub fn run(name: &str, event: Option<&str>) -> Result<()> {
         payload["hook_event_name"] = event.into();
     }
     let name = payload["hook_event_name"].as_str().map(str::to_owned);
+    let started = Instant::now();
+    tell(harness.id(), name.as_deref(), &payload);
+    // The status is told first. Usage comes after, and only while the hook is still quick: with
+    // tmux slow, two more commands could run it past the 5 s its agent gives a hook.
     if harness
         .usage_hook()
         .is_some_and(|hook| Some(hook) == name.as_deref())
+        && started.elapsed() < USAGE_ONLY_IF_QUICK
     {
         crate::harness::usage::keep(harness, &payload, true);
     }
-    tell(harness.id(), name.as_deref(), &payload);
     Ok(())
 }
+
+/// A hook tells its usage only if the status took less than this: what is left of the 5 s an
+/// agent gives a hook must cover the lock and two tmux commands of up to 2 s.
+const USAGE_ONLY_IF_QUICK: Duration = Duration::from_millis(500);
 
 /// Writes the status to the agent's pane: wrapped for tmux and kept on the tmux pane for a
 /// client that attaches later, or straight to the agent's tty in a Rex pane where the agent does
@@ -62,9 +70,6 @@ fn tell(app: &str, name: Option<&str>, event: &Value) {
         return log(name, pane.as_deref(), "skipped: no status for this event");
     };
     let pairs = || fields(app, status.state, status.kind, status.msg.as_deref(), None);
-    if status.state == "clear" {
-        crate::harness::usage::clear_report(|| clear_usage(app));
-    }
     let Some(pane) = pane else {
         match app {
             "codex" => log(name, None, "skipped: codex reports to a Rex pane itself"),
@@ -118,28 +123,19 @@ fn tell(app: &str, name: Option<&str>, event: &Value) {
 /// serve on any host reads it with the row. Where it goes is where `tell` sends a status.
 pub fn report_usage(app: &str, usage: &Usage) -> bool {
     let pairs = fields(app, "done", None, Some(&usage.to_report()), Some(USAGE));
-    send_usage(&pairs, false)
-}
-
-/// Tells Rex to drop the pane's usage record.
-pub fn clear_usage(app: &str) {
-    send_usage(&fields(app, "clear", None, None, Some(USAGE)), true);
+    send_usage(&pairs)
 }
 
 /// The record's pairs to the agent's pane: wrapped for tmux, and kept on the tmux pane for a
-/// client that attaches later (`clear` drops what was kept), or straight to the agent's tty in a
-/// plain Rex pane. Anywhere else it goes nowhere. Whether it reached the tty.
-fn send_usage(pairs: &str, clear: bool) -> bool {
+/// client that attaches later, or straight to the agent's tty in a plain Rex pane. Anywhere else
+/// it goes nowhere. Whether it reached the tty.
+fn send_usage(pairs: &str) -> bool {
     if let Some(pane) = seat_pane() {
         let Some(tty) = tmux(&["display-message", "-p", "-t", &pane, "#{pane_tty}"]) else {
             return false;
         };
         let delivered = write(&tty, &wrap(pairs));
-        if clear {
-            tmux(&["set-option", "-p", "-u", "-t", &pane, "@rex_usage"]);
-        } else {
-            tmux(&["set-option", "-p", "-t", &pane, "@rex_usage", pairs]);
-        }
+        tmux(&["set-option", "-p", "-t", &pane, "@rex_usage", pairs]);
         delivered
     } else if env("REX_BLOCK").is_some()
         && let Some((_, tty)) = agent_tty()

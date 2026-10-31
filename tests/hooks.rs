@@ -80,8 +80,9 @@ fn prepare_fake_tmux(
     std::fs::write(
         &tmux,
         "#!/bin/sh\n\
+         [ -z \"${FAKE_TMUX_SLEEP-}\" ] || sleep \"$FAKE_TMUX_SLEEP\"\n\
          case \"$1\" in\n\
-         display-message) [ -z \"${FAKE_TMUX_SLEEP-}\" ] || sleep \"$FAKE_TMUX_SLEEP\"; echo \"$FAKE_TMUX_TTY\" ;;\n\
+         display-message) echo \"$FAKE_TMUX_TTY\" ;;\n\
          list-panes) printf '%s' \"${FAKE_TMUX_LIST-}\" ;;\n\
          *) [ -z \"${FAKE_TMUX_CALLS-}\" ] || echo \"$@\" >> \"$FAKE_TMUX_CALLS\" ;;\n\
          esac\n",
@@ -734,17 +735,18 @@ fn a_turn_end_reports_at_once_what_the_throttle_would_hold() {
 }
 
 #[test]
-fn session_end_clears_the_report_and_the_off_switch_keeps_it_local() {
+fn session_end_leaves_the_usage_and_the_off_switch_keeps_it_local() {
     let home = tempfile::tempdir().unwrap();
     fake_tmux(home.path());
     let tty = home.path().join("tty");
     in_tmux(home.path(), &["usage", "claude"], status_line(7));
     in_tmux(home.path(), &["hook", "claude", "SessionEnd"], "{}".into());
-    let sent = reported(&tty);
-    assert_eq!(sent[1], json!({ "state": "clear" }));
+    // A pane keeps its last figures while it lives, as the local file does: the status clears,
+    // the usage record is not touched.
+    assert_eq!(reported(&tty).len(), 1, "{:?}", reported(&tty));
     let calls = std::fs::read_to_string(home.path().join("calls")).unwrap();
     assert!(
-        calls.contains("set-option -p -u -t %3 @rex_usage\n"),
+        calls.contains("-u -t %3 @rex_status") && !calls.contains("-u -t %3 @rex_usage"),
         "{calls}"
     );
     let quiet = tempfile::tempdir().unwrap();
@@ -768,7 +770,8 @@ fn session_end_clears_the_report_and_the_off_switch_keeps_it_local() {
 }
 
 #[test]
-fn a_figure_that_did_not_reach_the_pane_is_reported_again_and_session_end_makes_the_next_news() {
+fn a_figure_that_did_not_reach_the_pane_is_reported_again_and_a_new_session_with_the_same_ones_is_not()
+ {
     let home = tempfile::tempdir().unwrap();
     let tty = home.path().join("tty");
     fake_tmux(home.path());
@@ -799,76 +802,64 @@ fn a_figure_that_did_not_reach_the_pane_is_reported_again_and_session_end_makes_
     // The same figures once the pane can be reached: they were never delivered, so they go.
     run(&tty, &["usage", "claude"], status_line(7));
     assert_eq!(reported(&tty).len(), 1);
-    // The session ends, the next one starts with the same figures: that is news again.
+    // The session ends and the next one starts with the same figures: the row already shows
+    // them, so nothing is sent. Its own figures go when they differ.
     run(&tty, &["hook", "claude", "SessionEnd"], "{}".into());
     run(&tty, &["usage", "claude"], status_line(7));
+    assert_eq!(reported(&tty).len(), 1);
+    age_last_report(home.path(), 60);
+    run(&tty, &["usage", "claude"], status_line(8));
     let sent = reported(&tty);
-    assert_eq!(sent.len(), 3, "{sent:?}");
-    assert_eq!(
-        (&sent[1], &sent[2]["c"]),
-        (&json!({ "state": "clear" }), &json!(7))
-    );
+    assert_eq!((sent.len(), &sent[1]["c"]), (2, &json!(8)), "{sent:?}");
 }
 
-#[test]
-fn a_session_end_that_cannot_get_the_lock_still_leaves_rex_cleared_and_the_mark_unset() {
-    let home = tempfile::tempdir().unwrap();
-    let tty = home.path().join("tty");
-    fake_tmux(home.path());
-    let command = |slow: Option<&str>| {
-        let mut cmd = rexboard(home.path());
-        cmd.env(
+/// A hook given the 5 s its agent allows, with tmux taking 1.75 s over every command.
+fn slow_hook(home: &Path, args: &[&str], stdin: String) -> std::time::Duration {
+    let started = std::time::Instant::now();
+    rexboard(home)
+        .env(
             "PATH",
             format!("{}:/usr/bin:/bin", fake_tmux_dir().display()),
         )
         .env("TMUX", "/tmp/tmux-501/seats,1234,0")
-        .env("TMUX_PANE", "%3");
-        if let Some(seconds) = slow {
-            cmd.env("FAKE_TMUX_SLEEP", seconds);
-        }
-        cmd
-    };
-    std::thread::scope(|scope| {
-        // A report on its way: tmux takes 1.5 s to name the tty, so it holds the pane's lock.
-        scope.spawn(|| {
-            command(Some("1.5"))
-                .args(["usage", "claude"])
-                .write_stdin(status_line(7))
-                .assert()
-                .success();
-        });
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        // The session ends meanwhile. It waits for the lock a second and then clears anyway.
-        command(None)
-            .args(["hook", "claude", "SessionEnd"])
-            .write_stdin("{}")
-            .assert()
-            .success();
-    });
-    // The report landed after the clear; it cleared Rex again, and no mark was kept for it.
-    let sent = reported(&tty);
-    assert_eq!(sent.last(), Some(&json!({ "state": "clear" })), "{sent:?}");
-    assert!(
-        sent.iter().any(|s| s["c"] == 7),
-        "the late report did land first: {sent:?}"
+        .env("TMUX_PANE", "%3")
+        .env("FAKE_TMUX_SLEEP", "1.75")
+        .timeout(std::time::Duration::from_secs(5))
+        .args(args)
+        .write_stdin(stdin)
+        .assert()
+        .success();
+    started.elapsed()
+}
+
+#[test]
+fn a_hook_tells_its_status_first_and_drops_its_usage_when_tmux_is_slow() {
+    let home = tempfile::tempdir().unwrap();
+    let tty = home.path().join("tty");
+    fake_tmux(home.path());
+    let rollout = format!(
+        "{}/tests/fixtures/harness/usage/codex-rollout.jsonl",
+        env!("CARGO_MANIFEST_DIR")
     );
-    let kept: Value =
-        serde_json::from_slice(&std::fs::read(usage_file(home.path())).unwrap()).unwrap();
-    assert!(kept["sent"].is_null(), "{kept}");
+    // Codex's Stop carries usage too. Its status is what must land inside the hook's 5 s.
+    let stop =
+        json!({ "hook_event_name": "Stop", "model": "gpt-5.5-codex", "transcript_path": rollout });
+    let took = slow_hook(home.path(), &["hook", "codex", "Stop"], stop.to_string());
+    assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+    let written = std::fs::read_to_string(&tty).unwrap();
+    assert!(
+        written.contains("app=codex:state=done"),
+        "the status went: {written:?}"
+    );
+    assert!(
+        reported(&tty).is_empty(),
+        "the usage was dropped, not started late"
+    );
+    // SessionEnd used to clear the usage as well, and ran over: now it only clears the status.
+    let took = slow_hook(home.path(), &["hook", "claude", "SessionEnd"], "{}".into());
+    assert!(took < std::time::Duration::from_secs(5), "{took:?}");
     let calls = std::fs::read_to_string(home.path().join("calls")).unwrap();
-    assert!(
-        calls
-            .trim_end()
-            .lines()
-            .rev()
-            .find(|l| l.contains("@rex_usage"))
-            .unwrap()
-            .contains("-u"),
-        "the pane keeps nothing to replay: {calls}"
-    );
-    // The next session's same figures are news.
-    in_tmux(home.path(), &["usage", "claude"], status_line(7));
-    assert_eq!(reported(&tty).last().map(|s| &s["c"]), Some(&json!(7)));
+    assert!(calls.contains("-u -t %3 @rex_status"), "{calls}");
 }
 
 #[test]
