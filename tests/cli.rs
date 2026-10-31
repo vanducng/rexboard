@@ -3730,7 +3730,7 @@ fn interrupted(signal: libc::c_int) -> (Option<i32>, String, bool, bool) {
     let serve = Serve::new();
     let (ran, rows) = acting(
         &serve,
-        "echo $$ > pid\nsleep 2\necho late > marker",
+        "echo $$ > pid.tmp\nmv pid.tmp pid\nsleep 2\necho late > marker",
         "timeout = 30\n",
     );
     let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_rexboard"))
