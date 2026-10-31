@@ -683,9 +683,12 @@ fn held(path: &std::path::Path) -> bool {
     rc != 0
 }
 
-/// Polls `check` every 20ms for up to 10s.
+/// Polls `check` every 20ms for up to 30s. What it waits for (serve starting, an extension's run
+/// on its 4s interval, a process answering) takes as long as the machine lets it, and under load
+/// 10s was the first budget to run out: a loaded suite failed with "timed out waiting for the
+/// first good run" with nothing wrong. A passing wait never uses the rest of the budget.
 fn eventually(what: &str, check: impl Fn() -> bool) {
-    eventually_within(what, 10, check);
+    eventually_within(what, 30, check);
 }
 
 fn eventually_within(what: &str, secs: u64, check: impl Fn() -> bool) {
@@ -2213,7 +2216,7 @@ fn kept_three_runs_then_dropped(serve: &Serve, logged: &str) {
     if runs < 3 {
         assert_eq!(rig, "api", "kept after {runs} failed runs");
     }
-    eventually_within("the field to go after three failed runs", 20, || {
+    eventually_within("the field to go after three failed runs", 40, || {
         ext_of(&serve.rows(&[]), SEAT).get("fake.rig").is_none()
     });
 }
@@ -3708,7 +3711,7 @@ fn serve_keeps_a_local_panes_usage_while_it_lives_and_removes_a_gone_panes_file(
     keep("block:api-seat-a");
     keep("block:web-seat-b");
     keep("block:closed-pane");
-    eventually_within("the local pane's usage, idle half an hour", 10, || {
+    eventually_within("the local pane's usage, idle half an hour", 30, || {
         row(&serve.rows(&[]), SEAT)["usage"]
             == serde_json::json!({ "model": "Opus 5.5", "ctx_pct": 82, "tok": 820000 })
     });
@@ -3716,7 +3719,7 @@ fn serve_keeps_a_local_panes_usage_while_it_lives_and_removes_a_gone_panes_file(
         row(&serve.rows(&[]), "mini/block:web-seat-b")["usage"].is_null(),
         "a file on this host says nothing of mini's panes"
     );
-    eventually_within("the files no local pane names to go", 10, || {
+    eventually_within("the files no local pane names to go", 30, || {
         !path("block:closed-pane").exists() && !path("block:web-seat-b").exists()
     });
     assert!(path("block:api-seat-a").exists(), "a live pane's stays");
