@@ -1706,6 +1706,12 @@ fn a_hook_that_cannot_report_this_event_leaves_it_missing_and_install_adds_the_r
             r#"/bin/sh -c "B=$HOME/.local/bin/rexboard; [ -x \"$B\" ] || B=/opt/homebrew/bin/rexboard; \"$B\" hook codex Stop || true""#.to_owned(),
         ),
         ("a file that cannot be executed", not_executable),
+        ("a quoted ||", "/bin/sh -c 'rexboard hook codex Stop '\\''||'\\'' true'".to_owned()),
+        ("an unterminated script", "/bin/sh -c 'rexboard hook codex Stop || true".to_owned()),
+        (
+            "a double-quoted path with an apostrophe and $VAR",
+            r#"/bin/sh -c '"/tmp/it'\''s $VAR/rexboard" hook codex Stop || true'"#.to_owned(),
+        ),
     ] {
         let home = codex_home_with_stop(&[&stop]);
         assert_eq!(codex_state(home.path())["state"], "changes", "{what}");
@@ -1751,6 +1757,64 @@ fn uninstall_gives_back_a_status_line_wrapped_with_rexboard_spelled_with_home() 
         let command = format!(
             "{bin} usage --help >/dev/null 2>&1 && exec {bin} usage claude -- /bin/sh -c {quoted} || exec /bin/sh -c {quoted}"
         );
+        std::fs::write(
+            &file,
+            json!({ "statusLine": { "type": "command", "command": command } }).to_string(),
+        )
+        .unwrap();
+        rexboard(home.path())
+            .args(["hooks", "uninstall", "claude"])
+            .assert()
+            .success();
+        let after: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(after["statusLine"]["command"], theirs, "{bin}");
+    }
+}
+
+#[test]
+fn the_bridges_name_in_a_command_of_the_users_is_kept_and_the_bridge_itself_is_replaced() {
+    let data = "printf '%s' 'rex-agent-status is retired'";
+    let home = codex_home_with_stop(&[data]);
+    let file = home.path().join(".codex/hooks.json");
+    rexboard(home.path())
+        .args(["hooks", "install", "codex"])
+        .assert()
+        .success();
+    let after = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        after.contains("rex-agent-status is retired"),
+        "kept: {after}"
+    );
+    let bridge = r#"/bin/sh -c '[ -n "$TMUX$REX_BLOCK" ] || case "$TERM" in tmux*|screen*) ;; *) exit 0;; esac; exec /usr/bin/python3 "$HOME/.local/bin/rex-agent-status" codex'"#;
+    let home = codex_home_with_stop(&[bridge]);
+    rexboard(home.path())
+        .args(["hooks", "install", "codex"])
+        .assert()
+        .success();
+    let after = std::fs::read_to_string(home.path().join(".codex/hooks.json")).unwrap();
+    assert!(!after.contains("rex-agent-status"), "replaced: {after}");
+}
+
+#[test]
+fn uninstall_gives_back_the_status_line_a_v0_14_install_wrote() {
+    let theirs = "echo it's \"$HOME\" costs $5";
+    let t = format!("'{}'", theirs.replace('\'', "'\\''"));
+    for (bin, guard) in [
+        ("rexboard", "command -v rexboard >/dev/null 2>&1"),
+        (
+            "/opt/homebrew/bin/rexboard",
+            "[ -x /opt/homebrew/bin/rexboard ]",
+        ),
+        (
+            "'/tmp/My Tools/rexboard'",
+            "[ -x '/tmp/My Tools/rexboard' ]",
+        ),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let file = home.path().join(".claude/settings.json");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let command =
+            format!("{guard} && exec {bin} usage claude -- /bin/sh -c {t} || exec /bin/sh -c {t}");
         std::fs::write(
             &file,
             json!({ "statusLine": { "type": "command", "command": command } }).to_string(),
