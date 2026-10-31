@@ -22,7 +22,7 @@ pub enum Act {
     PrevGroup,
     NextNeeds,
     PrevNeeds,
-    /// `1`-`9`: the nth NEEDS YOU row.
+    /// `1`-`9`, then maybe another: the row with that number on screen.
     Nth,
     Jump,
     Back,
@@ -198,8 +198,8 @@ pub const BOARD: &[Entry] = &[
             &[c('8')],
             &[c('9')],
         ],
-        "1-9",
-        "the nth NEEDS YOU row",
+        "1-99",
+        "row by number; 2 digits wait",
         "select",
     ),
     e(

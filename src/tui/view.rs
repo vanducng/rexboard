@@ -8,7 +8,7 @@ use unicode_width::UnicodeWidthStr;
 
 use ratatui::crossterm::event::KeyCode;
 
-use super::app::{App, CardDrawn, Item, Link, Spot};
+use super::app::{App, CardDrawn, Item, Link, NUMBERED, Spot};
 use super::columns::{Col, Columns, Sort, Tier, Tone, column_of, tier};
 use super::keys::{self, Act};
 use super::prefs::CardHeight;
@@ -435,6 +435,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
             columns.width(Col::Block).saturating_sub(1),
         )
     };
+    let mut shown = 0;
     let mut lines: Vec<Line> = items
         .iter()
         .skip(offset)
@@ -455,6 +456,10 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
             Item::Gap => Line::default(),
             &Item::Row(i) => row_line(
                 &app.rows[i],
+                {
+                    shown += 1;
+                    (shown <= NUMBERED).then_some(shown)
+                },
                 &places[i],
                 app,
                 &columns,
@@ -597,6 +602,7 @@ fn is_selected(app: &App, item: &Item) -> bool {
 /// One row of the list. `place` is its WHERE or BLOCK, worked out with the other rows.
 fn row_line(
     row: &Row,
+    number: Option<usize>,
     place: &str,
     app: &App,
     columns: &Columns,
@@ -610,7 +616,7 @@ fn row_line(
         theme::plain()
     };
     let mut spans: Vec<Span> = columns
-        .cells(row, place, &app.marked(row).msg, now)
+        .cells(row, number, place, &app.marked(row).msg, now)
         .into_iter()
         .map(|(text, tone)| {
             let style = match tone {
@@ -667,6 +673,10 @@ fn footer_overlay(app: &App, width: usize) -> Option<Line<'static>> {
     }
     if let Some(line) = app.action_footer(width) {
         return Some(line);
+    }
+    if let Some((first, _)) = app.number {
+        let text = format!("{first}… · a second digit or enter selects · esc cancels");
+        return Some(Line::styled(fit(&text, width), theme::strong()));
     }
     match app.pending {
         Some('f') => return Some(status_keys(app, width)),
@@ -860,7 +870,7 @@ mod tests {
         assert!(header.contains(" 5H MSG↑"), "never joins 5H: {header}");
         app.sort = None;
         let columns = Columns::with_usage(160, 160, &[], &app.usage_columns());
-        let cells = columns.cells(app.current().unwrap(), "", &[], Utc::now());
+        let cells = columns.cells(app.current().unwrap(), None, "", &[], Utc::now());
         let tone = |want: &str| cells.iter().find(|(t, _)| t.trim() == want).unwrap().1;
         assert_eq!(tone("88%"), Tone::Fill(Some(88)));
         assert_eq!(
@@ -1371,7 +1381,10 @@ mod tests {
         app.set_rows(rows, hosts());
         for width in [30, 40] {
             let text = render(&app, width, 20);
-            let lines: Vec<&str> = text.lines().filter(|l| l.starts_with('✓')).collect();
+            let lines: Vec<&str> = text
+                .lines()
+                .filter(|l| l.get(3..).is_some_and(|r| r.starts_with('✓')))
+                .collect();
             assert_eq!(lines.len(), 3, "{text}");
             assert!(lines.iter().any(|l| l.contains(" #1")), "{text}");
             assert!(lines.iter().any(|l| l.contains(" #2")), "{text}");
@@ -1426,7 +1439,7 @@ mod tests {
                     "",
                     "{presses:?} {width}: the gap under the top bar"
                 );
-                assert!(lines[2].trim_start().starts_with("AGE") || lines[2].contains("STATE"));
+                assert!(lines[2].contains("AGE") || lines[2].contains("STATE"));
                 for want in &want {
                     assert!(text.contains(want), "{presses:?} {width}: {want}\n{text}");
                 }
@@ -1878,6 +1891,7 @@ mod tests {
     #[test]
     fn digits_f_and_sort_letters_keep_their_meaning() {
         let mut app = app();
+        crate::tui::app::testkit::render(&app, 80, 30);
         press(&mut app, KeyCode::Char('2'));
         assert_eq!(app.current().unwrap().key, "local/claude");
         press(&mut app, KeyCode::Char('f'));
@@ -2383,7 +2397,7 @@ mod extension_tests {
         }
         fixed.set_rows(rows, hosts());
         fixed.widths = BTreeMap::from([
-            ("session".to_owned(), 90.into()),
+            ("session".to_owned(), 87.into()),
             ("window".to_owned(), 10.into()),
             ("block".to_owned(), 10.into()),
         ]);
@@ -2422,7 +2436,7 @@ mod extension_tests {
         app.widths = std::collections::BTreeMap::from([
             ("host".to_owned(), 12.into()),
             ("session".to_owned(), 20.into()),
-            ("window".to_owned(), 24.into()),
+            ("window".to_owned(), 20.into()),
             ("block".to_owned(), 18.into()),
             ("msg".to_owned(), 60.into()),
             ("nonsense".to_owned(), 3.into()),
@@ -2431,7 +2445,7 @@ mod extension_tests {
         for width in [140u16, 200, 250] {
             let columns = app.columns(width, usize::from(width));
             let got = [Col::Host, Col::Session, Col::Window, Col::Block].map(|c| columns.width(c));
-            assert_eq!(got, [12, 20, 24, 18], "{width}: {}", header(&app, width));
+            assert_eq!(got, [12, 20, 20, 18], "{width}: {}", header(&app, width));
             let msg = columns.width(Col::Msg);
             let others: usize = columns.cols.iter().map(|(_, w)| *w).sum::<usize>() - msg;
             assert_eq!(

@@ -37,6 +37,8 @@ pub fn tier(width: u16) -> Tier {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Col {
+    /// The row's place on screen, for the number keys.
+    Num,
     Glyph,
     State,
     Age,
@@ -171,7 +173,7 @@ pub fn opted(names: &[String], id: Col) -> bool {
 
 /// Figures read best right-aligned, so their digits line up.
 fn right(id: Col) -> bool {
-    matches!(id, Col::Ctx | Col::Tok | Col::Cost | Col::Quota)
+    matches!(id, Col::Num | Col::Ctx | Col::Tok | Col::Cost | Col::Quota)
 }
 
 fn align_right(fitted: &str) -> String {
@@ -244,10 +246,19 @@ const fn column(
     }
 }
 
-/// Every column, left to right. Sort letters, after `o`: s state, a age, t turn, h harness, o host,
+/// Every column, left to right (`#` and the glyph have no sort letter). Sort letters, after `o`: s state, a age, t turn, h harness, o host,
 /// w where, e session, n window, b block, d model, x ctx, k tok, c cost, 5 5h, m msg. The usage
 /// letters are rare first letters, so an extension field keeps its own.
-pub const COLUMNS: [Column; 16] = [
+pub const COLUMNS: [Column; 17] = [
+    column(
+        Col::Num,
+        "#",
+        None,
+        Dir::Up,
+        ALWAYS,
+        Width::Fixed(3),
+        Tone::Dim,
+    ),
     column(
         Col::Glyph,
         "",
@@ -466,7 +477,7 @@ enum SortKey {
 fn sort_key(id: Col, row: &Row) -> Option<SortKey> {
     let text = |s: &str| Some(SortKey::Text(s.to_lowercase()));
     match id {
-        Col::Glyph => None,
+        Col::Num | Col::Glyph => None,
         Col::State => Some(SortKey::Num(match state_word(row).as_str() {
             "blocked" => 0,
             "error" => 1,
@@ -760,6 +771,7 @@ impl Columns {
     pub fn cells(
         &self,
         row: &Row,
+        number: Option<usize>,
         place: &str,
         msg: &[Run],
         now: DateTime<Utc>,
@@ -768,6 +780,7 @@ impl Columns {
             .iter()
             .flat_map(|(c, width)| {
                 let text = match c.id {
+                    Col::Num => number.map_or_else(String::new, |n| n.to_string()),
                     Col::Glyph => theme::glyph(row, now).to_owned(),
                     Col::State => state(row),
                     Col::Age => in_state(row, now),
@@ -948,12 +961,14 @@ mod tests {
             let mut x = 0u16;
             for (column, w) in &columns.cols {
                 if !column.header.is_empty() {
-                    let label: String = (x..x + column.header.len() as u16)
+                    // `#` is right-aligned in its cell, as the figures are.
+                    let at = x + u16::from(column.id == Col::Num);
+                    let label: String = (at..at + column.header.len() as u16)
                         .map(|x| buf[(x, 2)].symbol())
                         .collect();
                     assert_eq!(label, column.header, "{width}: header at {x}:\n{header}");
                     assert_ne!(
-                        buf[(x, row_y)].symbol(),
+                        buf[(at, row_y)].symbol(),
                         " ",
                         "{width}: {} cell starts at {x}:\n{header}\n{}",
                         column.header,
@@ -1371,7 +1386,8 @@ mod tests {
         let row_at = |width: u16, needle: &str| {
             let buf = buffer(&app, width, 30);
             let y = (3..30).find(|&y| line(&buf, y).contains(needle)).unwrap();
-            line(&buf, y)
+            // Past the number.
+            line(&buf, y).chars().skip(3).collect::<String>()
         };
         assert!(row_at(100, "ask msg").starts_with("! permission "));
         assert!(row_at(100, "pick msg").starts_with("? question "));
@@ -1388,7 +1404,7 @@ mod tests {
     #[test]
     fn where_keeps_v0_1_width_from_100_and_its_three_parts_take_two_thirds_once_split() {
         let at = |board: u16| {
-            let columns = Columns::new(board, usize::from(board) - 39, &[]);
+            let columns = Columns::new(board, usize::from(board) - 36, &[]);
             [Col::Where, Col::Session, Col::Window, Col::Block, Col::Msg].map(|c| columns.width(c))
         };
         assert_eq!(at(100), [15, 0, 0, 0, 8], "v0.1's WHERE at 100");
@@ -1493,6 +1509,12 @@ mod tests {
         }
     }
 
+    /// Whether a drawn line is a list row, which starts with its number; the card's lines do not.
+    fn numbered(line: &str) -> bool {
+        line.get(..3)
+            .is_some_and(|n| n.trim().parse::<usize>().is_ok())
+    }
+
     /// The rendered lines of the rows whose BLOCK or WHERE ends in `seat`, top to bottom.
     fn seats(rows: Vec<Row>, width: u16) -> Vec<String> {
         let mut app = App::default();
@@ -1500,8 +1522,7 @@ mod tests {
         let buf = buffer(&app, width, 30);
         (3..30)
             .map(|y| line(&buf, y))
-            // The card's lines start with its bar or a space; list rows with their state.
-            .filter(|l| l.contains("seat") && !l.starts_with(['━', ' ']))
+            .filter(|l| l.contains("seat") && numbered(l))
             .collect()
     }
 
@@ -1596,7 +1617,7 @@ mod tests {
         let buf = buffer(&app, 161, 30);
         let rows: Vec<String> = (3..30)
             .map(|y| line(&buf, y))
-            .filter(|l| l.contains("seat") && !l.starts_with(['━', ' ']))
+            .filter(|l| l.contains("seat") && numbered(l))
             .collect();
         assert_eq!(rows.len(), 2, "{rows:#?}");
         let columns = Columns::new(161, 161, &[]);
@@ -1635,8 +1656,8 @@ mod tests {
         let plain: Vec<String> = columns.header(None).into_iter().map(|c| c.text).collect();
         let cells = columns.header(Some((Col::Age, Dir::Down)));
         let text: Vec<&str> = cells.iter().map(|c| c.text.as_str()).collect();
-        assert_eq!(text[1], "STATE     ↓", "the arrow takes the gap before AGE");
-        assert_eq!(text[2], plain[2], "AGE itself does not move");
+        assert_eq!(text[2], "STATE     ↓", "the arrow takes the gap before AGE");
+        assert_eq!(text[3], plain[3], "AGE itself does not move");
         assert_eq!(
             text.concat().chars().count(),
             plain.concat().chars().count()
@@ -1648,6 +1669,7 @@ mod tests {
         assert_eq!(
             underlined,
             [
+                None,
                 None,
                 Some('S'),
                 Some('A'),

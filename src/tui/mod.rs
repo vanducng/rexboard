@@ -168,6 +168,7 @@ fn board(pick: bool) -> Result<Option<Row>> {
                 None => return Ok(None),
             }
             let now = Instant::now();
+            changed |= app.number_due(now);
             app.note_card(now);
             if let Some(effect) = app.auto_tail(now).or_else(|| app.live(now)) {
                 act(effect, &tx, &generation);

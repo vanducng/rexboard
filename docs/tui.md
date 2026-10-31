@@ -8,8 +8,8 @@ The board is built to live in a narrow column, so the narrow layout is the main 
 
 - **Top bar:** `rexboard`, the number of hosts, panes and agents, the clock and the hosts. A host that is not `up` shows in red with its state (`mini down`), and so does an extension whose last run failed (`ext fake failed`, or `ext fake, other failed`; when they would not fit, `2 ext failed`). A stopped serve shows `serve stopped · R reconnects` (while the board first connects, a dim `connecting to serve`). When serve cannot be started, the list says why. When the line is short, the host list goes first, then the counts, then the clock; the red alerts always stay.
 - **Groups**, in order, each with its count and a dashed rule: `NEEDS YOU` (blocked, error, unseen done), `WORKING`, `QUIET` (idle, seen done) and `UNREPORTED` (no status record, unknown state, a host that is down, or a suspect `working` report). Empty groups are not drawn. Inside `NEEDS YOU`, blocked comes first, then error, then unseen done, each oldest first. A folded group shows `▸` before its name.
-- **Column header:** one dim line over the list names each column, at the same widths as the rows (the glyph column has no name). A blank row separates it from the top bar. `pick` has both too. On a screen under 12 rows the header and the blank row are left out, so a short screen keeps every line for rows.
-- **Rows:** a glyph, then the columns the width allows:
+- **Column header:** one dim line over the list names each column, at the same widths as the rows (the glyph column has no name, and `#` heads the numbers). A blank row separates it from the top bar. `pick` has both too. On a screen under 12 rows the header and the blank row are left out, so a short screen keeps every line for rows.
+- **Rows:** a row number, a glyph, then the columns the width allows. The dim `#` column is 3 cells wide at every width and numbers the rows on screen from 1 at the top, up to 99; group headers and the blank rows between groups have no number, and a row past 99 has none. The number is the row's place on screen, so it changes when the list scrolls, re-sorts or is filtered (see `1`-`9` in [Keys](#keys)).
 
   | Width | Columns |
   | --- | --- |
@@ -37,6 +37,7 @@ The board is built to live in a narrow column, so the narrow layout is the main 
 
   | Column | Question | Shows |
   | --- | --- | --- |
+  | `#` | Which key picks it? | The row's place on screen: `1` at the top, up to `99` |
   | `STATE` | What needs me? | The kind when the row has one (`permission`, `question`), since the red glyph already says blocked; else the state word. A suspect row reads `idle?` |
   | `AGE` | How long has it been like this? | Time in state |
   | `TURN` | How long did its last turn take? | The last working turn, `-` before the first one ends |
@@ -64,7 +65,7 @@ The board is built to live in a narrow column, so the narrow layout is the main 
   - **Overflow:** when rows do not fit, the last line says how many are below (`↓ 4 more`).
 - **Turn card**, for the selected row, under the list at full width, at every width (see [Turn card](#turn-card)). `c` hides it.
 - **Footer:** one of these:
-  - the keys that fit, most needed first: `j/k move · m seen · / filter · ? keys` at 50 columns, then `n needs you`, `enter jump`, `a answer`, `space full`, `v next view` and `1-9 select` as they fit, so 80 columns ends at `a answer` (`v next view` shows after `/ filter`), and `q quit` sits at the right edge (`esc cancel` in `pick`). A kept filter starts it with `/mini · esc clears ·`. While `c` has the card hidden, `c card` follows `? keys` and outranks `space full`, so 80 columns shows `c card` and drops `space full`;
+  - the keys that fit, most needed first: `j/k move · m seen · / filter · ? keys` at 50 columns, then `n needs you`, `enter jump`, `a answer`, `space full`, `v next view` and `1-99 select` as they fit, so 80 columns ends at `a answer` (`v next view` shows after `/ filter`), and `q quit` sits at the right edge (`esc cancel` in `pick`). A kept filter starts it with `/mini · esc clears ·`. While `c` has the card hidden, `c card` follows `? keys` and outranks `space full`, so 80 columns shows `c card` and drops `space full`;
   - a waiting prefix's next keys;
   - the filter being typed;
   - a message, for 3 seconds.
@@ -153,7 +154,7 @@ The keys are vim's where vim has one, and plain keys or vim's own ctrl chords ot
 | `ctrl-f` / `ctrl-b` | A screen down / up |
 | `]` / `[` | The next group's first row; the start of this group, then the one before |
 | `n` / `N`, `tab` | The next / previous row that needs you, round the ends. Leaving a `done` row whose card showed for at least a second marks it seen; a blocked or erroring row stays as it is. `tab` is `n` |
-| `1`-`9` | Select the nth `NEEDS YOU` row, counted in the order shown (so a sort changes which row a digit picks), opening its group if it is folded; past the last it says how many there are |
+| `1`-`9`, then maybe a second digit | Select the row with that number in the `#` column: the rows on screen, in every view, under a filter and in `pick`. A digit selects at once unless a two-digit number on screen starts with it (`1` when the screen has 10 rows or more, `2` when it has 20): then it waits 400 ms for a second digit, and the footer shows `1…`. `enter` ends the wait early with that row (it does not jump), `esc` cancels, and any other key ends the wait and then does its own job. A number with no row says how many rows there are |
 | `enter` | Go to the pane in the Rex window you are in, on its host, and mark it seen, as [`rexboard jump`](cli.md#rexboard-jump-next-and-pick) does. The footer says `going to SESSION › BLOCK…` while it runs and a second jump waits for it |
 | `-`, `ctrl-o` | Back to the pane before the last jump, as [`rexboard jump -`](cli.md#rexboard-jump-next-and-pick) does; again comes back, like `cd -`. The footer says `going back…`, then `back to SESSION › BLOCK`, or `previous pane is gone` |
 | `/` | Filter rows by host, session, window, block, title, state, message or harness; `enter` keeps it, `esc` clears it. A `key:value` term matches one key: `host:mini`, `state:done`, or an extension field (`rig:api`). Terms are and-ed |
@@ -334,7 +335,7 @@ A second run waits for a jump or close in flight, and a running action is stoppe
 
 A row in `UNREPORTED` matches only `u`, so each row matches exactly one letter. While `f` waits for its letter, the footer lists each status with how many rows it would show, its letter underlined as in the column header: `f working 3 · done 5 · … · ff clears`. Narrower, the hint goes and the separators tighten, then it reads `f w3 d5 … · ff clears`. `ff` clears the filter, and `esc` drops the waiting `f`, leaving the filter as it was. Another letter leaves the filter as it was and says which letters `f` takes; a key that is not a character (an arrow, `enter`) does the same without a word. A key with `ctrl` or `alt` keeps its own meaning, so `ctrl+c` still quits. When nothing has the status, the list says `no error rows · ff or esc clears` (`no error rows match "x"` with a `/` text too). The top bar shows the filter after `rexboard` (`only question`, or `view: table ↓age · only question`).
 
-The filter combines with the `/` text and with every view. Setting it opens folded groups, so the rows asked for are not hidden. `1`-`9` and `:seen` count only the rows the filters show. It works in `pick` too, where a plain `esc` exits as usual and `ff` clears the filter.
+The filter combines with the `/` text and with every view. Setting it opens folded groups, so the rows asked for are not hidden. The `#` numbers, `1`-`99` and `:seen` count only the rows the filters show. It works in `pick` too, where a plain `esc` exits as usual and `ff` clears the filter.
 
 ## Pick
 
