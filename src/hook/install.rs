@@ -356,7 +356,7 @@ fn unquote(text: &str) -> Option<(String, &str)> {
             .unwrap_or(text.len());
         (text[..end].to_owned(), &text[end..])
     };
-    (!word.is_empty() && quoted(&word) == text[..text.len() - rest.len()]).then_some((word, rest))
+    (quoted(&word) == text[..text.len() - rest.len()]).then_some((word, rest))
 }
 
 /// What `text` is when it is exactly how a command names rexboard: bare, a `$HOME` spelling, or an
@@ -370,11 +370,20 @@ fn spelling(text: &str) -> Option<String> {
         .then_some(path)
 }
 
+/// An event or harness name as a settings file spells them: letters only. The key of an event in
+/// a settings file is the user's text, never command syntax, so any other is matched with nothing.
+fn identifier(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphabetic())
+}
+
 /// The rexboard `command` runs, as written, when `command` is exactly a hook rexboard writes or
 /// wrote for this harness and event, else None: `REXBOARD hook HARNESS EVENT` (v0.14), or inside
 /// `/bin/sh -c '… || true'` (since), `REXBOARD` being one of the `spelling`s, or the portable
 /// form. Nothing else is matched, so a command of the user's is never taken for rexboard's.
 fn hook_bin(command: &str, harness: &str, event: &str) -> Option<String> {
+    if !(identifier(harness) && identifier(event)) {
+        return None;
+    }
     let call = format!(" hook {harness} {event}");
     if command
         == format!(
@@ -399,6 +408,9 @@ fn hook_bin(command: &str, harness: &str, event: &str) -> Option<String> {
 /// Whether `command` is the `rex-agent-status` bridge's own invocation, in a spelling it was
 /// installed in: its name in a command of the user's is not it.
 fn bridge(command: &str, event: &str) -> bool {
+    if !identifier(event) {
+        return false;
+    }
     const GUARDS: [&str; 3] = [
         "",
         r#"[ -n "$TMUX" ] || exit 0; "#,
@@ -655,29 +667,45 @@ fn stripped(live: &Value, harness: &str) -> Value {
 /// chained, Some(None) for one install added, None for one install did not write.
 fn unchained(current: &Value) -> Option<Option<String>> {
     let command = current["command"].as_str()?;
-    // Install's own line (the portable one too): rexboard alone.
-    if let Some(bin) = command.strip_suffix(" usage claude") {
-        let portable = format!("{PORTABLE}; \"$B\"");
-        return (bin == portable || spelling(bin).is_some()).then_some(None);
-    }
-    // Chained: `GUARD && exec BIN usage claude -- /bin/sh -c THEIRS || exec /bin/sh -c THEIRS`,
-    // GUARD being what each release wrote; THEIRS is the user's line as `quoted` writes it.
-    let (guard, mine) = command.split_once(" && exec ")?;
-    let (bin, tail) = mine.split_once(" usage claude -- /bin/sh -c ")?;
-    let (theirs, rest) = unquote(tail)?;
-    let (found, run) = (
-        format!("{bin} usage --help >/dev/null 2>&1"),
-        format!("{PORTABLE}; \"$B\" usage --help >/dev/null 2>&1"),
-    );
-    let guarded = if bin == "\"$B\"" {
-        guard == run
+    // The words are read first, the way `quoted` wrote them, then what is left must be one of the
+    // lines a release wrote; no separator is searched for inside a path.
+    let portable = format!("{PORTABLE}; \"$B\"");
+    let tail = if let Some(rest) = command.strip_prefix(&portable) {
+        if rest == " usage claude" {
+            return Some(None);
+        }
+        rest.strip_prefix(" usage --help >/dev/null 2>&1 && exec \"$B\"")?
+    } else if let Some(rest) =
+        command.strip_prefix("command -v rexboard >/dev/null 2>&1 && exec rexboard")
+    {
+        rest
+    } else if let Some(rest) = command.strip_prefix("[ -x ") {
+        let (bin, rest) = bin_word(rest)?;
+        rest.strip_prefix(" ] && exec ")?.strip_prefix(bin)?
     } else {
-        spelling(bin).is_some()
-            && (guard == found
-                || guard == format!("[ -x {bin} ]")
-                || (bin == "rexboard" && guard == "command -v rexboard >/dev/null 2>&1"))
+        let (bin, rest) = bin_word(command)?;
+        if rest == " usage claude" {
+            return Some(None);
+        }
+        rest.strip_prefix(" usage --help >/dev/null 2>&1 && exec ")?
+            .strip_prefix(bin)?
     };
-    (guarded && rest == format!(" || exec /bin/sh -c {}", quoted(&theirs))).then_some(Some(theirs))
+    let (theirs, rest) = unquote(tail.strip_prefix(" usage claude -- /bin/sh -c ")?)?;
+    (rest == format!(" || exec /bin/sh -c {}", quoted(&theirs))).then_some(Some(theirs))
+}
+
+/// A word naming rexboard at the start of `text`, as written, and what follows it.
+fn bin_word(text: &str) -> Option<(&str, &str)> {
+    if let Some(bin) = HOME_BINS
+        .iter()
+        .chain(&["rexboard"])
+        .find(|b| text.starts_with(**b))
+    {
+        return Some((bin, &text[bin.len()..]));
+    }
+    let (_, rest) = unquote(text)?;
+    let bin = &text[..text.len() - rest.len()];
+    spelling(bin).map(|_| (bin, rest))
 }
 
 /// `live` with its reporting hooks replaced by rexboard's, each event's where the old ones were.
@@ -1758,6 +1786,73 @@ mod tests {
             "rexboard usage claude; rm -rf x".to_owned(),
         ] {
             assert_eq!(unchained(&json!({ "command": command })), None, "{command}");
+        }
+    }
+
+    #[test]
+    fn an_event_key_is_never_command_syntax_so_no_key_makes_a_users_command_ours() {
+        let theirs = "rexboard hook codex Stop || true; printf user-work";
+        let key = "Stop || true; printf user-work";
+        let live = json!({ "hooks": { key: [{ "hooks": [hook(theirs)] }] } });
+        assert!(!ours(&live["hooks"][key][0]["hooks"][0], "codex", key));
+        assert_eq!(stripped(&live, "codex"), live, "uninstall keeps it");
+        assert_eq!(
+            merged(&live, "codex", CODEX_EVENTS, "rexboard")["hooks"][key],
+            live["hooks"][key],
+            "install keeps it"
+        );
+        // The same through a bridge comment: a newline and a second command in the event.
+        let event = "Stop\nprintf user-work";
+        let bridge = format!(
+            "/bin/sh -c 'exec /usr/bin/python3 \"$HOME/.local/bin/rex-agent-status\" codex' # {event}"
+        );
+        let live = json!({ "hooks": { event: [{ "hooks": [hook(&bridge)] }] } });
+        assert_eq!(
+            merged(&live, "codex", CODEX_EVENTS, "rexboard")["hooks"][event],
+            live["hooks"][event],
+            "the bridge test takes only letters for an event"
+        );
+        assert!(!reports(
+            &live["hooks"][event][0]["hooks"][0],
+            "codex",
+            event
+        ));
+    }
+
+    #[test]
+    fn a_status_line_chained_around_an_empty_command_or_a_path_holding_the_templates_words_is_unwound()
+     {
+        // `quoted("")` is `''`, which `unquote` reads back.
+        assert_eq!(unquote("''"), Some((String::new(), "")));
+        assert_eq!(unquote(""), None);
+        let wrap = |bin: &str, theirs: &str| {
+            let t = quoted(theirs);
+            json!({ "command": format!("{bin} usage --help >/dev/null 2>&1 && exec {bin} usage claude -- /bin/sh -c {t} || exec /bin/sh -c {t}") })
+        };
+        assert_eq!(unchained(&wrap("rexboard", "")), Some(Some(String::new())));
+        // Paths that hold the words the template is made of.
+        for path in [
+            "/tmp/a && exec b/rexboard",
+            "/tmp/a usage claude -- /bin/sh -c x/rexboard",
+            "/tmp/a usage --help >/dev/null 2>&1 && exec /tmp/rexboard",
+            "/tmp/a ] && exec /tmp/rexboard",
+        ] {
+            let bin = quoted(path);
+            for theirs in ["echo hi", ""] {
+                assert_eq!(
+                    unchained(&wrap(&bin, theirs)),
+                    Some(Some(theirs.to_owned())),
+                    "{bin}"
+                );
+            }
+            let guarded = format!(
+                "[ -x {bin} ] && exec {bin} usage claude -- /bin/sh -c x || exec /bin/sh -c x"
+            );
+            assert_eq!(
+                unchained(&json!({ "command": guarded })),
+                Some(Some("x".into())),
+                "{bin}"
+            );
         }
     }
 }

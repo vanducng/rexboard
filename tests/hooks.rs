@@ -1828,3 +1828,58 @@ fn uninstall_gives_back_the_status_line_a_v0_14_install_wrote() {
         assert_eq!(after["statusLine"]["command"], theirs, "{bin}");
     }
 }
+
+#[test]
+fn uninstall_keeps_a_command_under_an_event_key_that_is_not_a_name_and_restores_odd_status_lines() {
+    // An event key is the user's text: `Stop || true; printf user-work` is not an event.
+    let home = tempfile::tempdir().unwrap();
+    let file = home.path().join(".codex/hooks.json");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let key = "Stop || true; printf user-work";
+    let theirs = "rexboard hook codex Stop || true; printf user-work";
+    let text =
+        json!({ "hooks": { key: [{ "hooks": [{ "type": "command", "command": theirs }] }] } })
+            .to_string();
+    std::fs::write(&file, &text).unwrap();
+    for verb in ["install", "uninstall"] {
+        rexboard(home.path())
+            .args(["hooks", verb, "codex"])
+            .assert()
+            .success();
+        let kept: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(
+            kept["hooks"][key][0]["hooks"][0]["command"], theirs,
+            "{verb}"
+        );
+    }
+    // A Claude status line chained around an empty command, and around a path that holds the
+    // words of the wrapper, comes back as it was after the hooks around it were edited.
+    for (bin, theirs) in [
+        ("rexboard".to_owned(), ""),
+        ("'/tmp/a && exec b/rexboard'".to_owned(), "echo hi"),
+        (
+            "'/tmp/a usage claude -- /bin/sh -c x/rexboard'".to_owned(),
+            "echo hi",
+        ),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let file = home.path().join(".claude/settings.json");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let t = format!("'{theirs}'");
+        let command = format!(
+            "{bin} usage --help >/dev/null 2>&1 && exec {bin} usage claude -- /bin/sh -c {t} || exec /bin/sh -c {t}"
+        );
+        std::fs::write(
+            &file,
+            json!({ "padding": 1, "statusLine": { "type": "command", "command": command } })
+                .to_string(),
+        )
+        .unwrap();
+        rexboard(home.path())
+            .args(["hooks", "uninstall", "claude"])
+            .assert()
+            .success();
+        let after: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(after["statusLine"]["command"], theirs, "{bin}");
+    }
+}
