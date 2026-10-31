@@ -41,43 +41,118 @@ fn rexboard(home: &Path) -> Command {
 /// to a deadline, for ETXTBSY to stop; after that no process has it open and every exec works.
 fn fake_tmux_dir() -> &'static Path {
     static DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
-    // `keep` below leaves the directory for the whole run; this removes it when the process ends.
+    // The directory outlives the guard that made it, for the whole run; this removes it when the
+    // process ends.
     extern "C" fn remove() {
         if let Some(dir) = DIR.get() {
             let _ = std::fs::remove_dir_all(dir);
         }
     }
     DIR.get_or_init(|| {
-        let bin = tempfile::Builder::new()
-            .prefix("fake-tmux-")
-            .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
-            .unwrap()
-            .keep();
-        let tmux = bin.join("tmux");
-        // `display-message` gives the pane's tty, `list-panes` the rows replay reads, and any
-        // other call is logged.
-        std::fs::write(
-            &tmux,
-            "#!/bin/sh\n\
-             case \"$1\" in\n\
-             display-message) echo \"$FAKE_TMUX_TTY\" ;;\n\
-             list-panes) printf '%s' \"${FAKE_TMUX_LIST-}\" ;;\n\
-             *) [ -z \"${FAKE_TMUX_CALLS-}\" ] || echo \"$@\" >> \"$FAKE_TMUX_CALLS\" ;;\n\
-             esac\n",
+        let dir = prepare_fake_tmux(
+            Path::new(env!("CARGO_TARGET_TMPDIR")),
+            std::time::Duration::from_secs(10),
+            |_| {},
         )
         .unwrap();
-        std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while let Err(err) = std::process::Command::new(&tmux).arg("probe").status() {
-            assert!(
-                err.raw_os_error() == Some(libc::ETXTBSY) && std::time::Instant::now() < deadline,
-                "the fake tmux does not run: {err}"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
         unsafe { libc::atexit(remove) };
-        bin
+        dir
     })
+}
+
+/// Writes the fake `tmux` into a new directory under `parent` and waits up to `wait` for it to
+/// run, then returns the directory, which the caller now owns. When it never runs, nothing is
+/// left behind. `after_write` runs between the write and the first exec, which is where a
+/// forked child's copy of the write descriptor would be.
+fn prepare_fake_tmux(
+    parent: &Path,
+    wait: std::time::Duration,
+    after_write: impl FnOnce(&Path),
+) -> Result<std::path::PathBuf, String> {
+    // Removes the directory unless it is kept: the write, chmod and probe can all fail.
+    let guard = tempfile::Builder::new()
+        .prefix("fake-tmux-")
+        .tempdir_in(parent)
+        .map_err(|err| err.to_string())?;
+    let tmux = guard.path().join("tmux");
+    // `display-message` gives the pane's tty, `list-panes` the rows replay reads, and any other
+    // call is logged.
+    std::fs::write(
+        &tmux,
+        "#!/bin/sh\n\
+         case \"$1\" in\n\
+         display-message) echo \"$FAKE_TMUX_TTY\" ;;\n\
+         list-panes) printf '%s' \"${FAKE_TMUX_LIST-}\" ;;\n\
+         *) [ -z \"${FAKE_TMUX_CALLS-}\" ] || echo \"$@\" >> \"$FAKE_TMUX_CALLS\" ;;\n\
+         esac\n",
+    )
+    .map_err(|err| err.to_string())?;
+    std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755))
+        .map_err(|err| err.to_string())?;
+    after_write(&tmux);
+    let deadline = std::time::Instant::now() + wait;
+    while let Err(err) = std::process::Command::new(&tmux).arg("probe").status() {
+        if err.raw_os_error() != Some(libc::ETXTBSY) || std::time::Instant::now() >= deadline {
+            return Err(format!("the fake tmux does not run: {err}"));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    Ok(guard.keep())
+}
+
+#[test]
+fn a_fake_tmux_that_never_runs_leaves_no_directory_and_one_that_does_is_kept() {
+    let parent = tempfile::tempdir().unwrap();
+    let left = || std::fs::read_dir(parent.path()).unwrap().count();
+    let wait = std::time::Duration::from_millis(150);
+    // A script that cannot run (the write, chmod or exec can fail): the directory goes with the
+    // guard, not at process exit.
+    let err = prepare_fake_tmux(parent.path(), wait, |tmux| {
+        std::fs::set_permissions(tmux, std::fs::Permissions::from_mode(0o644)).unwrap();
+    })
+    .unwrap_err();
+    assert!(err.contains("the fake tmux does not run"), "{err}");
+    assert_eq!(left(), 0, "a failed preparation left its directory");
+    // Nowhere to make it: nothing is made.
+    assert!(prepare_fake_tmux(&parent.path().join("nope"), wait, |_| {}).is_err());
+    // One that runs is kept, with the script in it.
+    let dir = prepare_fake_tmux(parent.path(), wait, |_| {}).unwrap();
+    assert!(
+        dir.join("tmux").exists() && left() == 1,
+        "a prepared fake tmux is kept"
+    );
+}
+
+/// Only Linux refuses to exec a script some process holds open for writing.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_fake_tmux_still_held_open_for_writing_is_waited_for_and_then_given_up_on() {
+    let parent = tempfile::tempdir().unwrap();
+    let left = || std::fs::read_dir(parent.path()).unwrap().count();
+    // A writer that holds it past the wait, as a forked child's copy of the descriptor would:
+    // ETXTBSY until the wait is over, then the directory goes with the guard.
+    let mut holder = None;
+    let err = prepare_fake_tmux(
+        parent.path(),
+        std::time::Duration::from_millis(150),
+        |tmux| {
+            holder = Some(std::fs::OpenOptions::new().write(true).open(tmux).unwrap());
+        },
+    )
+    .unwrap_err();
+    assert!(err.contains("Text file busy"), "{err}");
+    assert_eq!(left(), 0, "a preparation that gave up left its directory");
+    drop(holder);
+    // One that lets go while the wait runs: the script then runs, and the directory is kept.
+    let dir = prepare_fake_tmux(parent.path(), std::time::Duration::from_secs(10), |tmux| {
+        let held = std::fs::OpenOptions::new().write(true).open(tmux).unwrap();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            drop(held);
+        });
+    })
+    .unwrap();
+    assert!(dir.join("tmux").exists() && left() == 1);
 }
 
 /// The PATH that finds the fake `tmux`, after making `dir`'s fake tty (`dir/tty`, empty).
