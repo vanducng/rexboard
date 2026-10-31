@@ -2181,17 +2181,18 @@ fn ext_status_fallback_only_reaches_unreported_rows_and_only_when_provided() {
     }
 }
 
-/// An adapter that answers well once, then fails as `failure` says on every later run.
+/// An adapter that answers well until the test creates `fail-now` (once it has seen the good
+/// answer arrive), then fails as `failure` says on every run. The switch is the test's, not the
+/// adapter's: an adapter that switched itself after its own answer could be stopped between
+/// switching and answering, and then its good answer would never come.
 fn good_then(serve: &Serve, failure: &str, timing: &str) {
-    let count = serve.dir.path().join("runs");
+    let fail_now = serve.dir.path().join("fail-now");
     let failed = serve.dir.path().join("failed");
-    // The good answer counts only once the run was sent the row: an early run can come before
-    // the local host's snapshot.
     const GOOD: &str =
         r#"{"contract": 1, "rows": {"local/block:api-seat-a": {"fields": {"rig": "api"}}}}"#;
     let script = format!(
-        "req=$(cat)\nif [ -e '{c}' ]; then\necho run >> '{f}'\n{failure}\nfi\ncase \"$req\" in *'{SEAT}'*) touch '{c}' ;; esac\necho '{GOOD}'",
-        c = count.display(),
+        "cat > /dev/null\nif [ -e '{n}' ]; then\necho run >> '{f}'\n{failure}\nfi\necho '{GOOD}'",
+        n = fail_now.display(),
         f = failed.display()
     );
     extension(serve, "fake", timing, "", &script);
@@ -2205,6 +2206,7 @@ fn kept_three_runs_then_dropped(serve: &Serve, logged: &str) {
     eventually("the first good run", || {
         ext_of(&serve.rows(&[]), SEAT)["fake.rig"] == "api"
     });
+    std::fs::write(serve.dir.path().join("fail-now"), "").unwrap();
     eventually("a failed run", || serve_log(serve).contains(logged));
     // Counted by the adapter, not the clock: a slow poll must not let the third failure land
     // before the check.
