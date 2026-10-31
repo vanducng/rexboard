@@ -80,3 +80,48 @@ fn answer_goes_to_a_tmux_client_and_never_to_a_wrapper_or_a_shell() {
         "a shell in front is never answered"
     );
 }
+
+/// tail.lua on a pane of 5000 rows (2.2 MB) whose replies are capped: its result, "ok reads cut
+/// ends-at-the-last-row bytes".
+fn tail(budget: &str, cap: &str, later: Option<&str>) -> String {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let out = Command::new(lua())
+        .arg(root.join("tests/fixtures/tail-harness.lua"))
+        .args([root.join("src/lua").to_str().unwrap(), budget, cap])
+        .args(later)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout).unwrap().trim().to_owned()
+}
+
+#[test]
+fn a_tail_read_on_short_replies_reaches_the_end_of_the_pane_or_fails_never_a_prefix() {
+    let first =
+        |result: &str| -> Vec<String> { result.split('\t').take(4).map(str::to_owned).collect() };
+    // The card's 98304 bytes arrive in 2 replies of up to 64 KiB, as before.
+    assert_eq!(
+        first(&tail("98304", "65536", None)),
+        ["true", "2", "true", "true"]
+    );
+    // 5000 rows at 64 KiB a reply: 35 reads, the whole pane, ending at its last row.
+    assert_eq!(
+        first(&tail("2457600", "65536", None)),
+        ["true", "35", "false", "true"]
+    );
+    // 4 KiB replies would need 560 reads: the start moves up, and it is still the pane's end.
+    assert_eq!(
+        first(&tail("2457600", "4096", None)),
+        ["true", "40", "true", "true"]
+    );
+    // Replies that shrink after the first: an error, not the rows up to where it gave up.
+    let shrinking = tail("2457600", "65536", Some("1024"));
+    assert!(
+        shrinking.starts_with("false\t40\t") && shrinking.contains("not reached"),
+        "{shrinking}"
+    );
+}

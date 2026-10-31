@@ -42,6 +42,8 @@ pub enum Act {
     OpenAll,
     FoldAll,
     Card,
+    /// `p`: the live preview strip.
+    Preview,
     CardDown,
     CardUp,
     Full,
@@ -283,10 +285,17 @@ pub const BOARD: &[Entry] = &[
     ),
     e(Act::FoldAll, &[&[c('z'), c('M')]], "", "", "fold all"),
     e(
+        Act::Preview,
+        &[&[c('p')]],
+        "p",
+        "show or hide the preview strip",
+        "preview",
+    ),
+    e(
         Act::Card,
         &[&[c('c')]],
         "c",
-        "hide or show the card",
+        "show or hide the card",
         "card",
     ),
     e(
@@ -426,13 +435,15 @@ pub const BOARD: &[Entry] = &[
 /// The board's footer, most needed first; a narrow board drops them from the end.
 pub const FOOTER: &[Act] = &[
     Act::Down,
-    Act::Seen,
-    Act::Filter,
+    Act::Jump,
+    Act::Full,
+    Act::Preview,
     Act::Keys,
     Act::NextNeeds,
-    Act::Jump,
+    Act::Filter,
+    Act::Seen,
     Act::Answer,
-    Act::Full,
+    Act::Card,
     Act::NextView,
     Act::Nth,
     Act::CardDown,

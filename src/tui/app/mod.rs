@@ -39,7 +39,7 @@ pub const GUARD: Duration = Duration::from_millis(300);
 const TOO_FAST_TO_ANSWER: &str = "keys came too fast; nothing sent · a answers";
 const TOO_FAST_TO_CLOSE: &str = "keys came too fast; nothing closed · dd closes";
 
-const HIDDEN: &str = "the card is hidden · c shows it";
+const BEHIND_CARD: &str = "the card is showing, so no preview · c hides the card";
 /// A blocked row's tail is read once its card has shown this long, so j/k across rows reads none.
 const SETTLE: Duration = Duration::from_millis(300);
 /// Rows are numbered up to here, and a first digit waits this long for its second.
@@ -63,6 +63,8 @@ pub enum Effect {
         block: String,
         /// With the pane's colours, for the full view; the card reads plain text.
         vt: bool,
+        /// How many lines from the end to keep.
+        lines: usize,
     },
     /// Read a pane for answer mode: its tail, and its input line with styles.
     Read {
@@ -233,8 +235,16 @@ pub struct App {
     pub link: Link,
     /// `rexboard pick`: the list alone; enter goes and esc gives up.
     pub pick: bool,
-    /// `c` hid the card, from tui.json.
-    pub hidden: bool,
+    /// `c` has the card showing, from tui.json; off by default.
+    pub card: bool,
+    /// `p` has the preview strip showing, from tui.json; the card, when on, takes its place.
+    pub preview: bool,
+    /// The settings tui.json carries that the board only reads.
+    pub tuning: super::prefs::Tuning,
+    /// The row the strip shows, while it does, and how its reads are going.
+    strip: Option<card::Strip>,
+    /// Whether the last draw had room for the strip: with none, nothing is read for it.
+    pub strip_drawn: std::cell::Cell<bool>,
     /// tui.json's motion, written back when `c` saves the file.
     pub motion: super::prefs::Motion,
     /// tui.json's icons, written back the same way.
@@ -518,6 +528,7 @@ impl App {
                     | Act::PrevNeeds
                     | Act::Answer
                     | Act::Card
+                    | Act::Preview
                     | Act::Back
                     | Act::Close
                     | Act::Actions
@@ -580,12 +591,15 @@ impl App {
             Act::FoldToggle | Act::FoldOpen | Act::FoldClose => self.fold(act),
             Act::OpenAll => self.unfold_all(),
             Act::FoldAll => self.fold_all(),
-            Act::Card => {
-                self.hidden = !self.hidden;
-                if self.hidden {
-                    self.say(HIDDEN);
+            Act::Card | Act::Preview => {
+                let on = if act == Act::Card {
+                    &mut self.card
                 } else {
-                    self.toast = None;
+                    &mut self.preview
+                };
+                *on = !*on;
+                if act == Act::Preview && self.preview && self.card_shown() {
+                    self.say(BEHIND_CARD);
                 }
                 return Some(Effect::SavePrefs(self.prefs()));
             }
@@ -651,8 +665,9 @@ fn id_of(column: &Column) -> &'static str {
     }
 }
 
-fn peek(row: &Row, vt: bool) -> Effect {
+fn peek(row: &Row, vt: bool, lines: usize) -> Effect {
     Effect::Peek {
+        lines,
         key: row.key.clone(),
         host: row.pane.host.clone(),
         session: row.pane.session_id.clone(),

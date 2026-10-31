@@ -92,7 +92,7 @@ pub fn state_of(app: &App) -> String {
         app.keys,
         app.filtering,
         app.commanding,
-        app.hidden,
+        app.card,
         app.pending,
         app.closing.is_some(),
         app.answer.is_some(),
@@ -130,8 +130,12 @@ pub fn rows() -> Vec<Row> {
     ]
 }
 
+/// The board as it was while the card showed by default: most tests are about the card.
 pub fn app() -> App {
-    let mut app = App::default();
+    let mut app = App {
+        card: true,
+        ..App::default()
+    };
     app.set_rows(rows(), hosts());
     app
 }
@@ -232,7 +236,10 @@ pub fn every_state() -> App {
     ];
     let mut hosts = crate::tui::app::testkit::hosts();
     hosts.insert("studio".into(), "down".into());
-    let mut app = App::default();
+    let mut app = App {
+        card: true,
+        ..App::default()
+    };
     app.set_rows(rows, hosts);
     app
 }
