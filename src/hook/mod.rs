@@ -42,21 +42,22 @@ pub fn run(name: &str, event: Option<&str>) -> Result<()> {
     let name = payload["hook_event_name"].as_str().map(str::to_owned);
     let started = Instant::now();
     tell(harness.id(), name.as_deref(), &payload);
-    // The status is told first. Usage comes after, and only while the hook is still quick: with
-    // tmux slow, two more commands could run it past the 5 s its agent gives a hook.
+    // The status is told first. The usage file is kept either way, but the report to Rex only
+    // while the hook is still quick: with tmux slow, two more commands could run it past the 5 s
+    // its agent gives a hook.
     if harness
         .usage_hook()
         .is_some_and(|hook| Some(hook) == name.as_deref())
-        && started.elapsed() < USAGE_ONLY_IF_QUICK
     {
-        crate::harness::usage::keep(harness, &payload, true);
+        let quick = started.elapsed() < REPORT_ONLY_IF_QUICK;
+        crate::harness::usage::keep(harness, &payload, true, quick);
     }
     Ok(())
 }
 
-/// A hook tells its usage only if the status took less than this: what is left of the 5 s an
+/// A hook reports usage to Rex only if the status took less than this: what is left of the 5 s an
 /// agent gives a hook must cover the lock and two tmux commands of up to 2 s.
-const USAGE_ONLY_IF_QUICK: Duration = Duration::from_millis(500);
+const REPORT_ONLY_IF_QUICK: Duration = Duration::from_millis(500);
 
 /// Writes the status to the agent's pane: wrapped for tmux and kept on the tmux pane for a
 /// client that attaches later, or straight to the agent's tty in a Rex pane where the agent does

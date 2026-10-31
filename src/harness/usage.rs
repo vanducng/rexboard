@@ -116,7 +116,7 @@ pub fn run(name: &str, then: &[String]) -> crate::error::Result<()> {
     match named(name) {
         Ok(harness) => {
             if let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&input) {
-                keep(harness, &payload, harness.usage_per_turn());
+                keep(harness, &payload, harness.usage_per_turn(), true);
             }
         }
         // The status line it runs in still shows: an unknown name keeps nothing, and says so.
@@ -150,8 +150,13 @@ pub fn named(name: &str) -> crate::error::Result<&'static dyn super::Harness> {
 }
 
 /// Keeps what `payload` says the last turn used, for the pane this process runs in; a payload
-/// with no usage, or a pane it cannot name, keeps nothing.
-pub fn keep(harness: &dyn super::Harness, payload: &serde_json::Value, turn_end: bool) {
+/// with no usage, or a pane it cannot name, keeps nothing. `may_report` is whether Rex is told too.
+pub fn keep(
+    harness: &dyn super::Harness,
+    payload: &serde_json::Value,
+    turn_end: bool,
+    may_report: bool,
+) {
     let env = |name: &str| std::env::var(name).ok();
     if let Some(usage) = harness.usage(payload)
         && let Some(key) = own_key(
@@ -167,8 +172,9 @@ pub fn keep(harness: &dyn super::Harness, payload: &serde_json::Value, turn_end:
         };
         let now = Utc::now();
         let last = sent_by(&paths.dir, &key);
-        let report =
-            env("REXBOARD_NO_USAGE_REPORT").is_none() && due(last.as_ref(), &usage, now, turn_end);
+        let report = may_report
+            && env("REXBOARD_NO_USAGE_REPORT").is_none()
+            && due(last.as_ref(), &usage, now, turn_end);
         // Nothing is sent that cannot be tracked: the file takes the figures first, with the old mark.
         if write(&paths.dir, &key, harness.id(), &usage, last, now).is_err() {
             return;

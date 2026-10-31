@@ -18,7 +18,7 @@ A row is only useful if its state is right. Options were: agents report their st
 - Coverage is the agent setup's job; [Agent status](../agent-status.md) says how to check it.
 - What rexboard shows is the same for local and remote rows, and costs nothing per view.
 - An extension can add a fallback status for rows with no record ([4](0004-extensions-not-a-built-in-core.md)); a record always wins over it.
-- Usage figures (model, context, tokens) reach every host: a harness hands them to `rexboard usage`, which keeps them beside serve's state for each pane and also tells Rex, in a `usage` record beside the status, since Rex drops keys it does not know. A pane's local file wins on serve's own host; every other row has the record's figures ([Agent status](../agent-status.md#usage-on-every-host)). The figures last while the pane lives, as the local file does, and each changed report replaces them; ending a session does not clear them. A hook tells its status before any usage, so usage can never cost the status.
+- Usage figures (model, context, tokens) reach every host: a harness hands them to `rexboard usage`, which keeps them beside serve's state for each pane and also tells Rex, in a `usage` record beside the status, since Rex drops keys it does not know. A pane's local file wins on serve's own host; every other row has the record's figures ([Agent status](../agent-status.md#usage-on-every-host)). The figures last while the pane lives, as the local file does, and each changed report replaces them; ending a session does not clear them. A hook tells its status before any usage report, so usage can never cost the status.
 
 ## Supersedes
 

@@ -863,6 +863,44 @@ fn a_hook_tells_its_status_first_and_drops_its_usage_when_tmux_is_slow() {
 }
 
 #[test]
+fn a_slow_stop_still_keeps_the_local_usage_and_a_fast_one_still_reports() {
+    let home = tempfile::tempdir().unwrap();
+    let tty = home.path().join("tty");
+    fake_tmux(home.path());
+    let rollout = format!(
+        "{}/tests/fixtures/harness/usage/codex-rollout.jsonl",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let stop =
+        json!({ "hook_event_name": "Stop", "model": "gpt-5.5-codex", "transcript_path": rollout });
+    // Two tmux commands of 0.3 s put the status past the quick limit: the local file is still
+    // written, and Rex is not told.
+    let run = |sleep: &str| {
+        rexboard(home.path())
+            .env(
+                "PATH",
+                format!("{}:/usr/bin:/bin", fake_tmux_dir().display()),
+            )
+            .env("TMUX", "/tmp/tmux-501/seats,1234,0")
+            .env("TMUX_PANE", "%3")
+            .env("FAKE_TMUX_SLEEP", sleep)
+            .args(["hook", "codex", "Stop"])
+            .write_stdin(stop.to_string())
+            .assert()
+            .success();
+    };
+    run("0.3");
+    let kept: Value =
+        serde_json::from_slice(&std::fs::read(usage_file(home.path())).unwrap()).unwrap();
+    assert_eq!(kept["model"], "gpt-5.5-codex", "{kept}");
+    assert!(kept["sent"].is_null(), "nothing was sent to Rex: {kept}");
+    assert!(reported(&tty).is_empty());
+    // A fast Stop with the same figures still reports them: they were never sent.
+    run("0");
+    assert_eq!(reported(&tty).len(), 1);
+}
+
+#[test]
 fn a_burst_of_callbacks_reports_once_and_nothing_is_sent_that_cannot_be_tracked() {
     let home = tempfile::tempdir().unwrap();
     let tty = home.path().join("tty");
