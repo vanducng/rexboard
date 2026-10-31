@@ -1,6 +1,7 @@
 //! Views, the `:` line, sorting and the extensions' fields: how the list is grouped and ordered.
 
 use super::*;
+use crate::tui::columns::Tier;
 
 impl App {
     /// The views `v` cycles through: the built-in ones, then one per field, by its name, or by
@@ -185,6 +186,8 @@ impl App {
                     widest(&|row| clean(&row.pane.tab)).min(LABEL_MAX),
                     widest(&crate::output::name).min(LABEL_MAX) + 3,
                 ],
+                place: widest(&|row| path(&labels(row, columns.tier != Tier::Wide), usize::MAX))
+                    + 3,
             },
             &self.widths,
         );
