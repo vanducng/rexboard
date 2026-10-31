@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.17.0](https://github.com/vanducng/rexboard/compare/v0.16.3...v0.17.0) (2026-10-31)
+
+
+### Features
+
+* **ext:** extensions can declare actions, and ext run starts one ([#104](https://github.com/vanducng/rexboard/issues/104)) ([cac5914](https://github.com/vanducng/rexboard/commit/cac59145b865173fec7746bdb0e821e810ac8ac1))
+* **tui:** send a message from the board with x, an input line and a confirm ([#106](https://github.com/vanducng/rexboard/issues/106)) ([99978fe](https://github.com/vanducng/rexboard/commit/99978fe62dcd1d4a6f4adfa5cb31314c238e36a5))
+* **tui:** the card's facts are a grid, and hooks status says how to try Nerd Font icons ([#102](https://github.com/vanducng/rexboard/issues/102)) ([e9ce509](https://github.com/vanducng/rexboard/commit/e9ce5090c94ce6a5b6a33e17bba4b77fa3596cb6))
+
 ## [0.16.3](https://github.com/vanducng/rexboard/compare/v0.16.2...v0.16.3) (2026-10-30)
 
 
