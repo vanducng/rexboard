@@ -863,8 +863,8 @@ mod tests {
         };
         let header = sorted((Col::Ctx, crate::tui::columns::Dir::Down));
         assert!(header.contains(" ↓CTX "), "in its own room: {header}");
-        let header = sorted((Col::Msg, crate::tui::columns::Dir::Up));
-        assert!(header.contains(" 5H MSG↑"), "never joins 5H: {header}");
+        let header = sorted((Col::Host, crate::tui::columns::Dir::Up));
+        assert!(header.contains(" 5H HOST↑"), "never joins 5H: {header}");
         app.sort = None;
         let columns = Columns::with_usage(160, 160, &[], &app.usage_columns());
         let cells = columns.cells(app.current().unwrap(), None, "", &[], Utc::now());
@@ -875,6 +875,45 @@ mod tests {
             Tone::Fill(Some(12)),
             "5H fills by its own figure"
         );
+    }
+
+    #[test]
+    fn model_and_ctx_sit_right_after_harness_with_the_other_usage_columns_after_ctx() {
+        let mut app = fuller();
+        let mut rows = app.rows.clone();
+        rows[0].usage = Some(crate::harness::usage::Usage {
+            model: Some("Opus 5.5".into()),
+            ctx_pct: Some(40),
+            tok: Some(1000),
+            cost_usd: Some(1.5),
+            quota_5h: Some(10),
+            ..Default::default()
+        });
+        app.set_rows(rows, hosts());
+        for (width, opted) in [(140, false), (200, false), (250, true), (200, true)] {
+            app.columns = if opted {
+                vec!["tok".into(), "cost".into(), "5h".into()]
+            } else {
+                Vec::new()
+            };
+            let text = render(&app, width, 30);
+            let header = text.lines().find(|l| l.contains("HARNESS")).unwrap();
+            let at = |name: &str| header.find(name).unwrap();
+            let order = ["HARNESS", "MODEL", "CTX"];
+            assert!(
+                order.windows(2).all(|w| at(w[0]) < at(w[1])),
+                "{width}: {header}"
+            );
+            let after = if opted { "5H" } else { "CTX" };
+            assert!(
+                at(after) < at("HOST") && at("HOST") < at("MSG"),
+                "{width}: usage before HOST and MSG: {header}"
+            );
+            assert!(
+                header[at("HARNESS")..at("MODEL")].trim_end().len() <= 10,
+                "{width}: MODEL follows HARNESS at once: {header}"
+            );
+        }
     }
 
     #[test]

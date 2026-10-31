@@ -246,7 +246,8 @@ const fn column(
     }
 }
 
-/// Every column, left to right (`#` and the glyph have no sort letter). Sort letters, after `o`: s state, a age, t turn, h harness, o host,
+/// Every column, left to right (`#` and the glyph have no sort letter); the usage columns follow
+/// HARNESS, so what runs and how full it is read together. Sort letters, after `o`: s state, a age, t turn, h harness, o host,
 /// w where, e session, n window, b block, d model, x ctx, k tok, c cost, 5 5h, m msg. The usage
 /// letters are rare first letters, so an extension field keeps its own.
 pub const COLUMNS: [Column; 17] = [
@@ -305,51 +306,6 @@ pub const COLUMNS: [Column; 17] = [
         Tone::Soft,
     ),
     column(
-        Col::Host,
-        "HOST",
-        Some('o'),
-        Dir::Up,
-        60..=u16::MAX,
-        Width::Fixed(8),
-        Tone::Dim,
-    ),
-    column(
-        Col::Where,
-        "WHERE",
-        Some('w'),
-        Dir::Up,
-        ALWAYS,
-        Width::Where,
-        Tone::Soft,
-    ),
-    column(
-        Col::Session,
-        "SESSION",
-        Some('e'),
-        Dir::Up,
-        ALWAYS,
-        Width::Part(0),
-        Tone::Soft,
-    ),
-    column(
-        Col::Window,
-        "WINDOW",
-        Some('n'),
-        Dir::Up,
-        ALWAYS,
-        Width::Part(1),
-        Tone::Soft,
-    ),
-    column(
-        Col::Block,
-        "BLOCK",
-        Some('b'),
-        Dir::Up,
-        ALWAYS,
-        Width::Part(2),
-        Tone::Soft,
-    ),
-    column(
         Col::Model,
         "MODEL",
         Some('d'),
@@ -393,6 +349,51 @@ pub const COLUMNS: [Column; 17] = [
         USAGE_FROM..=u16::MAX,
         Width::Fixed(5),
         Tone::Fill(None),
+    ),
+    column(
+        Col::Host,
+        "HOST",
+        Some('o'),
+        Dir::Up,
+        60..=u16::MAX,
+        Width::Fixed(8),
+        Tone::Dim,
+    ),
+    column(
+        Col::Where,
+        "WHERE",
+        Some('w'),
+        Dir::Up,
+        ALWAYS,
+        Width::Where,
+        Tone::Soft,
+    ),
+    column(
+        Col::Session,
+        "SESSION",
+        Some('e'),
+        Dir::Up,
+        ALWAYS,
+        Width::Part(0),
+        Tone::Soft,
+    ),
+    column(
+        Col::Window,
+        "WINDOW",
+        Some('n'),
+        Dir::Up,
+        ALWAYS,
+        Width::Part(1),
+        Tone::Soft,
+    ),
+    column(
+        Col::Block,
+        "BLOCK",
+        Some('b'),
+        Dir::Up,
+        ALWAYS,
+        Width::Part(2),
+        Tone::Soft,
     ),
     column(
         Col::Msg,

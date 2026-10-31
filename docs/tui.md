@@ -17,7 +17,7 @@ The board is built to live in a narrow column, so the narrow layout is the main 
   | 60-99 | adds `HARNESS` and `HOST` |
   | 100-131 | adds `STATE`, and the window in `WHERE`: `session › window › block` |
   | 132-139 | splits `WHERE` into `SESSION`, `WINDOW` and `BLOCK`, each as wide as its longest label (cut to 24 columns) and a two-column gap (one when that does not fit; at least 10 columns) while together they stay within WHERE's share; `MSG` takes what they free |
-  | 140 and up | adds `TURN`, and `MODEL` and `CTX` while some row reports what its turn used; `TOK`, `COST` and `5H` too when `tui.json` asks for them. Below 160, while they show, `WHERE` stays one column so `MSG` keeps its room |
+  | 140 and up | adds `TURN`, and `MODEL` and `CTX` while some row reports what its turn used; `TOK`, `COST` and `5H` too when `tui.json` asks for them. These sit right after `HARNESS`, in that order (what runs, then how full it is, then what it cost), before `HOST`. Below 160, while they show, `WHERE` stays one column so `MSG` keeps its room |
 
   The list is as wide as the board at every width (the turn card sits under it), and `pick` uses the same columns.
 
@@ -42,16 +42,16 @@ The board is built to live in a narrow column, so the narrow layout is the main 
   | `AGE` | How long has it been like this? | Time in state |
   | `TURN` | How long did its last turn take? | The last working turn, `-` before the first one ends |
   | `HARNESS` | Which agent? | `claude`, `codex`, ... |
-  | `HOST` | Which machine? | The Rex host |
-  | `WHERE` | Which pane? | `session › window › block`, until the split |
-  | `SESSION` | Which session? | The Rex session |
-  | `WINDOW` | Which window? | The Rex window (a tab in the Rex app) |
-  | `BLOCK` | Which pane? | The block's label |
   | `MODEL` | Which model? | The model the harness names, from [`rexboard usage`](cli.md#rexboard-usage) |
   | `CTX` | How full is its context? | Percent of the context window in use: yellow from 70%, red from 85% |
   | `TOK` | How big was its last request? | The prompt side of the last model request, cache hits included: `950`, `68k`, `1.0M` |
   | `COST` | What has it cost? | The harness's own estimate for the session, at list price: `$4.20`, `$123` |
   | `5H` | How much of the quota is gone? | Percent of the five-hour quota used, where the plan has one; coloured as `CTX` |
+  | `HOST` | Which machine? | The Rex host |
+  | `WHERE` | Which pane? | `session › window › block`, until the split |
+  | `SESSION` | Which session? | The Rex session |
+  | `WINDOW` | Which window? | The Rex window (a tab in the Rex app) |
+  | `BLOCK` | Which pane? | The block's label |
   | `MSG` | What did it say? | The agent's own message: its first line with words that is not a heading, or the heading when that is all there is. Its inline markdown is drawn (see [Markdown](#markdown)), and any heading, quote or list marker it starts with is dropped. Blank when there is none, and for a hook's filler (`Done`, `Working`, `Allow <tool>?`); the turn card has the title. See [Agent status](agent-status.md) |
 
   What a row shows beyond its columns:
