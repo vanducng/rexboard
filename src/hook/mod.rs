@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use crate::error::Result;
+use crate::harness::usage::{REPORT_ID as USAGE, Usage};
 use report::{fields, osc, turn_record, wrap};
 
 /// `rexboard hook HARNESS [EVENT]`, with the hook's JSON on stdin. EVENT fills in
@@ -39,15 +40,24 @@ pub fn run(name: &str, event: Option<&str>) -> Result<()> {
         payload["hook_event_name"] = event.into();
     }
     let name = payload["hook_event_name"].as_str().map(str::to_owned);
+    let started = Instant::now();
+    tell(harness.id(), name.as_deref(), &payload);
+    // The status is told first. The usage file is kept either way, but the report to Rex only
+    // while the hook is still quick: with tmux slow, two more commands could run it past the 5 s
+    // its agent gives a hook.
     if harness
         .usage_hook()
         .is_some_and(|hook| Some(hook) == name.as_deref())
     {
-        crate::harness::usage::keep(harness, &payload);
+        let quick = started.elapsed() < REPORT_ONLY_IF_QUICK;
+        crate::harness::usage::keep(harness, &payload, true, quick);
     }
-    tell(harness.id(), name.as_deref(), &payload);
     Ok(())
 }
+
+/// A hook reports usage to Rex only if the status took less than this: what is left of the 5 s an
+/// agent gives a hook must cover the lock and two tmux commands of up to 2 s.
+const REPORT_ONLY_IF_QUICK: Duration = Duration::from_millis(500);
 
 /// Writes the status to the agent's pane: wrapped for tmux and kept on the tmux pane for a
 /// client that attaches later, or straight to the agent's tty in a Rex pane where the agent does
@@ -110,8 +120,35 @@ fn tell(app: &str, name: Option<&str>, event: &Value) {
     log(name, Some(&pane), &format!("wrote {}", status.state));
 }
 
-/// `rexboard hooks replay SESSION`: re-sends each pane's last status, for a tmux client that
-/// just attached to SESSION.
+/// Tells Rex what the agent's last turn used: a `usage` sub-record beside its own status, so
+/// serve on any host reads it with the row. Where it goes is where `tell` sends a status.
+pub fn report_usage(app: &str, usage: &Usage) -> bool {
+    let pairs = fields(app, "done", None, Some(&usage.to_report()), Some(USAGE));
+    send_usage(&pairs)
+}
+
+/// The record's pairs to the agent's pane: wrapped for tmux, and kept on the tmux pane for a
+/// client that attaches later, or straight to the agent's tty in a plain Rex pane. Anywhere else
+/// it goes nowhere. Whether it reached the tty.
+fn send_usage(pairs: &str) -> bool {
+    if let Some(pane) = seat_pane() {
+        let Some(tty) = tmux(&["display-message", "-p", "-t", &pane, "#{pane_tty}"]) else {
+            return false;
+        };
+        let delivered = write(&tty, &wrap(pairs));
+        tmux(&["set-option", "-p", "-t", &pane, "@rex_usage", pairs]);
+        delivered
+    } else if env("REX_BLOCK").is_some()
+        && let Some((_, tty)) = agent_tty()
+    {
+        write(&tty, &osc(pairs))
+    } else {
+        false
+    }
+}
+
+/// `rexboard hooks replay SESSION`: re-sends each pane's last status and usage, for a tmux
+/// client that just attached to SESSION.
 pub fn replay(session: &str) -> Result<()> {
     let rows = tmux(&[
         "list-panes",
@@ -119,13 +156,16 @@ pub fn replay(session: &str) -> Result<()> {
         "-t",
         session,
         "-F",
-        "#{pane_tty} #{@rex_status}",
+        "#{pane_tty}|#{@rex_status}|#{@rex_usage}",
     ]);
     for row in rows.unwrap_or_default().lines() {
-        if let Some((tty, pairs)) = row.split_once(' ')
-            && !pairs.is_empty()
-        {
-            write(tty, &wrap(pairs));
+        let mut parts = row.splitn(3, '|');
+        let Some(tty) = parts.next().filter(|tty| !tty.is_empty()) else {
+            continue;
+        };
+        let sequences: String = parts.filter(|pairs| !pairs.is_empty()).map(wrap).collect();
+        if !sequences.is_empty() {
+            write(tty, &sequences);
         }
     }
     Ok(())
@@ -217,10 +257,46 @@ fn output(exes: &[&str], args: &[&str]) -> Option<String> {
     None
 }
 
-fn write(tty: &str, text: &str) {
-    if let Ok(mut file) = std::fs::OpenOptions::new().write(true).open(tty) {
-        let _ = file.write_all(text.as_bytes());
+/// How long a write to a pane's tty may wait for room before it is dropped.
+const WRITE_WAIT: Duration = Duration::from_millis(250);
+
+/// Writes `text` to a pane's tty, appended as a terminal takes it, without ever blocking: a
+/// terminal nobody reads fills up, and a hook or a status line must not stall its agent on it.
+/// What does not fit within WRITE_WAIT is dropped. Whether all of it was written.
+fn write(tty: &str, text: &str) -> bool {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::OpenOptionsExt;
+    let Ok(file) = std::fs::OpenOptions::new()
+        .append(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY)
+        .open(tty)
+    else {
+        return false;
+    };
+    let deadline = Instant::now() + WRITE_WAIT;
+    let mut rest = text.as_bytes();
+    while !rest.is_empty() {
+        let n = unsafe { libc::write(file.as_raw_fd(), rest.as_ptr().cast(), rest.len()) };
+        if n > 0 {
+            rest = &rest[n as usize..];
+            continue;
+        }
+        let room = deadline.saturating_duration_since(Instant::now());
+        let full = matches!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::EAGAIN | libc::EINTR)
+        );
+        if !full || room.is_zero() {
+            return false;
+        }
+        let mut wait = libc::pollfd {
+            fd: file.as_raw_fd(),
+            events: libc::POLLOUT,
+            revents: 0,
+        };
+        unsafe { libc::poll(&raw mut wait, 1, room.as_millis().max(1) as i32) };
     }
+    true
 }
 
 /// Notes an error in REXBOARD_HOOK_LOG, for the hook and status line commands that never fail.

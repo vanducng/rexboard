@@ -80,6 +80,7 @@ fn prepare_fake_tmux(
     std::fs::write(
         &tmux,
         "#!/bin/sh\n\
+         [ -z \"${FAKE_TMUX_SLEEP-}\" ] || sleep \"$FAKE_TMUX_SLEEP\"\n\
          case \"$1\" in\n\
          display-message) echo \"$FAKE_TMUX_TTY\" ;;\n\
          list-panes) printf '%s' \"${FAKE_TMUX_LIST-}\" ;;\n\
@@ -550,26 +551,471 @@ fn install_refuses_a_linked_harness_directory_and_writes_nothing_through_it() {
 }
 
 #[test]
-fn replay_sends_each_panes_kept_status_again() {
+fn replay_sends_each_panes_kept_status_and_usage_again() {
     let home = tempfile::tempdir().unwrap();
-    let (one, two) = (home.path().join("tty1"), home.path().join("tty2"));
-    std::fs::write(&one, "").unwrap();
-    std::fs::write(&two, "").unwrap();
-    let rows = format!("{} app=pi:state=done\n{} \n", one.display(), two.display());
+    let ttys: Vec<_> = (1..=3)
+        .map(|n| home.path().join(format!("tty{n}")))
+        .collect();
+    for tty in &ttys {
+        std::fs::write(tty, "").unwrap();
+    }
+    // One pane with both, one with only a status (a pane an older rexboard kept), one with none.
+    let rows = format!(
+        "{}|app=pi:state=done|id=usage:app=pi:state=done:msg=e30=\n{}|app=pi:state=idle|\n{}||\n",
+        ttys[0].display(),
+        ttys[1].display(),
+        ttys[2].display()
+    );
     rexboard(home.path())
         .env("PATH", fake_tmux(home.path()))
         .env("FAKE_TMUX_LIST", rows)
         .args(["hooks", "replay", "zz"])
         .assert()
         .success();
+    let wrapped = |pairs: &str| format!("\x1bPtmux;\x1b\x1b]7501;{pairs}\x07\x1b\\");
     assert_eq!(
-        std::fs::read_to_string(&one).unwrap(),
-        "\x1bPtmux;\x1b\x1b]7501;app=pi:state=done\x07\x1b\\"
+        std::fs::read_to_string(&ttys[0]).unwrap(),
+        wrapped("app=pi:state=done") + &wrapped("id=usage:app=pi:state=done:msg=e30=")
     );
     assert_eq!(
-        std::fs::read_to_string(&two).unwrap(),
+        std::fs::read_to_string(&ttys[1]).unwrap(),
+        wrapped("app=pi:state=idle"),
+        "an older rexboard kept only a status"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&ttys[2]).unwrap(),
         "",
         "a pane with none gets nothing"
+    );
+}
+
+/// What a tty got of the usage report: the `usage` records in it, their JSON decoded.
+fn reported(tty: &Path) -> Vec<Value> {
+    let text = std::fs::read_to_string(tty).unwrap();
+    text.split("]7501;")
+        .filter_map(|part| part.split('\x07').next())
+        .filter(|pairs| pairs.starts_with("id=usage:app="))
+        .map(|pairs| {
+            let state = pairs
+                .split(':')
+                .find_map(|p| p.strip_prefix("state="))
+                .unwrap();
+            match pairs.split(':').find_map(|p| p.strip_prefix("msg=")) {
+                Some(msg) => serde_json::from_slice(&unbase64(msg)).unwrap(),
+                None => json!({ "state": state }),
+            }
+        })
+        .collect()
+}
+
+fn unbase64(text: &str) -> Vec<u8> {
+    const ABC: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = Vec::new();
+    let (mut bits, mut have) = (0u32, 0);
+    for c in text.trim_end_matches('=').chars() {
+        bits = bits << 6 | ABC.find(c).unwrap() as u32;
+        have += 6;
+        if have >= 8 {
+            have -= 8;
+            out.push((bits >> have & 0xff) as u8);
+        }
+    }
+    out
+}
+
+/// The pane's usage file (a lock file lives beside it).
+fn usage_file(home: &Path) -> std::path::PathBuf {
+    std::fs::read_dir(home.join("state/rexboard/usage"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|e| e == "json"))
+        .unwrap()
+}
+
+/// A tmux pane's usage file, rewritten as if its last report had been `seconds` ago.
+fn age_last_report(home: &Path, seconds: i64) {
+    let file = usage_file(home);
+    let mut kept: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    kept["sent"]["ts"] = (chrono::Utc::now() - chrono::Duration::seconds(seconds))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        .into();
+    std::fs::write(&file, kept.to_string()).unwrap();
+}
+
+/// Runs rexboard in a tmux pane with the fake tmux, which `fake_tmux(home)` made once before.
+fn in_tmux(home: &Path, args: &[&str], stdin: String) {
+    rexboard(home)
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin", fake_tmux_dir().display()),
+        )
+        .env("TMUX", "/tmp/tmux-501/seats,1234,0")
+        .env("TMUX_PANE", "%3")
+        .args(args)
+        .write_stdin(stdin)
+        .assert()
+        .success();
+}
+
+fn status_line(ctx: u32) -> String {
+    let mut payload: Value = serde_json::from_str(include_str!(
+        "fixtures/harness/usage/claude-statusline.json"
+    ))
+    .unwrap();
+    payload["context_window"]["used_percentage"] = ctx.into();
+    payload.to_string()
+}
+
+#[test]
+fn a_status_line_reports_usage_to_rex_only_on_a_change_and_not_oftener_than_every_5_seconds() {
+    let home = tempfile::tempdir().unwrap();
+    fake_tmux(home.path());
+    let tty = home.path().join("tty");
+    let report = |ctx| in_tmux(home.path(), &["usage", "claude"], status_line(ctx));
+    report(7);
+    assert_eq!(
+        reported(&tty),
+        [
+            json!({ "v": 1, "m": "Opus 5.5", "c": 7, "w": 1_000_000, "t": 67910, "u": 0.5435, "q": 5 })
+        ]
+    );
+    let calls = std::fs::read_to_string(home.path().join("calls")).unwrap();
+    assert!(
+        calls
+            .starts_with("set-option -p -t %3 @rex_usage id=usage:app=claude-code:state=done:msg="),
+        "{calls}"
+    );
+    report(7);
+    assert_eq!(
+        reported(&tty).len(),
+        1,
+        "the same figures are not sent again"
+    );
+    report(8);
+    assert_eq!(reported(&tty).len(), 1, "a change inside 5 s waits");
+    age_last_report(home.path(), 6);
+    report(9);
+    let sent = reported(&tty);
+    assert_eq!(
+        (sent.len(), &sent[1]["c"]),
+        (2, &json!(9)),
+        "a change after 5 s goes"
+    );
+    // Rex gets what was sent; the local file has what the harness said last.
+    report(10);
+    assert_eq!(reported(&tty).len(), 2);
+    let kept: Value =
+        serde_json::from_slice(&std::fs::read(usage_file(home.path())).unwrap()).unwrap();
+    assert_eq!(
+        (&kept["ctx_pct"], &kept["sent"]["usage"]["ctx_pct"]),
+        (&json!(10), &json!(9))
+    );
+}
+
+#[test]
+fn a_turn_end_reports_at_once_what_the_throttle_would_hold() {
+    let home = tempfile::tempdir().unwrap();
+    fake_tmux(home.path());
+    let tty = home.path().join("tty");
+    in_tmux(home.path(), &["usage", "claude"], status_line(7));
+    // Codex's Stop hook is a turn end: a changed figure goes inside the 5 s.
+    let rollout = format!(
+        "{}/tests/fixtures/harness/usage/codex-rollout.jsonl",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let stop =
+        json!({ "hook_event_name": "Stop", "model": "gpt-5.5-codex", "transcript_path": rollout });
+    in_tmux(home.path(), &["hook", "codex", "Stop"], stop.to_string());
+    let sent = reported(&tty);
+    assert_eq!(sent.len(), 2, "{sent:?}");
+    assert_eq!(
+        (&sent[1]["m"], &sent[1]["c"]),
+        (&json!("gpt-5.5-codex"), &json!(4))
+    );
+}
+
+#[test]
+fn session_end_leaves_the_usage_and_the_off_switch_keeps_it_local() {
+    let home = tempfile::tempdir().unwrap();
+    fake_tmux(home.path());
+    let tty = home.path().join("tty");
+    in_tmux(home.path(), &["usage", "claude"], status_line(7));
+    in_tmux(home.path(), &["hook", "claude", "SessionEnd"], "{}".into());
+    // A pane keeps its last figures while it lives, as the local file does: the status clears,
+    // the usage record is not touched.
+    assert_eq!(reported(&tty).len(), 1, "{:?}", reported(&tty));
+    let calls = std::fs::read_to_string(home.path().join("calls")).unwrap();
+    assert!(
+        calls.contains("-u -t %3 @rex_status") && !calls.contains("-u -t %3 @rex_usage"),
+        "{calls}"
+    );
+    let quiet = tempfile::tempdir().unwrap();
+    rexboard(quiet.path())
+        .env("PATH", fake_tmux(quiet.path()))
+        .env("TMUX", "/tmp/tmux-501/seats,1234,0")
+        .env("TMUX_PANE", "%3")
+        .env("REXBOARD_NO_USAGE_REPORT", "1")
+        .args(["usage", "claude"])
+        .write_stdin(status_line(7))
+        .assert()
+        .success();
+    assert_eq!(
+        std::fs::read_to_string(quiet.path().join("tty")).unwrap(),
+        ""
+    );
+    assert!(
+        usage_file(quiet.path()).exists(),
+        "the local file is still kept"
+    );
+}
+
+#[test]
+fn a_figure_that_did_not_reach_the_pane_is_reported_again_and_a_new_session_with_the_same_ones_is_not()
+ {
+    let home = tempfile::tempdir().unwrap();
+    let tty = home.path().join("tty");
+    fake_tmux(home.path());
+    let run = |tty_for_tmux: &Path, args: &[&str], stdin: String| {
+        rexboard(home.path())
+            .env(
+                "PATH",
+                format!("{}:/usr/bin:/bin", fake_tmux_dir().display()),
+            )
+            .env("TMUX", "/tmp/tmux-501/seats,1234,0")
+            .env("TMUX_PANE", "%3")
+            .env("FAKE_TMUX_TTY", tty_for_tmux)
+            .args(args)
+            .write_stdin(stdin)
+            .assert()
+            .success();
+    };
+    // tmux names a tty that cannot be opened: nothing reached the pane, so nothing is marked sent.
+    run(
+        &home.path().join("no/such/tty"),
+        &["usage", "claude"],
+        status_line(7),
+    );
+    assert_eq!(reported(&tty).len(), 0);
+    let kept: Value =
+        serde_json::from_slice(&std::fs::read(usage_file(home.path())).unwrap()).unwrap();
+    assert!(kept["sent"].is_null(), "{kept}");
+    // The same figures once the pane can be reached: they were never delivered, so they go.
+    run(&tty, &["usage", "claude"], status_line(7));
+    assert_eq!(reported(&tty).len(), 1);
+    // The session ends and the next one starts with the same figures: the row already shows
+    // them, so nothing is sent. Its own figures go when they differ.
+    run(&tty, &["hook", "claude", "SessionEnd"], "{}".into());
+    run(&tty, &["usage", "claude"], status_line(7));
+    assert_eq!(reported(&tty).len(), 1);
+    age_last_report(home.path(), 60);
+    run(&tty, &["usage", "claude"], status_line(8));
+    let sent = reported(&tty);
+    assert_eq!((sent.len(), &sent[1]["c"]), (2, &json!(8)), "{sent:?}");
+}
+
+/// A hook given the 5 s its agent allows, with tmux taking 1.75 s over every command.
+fn slow_hook(home: &Path, args: &[&str], stdin: String) -> std::time::Duration {
+    let started = std::time::Instant::now();
+    rexboard(home)
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin", fake_tmux_dir().display()),
+        )
+        .env("TMUX", "/tmp/tmux-501/seats,1234,0")
+        .env("TMUX_PANE", "%3")
+        .env("FAKE_TMUX_SLEEP", "1.75")
+        .timeout(std::time::Duration::from_secs(5))
+        .args(args)
+        .write_stdin(stdin)
+        .assert()
+        .success();
+    started.elapsed()
+}
+
+#[test]
+fn a_hook_tells_its_status_first_and_drops_its_usage_when_tmux_is_slow() {
+    let home = tempfile::tempdir().unwrap();
+    let tty = home.path().join("tty");
+    fake_tmux(home.path());
+    let rollout = format!(
+        "{}/tests/fixtures/harness/usage/codex-rollout.jsonl",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    // Codex's Stop carries usage too. Its status is what must land inside the hook's 5 s.
+    let stop =
+        json!({ "hook_event_name": "Stop", "model": "gpt-5.5-codex", "transcript_path": rollout });
+    let took = slow_hook(home.path(), &["hook", "codex", "Stop"], stop.to_string());
+    assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+    let written = std::fs::read_to_string(&tty).unwrap();
+    assert!(
+        written.contains("app=codex:state=done"),
+        "the status went: {written:?}"
+    );
+    assert!(
+        reported(&tty).is_empty(),
+        "the usage was dropped, not started late"
+    );
+    // SessionEnd used to clear the usage as well, and ran over: now it only clears the status.
+    let took = slow_hook(home.path(), &["hook", "claude", "SessionEnd"], "{}".into());
+    assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+    let calls = std::fs::read_to_string(home.path().join("calls")).unwrap();
+    assert!(calls.contains("-u -t %3 @rex_status"), "{calls}");
+}
+
+#[test]
+fn a_slow_stop_still_keeps_the_local_usage_and_a_fast_one_still_reports() {
+    let home = tempfile::tempdir().unwrap();
+    let tty = home.path().join("tty");
+    fake_tmux(home.path());
+    let rollout = format!(
+        "{}/tests/fixtures/harness/usage/codex-rollout.jsonl",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let stop =
+        json!({ "hook_event_name": "Stop", "model": "gpt-5.5-codex", "transcript_path": rollout });
+    // Two tmux commands of 0.3 s put the status past the quick limit: the local file is still
+    // written, and Rex is not told.
+    let run = |sleep: &str| {
+        rexboard(home.path())
+            .env(
+                "PATH",
+                format!("{}:/usr/bin:/bin", fake_tmux_dir().display()),
+            )
+            .env("TMUX", "/tmp/tmux-501/seats,1234,0")
+            .env("TMUX_PANE", "%3")
+            .env("FAKE_TMUX_SLEEP", sleep)
+            .args(["hook", "codex", "Stop"])
+            .write_stdin(stop.to_string())
+            .assert()
+            .success();
+    };
+    run("0.3");
+    let kept: Value =
+        serde_json::from_slice(&std::fs::read(usage_file(home.path())).unwrap()).unwrap();
+    assert_eq!(kept["model"], "gpt-5.5-codex", "{kept}");
+    assert!(kept["sent"].is_null(), "nothing was sent to Rex: {kept}");
+    assert!(reported(&tty).is_empty());
+    // A fast Stop with the same figures still reports them: they were never sent.
+    run("0");
+    assert_eq!(reported(&tty).len(), 1);
+}
+
+#[test]
+fn a_burst_of_callbacks_reports_once_and_nothing_is_sent_that_cannot_be_tracked() {
+    let home = tempfile::tempdir().unwrap();
+    let tty = home.path().join("tty");
+    fake_tmux(home.path());
+    std::thread::scope(|scope| {
+        for _ in 0..16 {
+            scope.spawn(|| in_tmux(home.path(), &["usage", "claude"], status_line(7)));
+        }
+    });
+    assert_eq!(reported(&tty).len(), 1, "sixteen callbacks, one report");
+    // A usage directory that cannot take the figures or the lock: the report is not sent.
+    if unsafe { libc::geteuid() } == 0 {
+        return;
+    }
+    let quiet = tempfile::tempdir().unwrap();
+    fake_tmux(quiet.path());
+    let dir = quiet.path().join("state/rexboard/usage");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    in_tmux(quiet.path(), &["usage", "claude"], status_line(7));
+    assert_eq!(reported(&quiet.path().join("tty")).len(), 0);
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// A pty whose reader is not reading and whose queue is full, as a terminal that is stuck is:
+/// the master and slave stay open for the test.
+struct FullPty {
+    _master: std::os::fd::OwnedFd,
+    _slave: std::os::fd::OwnedFd,
+    path: std::path::PathBuf,
+}
+
+fn full_pty() -> FullPty {
+    use std::ffi::CStr;
+    use std::os::fd::FromRawFd;
+    unsafe {
+        let master = libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY);
+        assert!(master >= 0 && libc::grantpt(master) == 0 && libc::unlockpt(master) == 0);
+        let path = CStr::from_ptr(libc::ptsname(master))
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let slave = libc::open(
+            CStr::from_ptr(libc::ptsname(master)).as_ptr(),
+            libc::O_RDWR | libc::O_NOCTTY | libc::O_NONBLOCK,
+        );
+        assert!(slave >= 0);
+        let chunk = [b'x'; 4096];
+        let mut full = false;
+        for _ in 0..4096 {
+            if libc::write(slave, chunk.as_ptr().cast(), chunk.len()) < 0 {
+                full = true;
+                break;
+            }
+        }
+        assert!(full, "the pty never filled");
+        FullPty {
+            _master: std::os::fd::OwnedFd::from_raw_fd(master),
+            _slave: std::os::fd::OwnedFd::from_raw_fd(slave),
+            path: path.into(),
+        }
+    }
+}
+
+#[test]
+fn a_full_terminal_never_stalls_the_status_line_or_the_hook() {
+    let home = tempfile::tempdir().unwrap();
+    fake_tmux(home.path());
+    let pty = full_pty();
+    let started = std::time::Instant::now();
+    // The status line command it wraps still runs and says what it says.
+    let out = rexboard(home.path())
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin", fake_tmux_dir().display()),
+        )
+        .env("TMUX", "/tmp/tmux-501/seats,1234,0")
+        .env("TMUX_PANE", "%3")
+        .env("FAKE_TMUX_TTY", &pty.path)
+        .timeout(std::time::Duration::from_secs(5))
+        .args(["usage", "claude", "--", "cat"])
+        .write_stdin(status_line(7))
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert!(
+        String::from_utf8_lossy(&out).contains("claude-opus-5-5"),
+        "the status line still runs"
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(1500),
+        "{:?}",
+        started.elapsed()
+    );
+    // A hook's own status goes the same way, and does not stall either.
+    let started = std::time::Instant::now();
+    rexboard(home.path())
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin", fake_tmux_dir().display()),
+        )
+        .env("TMUX", "/tmp/tmux-501/seats,1234,0")
+        .env("TMUX_PANE", "%3")
+        .env("FAKE_TMUX_TTY", &pty.path)
+        .timeout(std::time::Duration::from_secs(5))
+        .args(["hook", "claude", "Stop"])
+        .write_stdin(json!({ "hook_event_name": "Stop" }).to_string())
+        .assert()
+        .success();
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(1500),
+        "{:?}",
+        started.elapsed()
     );
 }
 

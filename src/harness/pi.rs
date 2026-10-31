@@ -13,6 +13,10 @@ impl Harness for Pi {
         Some(icon("fae-pi", "\u{e22c}"))
     }
 
+    fn usage_per_turn(&self) -> bool {
+        true
+    }
+
     fn processes(&self) -> &'static [&'static str] {
         &["pi"]
     }

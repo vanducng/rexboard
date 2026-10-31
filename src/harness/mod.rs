@@ -52,6 +52,12 @@ pub trait Harness: Sync {
         None
     }
 
+    /// Whether each `rexboard usage` call comes as a turn ends (pi's extension), not on every
+    /// message (a status line); a turn's end reports to Rex at once.
+    fn usage_per_turn(&self) -> bool {
+        false
+    }
+
     /// Its Nerd Font mark, drawn only with `"icons": "nerd"`; a harness without one keeps its word.
     fn mark(&self) -> Option<Icon> {
         None

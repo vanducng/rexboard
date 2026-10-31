@@ -155,6 +155,10 @@ pub struct Pane {
     pub updated_at: Option<String>,
     pub source: String,
     pub children: BTreeMap<String, usize>,
+    /// What the agent's own hook reported to Rex of its last turn (a `usage` record). Serve
+    /// reads it and offers it as the row's `usage`, so clients never see it here.
+    #[serde(skip)]
+    pub reported_usage: Option<crate::harness::usage::Usage>,
 }
 
 impl Pane {
@@ -220,10 +224,11 @@ pub fn rank(state: &str) -> u8 {
 
 pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
     let turn = src.records.get(TURN);
+    // The `turn` and `usage` records say something about the pane; neither is the agent's state.
     let others = || {
         src.records
             .iter()
-            .filter(|(id, _)| *id != TURN)
+            .filter(|(id, _)| *id != TURN && *id != USAGE)
             .map(|(_, r)| r)
     };
     let main = src
@@ -295,12 +300,19 @@ pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
         updated_at,
         source,
         children,
+        reported_usage: src
+            .records
+            .get(USAGE)
+            .and_then(|r| r.msg.as_deref())
+            .and_then(Usage::from_report),
     }
 }
 
 /// The sub-record a hook writes beside an agent's own status in a plain Rex pane, to carry the
 /// turn's final message that the agent's own `done` leaves out.
 const TURN: &str = "turn";
+
+use crate::harness::usage::{REPORT_ID as USAGE, Usage};
 
 /// The `turn` record's message. A `done` root always takes it: the agent's own `done` lands just
 /// after the hook's `turn`, and the hook clears `turn` when the next prompt starts. Any other root
@@ -395,6 +407,58 @@ mod tests {
             alone.source, "inferred",
             "a turn record alone is not the pane's status"
         );
+    }
+
+    #[test]
+    fn a_usage_record_is_the_panes_reported_usage_and_neither_a_child_nor_its_status() {
+        let report = r#"{"v":1,"m":"Opus 5.5","c":7,"t":67910}"#;
+        let pane = with_records(serde_json::json!([
+            {"state": "working", "app": "claude-code", "updated_at": "2026-01-01T00:00:00Z"},
+            {"id": "usage", "state": "done", "app": "claude-code", "msg": report},
+        ]));
+        assert_eq!(
+            (pane.state.as_str(), pane.source.as_str()),
+            ("working", "native")
+        );
+        assert!(pane.children.is_empty(), "{:?}", pane.children);
+        assert_eq!(
+            pane.reported_usage,
+            Some(Usage {
+                model: Some("Opus 5.5".into()),
+                ctx_pct: Some(7),
+                tok: Some(67910),
+                ..Usage::default()
+            })
+        );
+        let alone = with_records(serde_json::json!([
+            {"id": "usage", "state": "done", "msg": report},
+        ]));
+        assert_eq!(
+            (
+                alone.source.as_str(),
+                alone.state.as_str(),
+                alone.msg.as_deref()
+            ),
+            ("inferred", "unknown", None),
+            "a usage record alone is not the pane's status"
+        );
+        // Not this version's document, or not a document: nothing, and the status is untouched.
+        for msg in [
+            "not json",
+            r#"{"v":2,"m":"x"}"#,
+            r#"{"v":1}"#,
+            &"x".repeat(600),
+        ] {
+            let pane = with_records(serde_json::json!([
+                {"state": "idle", "app": "claude-code"},
+                {"id": "usage", "state": "done", "msg": msg},
+            ]));
+            assert_eq!(
+                (pane.reported_usage, pane.state.as_str()),
+                (None, "idle"),
+                "{msg}"
+            );
+        }
     }
 
     #[test]

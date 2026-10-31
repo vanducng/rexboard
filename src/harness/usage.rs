@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -41,6 +41,71 @@ impl Usage {
     pub fn is_empty(&self) -> bool {
         *self == Self::default()
     }
+
+    /// The one-line JSON a `usage` record carries to Rex: `{"v":1,"m":"Opus","c":42,...}`, only
+    /// the figures that are set, each held to its range.
+    pub fn to_report(&self) -> String {
+        let mut doc = serde_json::json!({ "v": REPORT_VERSION });
+        let mut put = |key: &str, value: Option<serde_json::Value>| {
+            if let Some(value) = value {
+                doc[key] = value;
+            }
+        };
+        put("m", self.model.as_deref().and_then(model).map(Into::into));
+        put("c", self.ctx_pct.map(|p| p.min(100).into()));
+        put("w", self.ctx_window.map(Into::into));
+        put("t", self.tok.map(Into::into));
+        put("u", self.cost_usd.and_then(cost).map(Into::into));
+        put("q", self.quota_5h.map(|p| p.min(100).into()));
+        doc.to_string()
+    }
+
+    /// What a `usage` record's message says; None for anything that is not this version's
+    /// document, over REPORT_MAX bytes, or with no figure in it. Each figure is held to its range
+    /// again, since the record came over a wire.
+    pub fn from_report(text: &str) -> Option<Self> {
+        if text.len() > REPORT_MAX {
+            return None;
+        }
+        let doc: serde_json::Value = serde_json::from_str(text).ok()?;
+        if doc["v"] != REPORT_VERSION {
+            return None;
+        }
+        let usage = Self {
+            model: doc["m"].as_str().and_then(model),
+            ctx_pct: percent(&doc["c"]),
+            ctx_window: doc["w"].as_u64(),
+            tok: doc["t"].as_u64(),
+            cost_usd: doc["u"].as_f64().and_then(cost),
+            quota_5h: percent(&doc["q"]),
+        };
+        (!usage.is_empty()).then_some(usage)
+    }
+}
+
+/// The id of the sub-record that carries usage to Rex, beside the agent's own status.
+pub const REPORT_ID: &str = "usage";
+const REPORT_VERSION: u32 = 1;
+/// A record's message over this is not read.
+const REPORT_MAX: usize = 512;
+const MODEL_MAX: usize = 64;
+/// At most one report per pane in this long, unless a turn has just ended.
+pub const REPORT_EVERY: chrono::Duration = chrono::Duration::seconds(5);
+
+/// A model name without control characters, cut to MODEL_MAX characters; None if nothing is left.
+fn model(name: &str) -> Option<String> {
+    let name: String = name
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MODEL_MAX)
+        .collect();
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
+/// A cost in dollars to four decimals; None for a negative or non-finite one.
+fn cost(usd: f64) -> Option<f64> {
+    (usd.is_finite() && usd >= 0.0).then(|| (usd * 10_000.0).round() / 10_000.0)
 }
 
 /// `rexboard usage HARNESS [-- CMD]`. Keeping the numbers never breaks the status line it runs
@@ -51,7 +116,7 @@ pub fn run(name: &str, then: &[String]) -> crate::error::Result<()> {
     match named(name) {
         Ok(harness) => {
             if let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&input) {
-                keep(harness, &payload);
+                keep(harness, &payload, harness.usage_per_turn(), true);
             }
         }
         // The status line it runs in still shows: an unknown name keeps nothing, and says so.
@@ -85,8 +150,13 @@ pub fn named(name: &str) -> crate::error::Result<&'static dyn super::Harness> {
 }
 
 /// Keeps what `payload` says the last turn used, for the pane this process runs in; a payload
-/// with no usage, or a pane it cannot name, keeps nothing.
-pub fn keep(harness: &dyn super::Harness, payload: &serde_json::Value) {
+/// with no usage, or a pane it cannot name, keeps nothing. `may_report` is whether Rex is told too.
+pub fn keep(
+    harness: &dyn super::Harness,
+    payload: &serde_json::Value,
+    turn_end: bool,
+    may_report: bool,
+) {
     let env = |name: &str| std::env::var(name).ok();
     if let Some(usage) = harness.usage(payload)
         && let Some(key) = own_key(
@@ -96,8 +166,92 @@ pub fn keep(harness: &dyn super::Harness, payload: &serde_json::Value) {
         )
         && let Ok(paths) = crate::state::Paths::find()
     {
-        let _ = write(&paths.dir, &key, harness.id(), &usage, Utc::now());
+        // One caller decides and publishes at a time; a contender skips, as its figures come again.
+        let Some(_lock) = PaneLock::take(&paths.dir, &key, LOCK_WAIT) else {
+            return;
+        };
+        let now = Utc::now();
+        let last = sent_by(&paths.dir, &key);
+        let report = may_report
+            && env("REXBOARD_NO_USAGE_REPORT").is_none()
+            && due(last.as_ref(), &usage, now, turn_end);
+        // Nothing is sent that cannot be tracked: the file takes the figures first, with the old mark.
+        if write(&paths.dir, &key, harness.id(), &usage, last, now).is_err() {
+            return;
+        }
+        if report && crate::hook::report_usage(harness.id(), &usage) {
+            let sent = Some(Sent::new(&usage, now));
+            let _ = write(&paths.dir, &key, harness.id(), &usage, sent, now);
+        }
     }
+}
+
+/// A pane's lock for deciding and publishing a report, so a burst of callers sends once. Its file
+/// belongs to its pane's file and outlives it only until it is old.
+struct PaneLock {
+    _held: std::fs::File,
+}
+
+/// How long a caller waits for the lock before it skips its report.
+const LOCK_WAIT: Duration = Duration::from_millis(200);
+
+impl PaneLock {
+    fn take(state: &Path, key: &str, wait: Duration) -> Option<Self> {
+        let path = lock_path(state, key);
+        std::fs::create_dir_all(path.parent()?).ok()?;
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .ok()?;
+            if flock(&file) && same_file(&file, &path) {
+                return Some(Self { _held: file });
+            }
+            // Either held by another, or removed while this waited and so not the lock any more.
+            drop(file);
+            if std::time::Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// Removes a lock file nobody holds, holding it while it goes so nobody takes the one being
+    /// removed.
+    fn remove(path: &Path) {
+        if let Ok(file) = std::fs::OpenOptions::new().append(true).open(path)
+            && flock(&file)
+        {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+fn lock_path(state: &Path, key: &str) -> PathBuf {
+    dir(state).join(file_name(key).replace(".json", ".lock"))
+}
+
+fn flock(file: &std::fs::File) -> bool {
+    use std::os::fd::AsRawFd;
+    unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) == 0 }
+}
+
+/// Whether `path` still names the file that was opened.
+fn same_file(file: &std::fs::File, path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (file.metadata(), std::fs::metadata(path)) {
+        (Ok(a), Ok(b)) => (a.dev(), a.ino()) == (b.dev(), b.ino()),
+        _ => false,
+    }
+}
+
+/// What this pane last reported to Rex, from its file.
+fn sent_by(state: &Path, key: &str) -> Option<Sent> {
+    let sidecar: Sidecar =
+        serde_json::from_slice(&std::fs::read(dir(state).join(file_name(key))).ok()?).ok()?;
+    sidecar.sent
 }
 
 /// A percent as Rex and the harnesses report it, rounded into 0-100.
@@ -135,6 +289,41 @@ struct Sidecar {
     harness: String,
     #[serde(flatten)]
     usage: Usage,
+    /// The figures last reported to Rex and when, so a report goes only on a change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sent: Option<Sent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Sent {
+    ts: String,
+    usage: Usage,
+}
+
+impl Sent {
+    pub fn new(usage: &Usage, now: DateTime<Utc>) -> Self {
+        Self {
+            ts: now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            usage: usage.clone(),
+        }
+    }
+}
+
+/// Whether `usage` goes to Rex now: it is not what was last sent, and the last send was
+/// REPORT_EVERY ago or more, or a turn has just ended.
+pub fn due(last: Option<&Sent>, usage: &Usage, now: DateTime<Utc>, turn_end: bool) -> bool {
+    let Some(last) = last else {
+        return true;
+    };
+    // What Rex would be told, not the raw figures: a cost change below four decimals says the same.
+    if last.usage.to_report() == usage.to_report() {
+        return false;
+    }
+    let at = DateTime::parse_from_rfc3339(&last.ts).map(|at| at.with_timezone(&Utc));
+    match at {
+        Ok(at) => turn_end || now - at >= REPORT_EVERY,
+        Err(_) => true,
+    }
 }
 
 fn dir(state: &Path) -> PathBuf {
@@ -198,6 +387,7 @@ pub fn write(
     key: &str,
     harness: &str,
     usage: &Usage,
+    sent: Option<Sent>,
     now: DateTime<Utc>,
 ) -> std::io::Result<()> {
     let dir = dir(state);
@@ -207,6 +397,7 @@ pub fn write(
         ts: now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         harness: harness.to_owned(),
         usage: usage.clone(),
+        sent,
     };
     let path = dir.join(file_name(key));
     let tmp = path.with_extension(format!("json.{}", std::process::id()));
@@ -251,6 +442,15 @@ impl Files {
                 continue;
             };
             let json = path.extension().is_some_and(|ext| ext == "json");
+            // A lock belongs to its pane's file: it goes once that is gone and it is old, and only
+            // when nobody holds it.
+            if path.extension().is_some_and(|ext| ext == "lock") {
+                let old = now.signed_duration_since(DateTime::<Utc>::from(modified)) > ORPHAN_AFTER;
+                if live.is_some() && old && !path.with_extension("json").exists() {
+                    PaneLock::remove(&path);
+                }
+                continue;
+            }
             let held = match self.seen.remove(&path) {
                 Some((at, held)) if at == modified => held,
                 _ if json => read_one(&path),
@@ -466,6 +666,241 @@ mod tests {
         assert_eq!(Procs::default().tmux_child(1), None);
     }
 
+    fn full() -> Usage {
+        Usage {
+            model: Some("Opus 5.5".into()),
+            ctx_pct: Some(42),
+            ctx_window: Some(200_000),
+            tok: Some(84_210),
+            cost_usd: Some(1.2345),
+            quota_5h: Some(17),
+        }
+    }
+
+    #[test]
+    fn a_report_round_trips_and_leaves_out_what_is_not_set() {
+        let report = full().to_report();
+        assert_eq!(
+            report,
+            r#"{"v":1,"m":"Opus 5.5","c":42,"w":200000,"t":84210,"u":1.2345,"q":17}"#
+        );
+        assert!(report.len() < 120);
+        assert_eq!(Usage::from_report(&report), Some(full()));
+        let part = Usage {
+            model: Some("grok-build-1".into()),
+            ctx_pct: Some(12),
+            ..Usage::default()
+        };
+        assert_eq!(part.to_report(), r#"{"v":1,"m":"grok-build-1","c":12}"#);
+        assert_eq!(Usage::from_report(&part.to_report()), Some(part));
+    }
+
+    #[test]
+    fn a_report_holds_every_figure_to_its_range_on_both_ends() {
+        let long = Usage {
+            model: Some(format!("a\u{7}b\n{}", "m".repeat(100))),
+            ctx_pct: Some(250),
+            quota_5h: Some(101),
+            cost_usd: Some(0.123_456_789),
+            ..Usage::default()
+        };
+        let back = Usage::from_report(&long.to_report()).unwrap();
+        assert_eq!(back.model.as_deref().map(|m| m.chars().count()), Some(64));
+        assert!(!back.model.unwrap().contains(['\u{7}', '\n']));
+        assert_eq!(
+            (back.ctx_pct, back.quota_5h, back.cost_usd),
+            (Some(100), Some(100), Some(0.1235))
+        );
+        // A document that did not come from to_report is held to the same ranges.
+        let wild = Usage::from_report(r#"{"v":1,"m":"\u0007x","c":250,"u":-3,"q":-5}"#).unwrap();
+        assert_eq!(
+            (
+                wild.model.as_deref(),
+                wild.ctx_pct,
+                wild.cost_usd,
+                wild.quota_5h
+            ),
+            (Some("x"), Some(100), None, Some(0))
+        );
+        assert_eq!(
+            Usage {
+                cost_usd: Some(f64::NAN),
+                ..Usage::default()
+            }
+            .to_report(),
+            r#"{"v":1}"#
+        );
+    }
+
+    #[test]
+    fn a_report_that_is_not_this_versions_or_is_too_big_is_not_read() {
+        for text in [
+            "",
+            "{",
+            "[]",
+            r#"{"c":1}"#,
+            r#"{"v":2,"c":1}"#,
+            r#"{"v":1}"#,
+            r#"{"v":1,"m":"  "}"#,
+        ] {
+            assert_eq!(Usage::from_report(text), None, "{text:?}");
+        }
+        let big = format!(r#"{{"v":1,"m":"x","pad":"{}"}}"#, "p".repeat(REPORT_MAX));
+        assert_eq!(Usage::from_report(&big), None, "over {REPORT_MAX} bytes");
+    }
+
+    #[test]
+    fn a_report_is_due_on_a_change_after_5_seconds_or_at_a_turn_end() {
+        let now = Utc::now();
+        let sent = |ago: i64, usage: &Usage| Sent::new(usage, now - chrono::Duration::seconds(ago));
+        let (a, b) = (
+            full(),
+            Usage {
+                ctx_pct: Some(43),
+                ..full()
+            },
+        );
+        assert!(due(None, &a, now, false), "never sent");
+        assert!(
+            !due(Some(&sent(600, &a)), &a, now, true),
+            "the same figures, even at a turn end"
+        );
+        assert!(
+            !due(Some(&sent(4, &a)), &b, now, false),
+            "a change inside 5 s waits"
+        );
+        assert!(
+            due(Some(&sent(5, &a)), &b, now, false),
+            "a change after 5 s goes"
+        );
+        assert!(
+            due(Some(&sent(1, &a)), &b, now, true),
+            "a turn end does not wait"
+        );
+        let mut broken = sent(0, &a);
+        broken.ts = "later".into();
+        assert!(
+            due(Some(&broken), &b, now, false),
+            "an unreadable time does not hold a report"
+        );
+    }
+
+    #[test]
+    fn a_change_below_what_the_wire_carries_is_not_a_change() {
+        let now = Utc::now();
+        let a = Usage {
+            cost_usd: Some(0.543476),
+            ..full()
+        };
+        let b = Usage {
+            cost_usd: Some(0.543480),
+            ..full()
+        };
+        assert_ne!(a, b);
+        assert_eq!(a.to_report(), b.to_report(), "four decimals");
+        let sent = Sent::new(&a, now - chrono::Duration::seconds(60));
+        assert!(
+            !due(Some(&sent), &b, now, true),
+            "even at a turn end, after a minute"
+        );
+        let c = Usage {
+            cost_usd: Some(0.5436),
+            ..full()
+        };
+        assert!(
+            due(Some(&sent), &c, now, false),
+            "a figure the wire does carry"
+        );
+    }
+
+    fn age(path: &Path, by: chrono::Duration) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(SystemTime::from(Utc::now() - by))
+            .unwrap();
+    }
+
+    #[test]
+    fn a_live_panes_lock_is_never_aged_out_from_under_its_holder() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = Utc::now();
+        write(dir.path(), "block:live", "claude-code", &full(), None, now).unwrap();
+        let held = PaneLock::take(dir.path(), "block:live", Duration::from_millis(50)).unwrap();
+        let lock = lock_path(dir.path(), "block:live");
+        age(&lock, ORPHAN_AFTER * 3);
+        let live = BTreeSet::from(["block:live".to_owned()]);
+        let mut files = Files::default();
+        files.read(dir.path(), Some(&live), now);
+        assert!(
+            lock.exists(),
+            "the pane's file is there: its lock stays, held or not"
+        );
+        assert!(
+            PaneLock::take(dir.path(), "block:live", Duration::from_millis(30)).is_none(),
+            "and is still the one lock"
+        );
+        // The pane's file goes with its pane, but a held lock is not taken from its holder.
+        std::fs::remove_file(dir.path().join("usage/block-live.json")).unwrap();
+        files.read(dir.path(), Some(&live), now);
+        assert!(lock.exists(), "held");
+        drop(held);
+        files.read(dir.path(), Some(&live), now);
+        assert!(
+            !lock.exists(),
+            "old, unheld and without its pane's file: gone"
+        );
+    }
+
+    #[test]
+    fn a_caller_waiting_on_a_lock_that_is_removed_takes_the_new_one_not_the_old() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = PaneLock::take(dir.path(), "block:x", Duration::from_millis(50)).unwrap();
+        let waiter = std::thread::scope(|scope| {
+            let waiter =
+                scope.spawn(|| PaneLock::take(dir.path(), "block:x", Duration::from_secs(3)));
+            std::thread::sleep(Duration::from_millis(100));
+            std::fs::remove_file(lock_path(dir.path(), "block:x")).unwrap();
+            drop(first);
+            waiter.join().unwrap()
+        });
+        assert!(
+            waiter.is_some(),
+            "it retried onto the file that is there now"
+        );
+        assert!(
+            PaneLock::take(dir.path(), "block:x", Duration::from_millis(30)).is_none(),
+            "so a third caller finds that one held, not a lock on the removed file"
+        );
+    }
+
+    #[test]
+    fn what_was_last_sent_survives_each_write_and_is_read_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = Utc::now();
+        let mark = Sent::new(&full(), now);
+        write(
+            dir.path(),
+            "block:x",
+            "claude-code",
+            &Usage {
+                ctx_pct: Some(43),
+                ..full()
+            },
+            Some(mark),
+            now,
+        )
+        .unwrap();
+        let sent = sent_by(dir.path(), "block:x").unwrap();
+        assert_eq!(
+            sent.usage.ctx_pct,
+            Some(42),
+            "the file keeps what Rex was told, not the latest"
+        );
+        assert!(sent_by(dir.path(), "block:none").is_none());
+    }
+
     #[test]
     fn claude_and_grok_read_their_status_line() {
         assert_eq!(
@@ -617,7 +1052,15 @@ mod tests {
             ..Usage::default()
         };
         // The client shows %3; the agent in %5 sits in a window nobody looks at.
-        write(dir.path(), "tmux:seats:1234:%5", "claude-code", &usage, now).unwrap();
+        write(
+            dir.path(),
+            "tmux:seats:1234:%5",
+            "claude-code",
+            &usage,
+            None,
+            now,
+        )
+        .unwrap();
         std::fs::File::options()
             .write(true)
             .open(dir.path().join("usage/tmux-seats-1234--5.json"))
@@ -652,6 +1095,7 @@ mod tests {
             "tmux:default:1234:%3",
             "claude-code",
             &usage,
+            None,
             now,
         )
         .unwrap();
@@ -683,9 +1127,25 @@ mod tests {
             ctx_pct: Some(pct),
             ..Usage::default()
         };
-        write(dir.path(), "block:live", "claude-code", &usage(7), now).unwrap();
-        write(dir.path(), "block:gone", "claude-code", &usage(9), now).unwrap();
-        write(dir.path(), "block:new", "claude-code", &usage(3), now).unwrap();
+        write(
+            dir.path(),
+            "block:live",
+            "claude-code",
+            &usage(7),
+            None,
+            now,
+        )
+        .unwrap();
+        write(
+            dir.path(),
+            "block:gone",
+            "claude-code",
+            &usage(9),
+            None,
+            now,
+        )
+        .unwrap();
+        write(dir.path(), "block:new", "claude-code", &usage(3), None, now).unwrap();
         let usage_dir = dir.path().join("usage");
         std::fs::write(usage_dir.join("left.json.4242"), "{").unwrap();
         let age = |name: &str, by: chrono::Duration| {
@@ -718,7 +1178,15 @@ mod tests {
             files.read(dir.path(), Some(&live), now)["block:live"],
             usage(7)
         );
-        write(dir.path(), "block:live", "claude-code", &usage(12), now).unwrap();
+        write(
+            dir.path(),
+            "block:live",
+            "claude-code",
+            &usage(12),
+            None,
+            now,
+        )
+        .unwrap();
         age("block-live.json", chrono::Duration::seconds(-1));
         assert_eq!(
             files.read(dir.path(), Some(&live), now)["block:live"],

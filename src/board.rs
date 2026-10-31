@@ -130,7 +130,7 @@ impl Entry {
             suspect_reason,
             group: self.group(now),
             ext: self.ext.clone(),
-            usage: None,
+            usage: self.pane.reported_usage.clone(),
         }
     }
 }
