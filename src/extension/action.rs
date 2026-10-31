@@ -830,7 +830,11 @@ mod tests {
     #[test]
     fn stopping_all_kills_a_run_in_flight_and_what_it_started() {
         let dir = tempfile::tempdir().unwrap();
-        let plan = plan(dir.path(), "sleep 60 &\necho $! > child\nwait", 30);
+        let plan = plan(
+            dir.path(),
+            "sleep 60 &\necho $! > child.tmp\nmv child.tmp child\nwait",
+            30,
+        );
         let running = std::sync::Arc::new(Running::default());
         let theirs = running.clone();
         let started = Instant::now();
