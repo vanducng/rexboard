@@ -7,6 +7,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -277,6 +278,45 @@ fn valid_text(text: &str, max: usize) -> Result<&str, String> {
     Ok(text)
 }
 
+/// The runs in flight, and whether the board is closing: once it is, no run starts.
+#[derive(Default)]
+struct Registry {
+    stopped: bool,
+    groups: Vec<i32>,
+}
+
+type Running = Mutex<Registry>;
+
+static RUNNING: Running = Mutex::new(Registry {
+    stopped: false,
+    groups: Vec::new(),
+});
+
+fn held(running: &Running) -> std::sync::MutexGuard<'_, Registry> {
+    running
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Kills every run still going and refuses any that has not started yet.
+pub fn stop_all() {
+    stop(&RUNNING);
+}
+
+fn stop(running: &Running) {
+    let mut registry = held(running);
+    registry.stopped = true;
+    for pgid in registry.groups.drain(..) {
+        kill_group(pgid);
+    }
+}
+
+/// Runs `plan` in its directory, in its own process group, and returns the first line of what it
+/// printed. A failure says its exit, or that it timed out or could not start.
+pub fn run(plan: &Plan) -> Result<String, String> {
+    run_in(plan, &RUNNING)
+}
+
 /// The first line a pipe says, sent once it closes. The rest is read and dropped, so the action
 /// never blocks on a full pipe.
 fn first_line(mut pipe: impl Read + Send + 'static) -> std::sync::mpsc::Receiver<String> {
@@ -311,9 +351,7 @@ pub fn stop_on_signals() {
     }
 }
 
-/// Runs `plan` in its directory, in its own process group, and returns the first line of what it
-/// printed. A failure says its exit, or that it timed out or could not start.
-pub fn run(plan: &Plan) -> Result<String, String> {
+fn run_in(plan: &Plan, running: &Running) -> Result<String, String> {
     let mut cmd = Command::new(&plan.argv[0]);
     cmd.args(&plan.argv[1..])
         .current_dir(&plan.dir)
@@ -322,8 +360,20 @@ pub fn run(plan: &Plan) -> Result<String, String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
-    let mut child = crate::rex::spawn(&mut cmd)
-        .map_err(|err| format!("could not run {}: {err}", plan.argv[0]))?;
+    // The latch is checked and the group registered under one lock around the spawn, so a run
+    // either starts before `stop` and is killed by it, or never starts.
+    let mut child = {
+        let _fds = crate::rex::fd_guard();
+        let mut registry = held(running);
+        if registry.stopped {
+            return Err("the board is closing".to_owned());
+        }
+        let child = cmd
+            .spawn()
+            .map_err(|err| format!("could not run {}: {err}", plan.argv[0]))?;
+        registry.groups.push(child.id() as i32);
+        child
+    };
     let pgid = child.id() as i32;
     let out = first_line(child.stdout.take().expect("piped stdout"));
     let err = first_line(child.stderr.take().expect("piped stderr"));
@@ -348,6 +398,7 @@ pub fn run(plan: &Plan) -> Result<String, String> {
         }
         thread::sleep(Duration::from_millis(10));
     };
+    held(running).groups.retain(|p| *p != pgid);
     let status = outcome?;
     // What something that left the group still holds open is not waited for past the deadline.
     let wait = deadline.saturating_duration_since(Instant::now());
@@ -774,6 +825,61 @@ mod tests {
             Some(later.clone())
         );
         assert_eq!(program_on(&ext, "tool", &on(&[&later_dir])), Some(later));
+    }
+
+    #[test]
+    fn stopping_all_kills_a_run_in_flight_and_what_it_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let plan = plan(dir.path(), "sleep 60 &\necho $! > child\nwait", 30);
+        let running = std::sync::Arc::new(Running::default());
+        let theirs = running.clone();
+        let started = Instant::now();
+        let handle = thread::spawn(move || run_in(&plan, &theirs));
+        while !dir.path().join("child").exists() {
+            assert!(started.elapsed() < Duration::from_secs(5), "never started");
+            thread::sleep(Duration::from_millis(20));
+        }
+        stop(&running);
+        assert!(handle.join().unwrap().unwrap_err().contains("signal"));
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(held(&running).groups.is_empty());
+        let child: i32 = std::fs::read_to_string(dir.path().join("child"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while unsafe { libc::kill(child, 0) } == 0 {
+            assert!(Instant::now() < deadline, "the action's child outlived it");
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn a_run_waiting_to_spawn_when_the_board_closes_never_starts() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = plan(dir.path(), "echo started > after_stop", 5);
+        let running = std::sync::Arc::new(Running::default());
+        let theirs = running.clone();
+        // The worker is past its checks and blocked on the fd guard, as a slow spawn would be.
+        let fds = crate::rex::fd_guard();
+        let handle = thread::spawn(move || run_in(&first, &theirs));
+        thread::sleep(Duration::from_millis(100));
+        stop(&running);
+        drop(fds);
+        assert_eq!(handle.join().unwrap().unwrap_err(), "the board is closing");
+        thread::sleep(Duration::from_millis(300));
+        assert!(
+            !dir.path().join("after_stop").exists(),
+            "an action started after stop"
+        );
+        assert!(held(&running).groups.is_empty());
+        let again = plan(dir.path(), "echo again > after_stop", 5);
+        assert_eq!(
+            run_in(&again, &running).unwrap_err(),
+            "the board is closing"
+        );
+        assert!(!dir.path().join("after_stop").exists());
     }
 
     #[test]

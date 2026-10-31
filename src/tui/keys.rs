@@ -34,6 +34,8 @@ pub enum Act {
     PrevView,
     /// `o`, then a column's letter.
     Sort,
+    /// `x`, then an extension action's key.
+    Actions,
     FoldToggle,
     FoldOpen,
     FoldClose,
@@ -255,6 +257,13 @@ pub const BOARD: &[Entry] = &[
         "o",
         "sort by a column's letter",
         "sort",
+    ),
+    e(
+        Act::Actions,
+        &[&[c('x')]],
+        "x",
+        "extension actions, e.g. send",
+        "action",
     ),
     e(
         Act::FoldToggle,

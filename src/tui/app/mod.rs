@@ -18,10 +18,12 @@ use super::status::Status;
 use super::views::{Bucket, Key, View, arrange, bucket, views};
 use crate::board::{Group, Row};
 use crate::client::{ExtRun, Field};
+use crate::extension::action::Offered;
 use crate::output::{clean, harness, labels, name, path, squeeze, wheres};
 use crate::pane::Pane;
 use crate::send::{Action, Expect};
 
+mod actions;
 mod answer;
 mod card;
 mod filter;
@@ -73,6 +75,11 @@ pub enum Effect {
         expect: Expect,
         action: Action,
         what: String,
+    },
+    /// Run an extension's action, which the operator confirmed.
+    Run {
+        plan: Box<crate::extension::action::Plan>,
+        title: String,
     },
     /// Mark these unseen `done` rows seen.
     SeenAll(Vec<String>),
@@ -187,6 +194,10 @@ pub struct App {
     pub commanding: bool,
     pub view: View,
     pub sort: Option<Sort>,
+    /// What the enabled extensions offer on a row, from serve.
+    pub offered: Vec<Offered>,
+    /// An action past its key: its input line or its confirm.
+    pub doing: Option<actions::Doing>,
     /// Keys whose meaning changed (`R`, `M`, `N`), told once a run.
     told: BTreeSet<char>,
     told_table: bool,
@@ -351,6 +362,7 @@ impl App {
                 viewed.unwrap_or_else(|| "the pane".to_owned())
             ));
         }
+        self.recheck_doing();
         self.keep_selection_visible();
     }
 
@@ -389,6 +401,9 @@ impl App {
             .is_none_or(|at| now.duration_since(at) >= GUARD);
         self.last_key = Some(now);
         let k = K::of(key);
+        if self.doing.is_some() {
+            return self.doing_key(key, now);
+        }
         if let Some((row, asked)) = self.closing.take() {
             return self.answer_close(row, asked, k?, now);
         }
@@ -459,6 +474,7 @@ impl App {
                 self.unfold_all();
             }
             ('f', _) if k.0 != KeyCode::Esc => self.say("f takes w d q p e u i; ff clears"),
+            ('x', _) => return self.start_action(k),
             ('o' | 'f', _) => {}
             _ => {
                 let act = keys::find(keys::BOARD, &[K(KeyCode::Char(prefix), false), k])?;
@@ -481,6 +497,7 @@ impl App {
                     | Act::Card
                     | Act::Back
                     | Act::Close
+                    | Act::Actions
             )
         {
             return None;
@@ -521,6 +538,8 @@ impl App {
             Act::Filter => self.filtering = true,
             Act::Status => self.pending = Some('f'),
             Act::Sort => self.pending = Some('o'),
+            Act::Actions if self.action_pairs().is_empty() => self.say("no action for this row"),
+            Act::Actions => self.pending = Some('x'),
             Act::Command => {
                 self.command.reset();
                 self.commanding = true;

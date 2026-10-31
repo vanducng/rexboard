@@ -377,3 +377,35 @@ pub fn answer_mode_on(text: &str) -> App {
 }
 
 pub const PERMISSION: &str = "⏺ Bash(git push origin main --force-with-lease)\n Bash command\n   git push origin main --force-with-lease\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and don't ask again for git push commands in /work/project\n   3. No, and tell Claude what to do differently\n\n Esc to cancel · Tab to amend\n";
+
+/// `rows()` with the session field on every row but seat-a, and one action from `fake`.
+pub fn with_actions() -> App {
+    let manifest = "name = \"fake\"\ncontract = 1\ncmd = [\"./adapter\"]\n[[fields]]\nname = \"session\"\ntitle = \"S\"\nhidden = true\n[[actions]]\nname = \"send\"\ntitle = \"Send message\"\nkey = \"s\"\ncmd = [\"./send\", \"--\", \"{field:session}\", \"{text}\"]\nwhen = [\"session\"]\nconfirm = \"send to {field:session} on {host}\"\n";
+    let root = tempfile::tempdir().unwrap();
+    let dir = crate::extension::tests::write(root.path(), "fake", manifest);
+    let ext = crate::extension::load(&dir).unwrap();
+    let mut app = app();
+    app.offered = vec![Offered {
+        extension: "fake".into(),
+        dir: dir.clone(),
+        settings: serde_json::Value::Null,
+        action: ext.manifest.actions[0].clone(),
+    }];
+    let rows = with_sessions(&app, "api-lead");
+    app.set_rows(rows, hosts());
+    app.selected = Some(Spot::Row("mini/seat-b".into()));
+    app
+}
+
+pub fn with_sessions(app: &App, session: &str) -> Vec<Row> {
+    app.rows
+        .iter()
+        .cloned()
+        .map(|mut row| {
+            if row.key != "local/seat-a" {
+                row.ext.insert("fake.session".into(), session.into());
+            }
+            row
+        })
+        .collect()
+}
