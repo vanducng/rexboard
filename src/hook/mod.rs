@@ -64,6 +64,8 @@ fn tell(app: &str, name: Option<&str>, event: &Value) {
     let pairs = || fields(app, status.state, status.kind, status.msg.as_deref(), None);
     if status.state == "clear" {
         send_usage(&fields(app, "clear", None, None, Some(USAGE)), true);
+        // The next session's first figures are news again.
+        crate::harness::usage::forget_sent();
     }
     let Some(pane) = pane else {
         match app {
@@ -116,29 +118,32 @@ fn tell(app: &str, name: Option<&str>, event: &Value) {
 
 /// Tells Rex what the agent's last turn used: a `usage` sub-record beside its own status, so
 /// serve on any host reads it with the row. Where it goes is where `tell` sends a status.
-pub fn report_usage(app: &str, usage: &Usage) {
+pub fn report_usage(app: &str, usage: &Usage) -> bool {
     let pairs = fields(app, "done", None, Some(&usage.to_report()), Some(USAGE));
-    send_usage(&pairs, false);
+    send_usage(&pairs, false)
 }
 
 /// The record's pairs to the agent's pane: wrapped for tmux, and kept on the tmux pane for a
 /// client that attaches later (`clear` drops what was kept), or straight to the agent's tty in a
-/// plain Rex pane. Anywhere else it goes nowhere.
-fn send_usage(pairs: &str, clear: bool) {
+/// plain Rex pane. Anywhere else it goes nowhere. Whether it reached the tty.
+fn send_usage(pairs: &str, clear: bool) -> bool {
     if let Some(pane) = seat_pane() {
         let Some(tty) = tmux(&["display-message", "-p", "-t", &pane, "#{pane_tty}"]) else {
-            return;
+            return false;
         };
-        write(&tty, &wrap(pairs));
+        let delivered = write(&tty, &wrap(pairs));
         if clear {
             tmux(&["set-option", "-p", "-u", "-t", &pane, "@rex_usage"]);
         } else {
             tmux(&["set-option", "-p", "-t", &pane, "@rex_usage", pairs]);
         }
+        delivered
     } else if env("REX_BLOCK").is_some()
         && let Some((_, tty)) = agent_tty()
     {
-        write(&tty, &osc(pairs));
+        write(&tty, &osc(pairs))
+    } else {
+        false
     }
 }
 
@@ -252,11 +257,46 @@ fn output(exes: &[&str], args: &[&str]) -> Option<String> {
     None
 }
 
-fn write(tty: &str, text: &str) {
-    // Appended, as a terminal takes it, so a second report after the first never overwrites it.
-    if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(tty) {
-        let _ = file.write_all(text.as_bytes());
+/// How long a write to a pane's tty may wait for room before it is dropped.
+const WRITE_WAIT: Duration = Duration::from_millis(250);
+
+/// Writes `text` to a pane's tty, appended as a terminal takes it, without ever blocking: a
+/// terminal nobody reads fills up, and a hook or a status line must not stall its agent on it.
+/// What does not fit within WRITE_WAIT is dropped. Whether all of it was written.
+fn write(tty: &str, text: &str) -> bool {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::OpenOptionsExt;
+    let Ok(file) = std::fs::OpenOptions::new()
+        .append(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY)
+        .open(tty)
+    else {
+        return false;
+    };
+    let deadline = Instant::now() + WRITE_WAIT;
+    let mut rest = text.as_bytes();
+    while !rest.is_empty() {
+        let n = unsafe { libc::write(file.as_raw_fd(), rest.as_ptr().cast(), rest.len()) };
+        if n > 0 {
+            rest = &rest[n as usize..];
+            continue;
+        }
+        let room = deadline.saturating_duration_since(Instant::now());
+        let full = matches!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::EAGAIN | libc::EINTR)
+        );
+        if !full || room.is_zero() {
+            return false;
+        }
+        let mut wait = libc::pollfd {
+            fd: file.as_raw_fd(),
+            events: libc::POLLOUT,
+            revents: 0,
+        };
+        unsafe { libc::poll(&raw mut wait, 1, room.as_millis().max(1) as i32) };
     }
+    true
 }
 
 /// Notes an error in REXBOARD_HOOK_LOG, for the hook and status line commands that never fail.

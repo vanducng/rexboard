@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -161,19 +161,75 @@ pub fn keep(harness: &dyn super::Harness, payload: &serde_json::Value, turn_end:
         )
         && let Ok(paths) = crate::state::Paths::find()
     {
+        // One caller decides and publishes at a time; a contender skips, as its figures come again.
+        let Some(_lock) = PaneLock::take(&paths.dir, &key) else {
+            return;
+        };
         let now = Utc::now();
         let last = sent_by(&paths.dir, &key);
         let report =
             env("REXBOARD_NO_USAGE_REPORT").is_none() && due(last.as_ref(), &usage, now, turn_end);
-        let sent = if report {
-            Some(Sent::new(&usage, now))
-        } else {
-            last
-        };
-        let _ = write(&paths.dir, &key, harness.id(), &usage, sent.clone(), now);
-        if report {
-            crate::hook::report_usage(harness.id(), &usage);
+        // Nothing is sent that cannot be tracked: the file takes the figures first, with the old mark.
+        if write(&paths.dir, &key, harness.id(), &usage, last, now).is_err() {
+            return;
         }
+        // And the mark moves only once the report has reached the pane.
+        if report && crate::hook::report_usage(harness.id(), &usage) {
+            let sent = Some(Sent::new(&usage, now));
+            let _ = write(&paths.dir, &key, harness.id(), &usage, sent, now);
+        }
+    }
+}
+
+/// A pane's lock for deciding and publishing a report, so a burst of callers sends once.
+struct PaneLock {
+    _held: std::fs::File,
+}
+
+/// How long a caller waits for the lock before it skips its report.
+const LOCK_WAIT: Duration = Duration::from_millis(200);
+
+impl PaneLock {
+    fn take(state: &Path, key: &str) -> Option<Self> {
+        use std::os::fd::AsRawFd;
+        let dir = dir(state);
+        std::fs::create_dir_all(&dir).ok()?;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join(file_name(key).replace(".json", ".lock")))
+            .ok()?;
+        let deadline = std::time::Instant::now() + LOCK_WAIT;
+        while unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            if std::time::Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        Some(Self { _held: file })
+    }
+}
+
+/// Forgets what this pane last reported to Rex, as a session's end clears it there.
+pub fn forget_sent() {
+    let env = |name: &str| std::env::var(name).ok();
+    if let Some(key) = own_key(
+        env("TMUX").as_deref(),
+        env("TMUX_PANE").as_deref(),
+        env("REX_BLOCK").as_deref(),
+    ) && let Ok(paths) = crate::state::Paths::find()
+        && let Some(_lock) = PaneLock::take(&paths.dir, &key)
+        && let Ok(bytes) = std::fs::read(dir(&paths.dir).join(file_name(&key)))
+        && let Ok(sidecar) = serde_json::from_slice::<Sidecar>(&bytes)
+    {
+        let _ = write(
+            &paths.dir,
+            &key,
+            &sidecar.harness,
+            &sidecar.usage,
+            None,
+            Utc::now(),
+        );
     }
 }
 
@@ -245,7 +301,8 @@ pub fn due(last: Option<&Sent>, usage: &Usage, now: DateTime<Utc>, turn_end: boo
     let Some(last) = last else {
         return true;
     };
-    if last.usage == *usage {
+    // What Rex would be told, not the raw figures: a cost change below four decimals says the same.
+    if last.usage.to_report() == usage.to_report() {
         return false;
     }
     let at = DateTime::parse_from_rfc3339(&last.ts).map(|at| at.with_timezone(&Utc));
@@ -702,6 +759,34 @@ mod tests {
         assert!(
             due(Some(&broken), &b, now, false),
             "an unreadable time does not hold a report"
+        );
+    }
+
+    #[test]
+    fn a_change_below_what_the_wire_carries_is_not_a_change() {
+        let now = Utc::now();
+        let a = Usage {
+            cost_usd: Some(0.543476),
+            ..full()
+        };
+        let b = Usage {
+            cost_usd: Some(0.543480),
+            ..full()
+        };
+        assert_ne!(a, b);
+        assert_eq!(a.to_report(), b.to_report(), "four decimals");
+        let sent = Sent::new(&a, now - chrono::Duration::seconds(60));
+        assert!(
+            !due(Some(&sent), &b, now, true),
+            "even at a turn end, after a minute"
+        );
+        let c = Usage {
+            cost_usd: Some(0.5436),
+            ..full()
+        };
+        assert!(
+            due(Some(&sent), &c, now, false),
+            "a figure the wire does carry"
         );
     }
 
