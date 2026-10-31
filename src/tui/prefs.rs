@@ -59,11 +59,23 @@ pub struct Prefs {
 pub struct Tuning {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail_hidden: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub preview_lines: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub preview_every: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub tail_lines: Option<serde_json::Value>,
 }
 
@@ -105,6 +117,11 @@ impl Prefs {
             .or(self.tuning.detail_hidden.map(|hidden| !hidden))
             .unwrap_or(false)
     }
+}
+
+/// Whatever is written, an explicit `null` too: only a missing key is none.
+fn present<'de, D: Deserializer<'de>>(d: D) -> Result<Option<serde_json::Value>, D::Error> {
+    serde_json::Value::deserialize(d).map(Some)
 }
 
 /// `"on"` or `"off"`; anything else is missing.
@@ -407,5 +424,16 @@ mod tests {
         assert_eq!(back["preview_lines"], -1);
         assert_eq!(back["preview_every"], 1.5);
         assert_eq!(back["tail_lines"], "many");
+        // A key written as null is still there after a save; a missing one is not added.
+        std::fs::write(&path, r#"{"preview_lines": null, "tail_lines": null}"#).unwrap();
+        let mut prefs = load(&path);
+        prefs.preview = Some(true);
+        save(&path, &prefs).unwrap();
+        let back: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert!(back["preview_lines"].is_null() && back.get("preview_lines").is_some());
+        assert!(back.get("tail_lines").is_some());
+        assert!(back.get("preview_every").is_none(), "missing stays missing");
+        assert_eq!(prefs.tuning.lines(), 4, "null reads as the default");
     }
 }
