@@ -220,7 +220,7 @@ impl App {
         match rows.get(n.wrapping_sub(1)) {
             Some(&i) => self.selected = Some(Spot::Row(self.rows[i].key.clone())),
             None if rows.is_empty() => self.say("no rows on screen"),
-            None => self.say(format!("no row {n} · {} on screen", rows.len())),
+            None => self.say(format!("no row {n} · rows 1-{} on screen", rows.len())),
         }
     }
 
@@ -539,7 +539,7 @@ mod tests {
         );
         key_at(&mut app, '1', t);
         key_at(&mut app, '9', t);
-        assert_eq!(app.toast(), Some("no row 19 · 12 on screen"));
+        assert_eq!(app.toast(), Some("no row 19 · rows 1-12 on screen"));
         assert_eq!(selected(&app), "local/r1", "unchanged");
     }
 
@@ -577,7 +577,7 @@ mod tests {
             "3 is the third row the filter leaves"
         );
         key_at(&mut app, '4', t);
-        assert_eq!(app.toast(), Some("no row 4 · 3 on screen"));
+        assert_eq!(app.toast(), Some("no row 4 · rows 1-3 on screen"));
     }
 
     #[test]

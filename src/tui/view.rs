@@ -2436,7 +2436,7 @@ mod extension_tests {
         app.widths = std::collections::BTreeMap::from([
             ("host".to_owned(), 12.into()),
             ("session".to_owned(), 20.into()),
-            ("window".to_owned(), 20.into()),
+            ("window".to_owned(), 21.into()),
             ("block".to_owned(), 18.into()),
             ("msg".to_owned(), 60.into()),
             ("nonsense".to_owned(), 3.into()),
@@ -2445,7 +2445,7 @@ mod extension_tests {
         for width in [140u16, 200, 250] {
             let columns = app.columns(width, usize::from(width));
             let got = [Col::Host, Col::Session, Col::Window, Col::Block].map(|c| columns.width(c));
-            assert_eq!(got, [12, 20, 20, 18], "{width}: {}", header(&app, width));
+            assert_eq!(got, [12, 20, 21, 18], "{width}: {}", header(&app, width));
             let msg = columns.width(Col::Msg);
             let others: usize = columns.cols.iter().map(|(_, w)| *w).sum::<usize>() - msg;
             assert_eq!(
