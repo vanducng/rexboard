@@ -2064,7 +2064,12 @@ mod tests {
         failing.peeked("mini/seat-b", Err("rex timed out".into()));
         screens.push(("full failing 80", failing, 80, 10));
         let mut text = String::new();
-        for (name, app, width, height) in &screens {
+        for (name, app, width, height) in &mut screens {
+            // A toast lasts 3 s from its `say`, and under load the screens built and drawn before
+            // this one can take that long. An instant in the future never expires.
+            if let Some((_, at)) = app.toast.as_mut() {
+                *at = Instant::now() + Duration::from_secs(3600);
+            }
             text.push_str(&format!("== {name}\n{}", styled_dump(app, *width, *height)));
         }
         // The clock and a capture time show in the local zone, which differs between machines.
