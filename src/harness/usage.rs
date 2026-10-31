@@ -154,82 +154,147 @@ pub fn named(name: &str) -> crate::error::Result<&'static dyn super::Harness> {
 pub fn keep(harness: &dyn super::Harness, payload: &serde_json::Value, turn_end: bool) {
     let env = |name: &str| std::env::var(name).ok();
     if let Some(usage) = harness.usage(payload)
-        && let Some(key) = own_key(
-            env("TMUX").as_deref(),
-            env("TMUX_PANE").as_deref(),
-            env("REX_BLOCK").as_deref(),
-        )
-        && let Ok(paths) = crate::state::Paths::find()
+        && let Some((paths, key)) = own_pane()
     {
         // One caller decides and publishes at a time; a contender skips, as its figures come again.
-        let Some(_lock) = PaneLock::take(&paths.dir, &key) else {
+        let Some(_lock) = PaneLock::take(&paths.dir, &key, LOCK_WAIT) else {
             return;
         };
         let now = Utc::now();
-        let last = sent_by(&paths.dir, &key);
+        // What was sent before the pane's last clear is not news about this session.
+        let last =
+            sent_by(&paths.dir, &key).filter(|sent| !cleared_since(&paths.dir, &key, &sent.ts));
         let report =
             env("REXBOARD_NO_USAGE_REPORT").is_none() && due(last.as_ref(), &usage, now, turn_end);
         // Nothing is sent that cannot be tracked: the file takes the figures first, with the old mark.
         if write(&paths.dir, &key, harness.id(), &usage, last, now).is_err() {
             return;
         }
-        // And the mark moves only once the report has reached the pane.
-        if report && crate::hook::report_usage(harness.id(), &usage) {
-            let sent = Some(Sent::new(&usage, now));
-            let _ = write(&paths.dir, &key, harness.id(), &usage, sent, now);
+        if !report || !crate::hook::report_usage(harness.id(), &usage) {
+            return;
+        }
+        // A session that ended while this was being delivered cleared Rex before it landed: clear
+        // it again, and keep no mark for it.
+        if cleared_since(&paths.dir, &key, &stamped(now)) {
+            crate::hook::clear_usage(harness.id());
+        } else {
+            let _ = write(
+                &paths.dir,
+                &key,
+                harness.id(),
+                &usage,
+                Some(Sent::new(&usage, now)),
+                now,
+            );
         }
     }
 }
 
-/// A pane's lock for deciding and publishing a report, so a burst of callers sends once.
+/// A time as the files write it.
+fn stamped(at: DateTime<Utc>) -> String {
+    at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+/// The pane this process runs in and where its state lives.
+fn own_pane() -> Option<(crate::state::Paths, String)> {
+    let env = |name: &str| std::env::var(name).ok();
+    let key = own_key(
+        env("TMUX").as_deref(),
+        env("TMUX_PANE").as_deref(),
+        env("REX_BLOCK").as_deref(),
+    )?;
+    Some((crate::state::Paths::find().ok()?, key))
+}
+
+/// A session's end: Rex is told to drop the record (`send`), and what was reported is forgotten.
+/// The forgetting is a stamp beside the pane's file, written first, that every report checks, so
+/// it holds even when a report is being delivered and the lock is not to be had: that report sees
+/// the stamp after it lands and clears again. With the lock, the clear goes out in order after
+/// any report in flight.
+pub fn clear_report(send: impl FnOnce()) {
+    let Some((paths, key)) = own_pane() else {
+        return send();
+    };
+    let at = stamped(Utc::now());
+    let _ = std::fs::create_dir_all(dir(&paths.dir))
+        .and_then(|()| std::fs::write(stamp_path(&paths.dir, &key), at));
+    let _lock = PaneLock::take(&paths.dir, &key, CLEAR_WAIT);
+    send();
+}
+
+fn stamp_path(state: &Path, key: &str) -> PathBuf {
+    dir(state).join(file_name(key).replace(".json", ".cleared"))
+}
+
+/// Whether the pane's session ended after `at` (a time as the file writes them).
+fn cleared_since(state: &Path, key: &str, at: &str) -> bool {
+    let time = |text: &str| DateTime::parse_from_rfc3339(text.trim()).ok();
+    std::fs::read_to_string(stamp_path(state, key))
+        .ok()
+        .and_then(|stamp| Some(time(&stamp)? > time(at)?))
+        .unwrap_or(false)
+}
+
+/// A pane's lock for deciding and publishing a report, so a burst of callers sends once. A
+/// lock file belongs to its pane's file and outlives it only until it is old.
 struct PaneLock {
     _held: std::fs::File,
 }
 
-/// How long a caller waits for the lock before it skips its report.
+/// How long a caller waits for the lock before it skips its report, and how long a session's end
+/// waits to put its clear after one.
 const LOCK_WAIT: Duration = Duration::from_millis(200);
+const CLEAR_WAIT: Duration = Duration::from_millis(1000);
 
 impl PaneLock {
-    fn take(state: &Path, key: &str) -> Option<Self> {
-        use std::os::fd::AsRawFd;
-        let dir = dir(state);
-        std::fs::create_dir_all(&dir).ok()?;
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(dir.join(file_name(key).replace(".json", ".lock")))
-            .ok()?;
-        let deadline = std::time::Instant::now() + LOCK_WAIT;
-        while unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+    fn take(state: &Path, key: &str, wait: Duration) -> Option<Self> {
+        let path = lock_path(state, key);
+        std::fs::create_dir_all(path.parent()?).ok()?;
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .ok()?;
+            if flock(&file) && same_file(&file, &path) {
+                return Some(Self { _held: file });
+            }
+            // Either held by another, or removed while this waited and so not the lock any more.
+            drop(file);
             if std::time::Instant::now() >= deadline {
                 return None;
             }
             std::thread::sleep(Duration::from_millis(5));
         }
-        Some(Self { _held: file })
+    }
+
+    /// Removes a lock file nobody holds, holding it while it goes so nobody takes the one being
+    /// removed.
+    fn remove(path: &Path) {
+        if let Ok(file) = std::fs::OpenOptions::new().append(true).open(path)
+            && flock(&file)
+        {
+            let _ = std::fs::remove_file(path);
+        }
     }
 }
 
-/// Forgets what this pane last reported to Rex, as a session's end clears it there.
-pub fn forget_sent() {
-    let env = |name: &str| std::env::var(name).ok();
-    if let Some(key) = own_key(
-        env("TMUX").as_deref(),
-        env("TMUX_PANE").as_deref(),
-        env("REX_BLOCK").as_deref(),
-    ) && let Ok(paths) = crate::state::Paths::find()
-        && let Some(_lock) = PaneLock::take(&paths.dir, &key)
-        && let Ok(bytes) = std::fs::read(dir(&paths.dir).join(file_name(&key)))
-        && let Ok(sidecar) = serde_json::from_slice::<Sidecar>(&bytes)
-    {
-        let _ = write(
-            &paths.dir,
-            &key,
-            &sidecar.harness,
-            &sidecar.usage,
-            None,
-            Utc::now(),
-        );
+fn lock_path(state: &Path, key: &str) -> PathBuf {
+    dir(state).join(file_name(key).replace(".json", ".lock"))
+}
+
+fn flock(file: &std::fs::File) -> bool {
+    use std::os::fd::AsRawFd;
+    unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) == 0 }
+}
+
+/// Whether `path` still names the file that was opened.
+fn same_file(file: &std::fs::File, path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (file.metadata(), std::fs::metadata(path)) {
+        (Ok(a), Ok(b)) => (a.dev(), a.ino()) == (b.dev(), b.ino()),
+        _ => false,
     }
 }
 
@@ -289,7 +354,7 @@ pub struct Sent {
 impl Sent {
     pub fn new(usage: &Usage, now: DateTime<Utc>) -> Self {
         Self {
-            ts: now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            ts: stamped(now),
             usage: usage.clone(),
         }
     }
@@ -380,7 +445,7 @@ pub fn write(
     std::fs::create_dir_all(&dir)?;
     let sidecar = Sidecar {
         key: key.to_owned(),
-        ts: now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        ts: stamped(now),
         harness: harness.to_owned(),
         usage: usage.clone(),
         sent,
@@ -428,6 +493,22 @@ impl Files {
                 continue;
             };
             let json = path.extension().is_some_and(|ext| ext == "json");
+            // A lock and a stamp belong to their pane's file: they go once it is gone and they are
+            // old, and the lock only when nobody holds it.
+            let beside = path
+                .extension()
+                .is_some_and(|ext| ext == "lock" || ext == "cleared");
+            if beside {
+                let old = now.signed_duration_since(DateTime::<Utc>::from(modified)) > ORPHAN_AFTER;
+                if live.is_some() && old && !path.with_extension("json").exists() {
+                    if path.extension().is_some_and(|ext| ext == "lock") {
+                        PaneLock::remove(&path);
+                    } else {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                }
+                continue;
+            }
             let held = match self.seen.remove(&path) {
                 Some((at, held)) if at == modified => held,
                 _ if json => read_one(&path),
@@ -788,6 +869,112 @@ mod tests {
             due(Some(&sent), &c, now, false),
             "a figure the wire does carry"
         );
+    }
+
+    fn age(path: &Path, by: chrono::Duration) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(SystemTime::from(Utc::now() - by))
+            .unwrap();
+    }
+
+    #[test]
+    fn a_live_panes_lock_is_never_aged_out_from_under_its_holder() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = Utc::now();
+        write(dir.path(), "block:live", "claude-code", &full(), None, now).unwrap();
+        let held = PaneLock::take(dir.path(), "block:live", Duration::from_millis(50)).unwrap();
+        let lock = lock_path(dir.path(), "block:live");
+        age(&lock, ORPHAN_AFTER * 3);
+        let live = BTreeSet::from(["block:live".to_owned()]);
+        let mut files = Files::default();
+        files.read(dir.path(), Some(&live), now);
+        assert!(
+            lock.exists(),
+            "the pane's file is there: its lock stays, held or not"
+        );
+        assert!(
+            PaneLock::take(dir.path(), "block:live", Duration::from_millis(30)).is_none(),
+            "and is still the one lock"
+        );
+        // The pane's file goes with its pane, but a held lock is not taken from its holder.
+        std::fs::remove_file(dir.path().join("usage/block-live.json")).unwrap();
+        files.read(dir.path(), Some(&live), now);
+        assert!(lock.exists(), "held");
+        drop(held);
+        files.read(dir.path(), Some(&live), now);
+        assert!(
+            !lock.exists(),
+            "old, unheld and without its pane's file: gone"
+        );
+    }
+
+    #[test]
+    fn a_stamp_goes_with_its_panes_file_once_old_and_a_young_lock_stays() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = Utc::now();
+        std::fs::create_dir_all(dir.path().join("usage")).unwrap();
+        let (stamp, lock) = (
+            stamp_path(dir.path(), "block:x"),
+            lock_path(dir.path(), "block:x"),
+        );
+        std::fs::write(&stamp, "2020-01-01T00:00:00.000Z").unwrap();
+        std::fs::write(&lock, "").unwrap();
+        let live = BTreeSet::new();
+        let mut files = Files::default();
+        files.read(dir.path(), Some(&live), now);
+        assert!(
+            stamp.exists() && lock.exists(),
+            "young: the pane may not be on the board yet"
+        );
+        age(&stamp, ORPHAN_AFTER * 2);
+        files.read(dir.path(), None, now);
+        assert!(
+            stamp.exists(),
+            "before the first snapshot nothing is removed"
+        );
+        files.read(dir.path(), Some(&live), now);
+        assert!(!stamp.exists() && lock.exists());
+    }
+
+    #[test]
+    fn a_caller_waiting_on_a_lock_that_is_removed_takes_the_new_one_not_the_old() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = PaneLock::take(dir.path(), "block:x", Duration::from_millis(50)).unwrap();
+        let waiter = std::thread::scope(|scope| {
+            let waiter =
+                scope.spawn(|| PaneLock::take(dir.path(), "block:x", Duration::from_secs(3)));
+            std::thread::sleep(Duration::from_millis(100));
+            std::fs::remove_file(lock_path(dir.path(), "block:x")).unwrap();
+            drop(first);
+            waiter.join().unwrap()
+        });
+        assert!(
+            waiter.is_some(),
+            "it retried onto the file that is there now"
+        );
+        assert!(
+            PaneLock::take(dir.path(), "block:x", Duration::from_millis(30)).is_none(),
+            "so a third caller finds that one held, not a lock on the removed file"
+        );
+    }
+
+    #[test]
+    fn a_clear_stamp_makes_what_was_sent_before_it_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let before = "2026-01-01T00:00:00.000Z";
+        let after = "2026-01-01T00:00:05.000Z";
+        assert!(!cleared_since(dir.path(), "block:x", before), "no stamp");
+        std::fs::create_dir_all(dir.path().join("usage")).unwrap();
+        std::fs::write(stamp_path(dir.path(), "block:x"), after).unwrap();
+        assert!(cleared_since(dir.path(), "block:x", before));
+        assert!(
+            !cleared_since(dir.path(), "block:x", after),
+            "not after the clear"
+        );
+        assert!(!cleared_since(dir.path(), "block:other", before));
     }
 
     #[test]

@@ -63,9 +63,7 @@ fn tell(app: &str, name: Option<&str>, event: &Value) {
     };
     let pairs = || fields(app, status.state, status.kind, status.msg.as_deref(), None);
     if status.state == "clear" {
-        send_usage(&fields(app, "clear", None, None, Some(USAGE)), true);
-        // The next session's first figures are news again.
-        crate::harness::usage::forget_sent();
+        crate::harness::usage::clear_report(|| clear_usage(app));
     }
     let Some(pane) = pane else {
         match app {
@@ -121,6 +119,11 @@ fn tell(app: &str, name: Option<&str>, event: &Value) {
 pub fn report_usage(app: &str, usage: &Usage) -> bool {
     let pairs = fields(app, "done", None, Some(&usage.to_report()), Some(USAGE));
     send_usage(&pairs, false)
+}
+
+/// Tells Rex to drop the pane's usage record.
+pub fn clear_usage(app: &str) {
+    send_usage(&fields(app, "clear", None, None, Some(USAGE)), true);
 }
 
 /// The record's pairs to the agent's pane: wrapped for tmux, and kept on the tmux pane for a

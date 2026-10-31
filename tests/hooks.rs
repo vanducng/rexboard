@@ -81,7 +81,7 @@ fn prepare_fake_tmux(
         &tmux,
         "#!/bin/sh\n\
          case \"$1\" in\n\
-         display-message) echo \"$FAKE_TMUX_TTY\" ;;\n\
+         display-message) [ -z \"${FAKE_TMUX_SLEEP-}\" ] || sleep \"$FAKE_TMUX_SLEEP\"; echo \"$FAKE_TMUX_TTY\" ;;\n\
          list-panes) printf '%s' \"${FAKE_TMUX_LIST-}\" ;;\n\
          *) [ -z \"${FAKE_TMUX_CALLS-}\" ] || echo \"$@\" >> \"$FAKE_TMUX_CALLS\" ;;\n\
          esac\n",
@@ -808,6 +808,67 @@ fn a_figure_that_did_not_reach_the_pane_is_reported_again_and_session_end_makes_
         (&sent[1], &sent[2]["c"]),
         (&json!({ "state": "clear" }), &json!(7))
     );
+}
+
+#[test]
+fn a_session_end_that_cannot_get_the_lock_still_leaves_rex_cleared_and_the_mark_unset() {
+    let home = tempfile::tempdir().unwrap();
+    let tty = home.path().join("tty");
+    fake_tmux(home.path());
+    let command = |slow: Option<&str>| {
+        let mut cmd = rexboard(home.path());
+        cmd.env(
+            "PATH",
+            format!("{}:/usr/bin:/bin", fake_tmux_dir().display()),
+        )
+        .env("TMUX", "/tmp/tmux-501/seats,1234,0")
+        .env("TMUX_PANE", "%3");
+        if let Some(seconds) = slow {
+            cmd.env("FAKE_TMUX_SLEEP", seconds);
+        }
+        cmd
+    };
+    std::thread::scope(|scope| {
+        // A report on its way: tmux takes 1.5 s to name the tty, so it holds the pane's lock.
+        scope.spawn(|| {
+            command(Some("1.5"))
+                .args(["usage", "claude"])
+                .write_stdin(status_line(7))
+                .assert()
+                .success();
+        });
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        // The session ends meanwhile. It waits for the lock a second and then clears anyway.
+        command(None)
+            .args(["hook", "claude", "SessionEnd"])
+            .write_stdin("{}")
+            .assert()
+            .success();
+    });
+    // The report landed after the clear; it cleared Rex again, and no mark was kept for it.
+    let sent = reported(&tty);
+    assert_eq!(sent.last(), Some(&json!({ "state": "clear" })), "{sent:?}");
+    assert!(
+        sent.iter().any(|s| s["c"] == 7),
+        "the late report did land first: {sent:?}"
+    );
+    let kept: Value =
+        serde_json::from_slice(&std::fs::read(usage_file(home.path())).unwrap()).unwrap();
+    assert!(kept["sent"].is_null(), "{kept}");
+    let calls = std::fs::read_to_string(home.path().join("calls")).unwrap();
+    assert!(
+        calls
+            .trim_end()
+            .lines()
+            .rev()
+            .find(|l| l.contains("@rex_usage"))
+            .unwrap()
+            .contains("-u"),
+        "the pane keeps nothing to replay: {calls}"
+    );
+    // The next session's same figures are news.
+    in_tmux(home.path(), &["usage", "claude"], status_line(7));
+    assert_eq!(reported(&tty).last().map(|s| &s["c"]), Some(&json!(7)));
 }
 
 #[test]
