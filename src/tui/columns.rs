@@ -640,6 +640,13 @@ impl Columns {
         self.cols[msg].1 = self.cols[msg].1 + had - width;
         if width == 0 {
             self.cols.remove(at);
+            // The gap before HOST belongs to the usage column that is last now.
+            if self.spaced == Some(id) {
+                self.spaced = USAGE.into_iter().rev().find(|u| self.has(*u));
+                if let Some(last) = self.spaced {
+                    self.resize(last, self.width(last) + 1);
+                }
+            }
         } else {
             self.cols[at].1 = width;
         }
@@ -673,17 +680,7 @@ impl Columns {
         let (group, need, each) = if split.iter().all(|id| self.has(*id)) {
             (split.to_vec(), longest.parts.to_vec(), PART_MIN)
         } else {
-            (
-                vec![Col::Where],
-                // With usage columns showing, WHERE stays whole at 140 and takes only what its
-                // labels need; the rest is MSG's, not a hole between them.
-                vec![if USAGE.iter().any(|id| self.has(*id)) {
-                    self.width(Col::Where).min(longest.place)
-                } else {
-                    self.width(Col::Where)
-                }],
-                WHERE_MIN,
-            )
+            (vec![Col::Where], vec![self.width(Col::Where)], WHERE_MIN)
         };
         let (mut free, mut wanted) = (Vec::new(), Vec::new());
         for (i, id) in group.iter().enumerate() {
@@ -718,6 +715,11 @@ impl Columns {
                 _ => break total.saturating_sub(spent),
             }
         };
+        // With usage columns left, WHERE stays whole at 140 and takes only what its labels need;
+        // the rest is MSG's, not a hole between them. With none left, it is as it always was.
+        if group == [Col::Where] && USAGE.iter().any(|id| self.has(*id)) {
+            wanted[0] = wanted[0].min(longest.place);
+        }
         let held: usize = free.iter().map(|id| self.width(*id)).sum();
         wants.extend(
             free.iter()

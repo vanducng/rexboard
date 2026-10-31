@@ -964,6 +964,61 @@ mod tests {
         }
     }
 
+    fn with_usage(app: &mut App, msg: &str) {
+        let mut rows = app.rows.clone();
+        for row in &mut rows {
+            row.pane.msg = Some(msg.to_owned());
+            row.usage = Some(crate::harness::usage::Usage {
+                model: Some("Opus 5.5".into()),
+                ctx_pct: Some(3),
+                tok: Some(1000),
+                cost_usd: Some(1.5),
+                quota_5h: Some(5),
+                ..Default::default()
+            });
+        }
+        app.set_rows(rows, hosts());
+    }
+
+    #[test]
+    fn the_gap_and_the_where_cap_follow_the_usage_columns_that_fit_leaves() {
+        use crate::tui::columns::USAGE;
+        // A long MSG and a fixed HOST: fit drops usage columns from the right, and the two cells
+        // before HOST go to the last one left.
+        let mut app = app();
+        app.columns = vec!["tok".into(), "cost".into(), "5h".into()];
+        app.widths = std::collections::BTreeMap::from([("host".to_owned(), 8.into())]);
+        with_usage(&mut app, &"long message ".repeat(20));
+        let columns = app.columns(140, 140);
+        let left: Vec<Col> = USAGE.into_iter().filter(|c| columns.has(*c)).collect();
+        assert!(
+            !left.is_empty() && left.len() < USAGE.len(),
+            "some, not all, usage columns are dropped: {left:?}"
+        );
+        let text = render(&app, 140, 30);
+        let header = text.lines().find(|l| l.contains("HARNESS")).unwrap();
+        let name = crate::tui::columns::column_of(*left.last().unwrap()).header;
+        assert_eq!(
+            header.find("HOST").unwrap() - (header.find(name).unwrap() + name.len()),
+            2,
+            "two cells after the last usage column left, {name}: {header}"
+        );
+        // Every usage column dropped: WHERE is not capped to its labels, and MSG is not given the
+        // rest, as on a board that never had usage columns to keep.
+        let mut all = self::app();
+        all.columns = vec!["tok".into(), "cost".into(), "5h".into()];
+        all.widths = std::collections::BTreeMap::from([("host".to_owned(), 21.into())]);
+        with_usage(&mut all, &"long message ".repeat(20));
+        let with = all.columns(140, 140);
+        assert!(!USAGE.iter().any(|c| with.has(*c)), "all usage dropped");
+        let place = ["api", "main", "seat-b"].join(" › ").width() + 3;
+        assert!(
+            with.width(Col::Where) > place + 2,
+            "WHERE keeps its share, not its labels' {place}: {}",
+            with.width(Col::Where)
+        );
+    }
+
     #[test]
     fn below_160_usage_keeps_where_whole_so_msg_keeps_its_room_and_from_160_model_grows() {
         use crate::tui::columns::UsageShown;
