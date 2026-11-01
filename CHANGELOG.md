@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/vanducng/rexboard/compare/v0.22.0...v0.23.0) (2026-11-01)
+
+
+### Features
+
+* **tui:** cap MSG's share so PROJECT and RIG fit whole on a wide board ([#135](https://github.com/vanducng/rexboard/issues/135)) ([1b18614](https://github.com/vanducng/rexboard/commit/1b1861424eda91e0f087598088dd1dc19ed75020))
+
 ## [0.22.0](https://github.com/vanducng/rexboard/compare/v0.21.0...v0.22.0) (2026-11-01)
 
 
