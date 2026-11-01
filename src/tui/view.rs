@@ -877,6 +877,35 @@ mod tests {
     }
 
     #[test]
+    fn when_every_usage_column_drops_the_floor_is_the_usual_one_again() {
+        let msg = "Opened the pull request and queued the review";
+        let list = |mut app: App| {
+            app.widths = std::collections::BTreeMap::from([("host".to_owned(), 34.into())]);
+            let columns = app.columns(140, 140);
+            columns
+                .cols
+                .iter()
+                .map(|(c, w)| (c.header, *w))
+                .collect::<Vec<_>>()
+        };
+        let with = list(with_effort_msg(msg));
+        assert!(
+            !with
+                .iter()
+                .any(|(h, _)| ["MODEL", "EFFORT", "CTX"].contains(h)),
+            "{with:?}"
+        );
+        // The usage floor of 34 went with the columns: WHERE keeps what it needs (20) and MSG is
+        // back at the usual floor (its longest message and a gap), not left at 34 with WHERE 32.
+        let width = |name: &str| with.iter().find(|(h, _)| *h == name).unwrap().1;
+        assert_eq!(
+            (width("WHERE"), width("MSG")),
+            (20, msg.len() + 1),
+            "{with:?}"
+        );
+    }
+
+    #[test]
     fn when_room_runs_out_effort_goes_before_ctx_and_model() {
         let mut app = with_effort_msg("Opened the pull request and queued the review");
         app.widths = std::collections::BTreeMap::from([("host".to_owned(), 20.into())]);
@@ -1164,8 +1193,8 @@ mod tests {
         // rest, as on a board that never had usage columns to keep.
         let mut all = self::app();
         all.columns = vec!["tok".into(), "cost".into(), "5h".into()];
-        all.widths = std::collections::BTreeMap::from([("host".to_owned(), 36.into())]);
-        with_usage(&mut all, &"long message ".repeat(20));
+        all.widths = std::collections::BTreeMap::from([("host".to_owned(), 35.into())]);
+        with_usage(&mut all, &"m".repeat(39));
         let with = all.columns(140, 140);
         assert!(!USAGE.iter().any(|c| with.has(*c)), "all usage dropped");
         let place = ["api", "main", "seat-b"].join(" › ").width() + 3;

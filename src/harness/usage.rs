@@ -882,6 +882,71 @@ mod tests {
         serde_json::json!({ "hook_event_name": "Stop", "model": "m", "transcript_path": path })
     }
 
+    const COUNT: &str = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":5,"total_tokens":5},"model_context_window":475000}}}"#;
+
+    fn context(effort: &str) -> String {
+        format!(r#"{{"type":"turn_context","payload":{{"model":"m"{effort}}}}}"#)
+    }
+
+    fn stop_for(dir: &Path, lines: &[String]) -> serde_json::Value {
+        let path = dir.join("rollout.jsonl");
+        std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+        serde_json::json!({ "hook_event_name": "Stop", "model": "m", "transcript_path": path })
+    }
+
+    #[test]
+    fn codex_stops_at_the_latest_turn_context_whether_it_has_an_effort_or_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let older = context(r#","effort":"high""#);
+        for (what, latest) in [
+            ("null", context(r#","effort":null"#)),
+            ("missing", context("")),
+            ("empty", context(r#","effort":"""#)),
+            ("blank", context(r#","effort":"  ""#)),
+        ] {
+            let stop = stop_for(dir.path(), &[older.clone(), latest, COUNT.to_owned()]);
+            assert_eq!(
+                parse("codex", &stop).and_then(|u| u.effort),
+                None,
+                "{what}: not the older high"
+            );
+        }
+        let stop = stop_for(
+            dir.path(),
+            &[context(r#","effort":"low""#), COUNT.to_owned()],
+        );
+        assert_eq!(
+            parse("codex", &stop).and_then(|u| u.effort).as_deref(),
+            Some("low")
+        );
+    }
+
+    #[test]
+    fn codex_keeps_a_token_count_that_starts_exactly_on_the_tail_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        // The count's line starts at the byte the last TAIL bytes start at, and the rest of the
+        // file, up to the end, is lines with no token_count in them.
+        let tail = super::super::codex::TAIL as usize;
+        let rest = tail - COUNT.len() - 1;
+        let mut lines = vec![context(r#","effort":"high""#), "x".repeat(300)];
+        lines.push(COUNT.to_owned());
+        lines.push("y".repeat(rest - 1));
+        let stop = stop_for(dir.path(), &lines);
+        let len = std::fs::metadata(dir.path().join("rollout.jsonl"))
+            .unwrap()
+            .len() as usize;
+        let text = std::fs::read_to_string(dir.path().join("rollout.jsonl")).unwrap();
+        assert_eq!(
+            text.find(COUNT).unwrap(),
+            len - tail,
+            "the count starts on the boundary"
+        );
+        let usage = parse("codex", &stop).unwrap();
+        assert_eq!(usage.tok, Some(5), "TOK is read");
+        assert_eq!(usage.ctx_window, Some(475_000));
+        assert_eq!(usage.effort.as_deref(), Some("high"), "and the effort too");
+    }
+
     #[test]
     fn codex_reads_effort_back_from_its_last_turn_context_up_to_2_mib_and_not_past() {
         let dir = tempfile::tempdir().unwrap();

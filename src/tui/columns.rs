@@ -703,12 +703,11 @@ impl Columns {
     pub fn fit(&mut self, board: u16, longest: &Longest, widths: &BTreeMap<String, Value>) {
         let set = |name: &str| width_set(widths, name);
         let total: usize = self.cols.iter().map(|(_, w)| *w).sum();
-        let normal = match set("msg") {
+        // MSG's floor, by whether any usage column is still showing: it drops with them.
+        let normal_for = |usage: bool| match set("msg") {
             Some(_) => 0,
             None if board < FLOOR_FROM => 0,
-            None if board < USAGE_WIDE && USAGE.iter().any(|id| self.has(*id)) => {
-                USAGE_MSG_FLOOR.min(longest.msg + 1)
-            }
+            None if board < USAGE_WIDE && usage => USAGE_MSG_FLOOR.min(longest.msg + 1),
             None => MSG_FLOOR.max(total * MSG_SHARE / 100).min(longest.msg + 1),
         };
         // Every column that is planned here, HOST and the location columns, gets its width in one
@@ -771,7 +770,8 @@ impl Columns {
                 id != Col::Effort,
             )
         };
-        let (limit, floor) = loop {
+        let (limit, floor, normal) = loop {
+            let normal = normal_for(USAGE.iter().any(|id| self.has(*id)));
             // A field's width in tui.json is yours, so while it is kept MSG's floor gives up what
             // it has past FIELD_WIDTH, the cells every field is planned with; a field that goes
             // takes its concession with it.
@@ -796,7 +796,7 @@ impl Columns {
                 .filter(|id| matches!(id, Col::Field(_)) || is_usage(*id));
             match gone {
                 Some(id) if spent + each * free.len() > total => self.resize(id, 0),
-                _ => break (total.saturating_sub(spent), floor),
+                _ => break (total.saturating_sub(spent), floor, normal),
             }
         };
         // With usage columns left, WHERE stays whole at 140 and takes only what its labels need;

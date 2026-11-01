@@ -6,7 +6,7 @@ use super::usage::{Usage, effort, percent};
 use crate::tui::icons::{Icon, icon};
 
 /// Only the end of a rollout is read: they grow to hundreds of megabytes.
-const TAIL: u64 = 64 * 1024;
+pub(super) const TAIL: u64 = 64 * 1024;
 /// The effort is in the last `turn_context`, written when a turn starts, so after a long turn it
 /// is further back than the tail: read back this far, in TAIL steps, and say nothing past it.
 const EFFORT_BACK: u64 = 2 * 1024 * 1024;
@@ -93,15 +93,27 @@ fn rollout(path: &Path) -> (Option<serde_json::Value>, Option<String>) {
         return (None, None);
     };
     let len = file.metadata().map_or(0, |m| m.len());
-    let (mut count, mut found) = (None, None);
+    let (mut count, mut found, mut context) = (None, None, false);
     let (mut end, mut carry) = (len, Vec::new());
-    while end > 0 && len - end < EFFORT_BACK && found.is_none() {
+    while end > 0 && len - end < EFFORT_BACK && !context {
         let start = end.saturating_sub(TAIL);
         let mut chunk = vec![0; (end - start) as usize];
         if file.seek(SeekFrom::Start(start)).is_err() || file.read_exact(&mut chunk).is_err() {
             break;
         }
         chunk.extend(&carry);
+        // The last token_count is the one in the last TAIL bytes, a line that starts at the
+        // chunk's first byte included; a cut one does not parse and is skipped.
+        if end == len {
+            count = String::from_utf8_lossy(&chunk)
+                .lines()
+                .rev()
+                .filter(|line| line.contains("\"token_count\""))
+                .find_map(|line| {
+                    let event: serde_json::Value = serde_json::from_str(line).ok()?;
+                    (event["payload"]["type"] == "token_count").then_some(event)
+                });
+        }
         // A line the chunk's start cuts is finished by the next, earlier chunk.
         let first_line = chunk
             .iter()
@@ -111,14 +123,14 @@ fn rollout(path: &Path) -> (Option<serde_json::Value>, Option<String>) {
         carry = chunk;
         carry.pop_if(|b| *b == b'\n');
         for line in String::from_utf8_lossy(&whole).lines().rev() {
-            let event = || serde_json::from_str::<serde_json::Value>(line).ok();
-            if count.is_none() && end == len && line.contains("\"token_count\"") {
-                count = event().filter(|e| e["payload"]["type"] == "token_count");
-            }
-            if found.is_none() && line.contains("\"turn_context\"") {
-                found = event()
-                    .filter(|e| e["type"] == "turn_context")
-                    .and_then(|e| e["payload"]["effort"].as_str().and_then(effort));
+            if !context && line.contains("\"turn_context\"") {
+                let event = serde_json::from_str::<serde_json::Value>(line).ok();
+                // The latest turn_context speaks for the session, whether it has an effort or
+                // not: an older one's is never what it is running now.
+                if let Some(event) = event.filter(|e| e["type"] == "turn_context") {
+                    context = true;
+                    found = event["payload"]["effort"].as_str().and_then(effort);
+                }
             }
         }
         end = start;
