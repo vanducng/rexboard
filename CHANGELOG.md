@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/vanducng/rexboard/compare/v0.20.0...v0.21.0) (2026-11-01)
+
+
+### Features
+
+* **tui:** extension columns fit their values, and a manifest or tui.json can set a field's width ([#128](https://github.com/vanducng/rexboard/issues/128)) ([eb82766](https://github.com/vanducng/rexboard/commit/eb82766f50ee4cdcc19630706527471d627b7183))
+
 ## [0.20.0](https://github.com/vanducng/rexboard/compare/v0.19.0...v0.20.0) (2026-10-31)
 
 
