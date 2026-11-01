@@ -8,7 +8,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::answer::{Answer, Step};
 use super::columns::{
-    Col, Column, Columns, LABEL_MAX, Longest, Sort, UsageShown, field_column, free_letter,
+    Col, Column, Columns, FieldFit, LABEL_MAX, Longest, Sort, UsageShown, field_column, free_letter,
 };
 use super::full::Full;
 use super::keys::{self, Act, K};

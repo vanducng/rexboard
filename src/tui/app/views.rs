@@ -200,11 +200,12 @@ impl App {
                             width_set(&self.widths, &f.name)
                                 .filter(|_| !builtin.contains(&f.name.as_str()))
                         });
-                        (
-                            Col::Field(id),
-                            widest(&|row| row.ext.get(id).cloned().unwrap_or_default()),
-                            user.or(f.width),
-                        )
+                        FieldFit {
+                            id: Col::Field(id),
+                            longest: widest(&|row| row.ext.get(id).cloned().unwrap_or_default()),
+                            fixed: user.or(f.width),
+                            yours: user.is_some(),
+                        }
                     })
                     .collect(),
             },

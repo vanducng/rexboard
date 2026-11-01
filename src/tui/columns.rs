@@ -95,7 +95,16 @@ pub struct Longest {
     /// The longest WHERE label with room for a twin's ` #N`, as drawn unsplit.
     pub place: usize,
     /// For each extension field: its longest value, and the width tui.json or its manifest fixes.
-    pub fields: Vec<(Col, usize, Option<usize>)>,
+    pub fields: Vec<FieldFit>,
+}
+
+#[derive(Debug)]
+pub struct FieldFit {
+    pub id: Col,
+    pub longest: usize,
+    pub fixed: Option<usize>,
+    /// The width is tui.json's, not the manifest's.
+    pub yours: bool,
 }
 
 /// A session, window or block label is cut to this many columns, as docs/tui.md says.
@@ -671,11 +680,18 @@ impl Columns {
     pub fn fit(&mut self, board: u16, longest: &Longest, widths: &BTreeMap<String, Value>) {
         let set = |name: &str| width_set(widths, name);
         let total: usize = self.cols.iter().map(|(_, w)| *w).sum();
-        let floor = match set("msg") {
+        let normal = match set("msg") {
             Some(_) => 0,
             None if board < FLOOR_FROM => 0,
             None => MSG_FLOOR.max(total * MSG_SHARE / 100).min(longest.msg + 1),
         };
+        // A field's width in tui.json is yours, so MSG's floor gives up what it has past
+        // FIELD_WIDTH, the cells every field is planned with.
+        let give: usize = (longest.fields.iter())
+            .filter(|f| f.yours && self.has(f.id))
+            .filter_map(|f| f.fixed?.checked_sub(FIELD_WIDTH))
+            .sum();
+        let floor = normal.saturating_sub(give);
         // Every column that is planned here, HOST and the location columns, gets its width in one
         // pass; what is fixed counts at its planned width.
         let mut wants = Vec::new();
@@ -689,11 +705,13 @@ impl Columns {
         // floor. Below FLOOR_FROM it stays FIELD_WIDTH, as MSG has no floor there.
         let mut more = Vec::new();
         for (c, _) in &self.cols {
-            if let Some((_, longest, fixed)) = longest.fields.iter().find(|(id, ..)| *id == c.id) {
+            if let Some(FieldFit { longest, fixed, .. }) =
+                longest.fields.iter().find(|f| f.id == c.id)
+            {
                 let least = c.header.width() + 2;
                 let fit = match board {
                     ..FLOOR_FROM => FIELD_WIDTH,
-                    _ => (longest + 1).clamp(least, FIELD_MAX.max(least)),
+                    _ => (longest + 2).clamp(least, FIELD_MAX.max(least)),
                 };
                 wants.push((c.id, fixed.unwrap_or(fit.min(FIELD_WIDTH))));
                 more.extend(
@@ -754,7 +772,7 @@ impl Columns {
         }
         let held: usize = free.iter().map(|id| self.width(*id)).sum();
         let parts = parts_share(&wanted, held.min(limit), each);
-        let mut spare = limit.saturating_sub(parts.iter().sum());
+        let mut spare = limit.saturating_sub(parts.iter().sum::<usize>() + normal - floor);
         for (id, extra) in more.into_iter().filter(|(id, _)| self.has(*id)) {
             let give = extra.min(spare);
             spare -= give;
