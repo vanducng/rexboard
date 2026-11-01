@@ -2582,6 +2582,154 @@ mod extension_tests {
         );
     }
 
+    /// `with_fields` (RIG and PROJECT) with the values of both taken off every row but the first.
+    fn only_values_on(keep: &[(&str, &str)]) -> App {
+        let mut app = with_fields(&[]);
+        let mut rows = app.rows.clone();
+        for row in &mut rows {
+            row.ext.clear();
+        }
+        for (field, value) in keep {
+            rows[0].ext.insert((*field).into(), (*value).into());
+        }
+        app.set_rows(rows, hosts());
+        app
+    }
+
+    fn has(app: &App, id: &'static str) -> bool {
+        app.columns(140, 140).has(Col::Field(id))
+    }
+
+    const RIG: &str = "fake.rig";
+    const PROJECT: &str = "session-prefix.project";
+
+    #[test]
+    fn a_field_column_no_filtered_row_has_a_value_for_is_not_drawn_and_msg_gets_its_cells() {
+        let both = only_values_on(&[(RIG, "api"), (PROJECT, "web")]);
+        let none = only_values_on(&[(RIG, "api")]);
+        assert!(has(&both, RIG) && has(&both, PROJECT));
+        assert!(
+            has(&none, RIG) && !has(&none, PROJECT),
+            "PROJECT has no value anywhere"
+        );
+        let header = header_row(&none, 160);
+        assert!(
+            !header.contains("PROJECT") && header.contains("RIG"),
+            "{header}"
+        );
+        assert!(
+            none.columns(160, 160).width(Col::Msg) > both.columns(160, 160).width(Col::Msg),
+            "MSG gets what the empty column had"
+        );
+        // A value on any row, a folded or a scrolled-off one included, keeps it.
+        let mut some = only_values_on(&[(RIG, "api")]);
+        let mut rows = some.rows.clone();
+        rows[3].ext.insert(PROJECT.into(), "web".into());
+        some.set_rows(rows, hosts());
+        assert!(
+            has(&some, PROJECT),
+            "a row anywhere in the filtered list is enough"
+        );
+    }
+
+    #[test]
+    fn a_column_shows_at_once_and_hides_ten_seconds_after_its_last_value_goes() {
+        let mut app = only_values_on(&[(RIG, "api"), (PROJECT, "web")]);
+        assert!(has(&app, PROJECT));
+        let mut rows = app.rows.clone();
+        rows[0].ext.remove(PROJECT);
+        app.set_rows(rows.clone(), hosts());
+        assert!(has(&app, PROJECT), "its last value just went: it stays");
+        app.age_holds(std::time::Duration::from_secs(9));
+        assert!(has(&app, PROJECT), "9 s on");
+        app.age_holds(std::time::Duration::from_secs(2));
+        assert!(!has(&app, PROJECT), "11 s on: gone");
+        rows[0].ext.insert(PROJECT.into(), "web".into());
+        app.set_rows(rows, hosts());
+        assert!(has(&app, PROJECT), "a value shows it at once");
+    }
+
+    #[test]
+    fn the_filter_decides_and_a_list_with_no_rows_hides_nothing() {
+        let mut app = only_values_on(&[(RIG, "api"), (PROJECT, "web")]);
+        let filter = |app: &mut App, text: &str| {
+            press(app, KeyCode::Char('/'));
+            for c in text.chars() {
+                press(app, KeyCode::Char(c));
+            }
+            press(app, KeyCode::Enter);
+        };
+        assert!(has(&app, RIG) && has(&app, PROJECT), "both shown first");
+        // Rows with no value only: the first row is the one with values, seat-a another.
+        assert_eq!(app.rows[0].pane.pane, "seat-b");
+        filter(&mut app, "seat-a");
+        let listed = app
+            .items()
+            .iter()
+            .filter(|i| matches!(i, Item::Row(_)))
+            .count();
+        assert_eq!(listed, 1, "only seat-a");
+        assert!(has(&app, RIG), "the hold keeps it a moment");
+        app.age_holds(std::time::Duration::from_secs(11));
+        assert!(
+            !has(&app, RIG) && !has(&app, PROJECT),
+            "a filter to rows without values frees the width"
+        );
+        // A filter that matches nothing leaves nothing to hide: the columns come back.
+        press(&mut app, KeyCode::Esc);
+        filter(&mut app, "zzzzz");
+        assert!(
+            has(&app, RIG) && has(&app, PROJECT),
+            "no rows, nothing to hide"
+        );
+    }
+
+    #[test]
+    fn a_hidden_column_still_sorts_by_its_letter_says_so_and_ignores_its_width() {
+        let mut app = only_values_on(&[(RIG, "api")]);
+        let plain = app.columns(160, 160).width(Col::Msg);
+        app.widths = BTreeMap::from([("project".to_owned(), 30.into())]);
+        assert_eq!(
+            app.columns(160, 160).width(Col::Msg),
+            plain,
+            "its width is ignored while hidden"
+        );
+        let letter = app
+            .fields
+            .iter()
+            .find(|(f, _)| f.id == PROJECT)
+            .unwrap()
+            .1
+            .unwrap();
+        crate::tui::app::testkit::sort(&mut app, letter);
+        assert_eq!(app.sort.map(|(c, _)| c), Some(Col::Field(PROJECT)));
+        assert_eq!(app.toast(), Some("sorted by project (no values)"));
+    }
+
+    #[test]
+    fn opt_in_usage_columns_hide_while_no_filtered_row_has_a_figure() {
+        let mut app = crate::tui::app::testkit::app();
+        app.columns = vec!["tok".into(), "cost".into(), "5h".into()];
+        let mut rows = app.rows.clone();
+        rows[0].usage = Some(crate::harness::usage::Usage {
+            model: Some("m".into()),
+            ctx_pct: Some(3),
+            tok: Some(900),
+            ..Default::default()
+        });
+        app.set_rows(rows, app.hosts.clone());
+        let columns = app.columns(200, 200);
+        assert!(columns.has(Col::Tok), "a figure shows it");
+        assert!(
+            !columns.has(Col::Cost) && !columns.has(Col::Quota),
+            "no cost and no 5h anywhere"
+        );
+        assert!(
+            columns.has(Col::Model) && columns.has(Col::Ctx),
+            "the built-ins stay"
+        );
+    }
+
     /// Fields `project` then `rig`, with the long values, and a message of `msg` cells.
     fn project_then_rig(msg: usize) -> App {
         let mut app = app();
@@ -3057,7 +3205,10 @@ mod extension_tests {
 
     #[test]
     fn field_columns_follow_host_from_120_titled_from_the_manifest() {
-        let app = with_fields(&[field("third.owner", "OWNER")]);
+        let mut app = with_fields(&[field("third.owner", "OWNER")]);
+        let mut rows = app.rows.clone();
+        rows[0].ext.insert("third.owner".into(), "ana".into());
+        app.set_rows(rows, hosts());
         let at = |width| header_row(&app, width);
         let words = |line: String| {
             line.split_whitespace()

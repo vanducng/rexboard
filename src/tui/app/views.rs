@@ -103,6 +103,18 @@ impl App {
             Some((id, _)) if id == column.id => None,
             _ => Some((column.id, column.first)),
         };
+        // A column with no values has nothing to sort on: say so rather than do nothing, silently.
+        if let Some((Col::Field(id), _)) = self.sort.filter(|(id, _)| *id == column.id)
+            && !self
+                .rows
+                .iter()
+                .any(|row| self.matches(row) && row.ext.get(id).is_some_and(|v| !v.is_empty()))
+        {
+            self.say(format!(
+                "sorted by {} (no values)",
+                column.header.to_lowercase()
+            ));
+        }
     }
 
     /// The column a sort letter names: a built-in one, or a field's.
@@ -132,8 +144,40 @@ impl App {
             .filter(move |c| !crate::tui::columns::is_usage(c.id) || usage.contains(&c.id))
     }
 
+    /// Makes every column's last value `by` older, for the tests that wait out HIDE_AFTER.
+    #[cfg(test)]
+    pub fn age_holds(&self, by: Duration) {
+        for (_, at) in self.held.borrow_mut().iter_mut() {
+            *at -= by;
+        }
+    }
+
+    /// Whether `id` shows: some row that passes the filter, folded or off screen too, has a value
+    /// for it, or one did within HIDE_AFTER. With no row passing there is nothing to hide, so
+    /// every column shows and the empty list is explained on its own screen.
+    fn has_values(&self, id: Col, value: impl Fn(&Row) -> bool) -> bool {
+        let mut rows = self.rows.iter().filter(|row| self.matches(row)).peekable();
+        let now = Instant::now();
+        let mut held = self.held.borrow_mut();
+        if rows.peek().is_none() || rows.any(&value) {
+            held.retain(|(held, _)| *held != id);
+            held.push((id, now));
+            return true;
+        }
+        held.iter()
+            .any(|(held, at)| *held == id && now.duration_since(*at) < HIDE_AFTER)
+    }
+
+    /// Whether some filtered row has a value for the field column `id`.
+    fn field_has_values(&self, id: &'static str) -> bool {
+        self.has_values(Col::Field(id), |row| {
+            row.ext.get(id).is_some_and(|v| !v.is_empty())
+        })
+    }
+
     /// The usage columns the list shows: none until some row reports what its turn used, then
-    /// MODEL and CTX, and TOK, COST and 5H when tui.json's `columns` names them.
+    /// MODEL and CTX, and TOK, COST and 5H when tui.json's `columns` names them and some filtered
+    /// row has a figure for them.
     pub fn usage_columns(&self) -> UsageShown {
         use crate::tui::columns::{USAGE, USAGE_SHOWN, opted};
         let models: Vec<&str> = self
@@ -157,6 +201,17 @@ impl App {
                         || opted(&self.columns, *c)
                         || (*c == Col::Effort && effort)
                 })
+                .filter(|c| {
+                    let figure = |row: &Row| {
+                        row.usage.as_ref().is_some_and(|u| match c {
+                            Col::Tok => u.tok.is_some(),
+                            Col::Cost => u.cost_usd.is_some(),
+                            Col::Quota => u.quota_5h.is_some(),
+                            _ => true,
+                        })
+                    };
+                    !matches!(c, Col::Tok | Col::Cost | Col::Quota) || self.has_values(*c, figure)
+                })
                 .collect(),
             model: models.iter().map(|m| m.width()).max().unwrap_or_default(),
         }
@@ -165,8 +220,10 @@ impl App {
     /// The list's columns on a board `board` wide, `list` of it for the list: a view grouped by
     /// harness or host leaves that column to its group headers, and nerd marks widen HARNESS.
     pub fn columns(&self, board: u16, list: usize) -> Columns {
-        let mut columns =
-            Columns::with_usage(board, list, &self.field_columns(), &self.usage_columns());
+        let fields: Vec<_> = (self.field_columns().into_iter())
+            .filter(|c| self.field_has_values(id_of(c)))
+            .collect();
+        let mut columns = Columns::with_usage(board, list, &fields, &self.usage_columns());
         match self.view.group_by {
             Some(Key::Harness) => columns.resize(Col::Harness, 0),
             Some(Key::Host) => columns.resize(Col::Host, 0),
