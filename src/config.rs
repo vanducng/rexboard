@@ -18,6 +18,9 @@ pub struct Config {
     pub hosts: Hosts,
     #[serde(default)]
     pub extensions: Extensions,
+    /// `[models]`: a reported model name, exactly, and what the board shows for it.
+    #[serde(default)]
+    pub models: BTreeMap<String, String>,
 }
 
 /// `[extensions]`: which discovered extensions run, where else to look, and what each is told.

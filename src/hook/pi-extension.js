@@ -86,6 +86,7 @@ export default function rexboard(pi) {
   pi.on("turn_end", async (_event, ctx) => {
     send(["usage", "pi"], {
       model: ctx?.model?.id,
+      effort: pi.getThinkingLevel?.(),
       context: ctx?.getContextUsage?.(),
       usage: sent,
       cost: spent,

@@ -23,6 +23,7 @@ pub enum Fact {
     Harness,
     Turn,
     Model,
+    Effort,
     Ctx,
     Cost,
     Quota,
@@ -44,6 +45,7 @@ impl Fact {
                     .map_or("harness", |i| i.glyph),
                 Fact::Turn => icons::TURN.glyph,
                 Fact::Model => icons::MODEL.glyph,
+                Fact::Effort => icons::EFFORT.glyph,
                 Fact::Ctx => icons::CTX.glyph,
                 Fact::Cost => icons::COST.glyph,
                 Fact::Quota => icons::QUOTA.glyph,
@@ -58,6 +60,7 @@ impl Fact {
             Fact::Harness => "harness",
             Fact::Turn => "turn",
             Fact::Model => "model",
+            Fact::Effort => "effort",
             Fact::Ctx => "ctx",
             Fact::Cost => "cost",
             Fact::Quota => "5h",
@@ -94,8 +97,11 @@ pub fn lines(app: &App, row: &Row, width: usize, board: usize) -> Vec<Line<'stat
             .filter(|_| !drawn(Col::Turn))
             .map(|s| fact(Fact::Turn, span(s))),
         usage
-            .and_then(|u| u.model.clone())
-            .map(|m| fact(Fact::Model, clean(&m))),
+            .and_then(|u| u.shown_model())
+            .map(|m| fact(Fact::Model, clean(m))),
+        usage
+            .and_then(|u| u.effort.as_deref())
+            .map(|e| fact(Fact::Effort, clean(e))),
         usage.and_then(context).map(|c| fact(Fact::Ctx, c)),
         usage
             .and_then(|u| u.cost_usd)

@@ -767,6 +767,191 @@ mod tests {
 
     use std::time::{Duration, Instant};
 
+    /// `fuller` with usage on its first two rows: a model each, an effort on the first only.
+    fn with_effort() -> App {
+        with_effort_msg("Opened the review")
+    }
+
+    fn with_effort_msg(msg: &str) -> App {
+        use crate::harness::usage::Usage;
+        let mut app = fuller();
+        let mut rows = app.rows.clone();
+        let models = [("claude-opus-5-5", Some("xhigh")), ("Opus 5.5", None)];
+        for (row, (model, effort)) in rows.iter_mut().zip(models) {
+            row.pane.msg = Some(msg.into());
+            row.usage = Some(Usage {
+                model: Some(model.into()),
+                effort: effort.map(str::to_owned),
+                ctx_pct: Some(9),
+                ..Usage::default()
+            });
+        }
+        app.set_rows(rows, app.hosts.clone());
+        app
+    }
+
+    #[test]
+    fn effort_sits_right_after_model_from_140_8_wide_and_msg_keeps_its_floor() {
+        let app = with_effort();
+        for board in [140u16, 200] {
+            let columns = app.columns(board, usize::from(board));
+            let order: Vec<Col> = columns.cols.iter().map(|(c, _)| c.id).collect();
+            let at = |id| order.iter().position(|c| *c == id).unwrap();
+            assert_eq!(
+                at(Col::Effort),
+                at(Col::Model) + 1,
+                "{board}: right after MODEL"
+            );
+            assert_eq!(at(Col::Ctx), at(Col::Effort) + 1, "{board}: CTX follows");
+            assert_eq!(
+                columns.width(Col::Effort),
+                8,
+                "{board}: 7 for `minimal` and a gap"
+            );
+            assert!(
+                columns.width(Col::Msg) >= 18,
+                "{board}: MSG keeps its floor, its text and a gap"
+            );
+            let text = render(&app, board, 30);
+            let header = text.lines().find(|l| l.contains("HARNESS")).unwrap();
+            assert!(
+                header.find("MODEL").unwrap() < header.find("EFFORT").unwrap(),
+                "{header}"
+            );
+            let high = text.lines().find(|l| l.contains("xhigh")).expect(&text);
+            let none = text.lines().find(|l| l.contains("Opus 5.5")).expect(&text);
+            let at = |line: &str, word: &str| line.find(word).map(|b| line[..b].chars().count());
+            let col = at(header, "EFFORT").unwrap();
+            assert_eq!(
+                at(high, "xhigh"),
+                Some(col),
+                "under its header:\n{header}\n{high}"
+            );
+            let cell: String = none.chars().skip(col).take(8).collect();
+            assert_eq!(cell.trim(), "-", "not reported: -\n{none}");
+        }
+        let plain = fuller().columns(200, 200);
+        assert!(!plain.has(Col::Effort), "no row reports one, no column");
+        assert!(
+            !with_effort().columns(130, 130).has(Col::Effort),
+            "below 140, none"
+        );
+    }
+
+    #[test]
+    fn model_effort_and_ctx_all_fit_at_140_and_160_beside_a_whole_where_and_a_message() {
+        let msg = "Opened the pull request and queued the review";
+        let app = with_effort_msg(msg);
+        for board in [140u16, 160] {
+            let columns = app.columns(board, usize::from(board));
+            let order: Vec<Col> = columns.cols.iter().map(|(c, _)| c.id).collect();
+            let at = |id| order.iter().position(|c| *c == id).unwrap();
+            assert_eq!(at(Col::Effort), at(Col::Model) + 1, "{board}");
+            assert_eq!(
+                at(Col::Ctx),
+                at(Col::Effort) + 1,
+                "{board}: CTX is not pushed out"
+            );
+            let floor = if board < 160 {
+                34
+            } else {
+                40.max(usize::from(board) * 35 / 100)
+            };
+            assert!(
+                columns.width(Col::Msg) >= floor.min(msg.len() + 1),
+                "{board}: MSG keeps its floor"
+            );
+            let text = render(&app, board, 30);
+            let header = text.lines().find(|l| l.contains("HARNESS")).unwrap();
+            assert!(
+                header.contains("MODEL") && header.contains("EFFORT") && header.contains("CTX"),
+                "{header}"
+            );
+            let place = if board < 160 {
+                "api › main › seat-b"
+            } else {
+                "seat-b"
+            };
+            assert!(text.contains(place), "{board}: WHERE is not cut:\n{text}");
+        }
+    }
+
+    #[test]
+    fn when_every_usage_column_drops_the_floor_is_the_usual_one_again() {
+        let msg = "Opened the pull request and queued the review";
+        let list = |mut app: App| {
+            app.widths = std::collections::BTreeMap::from([("host".to_owned(), 34.into())]);
+            let columns = app.columns(140, 140);
+            columns
+                .cols
+                .iter()
+                .map(|(c, w)| (c.header, *w))
+                .collect::<Vec<_>>()
+        };
+        let with = list(with_effort_msg(msg));
+        assert!(
+            !with
+                .iter()
+                .any(|(h, _)| ["MODEL", "EFFORT", "CTX"].contains(h)),
+            "{with:?}"
+        );
+        // The usage floor of 34 went with the columns: WHERE keeps what it needs (20) and MSG is
+        // back at the usual floor (its longest message and a gap), not left at 34 with WHERE 32.
+        let width = |name: &str| with.iter().find(|(h, _)| *h == name).unwrap().1;
+        assert_eq!(
+            (width("WHERE"), width("MSG")),
+            (20, msg.len() + 1),
+            "{with:?}"
+        );
+    }
+
+    #[test]
+    fn when_room_runs_out_effort_goes_before_ctx_and_model() {
+        let mut app = with_effort_msg("Opened the pull request and queued the review");
+        app.widths = std::collections::BTreeMap::from([("host".to_owned(), 20.into())]);
+        let columns = app.columns(140, 140);
+        assert!(!columns.has(Col::Effort), "EFFORT goes first");
+        assert!(
+            columns.has(Col::Model) && columns.has(Col::Ctx),
+            "MODEL and CTX stay together"
+        );
+        app.widths = std::collections::BTreeMap::from([("host".to_owned(), 28.into())]);
+        let columns = app.columns(140, 140);
+        assert!(
+            !columns.has(Col::Effort) && !columns.has(Col::Ctx) && columns.has(Col::Model),
+            "then CTX"
+        );
+    }
+
+    #[test]
+    fn a_models_alias_shows_in_the_column_and_the_card_and_the_raw_name_does_not() {
+        let mut app = with_effort();
+        let mut rows = app.rows.clone();
+        let models = std::collections::BTreeMap::from([(
+            "claude-opus-5-5".to_owned(),
+            "opus-5.5".to_owned(),
+        )]);
+        rows.iter_mut()
+            .filter_map(|r| r.usage.as_mut())
+            .for_each(|u| u.alias(&models));
+        app.set_rows(rows, app.hosts.clone());
+        let text = render(&app, 200, 30);
+        assert!(
+            text.contains("opus-5.5") && !text.contains("claude-opus-5-5"),
+            "{text}"
+        );
+        assert!(
+            text.contains("Opus 5.5"),
+            "a name with no alias stays as reported"
+        );
+        let card = card_of(&text);
+        assert!(
+            card.iter()
+                .any(|l| l.contains("effort ") && l.contains("xhigh")),
+            "{card:#?}"
+        );
+    }
+
     #[test]
     fn usage_shows_model_and_ctx_from_140_the_rest_when_asked_and_the_card_says_it() {
         use crate::harness::usage::Usage;
@@ -787,6 +972,7 @@ mod tests {
                     tok: Some(176_000),
                     cost_usd: Some(4.2),
                     quota_5h: Some(12),
+                    ..Usage::default()
                 });
             }
         }
@@ -1007,8 +1193,8 @@ mod tests {
         // rest, as on a board that never had usage columns to keep.
         let mut all = self::app();
         all.columns = vec!["tok".into(), "cost".into(), "5h".into()];
-        all.widths = std::collections::BTreeMap::from([("host".to_owned(), 21.into())]);
-        with_usage(&mut all, &"long message ".repeat(20));
+        all.widths = std::collections::BTreeMap::from([("host".to_owned(), 35.into())]);
+        with_usage(&mut all, &"m".repeat(39));
         let with = all.columns(140, 140);
         assert!(!USAGE.iter().any(|c| with.has(*c)), "all usage dropped");
         let place = ["api", "main", "seat-b"].join(" › ").width() + 3;
@@ -2653,11 +2839,16 @@ mod extension_tests {
     #[test]
     fn msg_keeps_its_floor_with_usage_icons_and_extension_columns_at_every_width() {
         for width in [140u16, 200, 250, 1000] {
-            let floor = 40
-                .max(usize::from(width) * 35 / 100)
-                .min(WIDE_MSG.len() + 1);
             for fields in 0..=3 {
                 for usage in 0..=2 {
+                    // Below 160, usage columns lower the floor to a flat 34 (and EFFORT, not
+                    // reported here, takes none of it).
+                    let share = if usage > 0 && width < 160 {
+                        34
+                    } else {
+                        40.max(usize::from(width) * 35 / 100)
+                    };
+                    let floor = share.min(WIDE_MSG.len() + 1);
                     for nerd in [false, true] {
                         let app = configured(fields, usage, nerd);
                         let columns = app.columns(width, usize::from(width));

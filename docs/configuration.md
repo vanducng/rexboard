@@ -19,6 +19,13 @@ dirs = ["~/work/rexboard-extensions"]
 [extensions.settings.session-prefix]
 # Passed to that extension untouched.
 separator = "-"
+
+[models]
+# A model name as a harness reports it, exactly, and what the board shows instead. Map the
+# ids and display names the harnesses use to one style, here `name-version`; the value is shown
+# as written.
+"claude-opus-5-5" = "opus-5.5"
+"Opus 5.5" = "opus-5.5"
 ```
 
 | Key | Type | Default | What |
@@ -28,6 +35,7 @@ separator = "-"
 | `extensions.enabled` | array of strings | `[]` | The [extensions](extensions.md) serve runs. A directory dropped in runs nothing until it is named here |
 | `extensions.dirs` | array of strings | `[]` | Roots to look in for extensions after `$XDG_CONFIG_HOME/rexboard/extensions`. `~/` is your home. The first extension of a name wins |
 | `extensions.settings.NAME` | table | `{}` | Handed to extension `NAME` in every request, untouched |
+| `models` | table of strings | `{}` | Model aliases. A model name a harness reports that equals a key, character for character (no prefix, no case folding), is shown as the value, as written, in the board's `MODEL` column and card, in `show`, and as `model_display` in `ls --json` and `show --json`, which keep the reported name in `model`; a name with no key is shown as reported. Harnesses name one model differently (pi reports `claude-opus-5-5`, Claude Code `Opus 5.5`), so this is where they are made to read alike. rexboard has no names of its own. A blank value is ignored; the value is held to 64 characters. It applies to the rows this host's serve shows, whichever host reported them |
 
 A `[jump]` table is ignored, so an old config that still has one loads.
 

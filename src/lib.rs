@@ -107,11 +107,11 @@ pub fn execute(cli: &Cli) -> Result<()> {
 }
 
 fn ls(args: &LsArgs, json: bool) -> Result<()> {
-    let exclude = config::load()?.hosts.exclude;
+    let config = config::load()?;
     let value = rex::run_script(
         None,
         rex::SNAPSHOT,
-        &json!({ "host": args.host, "exclude": exclude }),
+        &json!({ "host": args.host, "exclude": config.hosts.exclude }),
     )?;
     let rex_version = value["rex_version"].as_str().map(str::to_owned);
     let version = rex_version
@@ -160,11 +160,14 @@ fn ls(args: &LsArgs, json: bool) -> Result<()> {
     for warning in board.take_warnings() {
         eprintln!("{warning}");
     }
-    let rows: Vec<_> = board
+    let mut rows: Vec<_> = board
         .rows(now)
         .into_iter()
         .filter(|row| args.all || row.pane.is_agent())
         .collect();
+    for usage in rows.iter_mut().filter_map(|row| row.usage.as_mut()) {
+        usage.alias(&config.models);
+    }
     if json {
         println!(
             "{}",

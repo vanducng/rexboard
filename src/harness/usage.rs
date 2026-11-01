@@ -21,6 +21,13 @@ pub const ORPHAN_AFTER: chrono::Duration = chrono::Duration::minutes(10);
 pub struct Usage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// What `[models]` in config.toml calls `model`, set where rows are served and never kept or
+    /// sent: each viewer has its own table.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_display: Option<String>,
+    /// The harness's reasoning effort as it says it (`high`, `xhigh`, `minimal`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     /// Percent of the context window in use, 0-100.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ctx_pct: Option<u8>,
@@ -42,6 +49,18 @@ impl Usage {
         *self == Self::default()
     }
 
+    /// The model as the board shows it: its alias when `[models]` has one, else as reported.
+    pub fn shown_model(&self) -> Option<&str> {
+        self.model_display.as_deref().or(self.model.as_deref())
+    }
+
+    /// Sets `model_display` from `models` on an exact match of the reported name.
+    pub fn alias(&mut self, models: &BTreeMap<String, String>) {
+        self.model_display = (self.model.as_deref())
+            .and_then(|name| models.get(name))
+            .and_then(|alias| model(alias));
+    }
+
     /// The one-line JSON a `usage` record carries to Rex: `{"v":1,"m":"Opus","c":42,...}`, only
     /// the figures that are set, each held to its range.
     pub fn to_report(&self) -> String {
@@ -52,6 +71,7 @@ impl Usage {
             }
         };
         put("m", self.model.as_deref().and_then(model).map(Into::into));
+        put("e", self.effort.as_deref().and_then(effort).map(Into::into));
         put("c", self.ctx_pct.map(|p| p.min(100).into()));
         put("w", self.ctx_window.map(Into::into));
         put("t", self.tok.map(Into::into));
@@ -73,6 +93,8 @@ impl Usage {
         }
         let usage = Self {
             model: doc["m"].as_str().and_then(model),
+            model_display: None,
+            effort: doc["e"].as_str().and_then(effort),
             ctx_pct: percent(&doc["c"]),
             ctx_window: doc["w"].as_u64(),
             tok: doc["t"].as_u64(),
@@ -89,8 +111,19 @@ const REPORT_VERSION: u32 = 1;
 /// A record's message over this is not read.
 const REPORT_MAX: usize = 512;
 const MODEL_MAX: usize = 64;
+const EFFORT_MAX: usize = 12;
 /// At most one report per pane in this long, unless a turn has just ended.
 pub const REPORT_EVERY: chrono::Duration = chrono::Duration::seconds(5);
+
+/// An effort word without control characters, cut to EFFORT_MAX characters; None if nothing is left.
+pub fn effort(word: &str) -> Option<String> {
+    let word: String = word
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(EFFORT_MAX)
+        .collect();
+    (!word.trim().is_empty()).then_some(word)
+}
 
 /// A model name without control characters, cut to MODEL_MAX characters; None if nothing is left.
 fn model(name: &str) -> Option<String> {
@@ -269,6 +302,8 @@ pub fn status_line(p: &serde_json::Value) -> Option<Usage> {
             .as_str()
             .or_else(|| model["id"].as_str())
             .map(str::to_owned),
+        model_display: None,
+        effort: p["effort"]["level"].as_str().and_then(effort),
         ctx_pct: percent(&ctx["used_percentage"]),
         ctx_window: ctx["context_window_size"].as_u64(),
         // Before the first request a session reports 0 tokens and a cost of 0: nothing yet.
@@ -669,11 +704,13 @@ mod tests {
     fn full() -> Usage {
         Usage {
             model: Some("Opus 5.5".into()),
+            effort: Some("xhigh".into()),
             ctx_pct: Some(42),
             ctx_window: Some(200_000),
             tok: Some(84_210),
             cost_usd: Some(1.2345),
             quota_5h: Some(17),
+            ..Usage::default()
         }
     }
 
@@ -682,9 +719,9 @@ mod tests {
         let report = full().to_report();
         assert_eq!(
             report,
-            r#"{"v":1,"m":"Opus 5.5","c":42,"w":200000,"t":84210,"u":1.2345,"q":17}"#
+            r#"{"v":1,"m":"Opus 5.5","e":"xhigh","c":42,"w":200000,"t":84210,"u":1.2345,"q":17}"#
         );
-        assert!(report.len() < 120);
+        assert!(report.len() < 130);
         assert_eq!(Usage::from_report(&report), Some(full()));
         let part = Usage {
             model: Some("grok-build-1".into()),
@@ -713,6 +750,18 @@ mod tests {
         );
         // A document that did not come from to_report is held to the same ranges.
         let wild = Usage::from_report(r#"{"v":1,"m":"\u0007x","c":250,"u":-3,"q":-5}"#).unwrap();
+        let effort = |text: &str| Usage::from_report(text).and_then(|u| u.effort);
+        assert_eq!(
+            effort(&format!(r#"{{"v":1,"e":"a\u0007b{}"}}"#, "e".repeat(30))),
+            Some(format!("ab{}", "e".repeat(10))),
+            "control characters dropped, 12 characters kept"
+        );
+        assert_eq!(
+            effort(r#"{"v":1,"e":"  ","c":1}"#),
+            None,
+            "blank is no effort"
+        );
+        assert_eq!(effort(r#"{"v":1,"e":3,"c":1}"#), None, "text only");
         assert_eq!(
             (
                 wild.model.as_deref(),
@@ -747,6 +796,185 @@ mod tests {
         }
         let big = format!(r#"{{"v":1,"m":"x","pad":"{}"}}"#, "p".repeat(REPORT_MAX));
         assert_eq!(Usage::from_report(&big), None, "over {REPORT_MAX} bytes");
+    }
+
+    #[test]
+    fn a_models_alias_is_an_exact_match_of_the_reported_name_and_the_raw_name_stays() {
+        let models = BTreeMap::from([
+            ("claude-opus-5-5".to_owned(), "opus-5.5".to_owned()),
+            ("Opus 5.5".to_owned(), "opus-5.5".to_owned()),
+            ("blank".to_owned(), "  ".to_owned()),
+        ]);
+        let seen = |name: &str| {
+            let mut usage = Usage {
+                model: Some(name.into()),
+                ..Usage::default()
+            };
+            usage.alias(&models);
+            (
+                usage.model.clone().unwrap(),
+                usage.shown_model().map(str::to_owned),
+            )
+        };
+        assert_eq!(
+            seen("claude-opus-5-5"),
+            ("claude-opus-5-5".into(), Some("opus-5.5".into()))
+        );
+        assert_eq!(
+            seen("Opus 5.5").1.as_deref(),
+            Some("opus-5.5"),
+            "both spellings, one name"
+        );
+        assert_eq!(
+            seen("claude-opus-5-5-x").1.as_deref(),
+            Some("claude-opus-5-5-x"),
+            "exact, not a prefix"
+        );
+        assert_eq!(
+            seen("opus 5.5").1.as_deref(),
+            Some("opus 5.5"),
+            "exact, not case-folded"
+        );
+        assert_eq!(
+            seen("blank").1.as_deref(),
+            Some("blank"),
+            "a blank alias is no alias"
+        );
+        let json = serde_json::to_value(Usage {
+            model: Some("m".into()),
+            ..Usage::default()
+        })
+        .unwrap();
+        assert!(
+            json.get("model_display").is_none(),
+            "only when an alias applies"
+        );
+        assert!(
+            !Usage {
+                model_display: Some("x".into()),
+                model: Some("m".into()),
+                ..Usage::default()
+            }
+            .to_report()
+            .contains('x'),
+            "an alias never goes on the wire"
+        );
+    }
+
+    /// A rollout of `pad` bytes of other events after its last `turn_context`, which says `effort`.
+    fn rollout_with(dir: &Path, effort: &str, pad: usize) -> serde_json::Value {
+        let path = dir.join("rollout.jsonl");
+        let mut text = format!(
+            "{{\"timestamp\":\"t\",\"type\":\"turn_context\",\"payload\":{{\"model\":\"m\",\"effort\":\"{effort}\"}}}}\n"
+        );
+        let filler = format!(
+            "{{\"type\":\"response_item\",\"payload\":{{\"text\":\"{}\"}}}}\n",
+            "x".repeat(9_000)
+        );
+        while text.len() < pad {
+            text.push_str(&filler);
+        }
+        text.push_str(
+            r#"{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":5,"total_tokens":5},"model_context_window":475000}}}"#,
+        );
+        text.push('\n');
+        std::fs::write(&path, text).unwrap();
+        serde_json::json!({ "hook_event_name": "Stop", "model": "m", "transcript_path": path })
+    }
+
+    const COUNT: &str = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":5,"total_tokens":5},"model_context_window":475000}}}"#;
+
+    fn context(effort: &str) -> String {
+        format!(r#"{{"type":"turn_context","payload":{{"model":"m"{effort}}}}}"#)
+    }
+
+    fn stop_for(dir: &Path, lines: &[String]) -> serde_json::Value {
+        let path = dir.join("rollout.jsonl");
+        std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+        serde_json::json!({ "hook_event_name": "Stop", "model": "m", "transcript_path": path })
+    }
+
+    #[test]
+    fn codex_stops_at_the_latest_turn_context_whether_it_has_an_effort_or_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let older = context(r#","effort":"high""#);
+        for (what, latest) in [
+            ("null", context(r#","effort":null"#)),
+            ("missing", context("")),
+            ("empty", context(r#","effort":"""#)),
+            ("blank", context(r#","effort":"  ""#)),
+        ] {
+            let stop = stop_for(dir.path(), &[older.clone(), latest, COUNT.to_owned()]);
+            assert_eq!(
+                parse("codex", &stop).and_then(|u| u.effort),
+                None,
+                "{what}: not the older high"
+            );
+        }
+        let stop = stop_for(
+            dir.path(),
+            &[context(r#","effort":"low""#), COUNT.to_owned()],
+        );
+        assert_eq!(
+            parse("codex", &stop).and_then(|u| u.effort).as_deref(),
+            Some("low")
+        );
+    }
+
+    #[test]
+    fn codex_keeps_a_token_count_that_starts_exactly_on_the_tail_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        // The count's line starts at the byte the last TAIL bytes start at, and the rest of the
+        // file, up to the end, is lines with no token_count in them.
+        let tail = super::super::codex::TAIL as usize;
+        let rest = tail - COUNT.len() - 1;
+        let mut lines = vec![context(r#","effort":"high""#), "x".repeat(300)];
+        lines.push(COUNT.to_owned());
+        lines.push("y".repeat(rest - 1));
+        let stop = stop_for(dir.path(), &lines);
+        let len = std::fs::metadata(dir.path().join("rollout.jsonl"))
+            .unwrap()
+            .len() as usize;
+        let text = std::fs::read_to_string(dir.path().join("rollout.jsonl")).unwrap();
+        assert_eq!(
+            text.find(COUNT).unwrap(),
+            len - tail,
+            "the count starts on the boundary"
+        );
+        let usage = parse("codex", &stop).unwrap();
+        assert_eq!(usage.tok, Some(5), "TOK is read");
+        assert_eq!(usage.ctx_window, Some(475_000));
+        assert_eq!(usage.effort.as_deref(), Some("high"), "and the effort too");
+    }
+
+    #[test]
+    fn codex_reads_effort_back_from_its_last_turn_context_up_to_2_mib_and_not_past() {
+        let dir = tempfile::tempdir().unwrap();
+        let effort = |pad: usize| {
+            let stop = rollout_with(dir.path(), "ultra", pad);
+            parse("codex", &stop).and_then(|u| u.effort)
+        };
+        assert_eq!(effort(0).as_deref(), Some("ultra"), "inside the tail");
+        assert_eq!(
+            effort(500_000).as_deref(),
+            Some("ultra"),
+            "a few chunks back"
+        );
+        assert_eq!(
+            effort(2 * 1024 * 1024 - 20_000).as_deref(),
+            Some("ultra"),
+            "at the bound"
+        );
+        assert_eq!(
+            effort(2 * 1024 * 1024 + 70_000),
+            None,
+            "past it, nothing, not a guess"
+        );
+        let stop = rollout_with(dir.path(), "ultra", 3 * 1024 * 1024);
+        assert!(
+            parse("codex", &stop).is_some_and(|u| u.tok == Some(5)),
+            "the figures are still read"
+        );
     }
 
     #[test]
@@ -915,17 +1143,20 @@ mod tests {
             parse("claude", &fixture("claude-statusline.json")),
             Some(Usage {
                 model: Some("Opus 5.5".into()),
+                effort: Some("high".into()),
                 ctx_pct: Some(7),
                 ctx_window: Some(1_000_000),
                 tok: Some(67910),
                 cost_usd: Some(0.543476),
                 quota_5h: Some(5),
+                ..Usage::default()
             })
         );
         assert_eq!(
             parse("grok", &fixture("grok-statusline.json")),
             Some(Usage {
                 model: Some("grok-build-1".into()),
+                effort: Some("xhigh".into()),
                 ctx_pct: Some(12),
                 ..Usage::default()
             }),
@@ -936,6 +1167,7 @@ mod tests {
             parse("claude", &fixture("claude-statusline-start.json")),
             Some(Usage {
                 model: Some("Opus 5.5".into()),
+                effort: Some("high".into()),
                 ctx_window: Some(1_000_000),
                 ..Usage::default()
             }),
@@ -949,6 +1181,7 @@ mod tests {
             parse("pi", &fixture("pi-turn-end.json")),
             Some(Usage {
                 model: Some("claude-sonnet-5-5".into()),
+                effort: Some("medium".into()),
                 ctx_pct: Some(14),
                 ctx_window: Some(200_000),
                 // input 25927 + cacheRead 1152 + cacheWrite 0; not the context's 27111, which
@@ -956,6 +1189,7 @@ mod tests {
                 tok: Some(27079),
                 cost_usd: None,
                 quota_5h: None,
+                ..Usage::default()
             })
         );
     }
@@ -973,12 +1207,14 @@ mod tests {
             parse("codex", &stop),
             Some(Usage {
                 model: Some("gpt-5.5-codex".into()),
+                effort: Some("high".into()),
                 // (32495 - 12000) / (475000 - 12000) = 4.43%, as the footer's `Context 4% used`.
                 ctx_pct: Some(4),
                 ctx_window: Some(475_000),
                 tok: Some(32490),
                 cost_usd: None,
                 quota_5h: Some(12),
+                ..Usage::default()
             })
         );
         let gone =

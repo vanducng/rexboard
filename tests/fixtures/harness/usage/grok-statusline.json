@@ -1,1 +1,1 @@
-{"session_id":"00000000-0000-0000-0000-000000000001","model":{"display_name":"grok-build-1"},"context_window":{"used_percentage":12.4},"workspace":{"branch":"main"},"cwd":"/work/project"}
+{"session_id":"00000000-0000-0000-0000-000000000001","model":{"display_name":"grok-build-1"},"effort":{"level":"xhigh"},"context_window":{"used_percentage":12.4},"workspace":{"branch":"main"},"cwd":"/work/project"}

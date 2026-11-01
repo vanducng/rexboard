@@ -959,6 +959,7 @@ mod tests {
             tok: Some(250_000),
             cost_usd: Some(1.24),
             quota_5h: Some(42),
+            ..Default::default()
         });
         for (name, value) in [("rig", "team-a"), ("project", "api"), ("role", "lead")] {
             seat.ext.insert(format!("fake.{name}"), value.into());
