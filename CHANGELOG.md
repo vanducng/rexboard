@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/vanducng/rexboard/compare/v0.23.0...v0.24.0) (2026-11-01)
+
+
+### Features
+
+* **tui:** persist picker view and sort ([#139](https://github.com/vanducng/rexboard/issues/139)) ([2162f48](https://github.com/vanducng/rexboard/commit/2162f4838bc22fae2356029380a19f21de9cd62e))
+
 ## [0.23.0](https://github.com/vanducng/rexboard/compare/v0.22.0...v0.23.0) (2026-11-01)
 
 
