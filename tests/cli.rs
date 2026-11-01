@@ -1350,15 +1350,13 @@ fn serve_sweep_skips_a_pid_that_is_not_its_observer() {
 #[test]
 fn serve_subscriber_gets_rows_as_soon_as_hosts_report() {
     let serve = Serve::new();
-    let envs = serve.envs();
+    let mut envs = serve.envs();
+    // A wall-clock budget counted process starts, which a loaded machine stretches past the
+    // fallback without serve waiting for it. With the fallback out of reach, rows arriving at
+    // all (watch_until gives up after 30s) means they came from the hosts' reports.
+    envs.push(("REXBOARD_TEST_READY_WITHIN_SECS", "600".to_owned()));
     let envs: Vec<(&str, &str)> = envs.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let started = std::time::Instant::now();
     let (prints, _) = watch_until(&["--json"], &envs, |prints| !prints.is_empty());
-    assert!(
-        started.elapsed() < std::time::Duration::from_secs(4),
-        "the first rows must not wait for the 5s fallback, took {:?}",
-        started.elapsed()
-    );
     assert!(!prints[0].as_array().unwrap().is_empty());
 }
 
