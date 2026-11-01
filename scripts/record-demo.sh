@@ -46,6 +46,8 @@ cleanup() {
   "$board" serve --stop >/dev/null 2>&1 || true
   if [[ "$ours" == 1 && -n "$server_pid" ]] && ps -o command= -p "$server_pid" | grep -qF "$root/"; then
     kill "$server_pid" 2>/dev/null || true
+    # It writes a last snapshot as it exits, so the dir goes only once it has.
+    for _ in $(seq 1 50); do kill -0 "$server_pid" 2>/dev/null || break; sleep 0.1; done
   fi
   rm -rf "$root"
 }
