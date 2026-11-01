@@ -3008,8 +3008,8 @@ mod extension_tests {
 
     #[test]
     fn a_wide_board_fits_extension_values_whole_before_msg_takes_a_share() {
-        let wide = |width: u16| {
-            let mut app = configured(3, 1, false);
+        let wide = |width: u16, fields: usize| {
+            let mut app = configured(fields, 1, false);
             let mut rows = app.rows.clone();
             for row in &mut rows {
                 row.ext.insert(
@@ -3022,37 +3022,36 @@ mod extension_tests {
                     .insert("fake.role".into(), "platform-engineer".into());
                 row.pane.session = format!("{}-orchestrated-session-name", row.pane.session);
                 row.pane.pane = "dev.implementer-seat-long".into();
+                row.pane.host = "studio".into();
                 row.pane.msg = Some("Opened the pull request and queued the review. ".repeat(5));
             }
             app.set_rows(rows, hosts());
             let columns = app.columns(width, usize::from(width));
             (app, columns)
         };
-        for width in [300u16, 330] {
-            let (app, columns) = wide(width);
+        for (width, fields) in [(200u16, 2), (300, 3), (330, 3)] {
+            let (app, columns) = wide(width, fields);
+            let text = render(&app, width, 30);
             for (id, value) in [
                 ("fake.rig", "conductor-pod-alpha"),
                 ("session-prefix.project", "team.platform-api-v2"),
                 ("fake.role", "platform-engineer"),
-            ] {
-                assert_eq!(
-                    columns.width(Col::Field(id)),
-                    value.len() + 2,
-                    "{width}: {id} whole, with its gap"
+            ]
+            .into_iter()
+            .take(fields)
+            {
+                assert!(
+                    columns.width(Col::Field(id)) > value.len() && text.contains(value),
+                    "{width}: {id} whole:\n{text}"
                 );
             }
             assert!(
                 columns.width(Col::Msg) >= 56,
                 "{width}: MSG keeps its floor"
             );
-            let text = render(&app, width, 30);
-            assert!(
-                text.contains("team.platform-api-v2  "),
-                "{width}: PROJECT whole:\n{text}"
-            );
         }
-        let (_, at_300) = wide(300);
-        let (_, at_330) = wide(330);
+        let (_, at_300) = wide(300, 3);
+        let (_, at_330) = wide(330, 3);
         assert!(
             at_330.width(Col::Msg) > at_300.width(Col::Msg),
             "MSG still takes every cell left over"

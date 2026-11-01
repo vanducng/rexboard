@@ -810,12 +810,25 @@ impl Columns {
             wanted[0] = wanted[0].min(longest.place);
         }
         let held: usize = free.iter().map(|id| self.width(*id)).sum();
-        let parts = parts_share(&wanted, held.min(limit), each);
-        let mut spare = limit.saturating_sub(parts.iter().sum::<usize>() + normal - floor);
+        let mut parts = parts_share(&wanted, held.min(limit), each);
+        // Past FIELDS_ALL the fields take their fit before the location columns take theirs; up
+        // to it they take what those leave, as the fit and drop rules there were set.
+        let fields_first = board > FIELDS_ALL;
+        let kept = if fields_first {
+            each * free.len()
+        } else {
+            parts.iter().sum()
+        };
+        let mut spare = limit.saturating_sub(kept + normal - floor);
+        let mut given = 0;
         for (id, extra) in more.into_iter().filter(|(id, _)| self.has(*id)) {
             let give = extra.min(spare);
             spare -= give;
+            given += give;
             wants.iter_mut().find(|(want, _)| *want == id).unwrap().1 += give;
+        }
+        if fields_first {
+            parts = parts_share(&wanted, held.min(limit - given), each);
         }
         wants.extend(free.iter().copied().zip(parts));
         self.apply(wants);
