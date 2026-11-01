@@ -2825,7 +2825,7 @@ fn ext_fields_reach_the_board_in_enabled_order_before_any_run() {
         &serve,
         "zeta",
         "icon = \"\u{ea7e}\"\n",
-        "icon = \"\u{f502}\"\n",
+        "icon = \"\u{f502}\"\nwidth = 20\n",
         "sleep 30",
     );
     extension(&serve, "alpha", "", "", "sleep 30");
@@ -2841,11 +2841,11 @@ fn ext_fields_reach_the_board_in_enabled_order_before_any_run() {
         serde_json::json!([
             {
                 "id": "zeta.rig", "name": "zeta.rig", "title": "RIG",
-                "icon": "\u{f502}", "extension_icon": "\u{ea7e}",
+                "icon": "\u{f502}", "extension_icon": "\u{ea7e}", "width": 20,
             },
             { "id": "alpha.rig", "name": "alpha.rig", "title": "RIG" },
         ]),
-        "both declare rig, so both go by id; zeta first, as enabled; only declared icons go"
+        "both declare rig, so both go by id; zeta first, as enabled; only declared icons and widths go"
     );
 }
 

@@ -2304,6 +2304,216 @@ mod extension_tests {
         app
     }
 
+    /// `with_fields` with long values: a project id and a rig of 17 and 15 cells.
+    fn long_fields() -> App {
+        let mut app = with_fields(&[]);
+        let mut rows = app.rows.clone();
+        for row in &mut rows {
+            row.ext
+                .insert("session-prefix.project".into(), "team.platform-api".into());
+            row.ext.insert("fake.rig".into(), "conductor-pod-a".into());
+            row.pane.msg = Some(WIDE_MSG.into());
+        }
+        app.set_rows(rows, hosts());
+        app
+    }
+
+    #[test]
+    fn a_field_column_fits_its_longest_value_between_its_title_and_24() {
+        let app = long_fields();
+        for width in [200u16, 250] {
+            let columns = app.columns(width, usize::from(width));
+            let (rig, project) = ("fake.rig", "session-prefix.project");
+            assert_eq!(columns.width(Col::Field(rig)), 17, "{width}: 15 and 2");
+            assert_eq!(columns.width(Col::Field(project)), 19, "{width}: 17 and 2");
+            let text = render(&app, width, 30);
+            assert!(
+                text.contains("team.platform-api  "),
+                "{width}: whole, two cells before the next column:\n{text}"
+            );
+            assert!(
+                text.contains("conductor-pod-a  "),
+                "{width}: whole, two cells before the next column:\n{text}"
+            );
+        }
+        // Where the fit does not all fit, a column takes what the location columns leave over
+        // MSG's floor, the first one first, and the same columns show as at 12.
+        let mut short = long_fields();
+        let mut rows = short.rows.clone();
+        rows.iter_mut()
+            .for_each(|r| r.pane.msg = Some("Opened the review".into()));
+        short.set_rows(rows, hosts());
+        let at_140 = short.columns(140, 140);
+        assert!(at_140.width(Col::Field("fake.rig")) > 12, "grows at 140");
+        assert!(at_140.width(Col::Msg) >= 18, "MSG keeps its floor");
+        let tight = app.columns(160, 160);
+        let (rig, project) = (Col::Field("fake.rig"), Col::Field("session-prefix.project"));
+        assert!(
+            tight.has(rig) && tight.has(project),
+            "both still show at 160"
+        );
+        assert!(tight.width(rig) + tight.width(project) < 36, "narrowed");
+        assert!(
+            tight.width(rig).min(tight.width(project)) >= 12,
+            "not under 12"
+        );
+        let mut app = app;
+        let mut rows = app.rows.clone();
+        rows[0].ext.insert("fake.rig".into(), "r".repeat(40));
+        rows[1]
+            .ext
+            .insert("session-prefix.project".into(), "p".into());
+        app.set_rows(rows, hosts());
+        let columns = app.columns(200, 200);
+        assert_eq!(columns.width(Col::Field("fake.rig")), 24, "at most 24");
+        let short = with_fields(&[]).columns(200, 200);
+        assert_eq!(
+            short.width(Col::Field("fake.rig")),
+            5,
+            "short values keep the title and its gap and arrow: RIG and 2"
+        );
+        assert_eq!(
+            short.width(Col::Field("session-prefix.project")),
+            9,
+            "PROJECT and 2"
+        );
+        assert_eq!(
+            long_fields()
+                .columns(120, 120)
+                .width(Col::Field("fake.rig")),
+            12,
+            "below 140 the width is what it was"
+        );
+    }
+
+    #[test]
+    fn a_manifest_width_fixes_a_field_and_tui_json_beats_it_by_id_or_by_name() {
+        let mut app = long_fields();
+        let width = |app: &App, id: &'static str| app.columns(200, 200).width(Col::Field(id));
+        app.fields[0].0.width = Some(30);
+        assert_eq!(width(&app, "fake.rig"), 30, "the manifest's");
+        app.widths = BTreeMap::from([("rig".to_owned(), 8.into())]);
+        assert_eq!(width(&app, "fake.rig"), 8, "tui.json by name beats it");
+        app.widths
+            .insert("fake.rig".to_owned(), serde_json::json!(10));
+        assert_eq!(width(&app, "fake.rig"), 10, "by id beats the name");
+        app.widths
+            .insert("fake.rig".to_owned(), serde_json::json!(0));
+        assert_eq!(
+            width(&app, "fake.rig"),
+            8,
+            "a value out of range is ignored"
+        );
+        assert_eq!(
+            width(&app, "session-prefix.project"),
+            19,
+            "the others still fit"
+        );
+    }
+
+    /// Fields `project` then `rig`, with the long values, and a message of `msg` cells.
+    fn project_then_rig(msg: usize) -> App {
+        let mut app = app();
+        let mut rows = app.rows.clone();
+        for row in &mut rows {
+            row.ext
+                .insert("p.project".into(), "team.platform-api".into());
+            row.ext.insert("p.rig".into(), "conductor-pod-a".into());
+            row.pane.msg = Some("m".repeat(msg));
+        }
+        app.set_extensions(
+            vec![field("p.project", "PROJECT"), field("p.rig", "RIG")],
+            BTreeMap::new(),
+        );
+        app.set_rows(rows, hosts());
+        app
+    }
+
+    #[test]
+    fn a_field_that_drops_at_140_gives_its_cells_to_the_one_that_stays() {
+        let (project, rig) = (Col::Field("p.project"), Col::Field("p.rig"));
+        let columns = project_then_rig(38).columns(140, 140);
+        assert!(
+            !columns.has(rig),
+            "the floor drops the last field, as at 12"
+        );
+        assert_eq!(
+            columns.width(project),
+            19,
+            "17 and 2: whole, with the cells RIG left"
+        );
+        assert!(columns.width(Col::Msg) >= 39, "MSG keeps its floor");
+        let short = project_then_rig(20).columns(140, 140);
+        assert_eq!(
+            (short.width(project), short.width(rig)),
+            (19, 17),
+            "both whole when both fit"
+        );
+    }
+
+    #[test]
+    fn a_width_in_tui_json_keeps_its_field_whole_at_140_and_msg_gives_way_to_it() {
+        let project = Col::Field("p.project");
+        let mut app = project_then_rig(45);
+        let alone = app.columns(140, 140);
+        assert!(
+            alone.width(project) < 19,
+            "cut by MSG's floor of 46: {}",
+            alone.width(project)
+        );
+        let floor = alone.width(Col::Msg);
+        app.widths = BTreeMap::from([("project".to_owned(), 18.into())]);
+        let fixed = app.columns(140, 140);
+        assert_eq!(fixed.width(project), 18, "yours is kept");
+        assert!(
+            fixed.width(Col::Msg) < floor,
+            "MSG gave way: {} of {floor}",
+            fixed.width(Col::Msg)
+        );
+        assert_eq!(
+            fixed.width(Col::Msg),
+            floor - (fixed.width(project) - alone.width(project)),
+            "MSG gave exactly the cells PROJECT gained"
+        );
+        assert!(!fixed.has(Col::Field("p.rig")), "and RIG stays dropped");
+        assert!(
+            render(&app, 140, 30).contains("team.platform-api "),
+            "whole"
+        );
+        // A width of yours that does not fit is dropped with its concession: MSG is back at its
+        // floor, and every other column is as it is with no width at all.
+        let widths = |app: &App| -> Vec<(&'static str, usize)> {
+            let columns = app.columns(140, 140);
+            columns.cols.iter().map(|(c, w)| (c.header, *w)).collect()
+        };
+        let mut gone = project_then_rig(45);
+        // Long labels, which would take any cell the floor gave up.
+        let mut rows = gone.rows.clone();
+        for row in &mut rows {
+            row.pane.tab = format!("1-team:rig:{}#0123456789abcdef", row.pane.session);
+            row.pane.session = format!("{}-orchestrated-session", row.pane.session);
+        }
+        gone.set_rows(rows, hosts());
+        let plain = widths(&gone);
+        gone.widths = BTreeMap::from([("rig".to_owned(), 18.into())]);
+        assert!(
+            !gone.columns(140, 140).has(Col::Field("p.rig")),
+            "RIG does not fit"
+        );
+        assert_eq!(
+            widths(&gone),
+            plain,
+            "so nothing else moved, MSG least of all"
+        );
+        // A manifest's width is not yours: MSG's floor still holds against it.
+        let mut manifest = project_then_rig(45);
+        manifest.fields[0].0.width = Some(18);
+        assert!(
+            !manifest.columns(140, 140).has(project),
+            "the floor drops it at 140"
+        );
+    }
+
     const WIDE_MSG: &str = "Opened the pull request and queued the review for the api team today";
 
     /// `with_fields` with a third extension field, a long host name, and window labels as an

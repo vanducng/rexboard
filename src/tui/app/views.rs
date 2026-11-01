@@ -1,7 +1,7 @@
 //! Views, the `:` line, sorting and the extensions' fields: how the list is grouped and ordered.
 
 use super::*;
-use crate::tui::columns::Tier;
+use crate::tui::columns::{Tier, width_set};
 
 impl App {
     /// The views `v` cycles through: the built-in ones, then one per field, by its name, or by
@@ -188,6 +188,26 @@ impl App {
                 ],
                 place: widest(&|row| path(&labels(row, columns.tier != Tier::Wide), usize::MAX))
                     + 3,
+                fields: self
+                    .fields
+                    .iter()
+                    .map(|(f, letter)| {
+                        let id = id_of(field_column(f, *letter));
+                        // `extension.field` beats the bare name, and both beat the manifest; a
+                        // bare name that is a built-in column's is that column's.
+                        let user = width_set(&self.widths, &f.id).or_else(|| {
+                            let builtin = ["host", "session", "window", "block", "msg"];
+                            width_set(&self.widths, &f.name)
+                                .filter(|_| !builtin.contains(&f.name.as_str()))
+                        });
+                        FieldFit {
+                            id: Col::Field(id),
+                            longest: widest(&|row| row.ext.get(id).cloned().unwrap_or_default()),
+                            fixed: user.or(f.width),
+                            yours: user.is_some(),
+                        }
+                    })
+                    .collect(),
             },
             &self.widths,
         );

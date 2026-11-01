@@ -8,6 +8,7 @@ use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
 use serde_json::Value;
+use unicode_width::UnicodeWidthStr;
 
 use super::markdown::{self, Run};
 use super::theme;
@@ -93,6 +94,17 @@ pub struct Longest {
     pub parts: [usize; 3],
     /// The longest WHERE label with room for a twin's ` #N`, as drawn unsplit.
     pub place: usize,
+    /// For each extension field: its longest value, and the width tui.json or its manifest fixes.
+    pub fields: Vec<FieldFit>,
+}
+
+#[derive(Debug)]
+pub struct FieldFit {
+    pub id: Col,
+    pub longest: usize,
+    pub fixed: Option<usize>,
+    /// The width is tui.json's, not the manifest's.
+    pub yours: bool,
 }
 
 /// A session, window or block label is cut to this many columns, as docs/tui.md says.
@@ -106,6 +118,12 @@ const FLOOR_FROM: u16 = 140;
 /// WHERE, unsplit, is not squeezed under this; MSG is not squeezed under MSG_LEAST by a fixed width.
 const WHERE_MIN: usize = 20;
 const MSG_LEAST: usize = 5;
+
+/// A fixed width tui.json's `widths` gives `name`: a whole number from 1 to 500.
+pub fn width_set(widths: &BTreeMap<String, Value>, name: &str) -> Option<usize> {
+    let width = widths.get(name)?.as_u64()?;
+    (1..=500).contains(&width).then_some(width as usize)
+}
 
 /// How `limit` columns divide among labels of the `longest` widths: each its label and a
 /// two-column gap (one when that does not all fit), none under `least`; when together they want
@@ -143,8 +161,10 @@ pub const SPLIT: u16 = 132;
 /// the first two.
 pub const FIELDS_FROM: u16 = 120;
 const FIELDS_ALL: u16 = 160;
-/// A field column's width, the gap after it included.
+/// A field column's width, the gap after it included, until it is fitted to its values; below
+/// FLOOR_FROM columns it stays so. Fitted, it is at most FIELD_MAX and at least its title and gap.
 const FIELD_WIDTH: usize = 12;
+const FIELD_MAX: usize = 24;
 const ALWAYS: RangeInclusive<u16> = 0..=u16::MAX;
 /// MODEL and CTX show from this width, and only while some row reports its usage; TOK, COST
 /// and 5H too when tui.json's `columns` names them.
@@ -658,12 +678,9 @@ impl Columns {
     /// `msg` replaces that. The location columns give way to it first, then the extension
     /// columns and then the usage ones, each the last one first. A fixed width is not fitted.
     pub fn fit(&mut self, board: u16, longest: &Longest, widths: &BTreeMap<String, Value>) {
-        let set = |name: &str| {
-            let width = widths.get(name)?.as_u64()?;
-            (1..=500).contains(&width).then_some(width as usize)
-        };
+        let set = |name: &str| width_set(widths, name);
         let total: usize = self.cols.iter().map(|(_, w)| *w).sum();
-        let floor = match set("msg") {
+        let normal = match set("msg") {
             Some(_) => 0,
             None if board < FLOOR_FROM => 0,
             None => MSG_FLOOR.max(total * MSG_SHARE / 100).min(longest.msg + 1),
@@ -674,6 +691,28 @@ impl Columns {
         if self.has(Col::Host) {
             let host = set("host").unwrap_or((longest.host + 1).clamp(8, 16));
             wants.push((Col::Host, host));
+        }
+        // An extension field takes the width its manifest or tui.json fixes, else what its values
+        // need, but only up to FIELD_WIDTH here, so the same columns fit and drop as before; what
+        // it needs beyond that (`more`) comes later, from what the location columns leave over MSG's
+        // floor. Below FLOOR_FROM it stays FIELD_WIDTH, as MSG has no floor there.
+        let mut more = Vec::new();
+        for (c, _) in &self.cols {
+            if let Some(FieldFit { longest, fixed, .. }) =
+                longest.fields.iter().find(|f| f.id == c.id)
+            {
+                let least = c.header.width() + 2;
+                let fit = match board {
+                    ..FLOOR_FROM => FIELD_WIDTH,
+                    _ => (longest + 2).clamp(least, FIELD_MAX.max(least)),
+                };
+                wants.push((c.id, fixed.unwrap_or(fit.min(FIELD_WIDTH))));
+                more.extend(
+                    fixed
+                        .is_none()
+                        .then_some((c.id, fit.saturating_sub(FIELD_WIDTH))),
+                );
+            }
         }
         // The location columns: SESSION, WINDOW and BLOCK once WHERE is split, else WHERE.
         let split = [Col::Session, Col::Window, Col::Block];
@@ -695,14 +734,26 @@ impl Columns {
                 }
             }
         }
-        let fixed_sum: usize = wants.iter().map(|(_, w)| *w).sum();
         // Room for the free location columns: the list less everything else and MSG's floor. Short
         // of their least, even with none free, the last extension column goes, then the last usage
         // column, and again.
         let rank = |id: Col| (!matches!(id, Col::Field(_)), !is_usage(id));
-        let limit = loop {
+        let (limit, floor) = loop {
+            // A field's width in tui.json is yours, so while it is kept MSG's floor gives up what
+            // it has past FIELD_WIDTH, the cells every field is planned with; a field that goes
+            // takes its concession with it.
+            let give: usize = (longest.fields.iter())
+                .filter(|f| f.yours && self.has(f.id))
+                .filter_map(|f| f.fixed?.checked_sub(FIELD_WIDTH))
+                .sum();
+            let floor = normal.saturating_sub(give);
+            let planned = |id: Col| wants.iter().any(|(want, _)| *want == id);
             let others: usize = (self.cols.iter())
-                .filter(|(c, _)| !group.contains(&c.id) && !matches!(c.id, Col::Host | Col::Msg))
+                .filter(|(c, _)| !group.contains(&c.id) && !planned(c.id) && c.id != Col::Msg)
+                .map(|(_, w)| *w)
+                .sum();
+            let fixed_sum: usize = (wants.iter())
+                .filter(|(id, _)| self.has(*id))
                 .map(|(_, w)| *w)
                 .sum();
             let spent = others + fixed_sum + floor;
@@ -712,7 +763,7 @@ impl Columns {
                 .filter(|id| rank(*id) != (true, true));
             match gone {
                 Some(id) if spent + each * free.len() > total => self.resize(id, 0),
-                _ => break total.saturating_sub(spent),
+                _ => break (total.saturating_sub(spent), floor),
             }
         };
         // With usage columns left, WHERE stays whole at 140 and takes only what its labels need;
@@ -721,11 +772,14 @@ impl Columns {
             wanted[0] = wanted[0].min(longest.place);
         }
         let held: usize = free.iter().map(|id| self.width(*id)).sum();
-        wants.extend(
-            free.iter()
-                .copied()
-                .zip(parts_share(&wanted, held.min(limit), each)),
-        );
+        let parts = parts_share(&wanted, held.min(limit), each);
+        let mut spare = limit.saturating_sub(parts.iter().sum::<usize>() + normal - floor);
+        for (id, extra) in more.into_iter().filter(|(id, _)| self.has(*id)) {
+            let give = extra.min(spare);
+            spare -= give;
+            wants.iter_mut().find(|(want, _)| *want == id).unwrap().1 += give;
+        }
+        wants.extend(free.iter().copied().zip(parts));
         self.apply(wants);
         if let (Some(width), Some(msg)) = (
             set("msg"),
