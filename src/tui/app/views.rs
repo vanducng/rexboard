@@ -38,24 +38,25 @@ impl App {
         {
             prefs.view = key;
         }
-        prefs.sort = self
-            .sort
-            .map(|(col, dir)| {
+        prefs.sort = match self.sort {
+            Some((col, dir)) => {
                 let key = match col {
-                    Col::Field(id) => format!("field:{id}"),
-                    _ => format!("builtin:{}", column_of(col).letter.unwrap_or('?')),
+                    Col::Field(id) => Some(format!("field:{id}")),
+                    _ => column_of(col)
+                        .letter
+                        .map(|letter| format!("builtin:{letter}")),
                 };
-                (key, dir == Dir::Down)
-            })
-            .or_else(|| {
-                self.pick_restore
-                    .as_ref()
-                    .and_then(|prefs| prefs.sort.clone())
-            });
+                key.map(|key| (key, dir == Dir::Down))
+            }
+            None => self
+                .pick_restore
+                .as_ref()
+                .and_then(|prefs| prefs.sort.clone()),
+        };
         prefs
     }
 
-    fn apply_pick_restore(&mut self) {
+    pub(super) fn apply_pick_restore(&mut self) {
         let Some(prefs) = self.pick_restore.as_ref() else {
             return;
         };
@@ -92,7 +93,9 @@ impl App {
                 .map(|(field, letter)| field_column(field, *letter).id);
         }
         let letter = key.strip_prefix("builtin:")?.chars().next()?;
-        crate::tui::columns::by_letter(letter).map(|column| column.id)
+        self.builtin_columns()
+            .find(|column| column.letter == Some(letter))
+            .map(|column| column.id)
     }
 
     /// Switches to `view`; the selection keeps its row.
@@ -507,22 +510,56 @@ mod tests {
         assert_eq!(prefs.sort, Some(("field:ext.status".into(), false)));
     }
 
+    fn usage_row(key: &str) -> Row {
+        let mut row = row(key, "working", "working", false);
+        row.usage = Some(crate::harness::usage::Usage {
+            model: Some("Opus".into()),
+            tok: Some(10),
+            ..Default::default()
+        });
+        row
+    }
+
     #[test]
-    fn picker_restores_model_sort_before_first_rows_arrive() {
+    fn picker_restores_a_usage_sort_once_its_column_shows() {
         let mut app = app();
         app.pick = true;
         app.restore_pick_prefs(PickPrefs {
             view: "table".into(),
             sort: Some(("builtin:d".into(), false)),
         });
+        assert_eq!(app.sort, None, "no row reports usage yet");
+        assert_eq!(app.pick_prefs().sort, Some(("builtin:d".into(), false)));
+        app.set_rows(vec![usage_row("mini/model")], hosts());
         assert_eq!(app.sort, Some((Col::Model, Dir::Up)));
-        let mut model = row("mini/model", "working", "working", false);
-        model.usage = Some(crate::harness::usage::Usage {
-            model: Some("Opus".into()),
-            ..Default::default()
+    }
+
+    #[test]
+    fn picker_does_not_restore_a_sort_on_a_column_that_is_hidden() {
+        let mut app = app();
+        app.pick = true;
+        app.restore_pick_prefs(PickPrefs {
+            view: "table".into(),
+            sort: Some(("builtin:k".into(), true)),
         });
-        app.set_rows(vec![model], hosts());
-        assert_eq!(app.sort, Some((Col::Model, Dir::Up)));
+        app.set_rows(vec![usage_row("mini/model")], hosts());
+        assert_eq!(app.sort, None, "TOK is off until tui.json names it");
+        assert_eq!(
+            app.pick_prefs().sort,
+            Some(("builtin:k".into(), true)),
+            "kept for when it shows"
+        );
+        app.columns = vec!["tok".into()];
+        app.set_rows(vec![usage_row("mini/model")], hosts());
+        assert_eq!(app.sort, Some((Col::Tok, Dir::Down)));
+    }
+
+    #[test]
+    fn picker_saves_no_sort_for_a_column_without_a_letter() {
+        let mut app = app();
+        app.pick = true;
+        app.sort = Some((Col::Num, Dir::Up));
+        assert_eq!(app.pick_prefs().sort, None);
     }
 
     #[test]

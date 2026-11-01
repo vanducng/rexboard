@@ -382,6 +382,7 @@ impl App {
                 viewed.unwrap_or_else(|| "the pane".to_owned())
             ));
         }
+        self.apply_pick_restore();
         self.recheck_doing();
         self.keep_selection_visible();
     }
