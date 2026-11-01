@@ -24,9 +24,9 @@ fn rexboard(home: &Path) -> Command {
         .env("FAKE_TMUX_CALLS", home.join("calls"))
         .env("XDG_STATE_HOME", home.join("state"))
         .env("PI_CODING_AGENT_DIR", home.join(".pi/agent"))
-        // A hook that is slow to start on a loaded machine must still count as quick, so the tests
-        // that expect a report do not depend on the machine; the slow ones set it back.
-        .env("REXBOARD_HOOK_REPORT_WITHIN_MS", "60000");
+        // How long the status took is the test's to say, so a hook that is slow to start on a
+        // loaded machine still counts as quick; the slow ones and the boundary tests set it.
+        .env("REXBOARD_TEST_STATUS_TOOK_MS", "0");
     cmd
 }
 
@@ -816,10 +816,9 @@ fn a_figure_that_did_not_reach_the_pane_is_reported_again_and_a_new_session_with
     assert_eq!((sent.len(), &sent[1]["c"]), (2, &json!(8)), "{sent:?}");
 }
 
-/// A hook whose status counts as slow: the limit after which a hook leaves its usage report to
-/// the next one is 0, so no machine is fast enough, and nothing here depends on how long tmux or
-/// the process took.
-fn slow_hook(home: &Path, args: &[&str], stdin: String) {
+/// A hook whose status, by its own account, took `ms`: nothing here depends on how long tmux or
+/// the process really took.
+fn hook_that_took(home: &Path, ms: u32, args: &[&str], stdin: String) {
     rexboard(home)
         .env(
             "PATH",
@@ -827,11 +826,15 @@ fn slow_hook(home: &Path, args: &[&str], stdin: String) {
         )
         .env("TMUX", "/tmp/tmux-501/seats,1234,0")
         .env("TMUX_PANE", "%3")
-        .env("REXBOARD_HOOK_REPORT_WITHIN_MS", "0")
+        .env("REXBOARD_TEST_STATUS_TOOK_MS", ms.to_string())
         .args(args)
         .write_stdin(stdin)
         .assert()
         .success();
+}
+
+fn slow_hook(home: &Path, args: &[&str], stdin: String) {
+    hook_that_took(home, 10_000, args, stdin);
 }
 
 #[test]
@@ -886,10 +889,37 @@ fn a_slow_stop_still_keeps_the_local_usage_and_a_fast_one_still_reports() {
     assert_eq!(kept["model"], "gpt-5.5-codex", "{kept}");
     assert!(kept["sent"].is_null(), "nothing was sent to Rex: {kept}");
     assert!(reported(&tty).is_empty());
-    // A quick Stop with the same figures still reports them: they were never sent. Quick is set
-    // by the limit, not by how fast the machine happens to be.
+    // A quick Stop with the same figures still reports them: they were never sent.
     in_tmux(home.path(), &["hook", "codex", "Stop"], stop.to_string());
     assert_eq!(reported(&tty).len(), 1);
+}
+
+#[test]
+fn a_stop_reports_usage_to_rex_when_its_status_took_499_ms_and_not_at_500() {
+    let home = tempfile::tempdir().unwrap();
+    let tty = home.path().join("tty");
+    fake_tmux(home.path());
+    let rollout = format!(
+        "{}/tests/fixtures/harness/usage/codex-rollout.jsonl",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let stop =
+        json!({ "hook_event_name": "Stop", "model": "gpt-5.5-codex", "transcript_path": rollout });
+    // The real default limit, with no override of it: the boundary is where the product puts it.
+    hook_that_took(
+        home.path(),
+        500,
+        &["hook", "codex", "Stop"],
+        stop.to_string(),
+    );
+    assert!(reported(&tty).is_empty(), "500 ms is slow: Rex is not told");
+    hook_that_took(
+        home.path(),
+        499,
+        &["hook", "codex", "Stop"],
+        stop.to_string(),
+    );
+    assert_eq!(reported(&tty).len(), 1, "499 ms is quick: Rex is told");
 }
 
 #[test]
