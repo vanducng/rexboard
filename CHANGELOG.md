@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.22.0](https://github.com/vanducng/rexboard/compare/v0.21.0...v0.22.0) (2026-11-01)
+
+
+### Features
+
+* **tui:** extension and opt-in usage columns hide while no row has a value ([#134](https://github.com/vanducng/rexboard/issues/134)) ([24426d6](https://github.com/vanducng/rexboard/commit/24426d631c211dcf8c958314a92cbcc19db78ddd))
+* **tui:** the p preview strip is removed, and c shows the card ([#132](https://github.com/vanducng/rexboard/issues/132)) ([04a4325](https://github.com/vanducng/rexboard/commit/04a4325faa270bfef4b4b4fa7b70bdf22fab758f))
+* **usage:** an EFFORT column after MODEL, and [models] aliases so one model reads one way ([#129](https://github.com/vanducng/rexboard/issues/129)) ([1b9de9f](https://github.com/vanducng/rexboard/commit/1b9de9f5e4ec7f979550ec8eaa4ef6053d084bb0))
+
 ## [0.21.0](https://github.com/vanducng/rexboard/compare/v0.20.0...v0.21.0) (2026-11-01)
 
 
