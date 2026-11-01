@@ -2730,6 +2730,43 @@ mod extension_tests {
         );
     }
 
+    #[test]
+    fn a_hidden_opt_in_usage_column_still_sorts_says_so_and_cycles_off() {
+        use crate::tui::app::testkit::sort;
+        let mut app = crate::tui::app::testkit::app();
+        app.columns = vec!["tok".into(), "cost".into(), "5h".into()];
+        let mut rows = app.rows.clone();
+        rows[0].usage = Some(crate::harness::usage::Usage {
+            model: Some("m".into()),
+            ctx_pct: Some(3),
+            tok: Some(900),
+            ..Default::default()
+        });
+        app.set_rows(rows, app.hosts.clone());
+        let columns = app.columns(200, 200);
+        assert!(
+            !columns.has(Col::Cost) && !columns.has(Col::Quota),
+            "hidden: no figure"
+        );
+        // The keys still sort by them, whatever is drawn, and say there is nothing to sort on.
+        for (letter, id, name) in [('c', Col::Cost, "cost"), ('5', Col::Quota, "5h")] {
+            sort(&mut app, letter);
+            assert_eq!(app.sort.map(|(c, _)| c), Some(id), "{letter} sorts");
+            assert_eq!(
+                app.toast(),
+                Some(format!("sorted by {name} (no values)").as_str())
+            );
+            sort(&mut app, letter);
+            sort(&mut app, letter);
+            assert_eq!(app.sort, None, "{letter} a third time clears it");
+        }
+        // And one that has figures does not say so.
+        app.toast = None;
+        sort(&mut app, 'k');
+        assert_eq!(app.sort.map(|(c, _)| c), Some(Col::Tok));
+        assert!(!app.toast().is_some_and(|t| t.contains("no values")));
+    }
+
     /// Fields `project` then `rig`, with the long values, and a message of `msg` cells.
     fn project_then_rig(msg: usize) -> App {
         let mut app = app();

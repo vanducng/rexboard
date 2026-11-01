@@ -104,11 +104,12 @@ impl App {
             _ => Some((column.id, column.first)),
         };
         // A column with no values has nothing to sort on: say so rather than do nothing, silently.
-        if let Some((Col::Field(id), _)) = self.sort.filter(|(id, _)| *id == column.id)
+        if let Some((id @ (Col::Field(_) | Col::Tok | Col::Cost | Col::Quota), _)) =
+            self.sort.filter(|(id, _)| *id == column.id)
             && !self
                 .rows
                 .iter()
-                .any(|row| self.matches(row) && row.ext.get(id).is_some_and(|v| !v.is_empty()))
+                .any(|row| self.matches(row) && has_value(id, row))
         {
             self.say(format!(
                 "sorted by {} (no values)",
@@ -136,9 +137,10 @@ impl App {
             .collect()
     }
 
-    /// The built-in columns `o` can sort by: the usage ones only while they show.
+    /// The built-in columns `o` can sort by: the usage ones only while they would show, not while
+    /// they are hidden for want of a value, which sorting says so.
     pub fn builtin_columns(&self) -> impl Iterator<Item = &'static Column> {
-        let usage = self.usage_columns().cols;
+        let usage = self.usage_cols(false).cols;
         crate::tui::columns::COLUMNS
             .iter()
             .filter(move |c| !crate::tui::columns::is_usage(c.id) || usage.contains(&c.id))
@@ -170,15 +172,18 @@ impl App {
 
     /// Whether some filtered row has a value for the field column `id`.
     fn field_has_values(&self, id: &'static str) -> bool {
-        self.has_values(Col::Field(id), |row| {
-            row.ext.get(id).is_some_and(|v| !v.is_empty())
-        })
+        self.has_values(Col::Field(id), |row| has_value(Col::Field(id), row))
     }
 
     /// The usage columns the list shows: none until some row reports what its turn used, then
     /// MODEL and CTX, and TOK, COST and 5H when tui.json's `columns` names them and some filtered
     /// row has a figure for them.
     pub fn usage_columns(&self) -> UsageShown {
+        self.usage_cols(true)
+    }
+
+    /// The usage columns, with TOK, COST and 5H left out while empty when `hide_empty`.
+    fn usage_cols(&self, hide_empty: bool) -> UsageShown {
         use crate::tui::columns::{USAGE, USAGE_SHOWN, opted};
         let models: Vec<&str> = self
             .rows
@@ -202,15 +207,9 @@ impl App {
                         || (*c == Col::Effort && effort)
                 })
                 .filter(|c| {
-                    let figure = |row: &Row| {
-                        row.usage.as_ref().is_some_and(|u| match c {
-                            Col::Tok => u.tok.is_some(),
-                            Col::Cost => u.cost_usd.is_some(),
-                            Col::Quota => u.quota_5h.is_some(),
-                            _ => true,
-                        })
-                    };
-                    !matches!(c, Col::Tok | Col::Cost | Col::Quota) || self.has_values(*c, figure)
+                    !hide_empty
+                        || !matches!(c, Col::Tok | Col::Cost | Col::Quota)
+                        || self.has_values(*c, |row| has_value(*c, row))
                 })
                 .collect(),
             model: models.iter().map(|m| m.width()).max().unwrap_or_default(),
@@ -331,6 +330,18 @@ impl App {
             return None;
         }
         Some(Effect::SeenAll(keys))
+    }
+}
+
+/// Whether `row` has a value for the extension field or opt-in usage column `id`.
+fn has_value(id: Col, row: &Row) -> bool {
+    let usage = row.usage.as_ref();
+    match id {
+        Col::Field(field) => row.ext.get(field).is_some_and(|v| !v.is_empty()),
+        Col::Tok => usage.is_some_and(|u| u.tok.is_some()),
+        Col::Cost => usage.is_some_and(|u| u.cost_usd.is_some()),
+        Col::Quota => usage.is_some_and(|u| u.quota_5h.is_some()),
+        _ => true,
     }
 }
 
