@@ -421,15 +421,22 @@ mod tests {
     #[test]
     fn a_child_that_leaves_the_group_cannot_hold_the_run() {
         let root = tempfile::tempdir().unwrap();
-        let script = "python3 -c 'import os, time; os.setsid(); time.sleep(8)' &\ncat > /dev/null\nsleep 0.5\necho '{\"contract\": 1, \"rows\": {}}'";
-        let ext = adapter(root.path(), script, "every = 2\ntimeout = 1\n");
+        // The adapter ends only once its child has left the group (it says so with a file), not
+        // after a pause that python's start under load can outlast: a child still in the group
+        // is killed with it and holds nothing. The child stops when told, or after 15 s.
+        let child = "import os, time\nos.setsid()\nopen('left', 'w').close()\nfor _ in range(300):\n    if os.path.exists('stop'): break\n    time.sleep(0.05)";
+        let script = format!(
+            "python3 -c \"{child}\" &\ncat > /dev/null\nwhile [ ! -e left ]; do sleep 0.05; done\necho '{{\"contract\": 1, \"rows\": {{}}}}'"
+        );
+        let ext = adapter(root.path(), &script, "every = 4\ntimeout = 3\n");
         let started = Instant::now();
         let err = run_once(&ext, &Value::Null, &rows(), &|| false).unwrap_err();
+        let took = started.elapsed();
+        std::fs::write(ext.dir.join("stop"), "").unwrap();
         assert_eq!(err, "its output stayed open after it exited");
         assert!(
-            started.elapsed() < Duration::from_millis(1500),
-            "{:?}",
-            started.elapsed()
+            took < Duration::from_secs(10),
+            "held until its child ended: {took:?}"
         );
     }
 
