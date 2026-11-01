@@ -406,9 +406,7 @@ impl App {
                 Item::Row(i) => Some(&self.rows[*i]),
                 Item::Header { .. } | Item::Gap => None,
             });
-        let carded = self
-            .current()
-            .filter(|_| self.card_shown() || self.strip_shown());
+        let carded = self.current().filter(|_| self.card_shown());
         crate::tui::theme::redraw_every(
             listed.chain(carded).map(crate::tui::theme::look),
             crate::tui::theme::motion(),

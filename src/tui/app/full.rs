@@ -24,9 +24,6 @@ impl App {
     /// A read came back. While the view is open a failed read keeps the lines it had and says
     /// why in the bar.
     pub fn peeked(&mut self, key: &str, lines: Result<Vec<String>, String>) {
-        if let Some(strip) = self.strip.as_mut().filter(|strip| strip.key == key) {
-            strip.reading = false;
-        }
         let Some(peek) = self.peek.as_mut().filter(|peek| peek.key == key) else {
             return;
         };

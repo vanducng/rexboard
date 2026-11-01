@@ -65,7 +65,6 @@ fn start_app(pick: bool) -> App {
     let prefs = prefs();
     app.nerd = icons_on(&prefs);
     app.card = prefs.card_on();
-    app.preview = prefs.preview.unwrap_or(false);
     app.tuning = prefs.tuning;
     app.motion = prefs.motion;
     app.icons = prefs.icons;
@@ -172,11 +171,7 @@ fn board(pick: bool) -> Result<Option<Row>> {
             let now = Instant::now();
             changed |= app.number_due(now);
             app.note_card(now);
-            if let Some(effect) = app
-                .auto_tail(now)
-                .or_else(|| app.preview_read(now))
-                .or_else(|| app.live(now))
-            {
+            if let Some(effect) = app.auto_tail(now).or_else(|| app.live(now)) {
                 act(effect, &tx, &generation);
                 changed = true;
             }
