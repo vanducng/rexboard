@@ -115,7 +115,7 @@ The glyph keeps its state's look everywhere, on the bars too: a spinner drawn bo
 
 ## Views
 
-A view is a way of grouping the rows plus a sort. The view and sort last for the run.
+For the board, view and sort last for the run. `rexboard pick` remembers its own view and sort between runs in `pick.json` beside `tui.json`; this separate file does not affect the board's starting view or sort. Picker settings are `"view"` (a built-in view name or `field:<id>`) and `"sort"` (omitted for no sort, or `{"key": <column-key>, "descending": <boolean>}`, where a built-in key is `builtin:<letter>` and an extension key is `field:<id>`). Missing, unreadable or malformed files use defaults. Unknown JSON properties are preserved when saving. Unavailable extension view/sort keys, and a sort on a column that is not shown (`TOK`, `COST` and `5H` until `tui.json` names them), remain pending independently while other picker changes are saved, so temporary defaults do not overwrite unresolved preferences. See [decision 17](decisions/0017-pick-keeps-its-view-and-sort-in-its-own-file.md). A save is triggered only by a user change to view or sort. Text and status filters are never saved.
 
 | View | Groups | Order inside a group, with no sort |
 | --- | --- | --- |

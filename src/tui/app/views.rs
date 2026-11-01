@@ -23,8 +23,93 @@ impl App {
         all
     }
 
+    pub fn restore_pick_prefs(&mut self, prefs: PickPrefs) {
+        if !self.pick {
+            return;
+        }
+        self.pick_restore = Some(prefs);
+        self.apply_pick_restore();
+    }
+
+    pub fn pick_prefs(&self) -> PickPrefs {
+        let mut prefs = self.pick_restore.clone().unwrap_or_default();
+        if (prefs.view.is_empty() || self.pick_view(&prefs.view).is_some())
+            && let Some(key) = self.pick_view_key()
+        {
+            prefs.view = key;
+        }
+        prefs.sort = match self.sort {
+            Some((col, dir)) => {
+                let key = match col {
+                    Col::Field(id) => Some(format!("field:{id}")),
+                    _ => column_of(col)
+                        .letter
+                        .map(|letter| format!("builtin:{letter}")),
+                };
+                key.map(|key| (key, dir == Dir::Down))
+            }
+            None => self
+                .pick_restore
+                .as_ref()
+                .and_then(|prefs| prefs.sort.clone()),
+        };
+        prefs
+    }
+
+    pub(super) fn apply_pick_restore(&mut self) {
+        let Some(prefs) = self.pick_restore.as_ref() else {
+            return;
+        };
+        if let Some(view) = self.pick_view(&prefs.view) {
+            self.view = view;
+        }
+        if let Some((key, descending)) = &prefs.sort
+            && let Some(col) = self.pick_sort(key)
+        {
+            self.sort = Some((col, if *descending { Dir::Down } else { Dir::Up }));
+        }
+    }
+
+    fn pick_view(&self, key: &str) -> Option<View> {
+        self.views().into_iter().find(|view| match view.group_by {
+            Some(Key::Field(id)) => key == format!("field:{id}"),
+            _ => view.name == key,
+        })
+    }
+
+    fn pick_view_key(&self) -> Option<String> {
+        match self.view.group_by {
+            Some(Key::Field(id)) => Some(format!("field:{id}")),
+            _ => Some(self.view.name.clone()),
+        }
+    }
+
+    fn pick_sort(&self, key: &str) -> Option<Col> {
+        if let Some(id) = key.strip_prefix("field:") {
+            return self
+                .fields
+                .iter()
+                .find(|(field, _)| field.id == id)
+                .map(|(field, letter)| field_column(field, *letter).id);
+        }
+        let letter = key.strip_prefix("builtin:")?.chars().next()?;
+        self.builtin_columns()
+            .find(|column| column.letter == Some(letter))
+            .map(|column| column.id)
+    }
+
     /// Switches to `view`; the selection keeps its row.
     pub(super) fn show(&mut self, view: View) {
+        self.show_view(view);
+        if self.pick
+            && let Some(key) = self.pick_view_key()
+            && let Some(prefs) = &mut self.pick_restore
+        {
+            prefs.view = key;
+        }
+    }
+
+    fn show_view(&mut self, view: View) {
         if let Some(Spot::Group(_)) = self.selected {
             self.unfold_all();
         }
@@ -98,6 +183,11 @@ impl App {
         let Some(column) = self.column_by_letter(letter) else {
             return;
         };
+        if self.pick
+            && let Some(prefs) = &mut self.pick_restore
+        {
+            prefs.sort = None;
+        }
         self.sort = match self.sort {
             Some((id, dir)) if id == column.id && dir == column.first => Some((id, dir.flip())),
             Some((id, _)) if id == column.id => None,
@@ -296,6 +386,7 @@ impl App {
     pub fn set_extensions(&mut self, fields: Vec<Field>, runs: BTreeMap<String, ExtRun>) {
         self.ext_runs = runs;
         if self.fields.iter().map(|(f, _)| f).eq(&fields) {
+            self.apply_pick_restore();
             return;
         }
         let mut taken = Vec::new();
@@ -315,6 +406,7 @@ impl App {
         {
             self.sort = None;
         }
+        self.apply_pick_restore();
     }
 
     /// `ctrl+s`: every unseen `done` row the list shows, to be marked seen.
@@ -386,5 +478,116 @@ mod tests {
         );
         assert_eq!(seen_all(&mut app), None);
         assert_eq!(app.toast(), Some("no unseen done rows"));
+    }
+
+    #[test]
+    fn picker_preferences_preserve_unavailable_extension_view_while_saving_sort() {
+        let mut app = app();
+        app.pick = true;
+        app.restore_pick_prefs(PickPrefs {
+            view: "field:ext.status".into(),
+            sort: Some(("builtin:a".into(), true)),
+        });
+
+        typed(&mut app, "oa");
+        let prefs = app.pick_prefs();
+        assert_eq!(prefs.view, "field:ext.status");
+        assert_eq!(prefs.sort, Some(("builtin:a".into(), false)));
+    }
+
+    #[test]
+    fn picker_preferences_preserve_unavailable_extension_sort_while_saving_view() {
+        let mut app = app();
+        app.pick = true;
+        app.restore_pick_prefs(PickPrefs {
+            view: "table".into(),
+            sort: Some(("field:ext.status".into(), false)),
+        });
+        typed(&mut app, "v");
+
+        let prefs = app.pick_prefs();
+        assert_eq!(prefs.view, "harness");
+        assert_eq!(prefs.sort, Some(("field:ext.status".into(), false)));
+    }
+
+    fn usage_row(key: &str) -> Row {
+        let mut row = row(key, "working", "working", false);
+        row.usage = Some(crate::harness::usage::Usage {
+            model: Some("Opus".into()),
+            tok: Some(10),
+            ..Default::default()
+        });
+        row
+    }
+
+    #[test]
+    fn picker_restores_a_usage_sort_once_its_column_shows() {
+        let mut app = app();
+        app.pick = true;
+        app.restore_pick_prefs(PickPrefs {
+            view: "table".into(),
+            sort: Some(("builtin:d".into(), false)),
+        });
+        assert_eq!(app.sort, None, "no row reports usage yet");
+        assert_eq!(app.pick_prefs().sort, Some(("builtin:d".into(), false)));
+        app.set_rows(vec![usage_row("mini/model")], hosts());
+        assert_eq!(app.sort, Some((Col::Model, Dir::Up)));
+    }
+
+    #[test]
+    fn picker_does_not_restore_a_sort_on_a_column_that_is_hidden() {
+        let mut app = app();
+        app.pick = true;
+        app.restore_pick_prefs(PickPrefs {
+            view: "table".into(),
+            sort: Some(("builtin:k".into(), true)),
+        });
+        app.set_rows(vec![usage_row("mini/model")], hosts());
+        assert_eq!(app.sort, None, "TOK is off until tui.json names it");
+        assert_eq!(
+            app.pick_prefs().sort,
+            Some(("builtin:k".into(), true)),
+            "kept for when it shows"
+        );
+        app.columns = vec!["tok".into()];
+        app.set_rows(vec![usage_row("mini/model")], hosts());
+        assert_eq!(app.sort, Some((Col::Tok, Dir::Down)));
+    }
+
+    #[test]
+    fn picker_saves_no_sort_for_a_column_without_a_letter() {
+        let mut app = app();
+        app.pick = true;
+        app.sort = Some((Col::Num, Dir::Up));
+        assert_eq!(app.pick_prefs().sort, None);
+    }
+
+    #[test]
+    fn picker_age_sort_round_trips_both_directions() {
+        for dir in [Dir::Down, Dir::Up] {
+            let mut original = app();
+            original.pick = true;
+            original.restore_pick_prefs(PickPrefs::default());
+            original.sort_by('a');
+            if dir == Dir::Up {
+                original.sort_by('a');
+            }
+
+            let mut restored = app();
+            restored.pick = true;
+            restored.restore_pick_prefs(original.pick_prefs());
+            assert_eq!(restored.sort, Some((Col::Age, dir)));
+        }
+    }
+
+    #[test]
+    fn picker_default_settings_allow_user_sort_changes() {
+        let mut app = app();
+        app.pick = true;
+        app.restore_pick_prefs(PickPrefs::default());
+        assert_eq!(app.pick_prefs().view, "status");
+
+        typed(&mut app, "oa");
+        assert_eq!(app.pick_prefs().sort, Some(("builtin:a".into(), true)));
     }
 }

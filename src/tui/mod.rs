@@ -9,6 +9,7 @@ pub(crate) mod icons;
 mod keys;
 mod markdown;
 mod meta;
+mod pick_prefs;
 mod prefs;
 pub(crate) mod query;
 pub(crate) mod screen;
@@ -38,7 +39,7 @@ use crate::{interrupted, jump, rex, send, stop_on_signals};
 
 use app::{App, Effect, Link};
 pub(crate) use app::{RUNS_THE_BOARD, ending, is_own, runs_rexboard, tmux_note};
-use effects::{Msg, act, apply, listen, tui_json};
+use effects::{Msg, act, apply, listen, pick_json, tui_json};
 pub(crate) use effects::{screen as read_screen, tail};
 use screen::Screen;
 
@@ -71,12 +72,30 @@ fn start_app(pick: bool) -> App {
     app.card_height = prefs.card_height;
     app.columns = prefs.columns;
     app.widths = prefs.widths;
+    if pick && let Some(path) = pick_json() {
+        app.restore_pick_prefs(pick_prefs::load(&path));
+    }
     theme::set_motion(
         prefs.motion == prefs::Motion::Full
             && std::env::var("REXBOARD_REDUCED_MOTION").as_deref() != Ok("1"),
     );
     app.own = std::env::var("REX_BLOCK").ok().filter(|id| !id.is_empty());
     app
+}
+
+/// Saves the picker's view and sort when `before`, taken ahead of a key or click, is not what they
+/// are now.
+fn keep_pick(
+    app: &App,
+    before: Option<pick_prefs::PickPrefs>,
+    tx: &Sender<Msg>,
+    generation: &Arc<AtomicU64>,
+) {
+    if let Some(before) = before
+        && before != app.pick_prefs()
+    {
+        act(Effect::SavePick(app.pick_prefs()), tx, generation);
+    }
 }
 
 /// Applies every message waiting and acts on what they ask: whether any came, or None once the
@@ -150,15 +169,21 @@ fn board(pick: bool) -> Result<Option<Row>> {
             if event::poll(Duration::from_millis(50)).unwrap_or_else(|_| leave()) {
                 match event::read().unwrap_or_else(|_| leave()) {
                     Event::Key(key) if key.kind != KeyEventKind::Release => {
+                        let before = pick.then(|| app.pick_prefs());
                         match app.handle(key) {
                             Some(Effect::Quit) => return Ok(None),
                             Some(Effect::Jump(row)) if pick => return Ok(Some(*row)),
                             Some(effect) => act(effect, &tx, &generation),
                             None => {}
                         }
+                        keep_pick(&app, before, &tx, &generation);
                         changed = true;
                     }
-                    Event::Mouse(event) => changed = mouse(&mut app, event),
+                    Event::Mouse(event) => {
+                        let before = pick.then(|| app.pick_prefs());
+                        changed = mouse(&mut app, event);
+                        keep_pick(&app, before.filter(|_| changed), &tx, &generation);
+                    }
                     Event::Resize(..) => changed = true,
                     _ => {}
                 }

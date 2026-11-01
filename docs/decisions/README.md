@@ -32,6 +32,7 @@ These decide between options the records do not cover.
 | [14](0014-writes-to-user-config-are-explicit-reversible-and-fail-open.md) | Writes to user config are explicit, reversible and fail open | Accepted |
 | [15](0015-scope-and-non-goals.md) | Scope and non-goals | Accepted |
 | [16](0016-extensions-can-offer-actions.md) | Extensions can offer actions | Accepted |
+| [17](0017-pick-keeps-its-view-and-sort-in-its-own-file.md) | `pick` keeps its view and sort in its own file | Accepted |
 
 ## Adding or changing one
 
