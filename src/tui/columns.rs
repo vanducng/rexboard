@@ -685,13 +685,6 @@ impl Columns {
             None if board < FLOOR_FROM => 0,
             None => MSG_FLOOR.max(total * MSG_SHARE / 100).min(longest.msg + 1),
         };
-        // A field's width in tui.json is yours, so MSG's floor gives up what it has past
-        // FIELD_WIDTH, the cells every field is planned with.
-        let give: usize = (longest.fields.iter())
-            .filter(|f| f.yours && self.has(f.id))
-            .filter_map(|f| f.fixed?.checked_sub(FIELD_WIDTH))
-            .sum();
-        let floor = normal.saturating_sub(give);
         // Every column that is planned here, HOST and the location columns, gets its width in one
         // pass; what is fixed counts at its planned width.
         let mut wants = Vec::new();
@@ -745,7 +738,15 @@ impl Columns {
         // of their least, even with none free, the last extension column goes, then the last usage
         // column, and again.
         let rank = |id: Col| (!matches!(id, Col::Field(_)), !is_usage(id));
-        let limit = loop {
+        let (limit, floor) = loop {
+            // A field's width in tui.json is yours, so while it is kept MSG's floor gives up what
+            // it has past FIELD_WIDTH, the cells every field is planned with; a field that goes
+            // takes its concession with it.
+            let give: usize = (longest.fields.iter())
+                .filter(|f| f.yours && self.has(f.id))
+                .filter_map(|f| f.fixed?.checked_sub(FIELD_WIDTH))
+                .sum();
+            let floor = normal.saturating_sub(give);
             let planned = |id: Col| wants.iter().any(|(want, _)| *want == id);
             let others: usize = (self.cols.iter())
                 .filter(|(c, _)| !group.contains(&c.id) && !planned(c.id) && c.id != Col::Msg)
@@ -762,7 +763,7 @@ impl Columns {
                 .filter(|id| rank(*id) != (true, true));
             match gone {
                 Some(id) if spent + each * free.len() > total => self.resize(id, 0),
-                _ => break total.saturating_sub(spent),
+                _ => break (total.saturating_sub(spent), floor),
             }
         };
         // With usage columns left, WHERE stays whole at 140 and takes only what its labels need;

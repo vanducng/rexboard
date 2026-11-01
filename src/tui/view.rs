@@ -2480,6 +2480,31 @@ mod extension_tests {
             render(&app, 140, 30).contains("team.platform-api "),
             "whole"
         );
+        // A width of yours that does not fit is dropped with its concession: MSG is back at its
+        // floor, and every other column is as it is with no width at all.
+        let widths = |app: &App| -> Vec<(&'static str, usize)> {
+            let columns = app.columns(140, 140);
+            columns.cols.iter().map(|(c, w)| (c.header, *w)).collect()
+        };
+        let mut gone = project_then_rig(45);
+        // Long labels, which would take any cell the floor gave up.
+        let mut rows = gone.rows.clone();
+        for row in &mut rows {
+            row.pane.tab = format!("1-team:rig:{}#0123456789abcdef", row.pane.session);
+            row.pane.session = format!("{}-orchestrated-session", row.pane.session);
+        }
+        gone.set_rows(rows, hosts());
+        let plain = widths(&gone);
+        gone.widths = BTreeMap::from([("rig".to_owned(), 18.into())]);
+        assert!(
+            !gone.columns(140, 140).has(Col::Field("p.rig")),
+            "RIG does not fit"
+        );
+        assert_eq!(
+            widths(&gone),
+            plain,
+            "so nothing else moved, MSG least of all"
+        );
         // A manifest's width is not yours: MSG's floor still holds against it.
         let mut manifest = project_then_rig(45);
         manifest.fields[0].0.width = Some(18);
