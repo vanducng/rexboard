@@ -2950,7 +2950,7 @@ mod extension_tests {
         for width in [140u16, 200, 250] {
             let columns = app.columns(width, usize::from(width));
             let floor = 40
-                .max(usize::from(width) * 35 / 100)
+                .max((usize::from(width) * 35 / 100).min(56))
                 .min(WIDE_MSG.len() + 1);
             assert!(
                 columns.width(Col::Msg) >= floor,
@@ -3007,6 +3007,59 @@ mod extension_tests {
     }
 
     #[test]
+    fn a_wide_board_fits_extension_values_whole_before_msg_takes_a_share() {
+        let wide = |width: u16| {
+            let mut app = configured(3, 1, false);
+            let mut rows = app.rows.clone();
+            for row in &mut rows {
+                row.ext.insert(
+                    "session-prefix.project".into(),
+                    "team.platform-api-v2".into(),
+                );
+                row.ext
+                    .insert("fake.rig".into(), "conductor-pod-alpha".into());
+                row.ext
+                    .insert("fake.role".into(), "platform-engineer".into());
+                row.pane.session = format!("{}-orchestrated-session-name", row.pane.session);
+                row.pane.pane = "dev.implementer-seat-long".into();
+                row.pane.msg = Some("Opened the pull request and queued the review. ".repeat(5));
+            }
+            app.set_rows(rows, hosts());
+            let columns = app.columns(width, usize::from(width));
+            (app, columns)
+        };
+        for width in [300u16, 330] {
+            let (app, columns) = wide(width);
+            for (id, value) in [
+                ("fake.rig", "conductor-pod-alpha"),
+                ("session-prefix.project", "team.platform-api-v2"),
+                ("fake.role", "platform-engineer"),
+            ] {
+                assert_eq!(
+                    columns.width(Col::Field(id)),
+                    value.len() + 2,
+                    "{width}: {id} whole, with its gap"
+                );
+            }
+            assert!(
+                columns.width(Col::Msg) >= 56,
+                "{width}: MSG keeps its floor"
+            );
+            let text = render(&app, width, 30);
+            assert!(
+                text.contains("team.platform-api-v2  "),
+                "{width}: PROJECT whole:\n{text}"
+            );
+        }
+        let (_, at_300) = wide(300);
+        let (_, at_330) = wide(330);
+        assert!(
+            at_330.width(Col::Msg) > at_300.width(Col::Msg),
+            "MSG still takes every cell left over"
+        );
+    }
+
+    #[test]
     fn msg_keeps_its_floor_with_usage_icons_and_extension_columns_at_every_width() {
         for width in [140u16, 200, 250, 1000] {
             for fields in 0..=3 {
@@ -3016,7 +3069,7 @@ mod extension_tests {
                     let share = if usage > 0 && width < 160 {
                         34
                     } else {
-                        40.max(usize::from(width) * 35 / 100)
+                        40.max((usize::from(width) * 35 / 100).min(56))
                     };
                     let floor = share.min(WIDE_MSG.len() + 1);
                     for nerd in [false, true] {
@@ -3045,7 +3098,7 @@ mod extension_tests {
         let columns = app.columns(250, 250);
         assert_eq!(columns.width(Col::Session), 90);
         assert!(
-            columns.width(Col::Msg) > WIDE_MSG.len(),
+            columns.width(Col::Msg) >= 56 && columns.width(Col::Window) < 26,
             "the other parts gave way, not MSG: {}",
             header(&app, 250)
         );
@@ -3110,13 +3163,13 @@ mod extension_tests {
         }
         fixed.set_rows(rows, hosts());
         fixed.widths = BTreeMap::from([
-            ("session".to_owned(), 87.into()),
+            ("session".to_owned(), 118.into()),
             ("window".to_owned(), 10.into()),
             ("block".to_owned(), 10.into()),
         ]);
         let columns = fixed.columns(250, 250);
         assert!(
-            columns.width(Col::Msg) >= 250 * 35 / 100,
+            columns.width(Col::Msg) >= 56,
             "MSG is {}: {}",
             columns.width(Col::Msg),
             header(&fixed, 250)
