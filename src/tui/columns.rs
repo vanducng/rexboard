@@ -112,11 +112,14 @@ pub struct FieldFit {
 pub const LABEL_MAX: usize = 24;
 /// The least a part is given: its header word, a gap and the sort arrow.
 const PART_MIN: usize = 10;
-/// MSG keeps at least this many columns, or MSG_SHARE percent of the list, from FLOOR_FROM.
+/// MSG keeps at least this many columns, or MSG_SHARE percent of the list up to MSG_CAP, from
+/// FLOOR_FROM. The share stops growing there (what it is at 160 columns), so on a wide board the
+/// extension columns reach their fit before MSG takes the rest.
 const MSG_FLOOR: usize = 40;
 const MSG_SHARE: usize = 35;
+const MSG_CAP: usize = 56;
 /// From FLOOR_FROM to USAGE_WIDE, while usage columns show, MSG's floor is this flat figure, so
-/// MODEL, EFFORT and CTX fit beside a message; from USAGE_WIDE it is MSG_FLOOR or its share.
+/// MODEL, EFFORT and CTX fit beside a message; from USAGE_WIDE it is MSG_FLOOR or its capped share.
 const USAGE_MSG_FLOOR: usize = 34;
 const FLOOR_FROM: u16 = 140;
 /// WHERE, unsplit, is not squeezed under this; MSG is not squeezed under MSG_LEAST by a fixed width.
@@ -708,7 +711,9 @@ impl Columns {
             Some(_) => 0,
             None if board < FLOOR_FROM => 0,
             None if board < USAGE_WIDE && usage => USAGE_MSG_FLOOR.min(longest.msg + 1),
-            None => MSG_FLOOR.max(total * MSG_SHARE / 100).min(longest.msg + 1),
+            None => MSG_FLOOR
+                .max((total * MSG_SHARE / 100).min(MSG_CAP))
+                .min(longest.msg + 1),
         };
         // Every column that is planned here, HOST and the location columns, gets its width in one
         // pass; what is fixed counts at its planned width.
@@ -805,12 +810,25 @@ impl Columns {
             wanted[0] = wanted[0].min(longest.place);
         }
         let held: usize = free.iter().map(|id| self.width(*id)).sum();
-        let parts = parts_share(&wanted, held.min(limit), each);
-        let mut spare = limit.saturating_sub(parts.iter().sum::<usize>() + normal - floor);
+        let mut parts = parts_share(&wanted, held.min(limit), each);
+        // Past FIELDS_ALL the fields take their fit before the location columns take theirs; up
+        // to it they take what those leave, as the fit and drop rules there were set.
+        let fields_first = board > FIELDS_ALL;
+        let kept = if fields_first {
+            each * free.len()
+        } else {
+            parts.iter().sum()
+        };
+        let mut spare = limit.saturating_sub(kept + normal - floor);
+        let mut given = 0;
         for (id, extra) in more.into_iter().filter(|(id, _)| self.has(*id)) {
             let give = extra.min(spare);
             spare -= give;
+            given += give;
             wants.iter_mut().find(|(want, _)| *want == id).unwrap().1 += give;
+        }
+        if fields_first {
+            parts = parts_share(&wanted, held.min(limit - given), each);
         }
         wants.extend(free.iter().copied().zip(parts));
         self.apply(wants);
