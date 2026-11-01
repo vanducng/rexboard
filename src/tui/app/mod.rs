@@ -44,6 +44,9 @@ const SETTLE: Duration = Duration::from_millis(300);
 /// Rows are numbered up to here, and a first digit waits this long for its second.
 pub const NUMBERED: usize = 99;
 const NUMBER_WAIT: Duration = Duration::from_millis(400);
+/// A field or opt-in usage column with no value in the filtered list is hidden this long after
+/// its last value goes, so a row that flips on and off does not make the layout jump.
+pub const HIDE_AFTER: Duration = Duration::from_secs(10);
 /// `tab` off a done row whose card showed at least this long marks it seen.
 const READ: Duration = Duration::from_secs(1);
 
@@ -217,6 +220,9 @@ pub struct App {
     pub drawn: std::cell::Cell<(u16, usize, usize)>,
     /// Whether the list was drawn with blank rows between its groups, which it is while they fit.
     pub spaced: std::cell::Cell<bool>,
+    /// When each hideable column last had a value in the filtered list, so one that loses its
+    /// last value stays HIDE_AFTER before it goes.
+    held: std::cell::RefCell<Vec<(Col, Instant)>>,
     /// Each row's message as inline markdown, by key, with the report it was mapped from.
     marked: std::cell::RefCell<BTreeMap<String, (Report, std::rc::Rc<Marked>)>>,
     pub folded: BTreeSet<Bucket>,

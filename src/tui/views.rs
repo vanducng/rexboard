@@ -369,6 +369,9 @@ mod tests {
         app.rows[0].usage = Some(crate::harness::usage::Usage {
             ctx_pct: Some(7),
             effort: Some("high".into()),
+            tok: Some(1000),
+            cost_usd: Some(1.0),
+            quota_5h: Some(5),
             ..Default::default()
         });
         sort(&mut app, 'c');
