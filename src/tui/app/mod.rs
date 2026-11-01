@@ -105,6 +105,8 @@ pub enum Effect {
     },
     /// Keep whether the card is hidden in tui.json.
     SavePrefs(super::prefs::Prefs),
+    /// Keep the picker's view and sort in pick.json.
+    SavePick(super::pick_prefs::PickPrefs),
     Reconnect,
     Quit,
 }

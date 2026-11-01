@@ -190,6 +190,19 @@ pub(super) fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>)
                 let _ = tx.send(Msg::Say(format!("could not keep the card setting: {why}")));
             }
         }
+        Effect::SavePick(prefs) => {
+            let saved = pick_json()
+                .ok_or_else(|| "no state dir".to_owned())
+                .and_then(|path| {
+                    pick_prefs::save(&path, &prefs)
+                        .map_err(|err| format!("{}: {err}", path.display()))
+                });
+            if let Err(why) = saved {
+                let _ = tx.send(Msg::Say(format!(
+                    "could not keep the picker's view and sort: {why}"
+                )));
+            }
+        }
         Effect::Reconnect => listen(&tx, generation),
         Effect::Quit => {}
     }
@@ -197,6 +210,10 @@ pub(super) fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>)
 
 pub(super) fn tui_json() -> Option<std::path::PathBuf> {
     Paths::find().ok().map(|paths| paths.tui())
+}
+
+pub(super) fn pick_json() -> Option<std::path::PathBuf> {
+    Paths::find().ok().map(|paths| paths.dir.join("pick.json"))
 }
 
 /// Starts a subscriber thread. A newer `listen` makes the older one stop at its next tick.

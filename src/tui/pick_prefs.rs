@@ -70,6 +70,7 @@ pub fn save(path: &Path, prefs: &PickPrefs) -> io::Result<()> {
     let text = serde_json::to_vec_pretty(&Value::Object(object))?;
 
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
     let file_name = path.file_name().unwrap_or_default().to_string_lossy();
     let (temp_path, mut temp_file) = loop {
         let sequence = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -170,5 +171,14 @@ mod tests {
         assert_eq!(saved["future"], serde_json::json!({"enabled":true}));
         assert_eq!(saved["other"], 9);
         assert_eq!(load(&file.0), prefs);
+    }
+
+    #[test]
+    fn save_creates_the_directory() {
+        let file = TempFile::new();
+        let path = file.0.with_extension("d").join("pick.json");
+        save(&path, &PickPrefs::default()).unwrap();
+        assert!(path.exists());
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 }

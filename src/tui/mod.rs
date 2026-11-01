@@ -39,7 +39,7 @@ use crate::{interrupted, jump, rex, send, stop_on_signals};
 
 use app::{App, Effect, Link};
 pub(crate) use app::{RUNS_THE_BOARD, ending, is_own, runs_rexboard, tmux_note};
-use effects::{Msg, act, apply, listen, tui_json};
+use effects::{Msg, act, apply, listen, pick_json, tui_json};
 pub(crate) use effects::{screen as read_screen, tail};
 use screen::Screen;
 
@@ -60,14 +60,11 @@ pub(crate) fn icons_on(prefs: &prefs::Prefs) -> bool {
 }
 
 /// The board as tui.json, the environment and the pane it runs in set it up.
-fn start_app(pick: bool, pick_path: Option<&std::path::Path>) -> App {
+fn start_app(pick: bool) -> App {
     let mut app = App::default();
     app.pick = pick;
     let prefs = prefs();
     app.nerd = icons_on(&prefs);
-    if pick && let Some(path) = pick_path {
-        app.restore_pick_prefs(pick_prefs::load(path));
-    }
     app.card = prefs.card_on();
     app.tuning = prefs.tuning;
     app.motion = prefs.motion;
@@ -75,6 +72,9 @@ fn start_app(pick: bool, pick_path: Option<&std::path::Path>) -> App {
     app.card_height = prefs.card_height;
     app.columns = prefs.columns;
     app.widths = prefs.widths;
+    if pick && let Some(path) = pick_json() {
+        app.restore_pick_prefs(pick_prefs::load(&path));
+    }
     theme::set_motion(
         prefs.motion == prefs::Motion::Full
             && std::env::var("REXBOARD_REDUCED_MOTION").as_deref() != Ok("1"),
@@ -83,8 +83,19 @@ fn start_app(pick: bool, pick_path: Option<&std::path::Path>) -> App {
     app
 }
 
-fn pick_prefs_path() -> Option<std::path::PathBuf> {
-    Paths::find().ok().map(|paths| paths.dir.join("pick.json"))
+/// Saves the picker's view and sort when `before`, taken ahead of a key or click, is not what they
+/// are now.
+fn keep_pick(
+    app: &App,
+    before: Option<pick_prefs::PickPrefs>,
+    tx: &Sender<Msg>,
+    generation: &Arc<AtomicU64>,
+) {
+    if let Some(before) = before
+        && before != app.pick_prefs()
+    {
+        act(Effect::SavePick(app.pick_prefs()), tx, generation);
+    }
 }
 
 /// Applies every message waiting and acts on what they ask: whether any came, or None once the
@@ -138,9 +149,7 @@ fn board(pick: bool) -> Result<Option<Row>> {
     // Before the subscriber thread, which may restart serve and say so.
     client::QUIET.store(true, Ordering::Relaxed);
     listen(&tx, &generation);
-    let pick_path = pick.then(pick_prefs_path).flatten();
-    let mut app = start_app(pick, pick_path.as_deref());
-    let mut pick_save_pending = false;
+    let mut app = start_app(pick);
     let mut terminal = ratatui::init();
     let _restore = Restore;
     let mut tick = Instant::now();
@@ -167,15 +176,13 @@ fn board(pick: bool) -> Result<Option<Row>> {
                             Some(effect) => act(effect, &tx, &generation),
                             None => {}
                         }
-                        pick_save_pending |=
-                            before.is_some_and(|before| before != app.pick_prefs());
+                        keep_pick(&app, before, &tx, &generation);
                         changed = true;
                     }
                     Event::Mouse(event) => {
                         let before = pick.then(|| app.pick_prefs());
                         changed = mouse(&mut app, event);
-                        pick_save_pending |=
-                            changed && before.is_some_and(|before| before != app.pick_prefs());
+                        keep_pick(&app, before.filter(|_| changed), &tx, &generation);
                     }
                     Event::Resize(..) => changed = true,
                     _ => {}
@@ -197,15 +204,6 @@ fn board(pick: bool) -> Result<Option<Row>> {
             if tick.elapsed() >= app.frame_every().unwrap_or(Duration::from_secs(1)) {
                 tick = Instant::now();
                 changed = true;
-            }
-            if pick
-                && pick_save_pending
-                && let Some(path) = pick_path.as_deref()
-            {
-                let current = app.pick_prefs();
-                if pick_prefs::save(path, &current).is_ok() {
-                    pick_save_pending = false;
-                }
             }
         }
     }
