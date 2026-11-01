@@ -423,8 +423,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         // The adapter ends only once its child has left the group (it says so with a file), not
         // after a pause that python's start under load can outlast: a child still in the group
-        // is killed with it and holds nothing. The child stops when told, or after 15 s.
-        let child = "import os, time\nos.setsid()\nopen('left', 'w').close()\nfor _ in range(300):\n    if os.path.exists('stop'): break\n    time.sleep(0.05)";
+        // is killed with it and holds nothing. The child stops when told, and says so, or ends
+        // after 15 s.
+        let child = "import os, time\nos.setsid()\nopen('left', 'w').close()\nfor _ in range(300):\n    if os.path.exists('stop'):\n        open('stopped', 'w').close()\n        break\n    time.sleep(0.05)";
         let script = format!(
             "python3 -c \"{child}\" &\ncat > /dev/null\nwhile [ ! -e left ]; do sleep 0.05; done\necho '{{\"contract\": 1, \"rows\": {{}}}}'"
         );
@@ -433,6 +434,13 @@ mod tests {
         let err = run_once(&ext, &Value::Null, &rows(), &|| false).unwrap_err();
         let took = started.elapsed();
         std::fs::write(ext.dir.join("stop"), "").unwrap();
+        // The directory goes with the test: wait for the child to have taken the stop, so it
+        // does not outlive the fixture looking for a file that is gone.
+        let acked = Instant::now() + Duration::from_secs(10);
+        while !ext.dir.join("stopped").exists() && Instant::now() < acked {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(ext.dir.join("stopped").exists(), "the child took the stop");
         assert_eq!(err, "its output stayed open after it exited");
         assert!(
             took < Duration::from_secs(10),
