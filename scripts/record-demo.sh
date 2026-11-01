@@ -104,7 +104,17 @@ exec jq -c '{contract: 1, rows: (.rows | map(select((.pane // "") | test("^seat-
 ADAPTER
 printf '#!/bin/sh\nshift\nprintf "%%s: %%s\\n" "$1" "$2" >>"%s/sent"\necho "delivered to $1"\n' "$root" >"$ext/send"
 chmod +x "$ext/adapter" "$ext/send"
-printf '[extensions]\nenabled = ["team"]\n' >"$XDG_CONFIG_HOME/rexboard/config.toml"
+# Model aliases: the board shows each harness's model id in one short style. No row reports a
+# five-hour quota, so 5H stays hidden, as every column does while no row has a value.
+cat >"$XDG_CONFIG_HOME/rexboard/config.toml" <<'TOML'
+[extensions]
+enabled = ["team"]
+
+[models]
+"claude-opus-4-5" = "opus-4.5"
+"claude-sonnet-4-5" = "sonnet-4.5"
+"gpt-5.1-codex" = "5.1-codex"
+TOML
 # A clipboard that is a file here, whichever tool the board picks.
 for copy in pbcopy wl-copy xclip; do
   printf '#!/bin/sh\ncat >"%s/clipboard"\n' "$root" >"$root/bin/$copy"
@@ -140,7 +150,7 @@ case "$seat" in
   seat-a)
     title "⠋ seat-a@demo"; printf '● Fixing the nested parser case.\n\n'
     report working "Fixing the nested parser case"
-    usage '{"v":1,"m":"opus-4","c":38,"w":200000,"t":76000,"u":0.84,"q":21}'
+    usage '{"v":1,"m":"claude-opus-4-5","e":"high","c":38,"w":200000,"t":76000,"u":0.84}'
     at 5
     printf '● Bash(cargo test --workspace --features full)\n\n'
     printf ' Bash command\n\n   cargo test --workspace --features full\n   Run the full test suite\n\n'
@@ -156,11 +166,11 @@ case "$seat" in
     report done "Tests pass: 12 passed ⏎ The nested parser case is fixed and covered by a new test." ;;
   seat-b)
     title "✳ seat-b@demo"; printf '● Posted 2 comments on the parser change.\n'
-    usage '{"v":1,"m":"gpt-5","c":61,"w":400000,"t":244000}'
+    usage '{"v":1,"m":"gpt-5.1-codex","e":"xhigh","c":61,"w":400000,"t":244000}'
     report done "Review posted with 2 comments ⏎ Both are about naming in src/parser.rs; nothing blocks the merge. ⏎ 1. parse_block: rename depth to nesting, since it counts open blocks, not lines. ⏎ 2. tokens: the comment filter reads better as its own small function. ⏎ Tests: 12 passed, 0 failed, on the branch head. ⏎ Clippy and fmt are clean. ⏎ The change is 48 lines in two files. ⏎ Next step is yours: answer the two comments, then merge." ;;
   seat-c)
     title "✳ seat-c@demo"
-    usage '{"v":1,"m":"sonnet-4","c":17,"w":200000,"t":34000,"u":0.12}'
+    usage '{"v":1,"m":"claude-sonnet-4-5","e":"medium","c":17,"w":200000,"t":34000,"u":0.12}'
     printf ' ☐ Test runner\n\nWhich test runner should the web package use?\n\n'
     printf '❯ 1. vitest\n     Fast, native ESM, works with Vite\n  2. jest\n     Familiar, more plugins\n  3. Type something.\n\n'
     printf 'Enter to select · ↑/↓ to navigate · Esc to cancel\n'
@@ -168,7 +178,7 @@ case "$seat" in
   seat-d)
     # A coloured diff that grows while the full view follows it, then a done report.
     title "⠋ seat-d@demo"; report working "Updating the style docs"
-    usage '{"v":1,"m":"opus-4","c":54,"w":200000,"t":108000,"u":1.31}'
+    usage '{"v":1,"m":"claude-opus-4-5","e":"high","c":54,"w":200000,"t":108000,"u":1.31}'
     printf '\033[1mdiff --git a/docs/tui.md b/docs/tui.md\033[0m\n\033[36m@@ -36,6 +36,18 @@ ## Style\033[0m\n'
     printf ' One table says how each state looks.\n'
     printf '\033[31m-  Glyphs: blocked, error, done, working, idle.\033[0m\n'
@@ -271,16 +281,17 @@ done
 tmux -L "$tmux_socket" capture-pane -p -t demo | grep -qF 'NEEDS YOU' || { echo "the board never showed NEEDS YOU" >&2; exit 1; }
 sleep 1.5
 touch "$go"
-# The board opens list first, every row numbered. `3` selects row 3 by its number; `p` opens the
-# live preview strip, which follows `k` up to the error and the permission ask, then `j` back; `c` shows the card, scrolled with ctrl-e to its facts (model and context come from
+# The board opens list first, every row numbered, MODEL showing each alias and EFFORT beside it.
+# `3` selects row 3 by its number; `k` walks up to the error and the permission ask, then `j`
+# back; `c` shows the card, scrolled with ctrl-e to its facts (model, effort and context come from
 # the pane's usage record), and hides it again; the permission row's ask is answered with `a`, `2`
 # once to show that a lasting option asks again, then `1`; `/docs` narrows the list to the docs
 # row, whose live, coloured full view follows its diff; `dd` asks before `y` closes it; `x s`
 # types a line to the question row, whose confirm says it waits on a dialog, and `y` sends it.
 # Every opener (`a`, the first `d`, `x`) comes after a pause, as the typing guard asks.
 sleep 2.5; k 3; sleep 1.8
-k p; sleep 2.2; k k; sleep 1.8; k k; sleep 2.2; k j j; sleep 1.2
-k c; sleep 2; k C-e C-e C-e C-e C-e; sleep 3; k c; sleep 1; k p; sleep 1.2
+k k; sleep 1.5; k k; sleep 1.8; k j j; sleep 1.2
+k c; sleep 2; k C-e C-e C-e C-e C-e; sleep 3; k c; sleep 1.2
 k / s e a t - a Enter; sleep 1.2
 k a; sleep 3; k 2; sleep 2; k 1; sleep 2.5; k Escape; sleep 1
 k / d o c s Enter; sleep 1.5; k Space; sleep 4; k q; sleep 1.2
