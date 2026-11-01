@@ -115,6 +115,9 @@ const PART_MIN: usize = 10;
 /// MSG keeps at least this many columns, or MSG_SHARE percent of the list, from FLOOR_FROM.
 const MSG_FLOOR: usize = 40;
 const MSG_SHARE: usize = 35;
+/// From FLOOR_FROM to USAGE_WIDE, while usage columns show, MSG's floor is this flat figure, so
+/// MODEL, EFFORT and CTX fit beside a message; from USAGE_WIDE it is MSG_FLOOR or its share.
+const USAGE_MSG_FLOOR: usize = 34;
 const FLOOR_FROM: u16 = 140;
 /// WHERE, unsplit, is not squeezed under this; MSG is not squeezed under MSG_LEAST by a fixed width.
 const WHERE_MIN: usize = 20;
@@ -695,13 +698,17 @@ impl Columns {
     /// the longest host name; WHERE, or SESSION, WINDOW and BLOCK, take what is left over MSG's
     /// floor. From FLOOR_FROM columns MSG keeps the least of FLOOR and its longest message; a fixed
     /// `msg` replaces that. The location columns give way to it first, then the extension
-    /// columns and then the usage ones, each the last one first. A fixed width is not fitted.
+    /// columns and then the usage ones, each the last one first but EFFORT, which goes first of
+    /// them. A fixed width is not fitted.
     pub fn fit(&mut self, board: u16, longest: &Longest, widths: &BTreeMap<String, Value>) {
         let set = |name: &str| width_set(widths, name);
         let total: usize = self.cols.iter().map(|(_, w)| *w).sum();
         let normal = match set("msg") {
             Some(_) => 0,
             None if board < FLOOR_FROM => 0,
+            None if board < USAGE_WIDE && USAGE.iter().any(|id| self.has(*id)) => {
+                USAGE_MSG_FLOOR.min(longest.msg + 1)
+            }
             None => MSG_FLOOR.max(total * MSG_SHARE / 100).min(longest.msg + 1),
         };
         // Every column that is planned here, HOST and the location columns, gets its width in one
@@ -756,7 +763,14 @@ impl Columns {
         // Room for the free location columns: the list less everything else and MSG's floor. Short
         // of their least, even with none free, the last extension column goes, then the last usage
         // column, and again.
-        let rank = |id: Col| (!matches!(id, Col::Field(_)), !is_usage(id));
+        // EFFORT goes before CTX and MODEL, which the operator reads together.
+        let rank = |id: Col| {
+            (
+                !matches!(id, Col::Field(_)),
+                !is_usage(id),
+                id != Col::Effort,
+            )
+        };
         let (limit, floor) = loop {
             // A field's width in tui.json is yours, so while it is kept MSG's floor gives up what
             // it has past FIELD_WIDTH, the cells every field is planned with; a field that goes
@@ -779,7 +793,7 @@ impl Columns {
             let gone = (self.cols.iter().rev())
                 .map(|(c, _)| c.id)
                 .min_by_key(|id| rank(*id))
-                .filter(|id| rank(*id) != (true, true));
+                .filter(|id| matches!(id, Col::Field(_)) || is_usage(*id));
             match gone {
                 Some(id) if spent + each * free.len() > total => self.resize(id, 0),
                 _ => break (total.saturating_sub(spent), floor),

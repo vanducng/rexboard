@@ -769,12 +769,16 @@ mod tests {
 
     /// `fuller` with usage on its first two rows: a model each, an effort on the first only.
     fn with_effort() -> App {
+        with_effort_msg("Opened the review")
+    }
+
+    fn with_effort_msg(msg: &str) -> App {
         use crate::harness::usage::Usage;
         let mut app = fuller();
         let mut rows = app.rows.clone();
         let models = [("claude-opus-5-5", Some("xhigh")), ("Opus 5.5", None)];
         for (row, (model, effort)) in rows.iter_mut().zip(models) {
-            row.pane.msg = Some("Opened the review".into());
+            row.pane.msg = Some(msg.into());
             row.usage = Some(Usage {
                 model: Some(model.into()),
                 effort: effort.map(str::to_owned),
@@ -831,6 +835,62 @@ mod tests {
         assert!(
             !with_effort().columns(130, 130).has(Col::Effort),
             "below 140, none"
+        );
+    }
+
+    #[test]
+    fn model_effort_and_ctx_all_fit_at_140_and_160_beside_a_whole_where_and_a_message() {
+        let msg = "Opened the pull request and queued the review";
+        let app = with_effort_msg(msg);
+        for board in [140u16, 160] {
+            let columns = app.columns(board, usize::from(board));
+            let order: Vec<Col> = columns.cols.iter().map(|(c, _)| c.id).collect();
+            let at = |id| order.iter().position(|c| *c == id).unwrap();
+            assert_eq!(at(Col::Effort), at(Col::Model) + 1, "{board}");
+            assert_eq!(
+                at(Col::Ctx),
+                at(Col::Effort) + 1,
+                "{board}: CTX is not pushed out"
+            );
+            let floor = if board < 160 {
+                34
+            } else {
+                40.max(usize::from(board) * 35 / 100)
+            };
+            assert!(
+                columns.width(Col::Msg) >= floor.min(msg.len() + 1),
+                "{board}: MSG keeps its floor"
+            );
+            let text = render(&app, board, 30);
+            let header = text.lines().find(|l| l.contains("HARNESS")).unwrap();
+            assert!(
+                header.contains("MODEL") && header.contains("EFFORT") && header.contains("CTX"),
+                "{header}"
+            );
+            let place = if board < 160 {
+                "api › main › seat-b"
+            } else {
+                "seat-b"
+            };
+            assert!(text.contains(place), "{board}: WHERE is not cut:\n{text}");
+        }
+    }
+
+    #[test]
+    fn when_room_runs_out_effort_goes_before_ctx_and_model() {
+        let mut app = with_effort_msg("Opened the pull request and queued the review");
+        app.widths = std::collections::BTreeMap::from([("host".to_owned(), 20.into())]);
+        let columns = app.columns(140, 140);
+        assert!(!columns.has(Col::Effort), "EFFORT goes first");
+        assert!(
+            columns.has(Col::Model) && columns.has(Col::Ctx),
+            "MODEL and CTX stay together"
+        );
+        app.widths = std::collections::BTreeMap::from([("host".to_owned(), 28.into())]);
+        let columns = app.columns(140, 140);
+        assert!(
+            !columns.has(Col::Effort) && !columns.has(Col::Ctx) && columns.has(Col::Model),
+            "then CTX"
         );
     }
 
@@ -1104,7 +1164,7 @@ mod tests {
         // rest, as on a board that never had usage columns to keep.
         let mut all = self::app();
         all.columns = vec!["tok".into(), "cost".into(), "5h".into()];
-        all.widths = std::collections::BTreeMap::from([("host".to_owned(), 21.into())]);
+        all.widths = std::collections::BTreeMap::from([("host".to_owned(), 36.into())]);
         with_usage(&mut all, &"long message ".repeat(20));
         let with = all.columns(140, 140);
         assert!(!USAGE.iter().any(|c| with.has(*c)), "all usage dropped");
@@ -2750,11 +2810,16 @@ mod extension_tests {
     #[test]
     fn msg_keeps_its_floor_with_usage_icons_and_extension_columns_at_every_width() {
         for width in [140u16, 200, 250, 1000] {
-            let floor = 40
-                .max(usize::from(width) * 35 / 100)
-                .min(WIDE_MSG.len() + 1);
             for fields in 0..=3 {
                 for usage in 0..=2 {
+                    // Below 160, usage columns lower the floor to a flat 34 (and EFFORT, not
+                    // reported here, takes none of it).
+                    let share = if usage > 0 && width < 160 {
+                        34
+                    } else {
+                        40.max(usize::from(width) * 35 / 100)
+                    };
+                    let floor = share.min(WIDE_MSG.len() + 1);
                     for nerd in [false, true] {
                         let app = configured(fields, usage, nerd);
                         let columns = app.columns(width, usize::from(width));
