@@ -38,20 +38,26 @@ const HEARTBEAT: Duration = Duration::from_secs(1);
 const SUBSCRIBER_BUFFER: usize = 4;
 const RESCAN: Duration = Duration::from_secs(300);
 
-/// How often serve rescans. Debug builds take REXBOARD_TEST_RESCAN_SECS, so a test can see a
-/// rescan without waiting five minutes.
-fn rescan_every() -> Duration {
+/// Debug builds take `var` in seconds, so a test can see a timer without waiting for it.
+fn timer(var: &str, default: Duration) -> Duration {
     if cfg!(debug_assertions)
-        && let Some(secs) = std::env::var("REXBOARD_TEST_RESCAN_SECS")
-            .ok()
-            .and_then(|secs| secs.parse().ok())
+        && let Some(secs) = std::env::var(var).ok().and_then(|secs| secs.parse().ok())
     {
         return Duration::from_secs(secs);
     }
-    RESCAN
+    default
 }
+
+fn rescan_every() -> Duration {
+    timer("REXBOARD_TEST_RESCAN_SECS", RESCAN)
+}
+
 /// `rows` waits this long at most for every host's first snapshot after serve starts.
 const READY_WITHIN: Duration = Duration::from_secs(5);
+
+fn ready_within() -> Duration {
+    timer("REXBOARD_TEST_READY_WITHIN_SECS", READY_WITHIN)
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -650,7 +656,7 @@ impl Reducer {
     /// Every host has sent its first snapshot or failed, or serve has waited long enough.
     fn ready(&self) -> bool {
         self.hosts.values().all(|state| *state != "starting")
-            || self.started.elapsed() >= READY_WITHIN
+            || self.started.elapsed() >= ready_within()
     }
 
     /// The rows on serve's own host, for the usage watcher.
