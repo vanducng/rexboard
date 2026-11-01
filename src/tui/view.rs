@@ -78,9 +78,7 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
     }
     let area = frame.area();
     app.card_drawn.set(CardDrawn::default());
-    app.strip_drawn.set(false);
     let card = app.card_shown();
-    let strip = app.strip_shown();
     let [top, _gap, body, bottom] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(u16::from(area.height >= HEADED)),
@@ -92,14 +90,6 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
     let headed = area.height >= HEADED;
     let height = if card {
         card_height(app, now, body, headed)
-    } else if strip {
-        // The bar, its lines and the blank row above the footer, leaving the list its floor; too
-        // little room shows no strip, and then nothing is read for it.
-        let room = body.height.saturating_sub(LIST_FLOOR + u16::from(headed));
-        let wanted = 1 + app.tuning.lines() as u16 + FOOTER_GAP;
-        let rows = wanted.min(room);
-        app.strip_drawn.set(rows >= 3);
-        if rows >= 3 { rows } else { 0 }
     } else {
         0
     };
@@ -111,11 +101,7 @@ pub fn draw(frame: &mut Frame, app: &App, now: DateTime<Utc>) {
     if height > 0 {
         let room = card_area.height.saturating_sub(FOOTER_GAP);
         let width = usize::from(body.width);
-        let lines = if card {
-            super::card::lines(app, now, width, usize::from(room))
-        } else {
-            super::card::strip(app, now, width, usize::from(room))
-        };
+        let lines = super::card::lines(app, now, width, usize::from(room));
         let card_area = Rect {
             height: room,
             ..card_area
@@ -1314,8 +1300,7 @@ mod tests {
         let mut app = fuller();
         app.pick = true;
         assert_eq!(press(&mut app, KeyCode::Char('c')), None);
-        assert_eq!(press(&mut app, KeyCode::Char('p')), None);
-        assert!((app.card, app.preview) == (true, false), "neither toggled");
+        assert!(app.card, "not toggled");
     }
 
     #[test]
@@ -1919,14 +1904,14 @@ mod tests {
         };
         let at_80 = bar(80);
         assert!(
-            at_80.starts_with(
-                "j/k move · enter jump · space full · p preview · ? keys · n needs you "
-            ) && at_80.trim_end().ends_with(" q quit"),
+            at_80
+                .starts_with("j/k move · enter jump · space full · c card · ? keys · n needs you ")
+                && at_80.trim_end().ends_with(" q quit"),
             "{at_80}"
         );
         assert!(
             bar(200).starts_with(
-                "j/k move · enter jump · space full · p preview · ? keys · n needs you · / filter · m seen · a answer · c card · v next view · 1-99 select"
+                "j/k move · enter jump · space full · c card · ? keys · n needs you · / filter · m seen · a answer · v next view · 1-99 select"
             ),
             "{}",
             bar(200)

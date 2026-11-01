@@ -39,7 +39,6 @@ pub const GUARD: Duration = Duration::from_millis(300);
 const TOO_FAST_TO_ANSWER: &str = "keys came too fast; nothing sent · a answers";
 const TOO_FAST_TO_CLOSE: &str = "keys came too fast; nothing closed · dd closes";
 
-const BEHIND_CARD: &str = "the card is showing, so no preview · c hides the card";
 /// A blocked row's tail is read once its card has shown this long, so j/k across rows reads none.
 const SETTLE: Duration = Duration::from_millis(300);
 /// Rows are numbered up to here, and a first digit waits this long for its second.
@@ -237,14 +236,8 @@ pub struct App {
     pub pick: bool,
     /// `c` has the card showing, from tui.json; off by default.
     pub card: bool,
-    /// `p` has the preview strip showing, from tui.json; the card, when on, takes its place.
-    pub preview: bool,
     /// The settings tui.json carries that the board only reads.
     pub tuning: super::prefs::Tuning,
-    /// The row the strip shows, while it does, and how its reads are going.
-    strip: Option<card::Strip>,
-    /// Whether the last draw had room for the strip: with none, nothing is read for it.
-    pub strip_drawn: std::cell::Cell<bool>,
     /// tui.json's motion, written back when `c` saves the file.
     pub motion: super::prefs::Motion,
     /// tui.json's icons, written back the same way.
@@ -528,7 +521,6 @@ impl App {
                     | Act::PrevNeeds
                     | Act::Answer
                     | Act::Card
-                    | Act::Preview
                     | Act::Back
                     | Act::Close
                     | Act::Actions
@@ -591,16 +583,8 @@ impl App {
             Act::FoldToggle | Act::FoldOpen | Act::FoldClose => self.fold(act),
             Act::OpenAll => self.unfold_all(),
             Act::FoldAll => self.fold_all(),
-            Act::Card | Act::Preview => {
-                let on = if act == Act::Card {
-                    &mut self.card
-                } else {
-                    &mut self.preview
-                };
-                *on = !*on;
-                if act == Act::Preview && self.preview && self.card_shown() {
-                    self.say(BEHIND_CARD);
-                }
+            Act::Card => {
+                self.card = !self.card;
                 return Some(Effect::SavePrefs(self.prefs()));
             }
             Act::Full => return self.open_full(now),

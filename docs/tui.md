@@ -66,9 +66,9 @@ The board is built to live in a narrow column, so the narrow layout is the main 
   - **Paths:** a pane labelled `shell`, or named after its foreground process, tells you nothing, so its path is `session › window` (also below 100 columns), and its `BLOCK` is its title, else its window. A path too long for its column is cut window first (to `…` below 6 columns), then the session down to an 8-column stem, then the last label.
   - **Twins:** rows on one host that would still read the same end in `#N`, their place among those rows by window and then by block age. A number can shift when a twin's title changes and it stops reading the same. Once `WHERE` is split, `#N` goes on `BLOCK`, and a long session, window or block keeps both ends with `…` in the middle. Below 60 columns, with no host column, a row from a host other than `local` also gets `@HOST` when a twin is on another host: at 50 columns, `api…way › pair #1`, `api…way › pair #2` and `ap…y › pair @mini`. The suffix is never cut; the path gives way first, down to `…`.
   - **Overflow:** when rows do not fit, the last line says how many are below (`↓ 4 more`).
-- Nothing under the list by default: the list fills the body. `c` shows the **turn card** for the selected row, under the list at full width, at every width (see [Turn card](#turn-card)); `p` shows a **preview strip** above the footer instead, a bar and the last lines of the row's pane (see [Preview strip](#preview-strip)). With both on, the card wins.
+- Nothing under the list by default: the list fills the body. `c` shows the **turn card** for the selected row, under the list at full width, at every width (see [Turn card](#turn-card)), and `space` opens the full view of the pane.
 - **Footer:** one of these:
-  - the keys that fit, most needed first: `j/k move · enter jump · space full · p preview · ? keys · n needs you · / filter · m seen · a answer · c card · v next view · 1-99 select`, then `ctrl-e/y scroll card` while a card shows. A narrow board drops them from the end, so 80 columns ends at `n needs you`, and `q quit` sits at the right edge (`esc cancel` in `pick`). A kept filter starts it with `/mini · esc clears ·`;
+  - the keys that fit, most needed first: `j/k move · enter jump · space full · c card · ? keys · n needs you · / filter · m seen · a answer · v next view · 1-99 select`, then `ctrl-e/y scroll card` while a card shows. A narrow board drops them from the end, so 80 columns ends at `n needs you`, and `q quit` sits at the right edge (`esc cancel` in `pick`). A kept filter starts it with `/mini · esc clears ·`;
   - a waiting prefix's next keys;
   - the filter being typed;
   - a message, for 3 seconds.
@@ -167,7 +167,6 @@ The keys are vim's where vim has one, and plain keys or vim's own ctrl chords ot
 | `o`, then a column's letter | Sort by that column (see [Views](#views)): once to sort, again to flip, a third time to clear |
 | `za` / `zo` / `zc` | Fold or open the selected row's group (`za` toggles; on a folded group's header it opens it) |
 | `zR` / `zM` | Open every group / fold every group. `NEEDS YOU` opens by itself when a new row enters it |
-| `p` | Show or hide the live preview strip above the footer (see [Preview strip](#preview-strip)); the choice is kept in `tui.json`. While the card is showing, the card wins and the strip stays hidden. `pick` has none and ignores `p` |
 | `c` | Show or hide the turn card; it is off until you turn it on. The choice is kept in `tui.json`. The key table, answer mode or a failed jump's reason still open the card until they go. `pick` has no card and ignores `c` |
 | `ctrl-e` / `ctrl-y` | Scroll the card's text a line down / up, under its bar; the mouse wheel over the card does the same in the table view. Moving to another row starts its card at the top (a blocked row's at its dialog) |
 | `space` | Open the [full view](#full-view) of the selected row's pane, read again every 2 seconds while it is open |
@@ -219,27 +218,13 @@ The card is 40% of the body, and at least 8 rows, and more when the list is shor
 
 Reading a card does not mark a row seen. `m` does, and so does `n` or `tab` off a `done` row whose card has shown for at least a second. The tail of a blocked row is read by itself once its card has shown for 300 ms, once per report, so the ask can be checked against the screen; moving through rows reads none.
 
-`c`'s choice lives in `tui.json` beside serve's `state.json` (`~/.local/state/rexboard/tui.json`, or under `XDG_STATE_HOME`), as `"card": "on"` or `"off"` (missing means off). Before this key a hidden card was `"detail_hidden": true` and a shown one the default: while `card` is missing the file's `detail_hidden` still says what it said (`false` is on, `true` is off), and a save writes `card` and keeps `detail_hidden` as it was. Next to it are `preview`, `motion` (see [Style](#style)), `icons` (see [Icons](#icons)), `card_height`, `columns` and `widths` (see [Layout](#layout)), which a save keeps as they were. The file is read when the board starts and written on each `c` or `p`. The side pane's old width key is ignored.
+`c`'s choice lives in `tui.json` beside serve's `state.json` (`~/.local/state/rexboard/tui.json`, or under `XDG_STATE_HOME`), as `"card": "on"` or `"off"` (missing means off). Before this key a hidden card was `"detail_hidden": true` and a shown one the default: while `card` is missing the file's `detail_hidden` still says what it said (`false` is on, `true` is off), and a save writes `card` and keeps `detail_hidden` as it was. Next to it are `motion` (see [Style](#style)), `icons` (see [Icons](#icons)), `card_height`, `columns` and `widths` (see [Layout](#layout)), which a save keeps as they were. The file is read when the board starts and written on each `c`. The side pane's old width key is ignored.
 
 `"tail_lines"` sets how much of a pane's end the card and the full view keep: 50 to 5000 lines, 200 by default (anything else is the default). The most bytes a read asks for grows with it, from 96 KiB of coloured text and 48 KiB of plain text per 200 lines, so a 1000-line tail reads about 480 KiB in the full view. It costs one bigger read when the card or the full view opens, never one per row.
 
-### Preview strip
+### Retired: the preview strip
 
-The card and the preview are both off by default: `c` and `p` turn them on, and `space` opens the full view. `p` shows the selected row's pane above the footer, with the list above it:
-
-```
-── seat-a · working · for 2m ───────────────────────────── captured 11:21:14 · 1s ──
- │ running 12 tests
- │ test parser::nested ... ok
- │ test result: ok. 12 passed
- │ Allow Bash: cargo test? (y/n)
-```
-
-The bar is the card's: the row's state, its name, how long it has been so, and how fresh the tail is. Under it are the last `preview_lines` lines of the pane (1 to 12, 4 by default), wrapped to the board's width. The strip follows the selection: a row that stays selected for 300 ms is read, then again every `preview_every` seconds (1 to 10, 2 by default). Each read is one bounded Rex tail read of only those lines, never started while the last one is still out, and while the strip is hidden nothing is read. The lines already shown stay up between reads. A blank row separates the strip from the footer, as it does the card. The list always keeps its 3 least rows, so a short screen shows a shorter strip, or none, and then nothing is read for it; the choice stays.
-
-The card and the strip are both inline detail, so only one shows: with `c` on, the card shows and `p` only says so (`the card is showing, so no preview`). `p` and `c` are kept separately in `tui.json`, so turning the card off brings the strip back. `pick` shows neither.
-
-To set the strip, write `"preview": "on"`, `"preview_lines": 6` or `"preview_every": 5` in `tui.json`; an out-of-range number is the default, and a save keeps it as written.
+`p` used to show a live preview strip above the footer, with `"preview"`, `"preview_lines"` and `"preview_every"` in `tui.json`. It is gone: the card (`c`) and the full view (`space`) are the two ways to look at a pane, and `p` is not a key. An old `tui.json` that still has those three keys keeps them as written when the board saves the file, but nothing reads them.
 
 ### Icons
 

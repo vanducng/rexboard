@@ -124,20 +124,6 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
     std::iter::once(bar).chain(shown).collect()
 }
 
-/// The preview strip, in `room` rows: the selected row's bar, then the newest lines of its tail.
-pub fn strip(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Line<'static>> {
-    let Some(row) = app.current() else {
-        return Vec::new();
-    };
-    let peek = app.peek.as_ref().filter(|peek| peek.key == row.key);
-    let bar = bar(row, fresh(row, peek, now), now, width, false);
-    let tail = peek.map_or_else(
-        || vec![Line::styled(" capturing…", theme::quiet())],
-        |peek| tail(peek, width, room.saturating_sub(1)),
-    );
-    std::iter::once(bar).chain(tail).collect()
-}
-
 /// `window` rows of `text` from `at`, with a dim `↑ N above` and `↓ N more` where it is cut; and
 /// the scroll it shows and the most it can take.
 fn scrolled(

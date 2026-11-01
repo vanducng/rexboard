@@ -15,14 +15,6 @@ pub struct Prefs {
         skip_serializing_if = "Option::is_none"
     )]
     pub card: Option<bool>,
-    /// `"preview": "on"`: `p` has the preview strip showing. Missing is off.
-    #[serde(
-        default,
-        deserialize_with = "switch",
-        serialize_with = "switch_out",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub preview: Option<bool>,
     #[serde(flatten)]
     pub tuning: Tuning,
     #[serde(default)]
@@ -59,6 +51,14 @@ pub struct Prefs {
 pub struct Tuning {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail_hidden: Option<bool>,
+    /// `preview`, `preview_lines` and `preview_every` belonged to the retired preview strip: they
+    /// are not read, and a save writes them back as they were.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub preview: Option<serde_json::Value>,
     #[serde(
         default,
         deserialize_with = "present",
@@ -80,16 +80,6 @@ pub struct Tuning {
 }
 
 impl Tuning {
-    /// The strip's tail lines, 1-12; anything else is 4.
-    pub fn lines(&self) -> usize {
-        within(&self.preview_lines, 1..=12, 4) as usize
-    }
-
-    /// Seconds between the strip's reads, 1-10; anything else is 2.
-    pub fn every(&self) -> u64 {
-        within(&self.preview_every, 1..=10, 2)
-    }
-
     /// The tail the card and the full view keep, 50-5000 lines; anything else is 200.
     pub fn tail(&self) -> usize {
         within(&self.tail_lines, 50..=5000, DEFAULT_TAIL as u64) as usize
@@ -264,9 +254,9 @@ mod tests {
         assert_eq!(load(&path), Prefs::default(), "missing");
         let kept = Prefs {
             card: Some(true),
-            preview: Some(false),
             tuning: Tuning {
                 detail_hidden: Some(true),
+                preview: Some("on".into()),
                 preview_lines: Some(6.into()),
                 preview_every: Some(3.into()),
                 tail_lines: Some(1000.into()),
@@ -371,30 +361,19 @@ mod tests {
         std::fs::write(&path, r#"{"detail_hidden": false, "motion": "reduced"}"#).unwrap();
         let mut prefs = load(&path);
         prefs.card = Some(false);
-        prefs.preview = Some(true);
         save(&path, &prefs).unwrap();
         let back: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(back["card"], "off");
-        assert_eq!(back["preview"], "on");
         assert_eq!(back["detail_hidden"], false, "kept as it was read");
         assert_eq!(back["motion"], "reduced");
         assert!(!load(&path).card_on(), "the card key wins from then on");
     }
 
     #[test]
-    fn preview_and_tail_settings_are_checked_when_used_and_kept_as_written() {
+    fn tail_lines_is_checked_when_used_and_the_retired_preview_keys_are_kept_as_written() {
         let tune = |text: &str| -> Tuning { serde_json::from_str::<Prefs>(text).unwrap().tuning };
-        assert_eq!(
-            (tune("{}").lines(), tune("{}").every(), tune("{}").tail()),
-            (4, 2, 200)
-        );
-        for (n, want) in [(0, 4), (1, 1), (12, 12), (13, 4)] {
-            assert_eq!(tune(&format!(r#"{{"preview_lines": {n}}}"#)).lines(), want);
-        }
-        for (n, want) in [(0, 2), (1, 1), (10, 10), (11, 2)] {
-            assert_eq!(tune(&format!(r#"{{"preview_every": {n}}}"#)).every(), want);
-        }
+        assert_eq!(tune("{}").tail(), 200);
         for (n, want) in [(49, 200), (50, 50), (5000, 5000), (5001, 200)] {
             assert_eq!(tune(&format!(r#"{{"tail_lines": {n}}}"#)).tail(), want);
         }
@@ -403,37 +382,32 @@ mod tests {
             200,
             "not a number"
         );
-        // Whatever was written comes back on a save, valid or not.
+        // Whatever was written comes back on a save, valid or not, the retired keys included.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("tui.json");
-        let written = r#"{"preview_lines": -1, "preview_every": 1.5, "tail_lines": "many"}"#;
+        let written =
+            r#"{"preview": "on", "preview_lines": -1, "preview_every": 1.5, "tail_lines": "many"}"#;
         std::fs::write(&path, written).unwrap();
         let mut prefs = load(&path);
-        assert_eq!(
-            (
-                prefs.tuning.lines(),
-                prefs.tuning.every(),
-                prefs.tuning.tail()
-            ),
-            (4, 2, 200)
-        );
+        assert_eq!(prefs.tuning.tail(), 200);
         prefs.card = Some(true);
         save(&path, &prefs).unwrap();
         let back: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(back["preview"], "on");
         assert_eq!(back["preview_lines"], -1);
         assert_eq!(back["preview_every"], 1.5);
         assert_eq!(back["tail_lines"], "many");
         // A key written as null is still there after a save; a missing one is not added.
         std::fs::write(&path, r#"{"preview_lines": null, "tail_lines": null}"#).unwrap();
         let mut prefs = load(&path);
-        prefs.preview = Some(true);
+        prefs.card = Some(true);
         save(&path, &prefs).unwrap();
         let back: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert!(back["preview_lines"].is_null() && back.get("preview_lines").is_some());
         assert!(back.get("tail_lines").is_some());
         assert!(back.get("preview_every").is_none(), "missing stays missing");
-        assert_eq!(prefs.tuning.lines(), 4, "null reads as the default");
+        assert!(back.get("preview").is_none(), "missing stays missing");
     }
 }
