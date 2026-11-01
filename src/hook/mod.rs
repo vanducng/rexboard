@@ -49,7 +49,7 @@ pub fn run(name: &str, event: Option<&str>) -> Result<()> {
         .usage_hook()
         .is_some_and(|hook| Some(hook) == name.as_deref())
     {
-        let quick = started.elapsed() < REPORT_ONLY_IF_QUICK;
+        let quick = quick(status_took(started));
         crate::harness::usage::keep(harness, &payload, true, quick);
     }
     Ok(())
@@ -58,6 +58,21 @@ pub fn run(name: &str, event: Option<&str>) -> Result<()> {
 /// A hook reports usage to Rex only if the status took less than this: what is left of the 5 s an
 /// agent gives a hook must cover the lock and two tmux commands of up to 2 s.
 const REPORT_ONLY_IF_QUICK: Duration = Duration::from_millis(500);
+
+fn quick(took: Duration) -> bool {
+    took < REPORT_ONLY_IF_QUICK
+}
+
+/// How long the status took. Debug builds, which the tests run, let a test say it in
+/// `REXBOARD_TEST_STATUS_TOOK_MS`, so the quick or slow path never depends on the machine; a
+/// release build has no such input.
+fn status_took(started: Instant) -> Duration {
+    #[cfg(debug_assertions)]
+    if let Some(ms) = env("REXBOARD_TEST_STATUS_TOOK_MS").and_then(|ms| ms.parse().ok()) {
+        return Duration::from_millis(ms);
+    }
+    started.elapsed()
+}
 
 /// Writes the status to the agent's pane: wrapped for tmux and kept on the tmux pane for a
 /// client that attaches later, or straight to the agent's tty in a Rex pane where the agent does
@@ -331,5 +346,50 @@ fn log(event: Option<&str>, pane: Option<&str>, action: &str) {
         .open(path)
     {
         let _ = file.write_all(line.as_bytes());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_hook_is_quick_only_under_500_ms() {
+        assert!(quick(Duration::from_millis(0)));
+        assert!(quick(Duration::from_millis(499)));
+        assert!(!quick(Duration::from_millis(500)));
+        assert!(!quick(Duration::from_secs(2)));
+    }
+
+    #[test]
+    fn a_write_to_a_terminal_nobody_reads_gives_up_within_its_short_wait() {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tty");
+        let c_path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+        // A reader that never reads, and a writer that has filled the pipe.
+        let _reader = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&path)
+            .unwrap();
+        let filler = std::fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&path)
+            .unwrap();
+        let chunk = [b'x'; 4096];
+        while unsafe { libc::write(filler.as_raw_fd(), chunk.as_ptr().cast(), chunk.len()) } > 0 {}
+        // The write alone is timed, not a process start: it waits its WRITE_WAIT and no longer.
+        let started = Instant::now();
+        assert!(!write(path.to_str().unwrap(), "more"));
+        let took = started.elapsed();
+        assert!(took >= WRITE_WAIT, "it waited for room: {took:?}");
+        assert!(took < Duration::from_secs(3), "and gave up: {took:?}");
+        // What a hook and its tmux commands leave of the 5 s an agent gives it is spent in two
+        // writes at most (the status and the usage), so one wait must be a small part of it.
+        assert!(WRITE_WAIT * 2 <= Duration::from_secs(1), "{WRITE_WAIT:?}");
     }
 }

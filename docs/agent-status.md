@@ -28,6 +28,7 @@ An agent's own `done` record carries no message. A hook can add a sub-record wit
 - Serve reads it with the rest of the pane. It is neither the pane's status nor a child record: a pane with only a `usage` record is still `inferred`. A pane's usage file on serve's own host wins over the record, whole; every other row has the record's figures.
 - A pane keeps its last figures while it lives, as locally: Rex keeps the record until the pane goes, and each report replaces it.
 - `REXBOARD_NO_USAGE_REPORT=1` in the agent's environment turns the sending off.
+- A hook tells Rex its usage only when its own status took under 500 ms, so a slow tmux can cost a report but never the status inside the 5 s an agent gives a hook. The local usage file is kept either way.
 
 A rexboard older than this does not know the record. It counts it as a child record of the pane (in `ls --json` only), and for a pane that has no status record of its own it takes the usage record for the pane's status: the row shows `done`, `native` and the raw JSON as its message, until the pane reports a status. Upgrade the host that runs serve first, then the others. A running agent picks the hooks up only when it next starts, so a host's panes show usage after its rexboard is upgraded and each agent has been started again; nothing here asks you to restart one.
 
