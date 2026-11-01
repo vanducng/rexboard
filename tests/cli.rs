@@ -640,17 +640,28 @@ impl Serve {
             .count()
     }
 
+    /// `ls --json`. While a just-started serve has no host up yet, `ls` says `every host is
+    /// unreachable: local (starting)`, which under load can outlast its own wait; the callers poll
+    /// for rows, so that state is waited out (30 s at most) and any other failure ends the test.
     fn rows(&self, extra: &[&str]) -> Vec<serde_json::Value> {
-        let out = self
-            .cmd()
-            .args(["ls", "--json"])
-            .args(extra)
-            .assert()
-            .success()
-            .get_output()
-            .stdout
-            .clone();
-        serde_json::from_slice(&out).unwrap()
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let out = self
+                .cmd()
+                .args(["ls", "--json"])
+                .args(extra)
+                .output()
+                .unwrap();
+            if out.status.success() {
+                return serde_json::from_slice(&out.stdout).unwrap();
+            }
+            let said = String::from_utf8_lossy(&out.stderr);
+            assert!(
+                said.contains("(starting)") && std::time::Instant::now() < deadline,
+                "ls failed: {said}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
     }
 }
 
