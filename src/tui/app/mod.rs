@@ -10,9 +10,11 @@ use super::answer::{Answer, Step};
 use super::columns::{
     Col, Column, Columns, FieldFit, LABEL_MAX, Longest, Sort, UsageShown, field_column, free_letter,
 };
+use super::columns::{Dir, column_of};
 use super::full::Full;
 use super::keys::{self, Act, K};
 use super::markdown::{self, Block, Run};
+use super::pick_prefs::PickPrefs;
 use super::screen::Screen;
 use super::status::Status;
 use super::views::{Bucket, Key, View, arrange, bucket, views};
@@ -275,6 +277,8 @@ pub struct App {
     quiet: bool,
     /// Whether the waiting prefix's key came on its own.
     pending_quiet: bool,
+    /// Picker preferences retained until their extension fields are available.
+    pick_restore: Option<PickPrefs>,
     needs: BTreeSet<String>,
     /// `a`: answering one row; the board's keys are off.
     pub answer: Option<Answer>,

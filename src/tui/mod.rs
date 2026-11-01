@@ -9,6 +9,7 @@ pub(crate) mod icons;
 mod keys;
 mod markdown;
 mod meta;
+mod pick_prefs;
 mod prefs;
 pub(crate) mod query;
 pub(crate) mod screen;
@@ -59,11 +60,14 @@ pub(crate) fn icons_on(prefs: &prefs::Prefs) -> bool {
 }
 
 /// The board as tui.json, the environment and the pane it runs in set it up.
-fn start_app(pick: bool) -> App {
+fn start_app(pick: bool, pick_path: Option<&std::path::Path>) -> App {
     let mut app = App::default();
     app.pick = pick;
     let prefs = prefs();
     app.nerd = icons_on(&prefs);
+    if pick && let Some(path) = pick_path {
+        app.restore_pick_prefs(pick_prefs::load(path));
+    }
     app.card = prefs.card_on();
     app.tuning = prefs.tuning;
     app.motion = prefs.motion;
@@ -77,6 +81,10 @@ fn start_app(pick: bool) -> App {
     );
     app.own = std::env::var("REX_BLOCK").ok().filter(|id| !id.is_empty());
     app
+}
+
+fn pick_prefs_path() -> Option<std::path::PathBuf> {
+    Paths::find().ok().map(|paths| paths.dir.join("pick.json"))
 }
 
 /// Applies every message waiting and acts on what they ask: whether any came, or None once the
@@ -130,7 +138,9 @@ fn board(pick: bool) -> Result<Option<Row>> {
     // Before the subscriber thread, which may restart serve and say so.
     client::QUIET.store(true, Ordering::Relaxed);
     listen(&tx, &generation);
-    let mut app = start_app(pick);
+    let pick_path = pick.then(pick_prefs_path).flatten();
+    let mut app = start_app(pick, pick_path.as_deref());
+    let mut pick_save_pending = false;
     let mut terminal = ratatui::init();
     let _restore = Restore;
     let mut tick = Instant::now();
@@ -150,15 +160,23 @@ fn board(pick: bool) -> Result<Option<Row>> {
             if event::poll(Duration::from_millis(50)).unwrap_or_else(|_| leave()) {
                 match event::read().unwrap_or_else(|_| leave()) {
                     Event::Key(key) if key.kind != KeyEventKind::Release => {
+                        let before = pick.then(|| app.pick_prefs());
                         match app.handle(key) {
                             Some(Effect::Quit) => return Ok(None),
                             Some(Effect::Jump(row)) if pick => return Ok(Some(*row)),
                             Some(effect) => act(effect, &tx, &generation),
                             None => {}
                         }
+                        pick_save_pending |=
+                            before.is_some_and(|before| before != app.pick_prefs());
                         changed = true;
                     }
-                    Event::Mouse(event) => changed = mouse(&mut app, event),
+                    Event::Mouse(event) => {
+                        let before = pick.then(|| app.pick_prefs());
+                        changed = mouse(&mut app, event);
+                        pick_save_pending |=
+                            changed && before.is_some_and(|before| before != app.pick_prefs());
+                    }
                     Event::Resize(..) => changed = true,
                     _ => {}
                 }
@@ -179,6 +197,15 @@ fn board(pick: bool) -> Result<Option<Row>> {
             if tick.elapsed() >= app.frame_every().unwrap_or(Duration::from_secs(1)) {
                 tick = Instant::now();
                 changed = true;
+            }
+            if pick
+                && pick_save_pending
+                && let Some(path) = pick_path.as_deref()
+            {
+                let current = app.pick_prefs();
+                if pick_prefs::save(path, &current).is_ok() {
+                    pick_save_pending = false;
+                }
             }
         }
     }
