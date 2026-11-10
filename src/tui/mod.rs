@@ -194,7 +194,13 @@ fn board(pick: bool) -> Result<Option<Row>> {
                 None => return Ok(None),
             }
             let now = Instant::now();
-            changed |= app.number_due(now);
+            let (due, effect) = app.number_due(now);
+            changed |= due;
+            match effect {
+                Some(Effect::Jump(row)) if pick => return Ok(Some(*row)),
+                Some(effect) => act(effect, &tx, &generation),
+                None => {}
+            }
             app.note_card(now);
             if let Some(effect) = app.auto_tail(now).or_else(|| app.live(now)) {
                 act(effect, &tx, &generation);
