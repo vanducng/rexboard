@@ -534,6 +534,12 @@ fn watch_json_prints_debounced_rows() {
     assert_eq!(last[0]["host"], "mini");
     assert_eq!(last[0]["group"], "needs_you");
     assert_eq!(last[0]["source"], "bridge");
+    assert!(
+        last[0]
+            .get("view_group")
+            .is_some_and(serde_json::Value::is_null),
+        "watch shares the row but takes no --view: view_group is there and null"
+    );
 }
 
 #[test]
@@ -3580,6 +3586,34 @@ fn ls_view_says_each_rows_group_in_json_and_in_the_first_column() {
                 .any(|group| line.starts_with(group))),
         "the view's group replaces GROUP:\n{text}"
     );
+}
+
+#[test]
+fn ls_view_names_a_group_by_every_host_even_when_host_or_marked_keeps_only_one() {
+    let serve = shared_session_serve_with(|serve| serve.config("[[mark]]\nblock = \"seat-m\"\n"));
+    for extra in [&["--host", "mini"][..], &["--marked"][..]] {
+        let json = serve.rows(&[&["--view", "session"], extra].concat());
+        assert!(!json.is_empty(), "{extra:?}");
+        for row in json.iter().filter(|row| row["session"] == "api") {
+            assert_eq!(
+                row["view_group"], "API @MINI",
+                "{extra:?}: the board's header, not API"
+            );
+        }
+        let out = serve
+            .cmd()
+            .args(["ls", "--view", "session"])
+            .args(extra)
+            .assert()
+            .success();
+        let text = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
+        assert!(
+            text.contains("API @MINI") && !text.contains("API  "),
+            "{extra:?}:\n{text}"
+        );
+    }
+    let json = serve.rows(&["--view", "session", "--marked"]);
+    assert_eq!(json.len(), 1, "only seat-m is marked: {json:?}");
 }
 
 #[test]

@@ -23,6 +23,9 @@ pub struct Query<'a> {
     pub status: Option<&'a str>,
     /// `COLUMN`, `COLUMN:asc` or `COLUMN:desc`.
     pub sort: Option<&'a str>,
+    /// Every row the board has, when the rows given are only some of them (`--host`, `--marked`):
+    /// a group's name, `API @MINI`, depends on the rows of the other hosts too.
+    pub context: &'a [Row],
 }
 
 impl Query<'_> {
@@ -39,7 +42,12 @@ impl Query<'_> {
 pub fn arrange(rows: Vec<Row>, fields: Vec<Field>, query: &Query) -> Result<Vec<Row>> {
     let mut app = board(fields);
     // Not set_rows, which keeps only agents: `ls --all` asks for plain shells too.
-    app.rows = rows;
+    let wanted: BTreeSet<String> = rows.iter().map(|row| row.key.clone()).collect();
+    app.rows = if query.context.is_empty() {
+        rows
+    } else {
+        query.context.to_vec()
+    };
     if let Some(name) = query.view {
         app.view = view(&app, name)?;
     }
@@ -50,6 +58,7 @@ pub fn arrange(rows: Vec<Row>, fields: Vec<Field>, query: &Query) -> Result<Vec<
         app.sort = Some(sort_of(&app, spec)?);
     }
     let mut shown = listed(&app);
+    shown.retain(|&i| wanted.contains(&app.rows[i].key));
     let groups = view_groups(&app);
     for filter in query.filters {
         app.filter = Input::new(filter.clone());

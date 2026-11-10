@@ -492,9 +492,22 @@ pub fn ls(args: &LsArgs, json: bool) -> Result<()> {
         .map(|(h, s)| (h.clone(), s.clone()))
         .collect();
     let config_problem = rows.config_problem.clone();
+    // The rows before --host and --marked, for a group name that two hosts share.
+    let context: Vec<Row> = if args.view.is_some() {
+        rows.rows
+            .iter()
+            .filter(|row| args.all || row.pane.is_agent())
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
     let mut list = pick(rows, args.host.as_deref(), args.all)?;
     list.retain(|row| row.marked || !args.marked);
-    let query = args.query();
+    let query = crate::tui::query::Query {
+        context: &context,
+        ..args.query()
+    };
     let heading = query
         .view
         .and_then(|view| crate::tui::query::heading(fields.clone(), view));
