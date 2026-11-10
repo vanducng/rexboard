@@ -189,6 +189,50 @@ impl App {
             .collect()
     }
 
+    /// The marked rows the view shows, in list order.
+    fn marked_keys(&self) -> Vec<String> {
+        self.items()
+            .into_iter()
+            .filter_map(|item| match item {
+                Item::Row(i) if self.rows[i].marked => Some(self.rows[i].key.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Whether a row the view shows is marked, for the footer's hint.
+    pub fn marked_shown(&self) -> bool {
+        !self.marked_keys().is_empty()
+    }
+
+    /// `'`: the first marked row in list order, after opening the groups that hold one as `n`
+    /// does, and a jump to its pane; pressed again within 2 s, the next, wrapping.
+    pub(super) fn go_marked(&mut self, now: Instant) -> Option<Effect> {
+        if self.busy() {
+            return None;
+        }
+        for row in self.rows.iter().filter(|row| row.marked) {
+            if let Some(group) = bucket(&self.view, row) {
+                self.folded.remove(&group);
+            }
+        }
+        let marked = self.marked_keys();
+        if marked.is_empty() {
+            self.say("no marked row · see [[mark]] in config.toml");
+            return None;
+        }
+        let next = self
+            .marked_at
+            .take()
+            .filter(|(_, at)| now.duration_since(*at) <= MARKED_WINDOW)
+            .and_then(|(key, _)| marked.iter().position(|k| *k == key))
+            .map_or(0, |at| (at + 1) % marked.len());
+        let key = marked[next].clone();
+        self.marked_at = Some((key.clone(), now));
+        self.selected = Some(Spot::Row(key));
+        self.jump()
+    }
+
     /// The rows drawn on screen now, in order, as indexes into `rows`: row `n` is `[n - 1]`.
     fn numbered(&self) -> Vec<usize> {
         let (_, offset, room) = self.drawn.get();
@@ -788,6 +832,136 @@ mod tests {
         app.pick = true;
         assert_eq!(jumped(key_at(&mut app, '3', t)), None);
         assert_eq!(jumped(g(&mut app, '2', t)).as_deref(), Some("local/r1"));
+    }
+
+    /// `fuller`'s rows with `mini/seat-b` (the first) and `mini/codex` (the third) marked.
+    fn marked() -> App {
+        crate::tui::app::testkit::marked_board()
+    }
+
+    #[test]
+    fn the_quote_goes_to_the_first_marked_row_and_again_within_2_s_to_the_next_wrapping() {
+        let t = Instant::now();
+        let ms = |n| t + Duration::from_millis(n);
+        let mut app = marked();
+        app.selected = Some(Spot::Row("local/seat-a".into()));
+        assert_eq!(
+            jumped(key_at(&mut app, '\'', t)).as_deref(),
+            Some("mini/seat-b")
+        );
+        assert_eq!(
+            selected(&app),
+            "mini/seat-b",
+            "the first in list order, not after the selection"
+        );
+        app.going = None;
+        assert_eq!(
+            jumped(key_at(&mut app, '\'', ms(1500))).as_deref(),
+            Some("mini/codex")
+        );
+        app.going = None;
+        assert_eq!(
+            jumped(key_at(&mut app, '\'', ms(3000))).as_deref(),
+            Some("mini/seat-b"),
+            "1.5 s after the last: the window moves with each press, and it wraps"
+        );
+        app.going = None;
+        assert_eq!(
+            jumped(key_at(&mut app, '\'', ms(5001))).as_deref(),
+            Some("mini/seat-b"),
+            "over 2 s after the last: back to the first"
+        );
+        app.going = None;
+        assert_eq!(
+            jumped(key_at(&mut app, '\'', ms(7000))).as_deref(),
+            Some("mini/codex"),
+            "exactly 2 s still counts"
+        );
+    }
+
+    #[test]
+    fn the_quote_walks_what_the_filter_and_a_folded_group_leave() {
+        let t = Instant::now();
+        let mut app = marked();
+        app.folded.insert(Bucket::Status(Group::Working));
+        assert!(
+            !app.spots().contains(&Spot::Row("mini/codex".into())),
+            "folded away"
+        );
+        key_at(&mut app, '\'', t);
+        app.going = None;
+        let next = key_at(&mut app, '\'', t + Duration::from_millis(100));
+        assert_eq!(
+            jumped(next).as_deref(),
+            Some("mini/codex"),
+            "the group opened, as n opens it"
+        );
+        assert!(app.spots().contains(&Spot::Row("mini/codex".into())));
+        app.going = None;
+        for c in "/codex".chars() {
+            key_at(&mut app, c, t);
+        }
+        app.handle_at(KeyEvent::from(KeyCode::Enter), t);
+        let later = t + Duration::from_secs(10);
+        assert_eq!(
+            jumped(key_at(&mut app, '\'', later)).as_deref(),
+            Some("mini/codex"),
+            "seat-b is filtered out"
+        );
+        app.going = None;
+        let again = key_at(&mut app, '\'', later + Duration::from_millis(50));
+        assert_eq!(
+            jumped(again).as_deref(),
+            Some("mini/codex"),
+            "the only marked row wraps to itself"
+        );
+    }
+
+    #[test]
+    fn with_no_marked_row_the_quote_says_so_and_goes_nowhere() {
+        let mut app = crate::tui::app::testkit::app();
+        let before = selected(&app);
+        let effect = key_at(&mut app, '\'', Instant::now());
+        assert_eq!(effect, None);
+        assert_eq!(
+            app.toast(),
+            Some("no marked row · see [[mark]] in config.toml")
+        );
+        assert_eq!(selected(&app), before);
+        let mut app = marked();
+        for c in "/zzz".chars() {
+            key_at(&mut app, c, Instant::now());
+        }
+        app.handle_at(KeyEvent::from(KeyCode::Enter), Instant::now());
+        key_at(&mut app, '\'', Instant::now());
+        assert_eq!(
+            app.toast(),
+            Some("no marked row · see [[mark]] in config.toml"),
+            "a filter can hide them all"
+        );
+    }
+
+    #[test]
+    fn a_jump_still_running_keeps_the_quote_from_moving_the_selection() {
+        let mut app = marked();
+        app.going = Some("going to somewhere…".into());
+        assert_eq!(key_at(&mut app, '\'', Instant::now()), None);
+        assert_eq!(app.toast(), Some("a jump or close is already running"));
+        assert_eq!(selected(&app), "mini/seat-b", "unchanged");
+    }
+
+    #[test]
+    fn in_pick_the_quote_picks_the_first_marked_row_and_again_the_next() {
+        let t = Instant::now();
+        let mut app = marked();
+        app.pick = true;
+        assert_eq!(
+            jumped(key_at(&mut app, '\'', t)).as_deref(),
+            Some("mini/seat-b")
+        );
+        app.going = None;
+        let again = key_at(&mut app, '\'', t + Duration::from_millis(300));
+        assert_eq!(jumped(again).as_deref(), Some("mini/codex"));
     }
 
     #[test]

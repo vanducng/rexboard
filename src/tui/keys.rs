@@ -24,6 +24,8 @@ pub enum Act {
     PrevGroup,
     NextNeeds,
     PrevNeeds,
+    /// `'`: go to the first marked row, and again within 2 s the next.
+    Marked,
     /// `1`-`9`, then maybe another: the row with that number on screen, selected or jumped to as
     /// tui.json's `digits` says.
     Nth,
@@ -207,6 +209,13 @@ pub const BOARD: &[Entry] = &[
         "needs you",
     ),
     e(Act::PrevNeeds, &[&[c('N')]], "", "", "previous"),
+    e(
+        Act::Marked,
+        &[&[c('\'')]],
+        "'",
+        "jump to marked; again, next",
+        "marked",
+    ),
     digits(
         Act::Nth,
         &[
@@ -470,6 +479,7 @@ pub const FOOTER: &[Act] = &[
     Act::Card,
     Act::Keys,
     Act::NextNeeds,
+    Act::Marked,
     Act::Filter,
     Act::Seen,
     Act::Answer,

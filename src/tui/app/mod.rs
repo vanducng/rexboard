@@ -47,6 +47,8 @@ const SETTLE: Duration = Duration::from_millis(300);
 /// Rows are numbered up to here, and a first digit waits this long for its second.
 pub const NUMBERED: usize = 99;
 const NUMBER_WAIT: Duration = Duration::from_millis(400);
+/// How long after one `'` the next goes on to the next marked row, not back to the first.
+const MARKED_WINDOW: Duration = Duration::from_secs(2);
 /// A field or opt-in usage column with no value in the filtered list is hidden this long after
 /// its last value goes, so a row that flips on and off does not make the layout jump.
 pub const HIDE_AFTER: Duration = Duration::from_secs(10);
@@ -201,6 +203,8 @@ pub struct App {
     pub status: Option<Status>,
     /// A row number's first digit, when it came and whether it jumps, while a second may follow.
     pub number: Option<(usize, Instant, bool)>,
+    /// The marked row the last `'` went to, and when.
+    marked_at: Option<(String, Instant)>,
     /// A jump a number's wait ended in, while the key that ended it had an effect of its own;
     /// `number_due` hands it out next.
     deferred: Option<Effect>,
@@ -578,6 +582,7 @@ impl App {
             Act::NextGroup => self.group(false),
             Act::PrevGroup => self.group(true),
             Act::NextNeeds => return self.next_waiting(now, false),
+            Act::Marked => return self.go_marked(now),
             Act::PrevNeeds => {
                 self.tell(
                     'N',

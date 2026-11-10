@@ -712,12 +712,17 @@ fn key_bar(app: &App, width: usize) -> Line<'static> {
     }
     // `keys::FOOTER` ranks the keys; a narrow board drops them from the end.
     let keys: Vec<(&str, &str)> = if app.pick {
-        vec![("enter", "go"), ("j/k", "move"), ("/", "filter")]
+        let mut keys = vec![("enter", "go"), ("j/k", "move"), ("/", "filter")];
+        if app.marked_shown() {
+            keys.push(("'", "marked"));
+        }
+        keys
     } else {
         keys::FOOTER
             .iter()
             .copied()
             .filter(|&act| act != Act::CardDown || app.card_shown())
+            .filter(|&act| act != Act::Marked || app.marked_shown())
             .filter_map(|act| keys::entry(keys::BOARD, act))
             .map(|entry| (keys::short(entry), entry.text(app.tuning.digits()).1))
             .collect()
@@ -3379,6 +3384,64 @@ mod extension_tests {
                 "{width}: an unmarked row keeps its colours"
             );
         }
+    }
+
+    /// `' marked` follows `n needs you` while a row the view shows is marked, where `q quit`
+    /// leaves room (from 85 columns); `?` always lists the key.
+    #[test]
+    fn the_footer_hints_the_quote_only_while_a_marked_row_shows_and_where_it_fits() {
+        use crate::tui::app::testkit::{app, marked_board, press};
+        let foot = |app: &App, width: u16| {
+            let text = render(app, width, 30);
+            text.lines().last().unwrap().to_owned()
+        };
+        assert!(!foot(&marked_board(), 84).contains("' marked"));
+        assert!(
+            foot(&marked_board(), 85).contains("n needs you · ' marked"),
+            "{}",
+            foot(&marked_board(), 85)
+        );
+        assert!(foot(&marked_board(), 140).contains("n needs you · ' marked"));
+        assert!(foot(&marked_board(), 140).ends_with("q quit"));
+        for width in [85, 100, 140] {
+            assert!(
+                !foot(&app(), width).contains("' marked"),
+                "{width}: nothing is marked"
+            );
+        }
+        let mut hidden = marked_board();
+        press(&mut hidden, KeyCode::Char('/'));
+        for c in "zzz".chars() {
+            press(&mut hidden, KeyCode::Char(c));
+        }
+        press(&mut hidden, KeyCode::Enter);
+        assert!(
+            !foot(&hidden, 140).contains("' marked"),
+            "the filter hides the marked rows"
+        );
+        let mut keys = app();
+        press(&mut keys, KeyCode::Char('?'));
+        let table = render(&keys, 80, 30);
+        assert!(table.contains("jump to marked; again, next"), "{table}");
+        let mut picking = marked_board();
+        picking.pick = true;
+        assert!(
+            foot(&picking, 100).contains("/ filter · ' marked"),
+            "{}",
+            foot(&picking, 100)
+        );
+        picking.pick = true;
+        assert!(
+            !foot(
+                &{
+                    let mut p = app();
+                    p.pick = true;
+                    p
+                },
+                100
+            )
+            .contains("' marked")
+        );
     }
 
     /// A row past 99 has no number to show, and still has its star.
