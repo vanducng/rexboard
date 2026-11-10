@@ -419,8 +419,8 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
             &app.rows,
             columns.width(Col::Where).saturating_sub(1),
             columns.tier != Tier::Wide,
-            // The host and session views' groups already name the host, so rows need no `@HOST`.
-            columns.has(Col::Host) || matches!(app.view.group_by, Some(Key::Host | Key::Session)),
+            // The host view's groups already name the host, so its rows need no `@HOST`.
+            columns.has(Col::Host) || app.view.group_by == Some(Key::Host),
             app.view.group_by == Some(Key::Session),
         )
     } else {
@@ -3594,5 +3594,41 @@ mod session_view_tests {
                 "{width}:\n{text}"
             );
         }
+    }
+
+    #[test]
+    fn rows_with_no_session_on_two_hosts_keep_their_host_where_nothing_names_it() {
+        let mut app = in_session_view();
+        let mut rows = app.rows.clone();
+        for (key, host) in [("mini/none-a", "mini"), ("local/none-b", "studio")] {
+            let mut row = rows[0].clone();
+            row.key = key.into();
+            row.pane.block_id = key.split_once('/').unwrap().1.into();
+            row.pane.pane = "seat-n".into();
+            row.pane.session = String::new();
+            row.pane.host = host.into();
+            rows.push(row);
+        }
+        app.set_rows(rows, hosts());
+        let text = render(&app, 50, 40);
+        let places: Vec<&str> = text
+            .lines()
+            .filter(|l| l.contains("seat-n"))
+            .map(|l| {
+                let place = &l[l.find("seat-n").unwrap()..];
+                &place[..place.find("  ").unwrap_or(place.len())]
+            })
+            .collect();
+        assert_eq!(
+            places,
+            ["seat-n @mini", "seat-n @studio"],
+            "no HOST column and no header names the host:\n{text}"
+        );
+        assert!(
+            !text
+                .lines()
+                .any(|l| l.contains("seat-b  ") && l.contains('@')),
+            "a row with a session needs no @HOST:\n{text}"
+        );
     }
 }

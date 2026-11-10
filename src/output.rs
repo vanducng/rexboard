@@ -184,7 +184,7 @@ pub fn wheres(rows: &[Row], max: usize, short: bool, host_column: bool) -> Vec<S
 }
 
 /// `wheres`, and with `in_session` the paths leave the session out, so only rows of one session
-/// and host read as twins.
+/// read as twins, and a row with a session never needs `@HOST`: its group header names it.
 pub fn wheres_in(
     rows: &[Row],
     max: usize,
@@ -197,12 +197,13 @@ pub fn wheres_in(
     rows.iter()
         .zip(&first)
         .map(|(row, place)| {
+            let host_named = host_column || (in_session && !row.pane.session.is_empty());
             let twins: Vec<&Row> = rows
                 .iter()
                 .zip(&first)
                 .filter(|(other, text)| {
                     *text == place
-                        && (!host_column || other.pane.host == row.pane.host)
+                        && (!host_named || other.pane.host == row.pane.host)
                         && (!in_session || other.pane.session == row.pane.session)
                 })
                 .map(|(other, _)| other)
