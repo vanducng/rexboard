@@ -327,7 +327,7 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
     );
     let healthy = app.hosts.keys().cloned().collect::<Vec<_>>().join(" + ");
     let label = view_label(app);
-    let no_alert = alert.is_empty();
+    let shows_hosts = app.link == Link::Up && app.hosts.values().all(|s| s == "up");
     let clock = now.with_timezone(&Local).format("%H:%M").to_string();
     let width = usize::from(area.width);
     // Alerts stay; the host list goes first, then the counts, then the clock.
@@ -349,7 +349,7 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
                     3 + alert.width()
                 };
             let right = if k { clock.width() } else { 0 }
-                + if h && alert.is_empty() {
+                + if h && shows_hosts {
                     3 + healthy.width()
                 } else {
                     0
@@ -374,7 +374,7 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
     if with_clock {
         right.push(Span::styled(clock, theme::quiet()));
     }
-    if with_hosts && no_alert {
+    if with_hosts && shows_hosts {
         right.push(Span::styled(format!(" · {healthy}"), theme::quiet()));
     }
     let used = |spans: &[Span]| spans.iter().map(|s| s.content.width()).sum::<usize>();
@@ -3664,6 +3664,31 @@ mod extension_tests {
             "{}",
             top(&app, 80)
         );
+        let clock_at_the_end = |line: &str| line.trim_end().chars().nth_back(2) == Some(':');
+        let narrow = top(&app, 80);
+        assert!(
+            !narrow.contains(" local") && narrow.contains("line 12  ") && clock_at_the_end(&narrow),
+            "at 80 the host list goes first and the alert keeps clear of the clock: {narrow}"
+        );
+        let wide = top(&app, 140);
+        assert!(
+            wide.trim_end().ends_with("local + mini"),
+            "where it fits the host list stays beside the alert: {wide}"
+        );
+        app.ext_runs = BTreeMap::from([(
+            "fake".to_owned(),
+            ExtRun {
+                ok: false,
+                error: None,
+            },
+        )]);
+        let both = top(&app, 140);
+        assert!(
+            both.contains("config.toml bad: line 12, ext fake failed")
+                && both.trim_end().ends_with("local + mini"),
+            "{both}"
+        );
+        app.ext_runs.clear();
         app.hosts.insert("studio".into(), "down".into());
         assert!(
             top(&app, 140).contains("studio down, config.toml bad: line 12"),
@@ -3674,13 +3699,6 @@ mod extension_tests {
             top(&app, 50).starts_with("rexboard · studio down, config.toml bad: line 12"),
             "{}",
             top(&app, 50)
-        );
-        app.hosts.clear();
-        app.hosts.insert("local".into(), "up".into());
-        let narrow = top(&app, 80);
-        assert!(
-            narrow.contains("line 12  ") && narrow.trim_end().chars().nth_back(2) == Some(':'),
-            "the alert and the clock are apart: {narrow}"
         );
         app.config_bad = None;
         assert!(!top(&app, 80).contains("config.toml"));
