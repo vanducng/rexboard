@@ -457,6 +457,7 @@ rexboard jump 1                       # the first NEEDS YOU row
 rexboard jump -                       # back to the pane before the last jump
 rexboard next                         # the next pane that needs you
 rexboard next --back                  # the other way
+rexboard next --marked                # the next pane a [[mark]] rule marks
 rexboard pick                         # choose from the board's list
 ```
 
@@ -468,6 +469,8 @@ Each lands the Rex app on the pane, on its host, and marks it seen through serve
 The app has 5 seconds to answer, and it does not answer while the Mac's screen is locked. The jump then fails with `REX`, `the Rex app on NAME did not answer within 5s; it does not answer while the Mac's screen is locked`, and the next step `unlock the Mac, then rexboard jump KEY`. With `--json`, Rex's own words are in `error.detail`. [Configuration](configuration.md#which-window-a-jump-lands-in) says which app window a jump switches.
 
 `next` picks from `needs_you` in board order: blocked, then error, then unseen done, each longest waiting first. It starts after the pane it runs in (`REX_BLOCK`), or outside a pane, after the pane the last jump went to (kept in `state.json`, so it survives a restart). It goes to unseen rows first, so repeated `next` works through the queue; once every row is seen, the blocked and erroring ones cycle.
+
+`next --marked` goes instead to the next row a [`[[mark]]` rule](configuration.md#mark) marks, in board order, seen or not, starting after the same pane as `next` does and wrapping at the end; `--back` goes the other way. With no marked row it exits 1 with `no marked row · see [[mark]] in config.toml` (`NO_MARKED_ROW` with `--json`, next step `rexboard ls --marked`), as `next` does when nobody needs you.
 
 `jump -` goes to the pane the jump before the last one went to, and the two swap, as `cd -` does, so a second `jump -` comes back. Every jump counts: `jump`, `next`, `pick`, and the board's `enter` and `-`.
 

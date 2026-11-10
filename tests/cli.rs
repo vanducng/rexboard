@@ -1624,7 +1624,15 @@ fn mini_needing(serve: &Serve) {
 /// A serve whose local host is quiet and whose mini needs you three times, once mini's
 /// snapshot is in.
 fn needing() -> Serve {
+    needing_with("")
+}
+
+/// `needing()` with this `config.toml`, there before serve starts.
+fn needing_with(config: &str) -> Serve {
     let serve = Serve::new();
+    if !config.is_empty() {
+        serve.config(config);
+    }
     std::fs::write(
         serve.dir.path().join("observer-studio-quiet.ndjson"),
         "{\"v\":1,\"type\":\"snapshot\",\"rex_version\":\"0.0.1-test\",\"sessions\":[]}\n",
@@ -1916,6 +1924,56 @@ fn next_with_nobody_waiting_says_so() {
         .assert()
         .code(1)
         .stderr(predicate::str::contains("\"code\":\"NOBODY_NEEDS_YOU\""));
+}
+
+#[test]
+fn next_marked_goes_to_the_marked_rows_in_list_order_and_back_and_wraps() {
+    let serve = needing_with("[[mark]]\nblock = \"seat-old\"\n[[mark]]\nblock = \"seat-done\"\n");
+    // seat-new is not marked and needs you too, so plain `next` would stop on it.
+    assert_eq!(serve.next(&["--marked"], None), "mini/block:seat-old");
+    assert_eq!(
+        serve.next(&["--marked"], None),
+        "mini/block:seat-done",
+        "after the last jump"
+    );
+    assert_eq!(
+        serve.next(&["--marked"], None),
+        "mini/block:seat-old",
+        "wraps"
+    );
+    assert_eq!(
+        serve.next(&["--marked", "--back"], Some("block:seat-old")),
+        "mini/block:seat-done",
+        "back from the first wraps to the last"
+    );
+    assert_eq!(
+        serve.next(&["--marked"], Some("block:seat-done")),
+        "mini/block:seat-old",
+        "REX_BLOCK is the cursor, as for next"
+    );
+    assert_eq!(
+        serve.next(&[], Some("block:seat-old")),
+        "mini/block:seat-new",
+        "plain next is unchanged"
+    );
+}
+
+#[test]
+fn next_marked_with_no_marked_row_says_so_and_exits_1() {
+    let serve = needing();
+    serve
+        .needing_cmd()
+        .args(["next", "--marked"])
+        .assert()
+        .code(1)
+        .stderr("no marked row · see [[mark]] in config.toml\n");
+    serve
+        .needing_cmd()
+        .args(["--json", "next", "--marked"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("\"code\":\"NO_MARKED_ROW\""));
+    assert!(serve.jumps().is_empty(), "no jump ran");
 }
 
 #[test]
