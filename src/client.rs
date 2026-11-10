@@ -488,6 +488,7 @@ pub fn ls(args: &LsArgs, json: bool) -> Result<()> {
         .map(|(h, s)| (h.clone(), s.clone()))
         .collect();
     let mut list = pick(rows, args.host.as_deref(), args.all)?;
+    list.retain(|row| row.marked || !args.marked);
     let query = args.query();
     if !query.is_empty() {
         list = crate::tui::query::arrange(list, fields, &query)?;

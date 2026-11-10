@@ -17,6 +17,7 @@ use crate::event::Event;
 use crate::extension::runner::Report;
 use crate::extension::running::Running;
 use crate::harness::usage::{self, Usage};
+use crate::marks::Marks;
 use crate::state::{self, Lock, Paths, Record};
 use crate::{interrupted, rex, stop_on_signals};
 
@@ -249,6 +250,10 @@ struct Reducer {
     extensions: Running,
     /// `[models]` from config.toml, read again with the extensions.
     models: BTreeMap<String, String>,
+    /// `[[mark]]` from config.toml, read again with the extensions, and the rules already named
+    /// in the log as skipped.
+    marks: Marks,
+    mark_warned: BTreeSet<String>,
     usage: BTreeMap<String, Usage>,
     /// The local rows the usage watcher joins its files to.
     usage_panes: Arc<Mutex<Option<Vec<UsagePane>>>>,
@@ -370,6 +375,8 @@ impl Reducer {
             save_due: None,
             extensions: Running::new(ext_tx),
             models: BTreeMap::new(),
+            marks: Marks::default(),
+            mark_warned: BTreeSet::new(),
             usage: BTreeMap::new(),
             usage_panes: Arc::default(),
         }
@@ -598,13 +605,20 @@ impl Reducer {
         self.board.mark_stale(host)
     }
 
-    /// Re-reads the extensions and the model aliases; an extension that stopped takes its fields
+    /// Re-reads the extensions, the model aliases and the mark rules; an extension that stopped takes its fields
     /// and status off the rows, since no later run of it will.
     fn sync_extensions(&mut self) {
         let now = chrono::Utc::now();
         let mut changed = false;
         if let Ok(config) = crate::config::load() {
             changed = std::mem::replace(&mut self.models, config.models) != self.models;
+            let marks = Marks::new(config.mark.as_ref());
+            for why in &marks.skipped {
+                if self.mark_warned.insert(why.clone()) {
+                    eprintln!("warning: config.toml {why}");
+                }
+            }
+            changed |= std::mem::replace(&mut self.marks, marks) != self.marks;
         }
         for name in self.extensions.sync() {
             changed |= !self
@@ -689,6 +703,7 @@ impl Reducer {
                 usage.alias(&self.models);
             }
         }
+        self.marks.apply(&mut rows);
         json!({
             "v": VERSION,
             "rows": rows,

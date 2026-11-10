@@ -265,6 +265,9 @@ pub struct LsArgs {
     /// Take one snapshot here instead of asking serve.
     #[arg(long, conflicts_with_all = ["view", "filter", "status", "sort"])]
     pub direct: bool,
+    /// Only the rows a `[[mark]]` rule in config.toml marks.
+    #[arg(long)]
+    pub marked: bool,
     /// Group and order the rows as this board view does (`rexboard views` lists them).
     #[arg(long, value_name = "NAME")]
     pub view: Option<String>,

@@ -21,6 +21,10 @@ pub struct Config {
     /// `[models]`: a reported model name, exactly, and what the board shows for it.
     #[serde(default)]
     pub models: BTreeMap<String, String>,
+    /// `[[mark]]`: rules for the rows to mark. Kept as read, so a rule that does not fit is
+    /// skipped and named by `Marks::new`, not a reason for the whole file to fail.
+    #[serde(default)]
+    pub mark: Option<toml::Value>,
 }
 
 /// `[extensions]`: which discovered extensions run, where else to look, and what each is told.
