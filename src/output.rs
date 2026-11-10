@@ -236,7 +236,8 @@ pub fn wheres_in(
 
 /// BLOCK for each row once WHERE splits, in `block` columns: its name, and `#N` when another row
 /// on its host reads the same in SESSION, WINDOW and BLOCK as drawn `session`, `window` and
-/// `block` columns wide. The suffix is never cut; the name gives way.
+/// `block` columns wide, and in the same session when SESSION is not drawn (`session` 0). The
+/// suffix is never cut; the name gives way.
 pub fn blocks(rows: &[Row], session: usize, window: usize, block: usize) -> Vec<String> {
     let shown: Vec<(String, String, String)> = rows
         .iter()
