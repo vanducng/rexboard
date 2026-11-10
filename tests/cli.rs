@@ -2817,7 +2817,7 @@ fn ext_ls_json_and_ext_test_name_the_actions_and_a_hidden_field_has_no_column() 
     let views = serve.cmd().args(["views", "--json"]).output().unwrap();
     let views = String::from_utf8(views.stdout).unwrap();
     assert!(
-        views.contains("rig") && !views.contains("session\""),
+        views.contains("rig") && !views.contains("acts.session"),
         "{views}"
     );
 }
@@ -2975,10 +2975,35 @@ fn ls_takes_the_boards_view_filter_status_and_sort() {
             seen.push(host);
         }
     }
+    let by_session: Vec<(String, String)> = serve
+        .rows(&["--view", "session"])
+        .iter()
+        .map(|row| {
+            (
+                row["session"].as_str().unwrap().to_owned(),
+                row["host"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    let mut groups: Vec<&(String, String)> = Vec::new();
+    for place in &by_session {
+        if groups.last() != Some(&place) {
+            assert!(
+                !groups.contains(&place),
+                "each session on a host is one group: {by_session:?}"
+            );
+            groups.push(place);
+        }
+    }
+    assert!(groups.len() > 1, "{by_session:?}");
+    assert!(
+        groups.windows(2).all(|pair| pair[0].0 <= pair[1].0),
+        "sessions run a to z: {groups:?}"
+    );
     for (args, said) in [
         (
             &["--view", "nope"][..],
-            "no view named nope; views: status, table, harness, host",
+            "no view named nope; views: status, table, harness, host, session",
         ),
         (&["--status", "x"][..], "no status named x"),
         (&["--sort", "nope"][..], "no column named nope to sort by"),
@@ -3035,6 +3060,7 @@ fn views_lists_each_view_and_what_it_groups_by() {
             { "name": "table", "group_by": null },
             { "name": "harness", "group_by": "harness" },
             { "name": "host", "group_by": "host" },
+            { "name": "session", "group_by": "session" },
         ])
     );
 }
