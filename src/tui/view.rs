@@ -630,6 +630,7 @@ fn row_line(
                 Tone::Dim => theme::quiet(),
                 Tone::Fill(pct) => pct.and_then(theme::fill).unwrap_or(soft),
                 Tone::Strong => soft.patch(theme::strong()),
+                Tone::Marked => theme::marked(),
             };
             Span::styled(text, style)
         })
@@ -893,12 +894,12 @@ mod tests {
             "{with:?}"
         );
         // The usage floor of 34 went with the columns: WHERE keeps what it needs (20) and MSG is
-        // back at the usual floor (its longest message and a gap), not left at 34 with WHERE 32.
+        // back at the usual floor (its longest message), not left at 34 with WHERE 32.
         let width = |name: &str| with.iter().find(|(h, _)| *h == name).unwrap().1;
         assert_eq!(
             (width("WHERE"), width("MSG")),
-            (20, msg.len() + 1),
-            "{with:?}"
+            (20, msg.len()),
+            "MSG's gap is the cell the 4-cell # took: {with:?}"
         );
     }
 
@@ -1196,7 +1197,7 @@ mod tests {
         assert!(!USAGE.iter().any(|c| with.has(*c)), "all usage dropped");
         let place = ["api", "main", "seat-b"].join(" › ").width() + 3;
         assert!(
-            with.width(Col::Where) > place + 2,
+            with.width(Col::Where) > place + 1,
             "WHERE keeps its share, not its labels' {place}: {}",
             with.width(Col::Where)
         );
@@ -1640,7 +1641,7 @@ mod tests {
         let text = render(&app, 100, 36);
         for want in [
             "api-gateway › 2-tool",
-            "web-frontend › 2-too",
+            "web-frontend › 2-to",
             "#l2 › seat-r",
             "api › build #1",
             "api › build #2",
@@ -1706,7 +1707,7 @@ mod tests {
             let text = render(&app, width, 20);
             let lines: Vec<&str> = text
                 .lines()
-                .filter(|l| l.get(3..).is_some_and(|r| r.starts_with('✓')))
+                .filter(|l| l.get(4..).is_some_and(|r| r.starts_with('✓')))
                 .collect();
             assert_eq!(lines.len(), 3, "{text}");
             assert!(lines.iter().any(|l| l.contains(" #1")), "{text}");
@@ -2265,6 +2266,14 @@ mod tests {
         press(&mut table, KeyCode::Char('v'));
         crate::tui::app::testkit::sort(&mut table, 'a');
         screens.push(("table sorted 140", table, 140, 30));
+        for width in [80, 140] {
+            let name = if width == 80 {
+                "marked 80"
+            } else {
+                "marked 140"
+            };
+            screens.push((name, crate::tui::app::testkit::marked_board(), width, 30));
+        }
         let mut keys = fuller();
         press(&mut keys, KeyCode::Char('?'));
         screens.push(("keys 120", keys, 120, 34));
@@ -3243,6 +3252,151 @@ mod extension_tests {
             columns.width(Col::Msg) >= 250 * 35 / 100,
             "the floor holds with msg unset"
         );
+    }
+
+    /// The drawn cells, for a style to be read off one.
+    fn cells(app: &App, width: u16, height: u16) -> ratatui::buffer::Buffer {
+        let now = DateTime::parse_from_rfc3339("2026-01-01T05:43:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| draw(frame, app, now)).unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn text_of(buffer: &ratatui::buffer::Buffer, y: u16) -> String {
+        (0..buffer.area.width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect()
+    }
+
+    /// The `y` of the list row numbered `n`, marked or not.
+    fn row_n(buffer: &ratatui::buffer::Buffer, n: usize) -> u16 {
+        (3..buffer.area.height)
+            .find(|y| {
+                let line = text_of(buffer, *y);
+                let line = line.trim_start().trim_start_matches('*');
+                line.starts_with(&format!("{n} "))
+            })
+            .unwrap_or_else(|| panic!("no row {n}"))
+    }
+
+    /// A marked row has `*` before its number in the same 4 cells an unmarked one has, so no
+    /// column moves at any width; with no colour, the `*` is what says it.
+    #[test]
+    fn a_mark_is_a_star_before_the_number_and_no_column_moves() {
+        use crate::tui::app::testkit::{fuller, marked_board};
+        for width in [60, 80, 100, 120, 160, 200] {
+            let (plain, marked) = (
+                cells(&fuller(), width, 30),
+                cells(&marked_board(), width, 30),
+            );
+            for (n, starred) in [(1, true), (2, false), (3, true)] {
+                let (was, now) = (
+                    text_of(&plain, row_n(&plain, n)),
+                    text_of(&marked, row_n(&marked, n)),
+                );
+                assert_eq!(now.contains('*'), starred, "{width}: {now}");
+                assert_eq!(
+                    now.replacen('*', " ", 1),
+                    was,
+                    "{width}: nothing else moves"
+                );
+                if starred {
+                    assert!(now[..4].trim().starts_with('*'), "{width}: {now}");
+                    assert!(
+                        now[..4].trim()[1..].chars().all(|c| c.is_ascii_digit()),
+                        "{width}: {now}"
+                    );
+                }
+            }
+            assert_eq!(
+                text_of(&plain, 2),
+                text_of(&marked, 2),
+                "{width}: the header is the same marked or not"
+            );
+            assert!(
+                text_of(&plain, 2).starts_with("  # "),
+                "{width}: # is 4 cells"
+            );
+        }
+    }
+
+    /// `*` takes `marked` (cyan, bold), the number stays dim, the location cells take `marked`,
+    /// other cells keep their own look, and the selected row keeps its raised background.
+    #[test]
+    fn the_star_and_the_location_take_marked_the_number_stays_dim_and_the_selection_wins() {
+        use crate::tui::app::testkit::marked_board;
+        use ratatui::style::{Color, Modifier};
+        for width in [80, 140] {
+            let buffer = cells(&marked_board(), width, 30);
+            for (n, key, selected) in [(1, "seat-b", true), (3, "codex", false)] {
+                let y = row_n(&buffer, n);
+                let line = text_of(&buffer, y);
+                let at = |text: &str| {
+                    line.find(text)
+                        .map(|byte| line[..byte].chars().count() as u16)
+                };
+                let star = at("*").unwrap();
+                let number = star + 1;
+                let (star_cell, number_cell) = (&buffer[(star, y)], &buffer[(number, y)]);
+                assert_eq!(
+                    (star_cell.fg, star_cell.modifier),
+                    (Color::Cyan, Modifier::BOLD),
+                    "{width} {key} star"
+                );
+                assert!(
+                    number_cell.modifier.contains(Modifier::DIM),
+                    "{width} {key}: the number is dim"
+                );
+                assert_ne!(number_cell.fg, Color::Cyan);
+                let place = if width == 80 {
+                    format!("api › {key}")
+                } else {
+                    "api".to_owned()
+                };
+                let first = at(&place).unwrap();
+                let here = &buffer[(first, y)];
+                assert_eq!(
+                    (here.fg, here.modifier.contains(Modifier::BOLD)),
+                    (Color::Cyan, true),
+                    "{width} {key}: {place}"
+                );
+                let msg = &buffer[(at(&format!("{key} msg")).unwrap(), y)];
+                assert_ne!(msg.fg, Color::Cyan, "{width} {key}: MSG keeps its own look");
+                assert_eq!(
+                    star_cell.bg == Color::DarkGray,
+                    selected,
+                    "{width} {key}: the selected row's background"
+                );
+                assert_eq!(here.bg == Color::DarkGray, selected);
+            }
+            let y = row_n(&buffer, 2);
+            assert!(!text_of(&buffer, y).contains('*'));
+            assert_ne!(
+                buffer[(14, y)].fg,
+                Color::Cyan,
+                "{width}: an unmarked row keeps its colours"
+            );
+        }
+    }
+
+    /// A row past 99 has no number to show, and still has its star.
+    #[test]
+    fn a_marked_row_past_99_keeps_its_star() {
+        use crate::tui::app::testkit::{hosts, row};
+        let mut app = App::default();
+        let rows: Vec<Row> = (0..120)
+            .map(|i| {
+                let mut r = row(&format!("local/r{i}"), "working", "working", true);
+                r.marked = i == 99;
+                r
+            })
+            .collect();
+        app.set_rows(rows, hosts());
+        let text = render(&app, 100, 130);
+        let line = text.lines().find(|l| l.contains("r99 msg")).unwrap();
+        assert!(line.starts_with("  * "), "{line}");
     }
 
     fn render(app: &App, width: u16, height: u16) -> String {

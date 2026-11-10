@@ -260,6 +260,20 @@ pub fn fuller() -> App {
     app
 }
 
+/// `fuller`, with the selected row (`mini/seat-b`) and `mini/codex` marked.
+pub fn marked_board() -> App {
+    let mut app = fuller();
+    let mut rows = app.rows.clone();
+    for row in &mut rows {
+        if row.key == "mini/seat-b" || row.key == "mini/codex" {
+            row.marked = true;
+            row.marked_by = vec!["config".into()];
+        }
+    }
+    app.set_rows(rows, app.hosts.clone());
+    app
+}
+
 /// `fuller`'s rows on each harness: two Claude, then Codex, pi, grok (an adapter without a mark)
 /// and OpenCode (no adapter), in the view `view`.
 pub fn harnesses(view: &str) -> App {

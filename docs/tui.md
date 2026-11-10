@@ -9,7 +9,7 @@ The board is built to live in a narrow column, so the narrow layout is the main 
 - **Top bar:** `rexboard`, the number of hosts, panes and agents, the clock and the hosts. A host that is not `up` shows in red with its state (`mini down`), and so does an extension whose last run failed (`ext fake failed`, or `ext fake, other failed`; when they would not fit, `2 ext failed`). A stopped serve shows `serve stopped · R reconnects` (while the board first connects, a dim `connecting to serve`). When serve cannot be started, the list says why. When the line is short, the host list goes first, then the counts, then the clock; the red alerts always stay.
 - **Groups**, in order, each with its count and a dashed rule: `NEEDS YOU` (blocked, error, unseen done), `WORKING`, `QUIET` (idle, seen done) and `UNREPORTED` (no status record, unknown state, a host that is down, or a suspect `working` report). Empty groups are not drawn. Inside `NEEDS YOU`, blocked comes first, then error, then unseen done, each oldest first. A folded group shows `▸` before its name.
 - **Column header:** one dim line over the list names each column, at the same widths as the rows (the glyph column has no name, and `#` heads the numbers). A blank row separates it from the top bar. `pick` has both too. On a screen under 12 rows the header and the blank row are left out, so a short screen keeps every line for rows.
-- **Rows:** a row number, a glyph, then the columns the width allows. The dim `#` column is 3 cells wide at every width and numbers the rows on screen from 1 at the top, up to 99; group headers and the blank rows between groups have no number, and a row past 99 has none. The number is the row's place on screen, so it changes when the list scrolls, re-sorts or is filtered (see `1`-`9` in [Keys](#keys)).
+- **Rows:** a row number, a glyph, then the columns the width allows. The dim `#` column is 4 cells wide at every width, marked rows or not, and numbers the rows on screen from 1 at the top, up to 99; group headers and the blank rows between groups have no number, and a row past 99 has none. A marked row has a `*` before its number (see [Marked rows](#marked-rows)). The number is the row's place on screen, so it changes when the list scrolls, re-sorts or is filtered (see `1`-`9` in [Keys](#keys)).
 
   | Width | Columns |
   | --- | --- |
@@ -104,10 +104,15 @@ The rest of the board's text takes one of a few roles, also in `theme.rs`, so a 
 | `alert` | red | a failed jump, read, close or copy, a host down, an extension failing, a refusal; answer mode's bar; the close question (bold) |
 | `note` | cyan | a passing message (a toast), a jump, close or answer on its way |
 | `accent` | cyan, bold | the board's name, the key table's title, an answer armed to send |
+| `marked` | cyan, bold, the look of `accent` | a marked row's `*` and its location cells (see [Marked rows](#marked-rows)) |
 | `strong` / `quiet` | bold / dim | a key and the words after it in every footer; a headline and its labels |
 | `header` | dim, bold | the column header and the group headers |
 | `selected` | raised background | the selected row or group header, keeping each cell's own colour |
 | cut mark | dim `…` | a pane line cut at the edge, on the line's own background |
+
+### Marked rows
+
+A row that a [`[[mark]]` rule](configuration.md#mark) matches shows a `*` before its `#` number, in the `marked` role, and its location cells take `marked` too: `WHERE`, or `SESSION`, `WINDOW` and `BLOCK` once WHERE splits (from 132 columns). The number stays dim. The `#` column is 4 cells at every width whether or not a row is marked, so a mark moves no column, and the `*` reads without colour. A marked row keeps its group, its place and every other cell's look, and the selected row's raised background still wins over the `marked` colour. A row past 99 has no number, and its `*` shows alone. `▸` is not used, as it already marks a folded group. A mark is data about the row (`marked` in `ls --json`), not a view: it never reorders rows. See [decision 18](decisions/0018-rows-can-be-marked.md).
 
 The glyph keeps its state's look everywhere, on the bars too: a spinner drawn bold turns into a still blob in a font with no bold braille.
 

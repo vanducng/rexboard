@@ -59,6 +59,11 @@ pub fn accent() -> Style {
     Style::new().fg(ACCENT).add_modifier(Modifier::BOLD)
 }
 
+/// A marked row: its `*` and its location cells. The look of `accent`, for "this one matters to you".
+pub fn marked() -> Style {
+    accent()
+}
+
 /// Something wrong: a failed jump or read, a host down, an extension failing, answer mode.
 pub fn alert() -> Style {
     Style::new().fg(ALERT)

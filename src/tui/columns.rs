@@ -72,6 +72,8 @@ pub enum Tone {
     Fill(Option<u8>),
     /// Markdown's strong text in MSG.
     Strong,
+    /// A marked row's `*` and location cells.
+    Marked,
 }
 
 #[derive(Clone, Copy)]
@@ -294,7 +296,7 @@ pub const COLUMNS: [Column; 18] = [
         None,
         Dir::Up,
         ALWAYS,
-        Width::Fixed(3),
+        Width::Fixed(4),
         Tone::Dim,
     ),
     column(
@@ -918,6 +920,16 @@ impl Columns {
         self.cols
             .iter()
             .flat_map(|(c, width)| {
+                if c.id == Col::Num && row.marked {
+                    // `*` before the number, which stays dim, in the same 3 cells and a gap.
+                    let n = number.map_or_else(String::new, |n| n.to_string());
+                    let room = width.saturating_sub(self.gap(c.id));
+                    let pad = room.saturating_sub(n.len() + 1);
+                    return vec![
+                        (format!("{}*", " ".repeat(pad)), Tone::Marked),
+                        (n + &" ".repeat(self.gap(c.id)), Tone::Dim),
+                    ];
+                }
                 let text = match c.id {
                     Col::Num => number.map_or_else(String::new, |n| n.to_string()),
                     Col::Glyph => theme::glyph(row, now).to_owned(),
@@ -952,6 +964,9 @@ impl Columns {
                 let tone = match c.id {
                     Col::Ctx => Tone::Fill(figure(|u| u.ctx_pct)),
                     Col::Quota => Tone::Fill(figure(|u| u.quota_5h)),
+                    Col::Where | Col::Session | Col::Window | Col::Block if row.marked => {
+                        Tone::Marked
+                    }
                     _ => c.tone,
                 };
                 let gap = self.gap(c.id);
@@ -1106,7 +1121,11 @@ mod tests {
             for (column, w) in &columns.cols {
                 if !column.header.is_empty() {
                     // `#` is right-aligned in its cell, as the figures are.
-                    let at = x + u16::from(column.id == Col::Num);
+                    let at = x + if column.id == Col::Num {
+                        *w as u16 - 2
+                    } else {
+                        0
+                    };
                     let label: String = (at..at + column.header.len() as u16)
                         .map(|x| buf[(x, 2)].symbol())
                         .collect();
@@ -1531,7 +1550,7 @@ mod tests {
             let buf = buffer(&app, width, 30);
             let y = (3..30).find(|&y| line(&buf, y).contains(needle)).unwrap();
             // Past the number.
-            line(&buf, y).chars().skip(3).collect::<String>()
+            line(&buf, y).chars().skip(4).collect::<String>()
         };
         assert!(row_at(100, "ask msg").starts_with("! permission "));
         assert!(row_at(100, "pick msg").starts_with("? question "));
@@ -1551,15 +1570,23 @@ mod tests {
             let columns = Columns::new(board, usize::from(board) - 36, &[]);
             [Col::Where, Col::Session, Col::Window, Col::Block, Col::Msg].map(|c| columns.width(c))
         };
-        assert_eq!(at(100), [15, 0, 0, 0, 8], "v0.1's WHERE at 100");
-        assert_eq!(at(120), [26, 0, 0, 0, 17], "v0.1's WHERE at 120");
-        assert_eq!(at(131), [32, 0, 0, 0, 22], "a 92-column list keeps WHERE");
+        assert_eq!(
+            at(100),
+            [14, 0, 0, 0, 8],
+            "v0.1's WHERE at 100, less the 4th cell of #"
+        );
+        assert_eq!(
+            at(120),
+            [25, 0, 0, 0, 17],
+            "v0.1's WHERE at 120, less the 4th cell of #"
+        );
+        assert_eq!(at(131), [31, 0, 0, 0, 22], "a 92-column list keeps WHERE");
         assert_eq!(
             at(132),
-            [0, 12, 12, 14, 17],
+            [0, 12, 12, 13, 17],
             "a 93-column list splits, no TURN yet"
         );
-        assert_eq!(at(140), [0, 12, 12, 14, 18], "a 101-column list adds TURN");
+        assert_eq!(at(140), [0, 12, 12, 14, 17], "a 101-column list adds TURN");
     }
 
     #[test]
