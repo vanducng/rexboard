@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.28.0](https://github.com/vanducng/rexboard/compare/v0.27.1...v0.28.0) (2026-11-10)
+
+
+### Features
+
+* **cli:** ls --view says each row's group, in a column and as view_group ([#153](https://github.com/vanducng/rexboard/issues/153)) ([076228d](https://github.com/vanducng/rexboard/commit/076228d9917cf84cbee114f06ee3ca23598583ec))
+* **tui:** * favorites a pane, as a third source of marks ([#150](https://github.com/vanducng/rexboard/issues/150)) ([946dd67](https://github.com/vanducng/rexboard/commit/946dd677e30a9af789dd56f5b2eeb9fcf52a0e98))
+
 ## [0.27.1](https://github.com/vanducng/rexboard/compare/v0.27.0...v0.27.1) (2026-11-10)
 
 
