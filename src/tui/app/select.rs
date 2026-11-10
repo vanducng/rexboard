@@ -200,9 +200,10 @@ impl App {
             .collect()
     }
 
-    /// Whether a row the view shows is marked, for the footer's hint.
+    /// Whether a marked row passes the filters, folded or not, since `'` opens its group: what
+    /// the footer's hint follows.
     pub fn marked_shown(&self) -> bool {
-        !self.marked_keys().is_empty()
+        self.rows.iter().any(|row| row.marked && self.matches(row))
     }
 
     /// `'`: the first marked row in list order, after opening the groups that hold one as `n`
@@ -218,7 +219,12 @@ impl App {
         }
         let marked = self.marked_keys();
         if marked.is_empty() {
-            self.say("no marked row · see [[mark]] in config.toml");
+            let rules = self.rows.iter().any(|row| row.marked);
+            self.say(if rules {
+                "no marked row in this view"
+            } else {
+                "no marked row · see [[mark]] in config.toml"
+            });
             return None;
         }
         let next = self
@@ -936,8 +942,8 @@ mod tests {
         key_at(&mut app, '\'', Instant::now());
         assert_eq!(
             app.toast(),
-            Some("no marked row · see [[mark]] in config.toml"),
-            "a filter can hide them all"
+            Some("no marked row in this view"),
+            "the rules mark rows but the filter hides them all: no pointer to the config"
         );
     }
 

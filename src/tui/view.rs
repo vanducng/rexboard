@@ -3419,6 +3419,18 @@ mod extension_tests {
             !foot(&hidden, 140).contains("' marked"),
             "the filter hides the marked rows"
         );
+        let mut folded = marked_board();
+        folded.folded.insert(crate::tui::views::Bucket::Status(
+            crate::board::Group::Working,
+        ));
+        folded.folded.insert(crate::tui::views::Bucket::Status(
+            crate::board::Group::NeedsYou,
+        ));
+        assert!(
+            foot(&folded, 140).contains("n needs you · ' marked"),
+            "every marked row is folded away, and ' opens their groups: {}",
+            foot(&folded, 140)
+        );
         let mut keys = app();
         press(&mut keys, KeyCode::Char('?'));
         let table = render(&keys, 80, 30);
