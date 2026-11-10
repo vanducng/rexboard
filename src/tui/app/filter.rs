@@ -154,6 +154,26 @@ mod tests {
     }
 
     #[test]
+    fn a_field_named_mark_is_reached_by_its_id_while_mark_means_the_source() {
+        let mut app = by_source();
+        let field = crate::client::Field {
+            id: "fake.mark".into(),
+            name: "mark".into(),
+            title: "Mark".into(),
+            icon: None,
+            extension_icon: None,
+            width: None,
+        };
+        app.set_extensions(vec![field], Default::default());
+        let mut rows = app.rows.clone();
+        rows[1].ext.insert("fake.mark".into(), "foo".into());
+        let has = rows[1].key.clone();
+        app.set_rows(rows, app.hosts.clone());
+        assert_eq!(kept(&mut app, "fake.mark:foo"), [has]);
+        assert!(kept(&mut app, "mark:foo").is_empty(), "mark: is the source");
+    }
+
+    #[test]
     fn filter_narrows_across_groups() {
         let mut app = app();
         press(&mut app, KeyCode::Char('/'));

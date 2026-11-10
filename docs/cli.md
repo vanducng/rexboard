@@ -16,17 +16,17 @@ With none of them, a command fails with `REX_NOT_FOUND`, next steps `set REXBOAR
 ## `rexboard ls`
 
 ```bash
-rexboard ls                 # agent panes on every host, most urgent first
-rexboard ls --all           # plain shells too
-rexboard ls --host mini     # one host: local, or a label from `rex hosts`
-rexboard ls --json          # an array of panes
-rexboard ls --direct        # one snapshot here, without serve
-rexboard ls --view host     # grouped and ordered as a board view (`rexboard views`)
-rexboard ls --view session  # one group per session, on each host that has it
+rexboard ls                     # agent panes on every host, most urgent first
+rexboard ls --all               # plain shells too
+rexboard ls --host mini         # one host: local, or a label from `rex hosts`
+rexboard ls --json              # an array of panes
+rexboard ls --direct            # one snapshot here, without serve
+rexboard ls --view host         # grouped and ordered as a board view (`rexboard views`)
+rexboard ls --view session      # one group per session, on each host that has it
 rexboard ls --filter host:mini --filter tests   # as the board's `/`; each one narrows
-rexboard ls --status q      # one status, by name or first letter, as the board's `f`
-rexboard ls --sort age:desc # within each group, as the board's `o`
-rexboard ls --marked        # only the marked rows: a [[mark]] rule, a favorite or an extension
+rexboard ls --status q          # one status, by name or first letter, as the board's `f`
+rexboard ls --sort age:desc     # within each group, as the board's `o`
+rexboard ls --marked            # only the marked rows: a [[mark]] rule, a favorite or an extension
 rexboard ls --marked favorite   # only the rows one source marked
 ```
 
@@ -47,7 +47,7 @@ In a terminal each line fits its width: `WHAT` is cut first, then `WHERE` (a lon
 
 `--marked` keeps only the marked rows (`marked` is `true`): those a [`[[mark]]` rule](configuration.md#mark), a [favorite](tui.md#favorites) or an [extension](extensions.md) marks. `--marked SOURCE` keeps the rows that source marked, by a name in `marked_by`: `config`, `favorite`, or an extension's name, ignoring case; `--marked any` is the bare flag. A name no row has lists nothing, with exit 0. `--filter mark:SOURCE` keeps the same rows. `--marked` combines with `--host`, `--view`, `--filter`, `--status` and `--sort`; `--direct` takes it too. The rules are applied by serve, so `ls`, `watch --json`, the board and `pick` agree; `ls --direct` and `watch --json --direct` apply them themselves, but run no extension, so a `field` key never matches there.
 
-`--view`, `--filter`, `--status` and `--sort` run the board's own code, so `ls` lists what the board would. `--view NAME` groups and orders as that view does: `status`, `table`, `harness`, `host`, `session`, or one per extension field (`rexboard views` lists them). `--filter TEXT` keeps the rows the board's `/` would: words match any label, the message or the harness as one phrase, and `key:value` matches one key (`host`, `state`, `harness`, `session`, `window`, `block`, `mark`, or a field's name); every term must match, ignoring case. `mark:favorite`, `mark:config` or `mark:` plus an extension's name keeps the rows that source marked, by a name in `marked_by`, and `mark:` or `mark:any` every marked row; a name no row has is an empty list, not an unknown key. A `key:` that names no key is plain text, as on the board, so `failed: 2` or a URL searches the message; stderr gets a `note:` naming the keys there are. Each `--filter` narrows further. `--status` takes `working`, `done`, `question`, `permission`, `error`, `unreported` or `idle`, or its first letter. `--sort COLUMN` sorts within each group by a column the board can sort by (`state`, `age`, `turn`, `harness`, `host`, `where`, `session`, `window`, `block`, `msg`) or a field, in the direction its first `o` press takes; `:asc` or `:desc` picks one. With `--json`, `--view` also sets each row's `view_group`. An unknown view, status, column or direction fails with `USAGE` and lists the ones there are. None of them work with `--direct`. Without them the order is serve's, as above.
+`--view`, `--filter`, `--status` and `--sort` run the board's own code, so `ls` lists what the board would. `--view NAME` groups and orders as that view does: `status`, `table`, `harness`, `host`, `session`, or one per extension field (`rexboard views` lists them). `--filter TEXT` keeps the rows the board's `/` would: words match any label, the message or the harness as one phrase, and `key:value` matches one key (`host`, `state`, `harness`, `session`, `window`, `block`, `mark`, or a field's name); every term must match, ignoring case. `mark:favorite`, `mark:config` or `mark:` plus an extension's name keeps the rows that source marked, by a name in `marked_by`, and `mark:` or `mark:any` every marked row; a name no row has is an empty list, not an unknown key. `mark` is a built-in key, as `host` is, so an extension field named `mark` is reached by its id (`ext.mark:value`, `ext` being the extension). A `key:` that names no key is plain text, as on the board, so `failed: 2` or a URL searches the message; stderr gets a `note:` naming the keys there are. Each `--filter` narrows further. `--status` takes `working`, `done`, `question`, `permission`, `error`, `unreported` or `idle`, or its first letter. `--sort COLUMN` sorts within each group by a column the board can sort by (`state`, `age`, `turn`, `harness`, `host`, `where`, `session`, `window`, `block`, `msg`) or a field, in the direction its first `o` press takes; `:asc` or `:desc` picks one. With `--json`, `--view` also sets each row's `view_group`. An unknown view, status, column or direction fails with `USAGE` and lists the ones there are. None of them work with `--direct`. Without them the order is serve's, as above.
 
 ### JSON fields
 
@@ -473,7 +473,7 @@ The app has 5 seconds to answer, and it does not answer while the Mac's screen i
 
 `next` picks from `needs_you` in board order: blocked, then error, then unseen done, each longest waiting first. It starts after the pane it runs in (`REX_BLOCK`), or outside a pane, after the pane the last jump went to (kept in `state.json`, so it survives a restart). It goes to unseen rows first, so repeated `next` works through the queue; once every row is seen, the blocked and erroring ones cycle.
 
-`next --marked` goes instead to the next marked row (a [`[[mark]]` rule](configuration.md#mark), a [favorite](tui.md#favorites) or an [extension](extensions.md) marked it), in board order, seen or not, starting after the same pane as `next` does and wrapping at the end; `--back` goes the other way. `next --marked SOURCE` walks only the rows that source marked, named as `ls --marked SOURCE` takes it. With no marked row it exits 1 with `no marked row · see [[mark]] in config.toml` (`NO_MARKED_ROW` with `--json`, next step `rexboard ls --marked`), as `next` does when nobody needs you; with a SOURCE no row has, `no row marked by SOURCE · see rexboard ls --marked`.
+`next --marked` goes instead to the next marked row (a [`[[mark]]` rule](configuration.md#mark), a [favorite](tui.md#favorites) or an [extension](extensions.md) marked it), in board order, seen or not, starting after the same pane as `next` does and wrapping at the end; `--back` goes the other way. `next --marked SOURCE` walks only the rows that source marked, named as `ls --marked SOURCE` takes it. With no marked row it exits 1 with `no marked row · * marks one, or see [[mark]] in config.toml` (`NO_MARKED_ROW` with `--json`, next step `rexboard ls --marked`), as `next` does when nobody needs you; with a SOURCE no row has, `no row marked by SOURCE · see rexboard ls --marked`.
 
 `jump -` goes to the pane the jump before the last one went to, and the two swap, as `cd -` does, so a second `jump -` comes back. Every jump counts: `jump`, `next`, `pick`, and the board's `enter` and `-`.
 
@@ -484,7 +484,7 @@ The app has 5 seconds to answer, and it does not answer while the Mac's screen i
 | Exit | When |
 | --- | --- |
 | 0 | Jumped |
-| 1 | `NOBODY_NEEDS_YOU`: `next`, or `jump N`, with nothing in `needs_you`; prints `nobody needs you`. `NO_MARKED_ROW`: `next --marked` with no marked row (or none marked by the SOURCE given); prints `no marked row · see [[mark]] in config.toml`, or `no row marked by SOURCE · see rexboard ls --marked`. `NOT_FOUND`: no such key, no row N, or for `jump -`, `no previous jump yet` or `previous pane is gone`. `AMBIGUOUS_CLIENT`: no app client named, and none or more than one on the unix socket; the message says which, and the next steps name each app (`open the Rex app` when there is none). `CONFIG`: config.toml cannot be read or has an unknown key, or `client` names no app. `REX`: a step in Rex failed; the message names it. `pick`: esc |
+| 1 | `NOBODY_NEEDS_YOU`: `next`, or `jump N`, with nothing in `needs_you`; prints `nobody needs you`. `NO_MARKED_ROW`: `next --marked` with no marked row (or none marked by the SOURCE given); prints `no marked row · * marks one, or see [[mark]] in config.toml`, or `no row marked by SOURCE · see rexboard ls --marked`. `NOT_FOUND`: no such key, no row N, or for `jump -`, `no previous jump yet` or `previous pane is gone`. `AMBIGUOUS_CLIENT`: no app client named, and none or more than one on the unix socket; the message says which, and the next steps name each app (`open the Rex app` when there is none). `CONFIG`: config.toml cannot be read or has an unknown key, or `client` names no app. `REX`: a step in Rex failed; the message names it. `pick`: esc |
 | 2 | `USAGE`: TARGET is neither a key, a number nor `-`, or `pick` without a terminal |
 
 ## `rexboard ext`

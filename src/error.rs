@@ -94,8 +94,8 @@ impl Error {
 
     /// `source` is what `--marked` asked for: a name, or `any`.
     pub fn no_marked_row(source: &str) -> Self {
-        Self::NoMarkedRow(if source.eq_ignore_ascii_case("any") {
-            "no marked row · see [[mark]] in config.toml".to_owned()
+        Self::NoMarkedRow(if source.is_empty() || source.eq_ignore_ascii_case("any") {
+            "no marked row · * marks one, or see [[mark]] in config.toml".to_owned()
         } else {
             format!("no row marked by {source} · see rexboard ls --marked")
         })

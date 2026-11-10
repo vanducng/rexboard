@@ -2088,7 +2088,13 @@ fn next_marked_with_no_marked_row_says_so_and_exits_1() {
         .args(["next", "--marked"])
         .assert()
         .code(1)
-        .stderr("no marked row · see [[mark]] in config.toml\n");
+        .stderr("no marked row · * marks one, or see [[mark]] in config.toml\n");
+    serve
+        .needing_cmd()
+        .args(["next", "--marked="])
+        .assert()
+        .code(1)
+        .stderr("no marked row · * marks one, or see [[mark]] in config.toml\n");
     serve
         .needing_cmd()
         .args(["--json", "next", "--marked"])
@@ -3434,7 +3440,7 @@ fn ext_ls_json_and_ext_test_name_the_actions_and_a_hidden_field_has_no_column() 
 #[test]
 fn an_extension_cannot_take_the_name_of_a_source_of_marks() {
     let serve = Serve::new();
-    for name in ["config", "favorite"] {
+    for name in ["config", "favorite", "any"] {
         let dir = serve
             .dir
             .path()

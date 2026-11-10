@@ -198,7 +198,7 @@ fn check(m: &Manifest, dir: &Path) -> Result<(), String> {
     }
     if RESERVED.contains(&m.name.as_str()) {
         return Err(format!(
-            "name {:?} is reserved: it names a source of marks ({})",
+            "name {:?} is reserved: it names a source of marks, or every one ({})",
             m.name,
             RESERVED.join(", ")
         ));
@@ -269,8 +269,9 @@ fn is_icon(icon: &str) -> bool {
         && unicode_width::UnicodeWidthStr::width(icon) == 1
 }
 
-/// Names that `marked_by` uses for sources that are not extensions.
-pub(crate) const RESERVED: [&str; 2] = ["config", "favorite"];
+/// Names that `marked_by` uses for sources that are not extensions, and `any`, which a mark
+/// filter reads as every source.
+pub(crate) const RESERVED: [&str; 3] = ["config", "favorite", "any"];
 
 pub(crate) fn is_name(name: &str) -> bool {
     !name.is_empty()
