@@ -79,6 +79,9 @@ enum Request {
         /// The marked rows, not NEEDS YOU.
         #[serde(default)]
         marked: bool,
+        /// With `marked`, only the rows this source marked; none or `any` for every one.
+        #[serde(default)]
+        source: Option<String>,
     },
     /// `*`: a pane, by its labels, becomes a favorite or stops being one.
     Favorite {
@@ -880,9 +883,14 @@ impl Reducer {
                 after,
                 back,
                 marked,
+                source,
             } => {
                 let after = after.or_else(|| self.jumps.last().cloned());
-                self.next(after.as_deref(), back, marked)
+                self.next(
+                    after.as_deref(),
+                    back,
+                    marked.then(|| source.as_deref().unwrap_or("any")),
+                )
             }
             Request::Favorite {
                 host,
@@ -923,19 +931,19 @@ impl Reducer {
         }
     }
 
-    /// The NEEDS YOU row (or with `marked`, the marked one) after `after` (a key, or the block id of
-    /// the pane asking), unseen
+    /// The NEEDS YOU row (or with `marked`, the one that source marked) after `after` (a key, or
+    /// the block id of the pane asking), unseen
     /// rows first: a jump marks its row seen, so the queue moves on. Seen blocked or erroring
     /// rows still need you, so they cycle once nothing is unseen.
-    fn next(&self, after: Option<&str>, back: bool, marked: bool) -> Value {
-        let mut rows = if marked {
+    fn next(&self, after: Option<&str>, back: bool, marked: Option<&str>) -> Value {
+        let mut rows = if let Some(source) = marked {
             // Marked rows in list order, seen or not: a mark is the user's own, not a queue.
             let mut rows = self.board.rows(chrono::Utc::now());
             rows.retain(|row| row.pane.is_agent());
             self.mark(&mut rows);
-            rows.retain(|row| row.marked);
+            rows.retain(|row| row.marked_by_source(source));
             if rows.is_empty() {
-                return error_line("NO_MARKED_ROW", &Error::NoMarkedRow.to_string());
+                return error_line("NO_MARKED_ROW", &Error::no_marked_row(source).to_string());
             }
             rows
         } else {

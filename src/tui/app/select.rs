@@ -943,6 +943,34 @@ mod tests {
     }
 
     #[test]
+    fn the_quote_under_a_mark_filter_walks_only_the_rows_that_source_marked() {
+        let t = Instant::now();
+        let mut app = marked();
+        let mut rows = app.rows.clone();
+        for key in ["mini/codex", "local/seat-a"] {
+            let row = rows.iter_mut().find(|row| row.key == key).unwrap();
+            row.marked_by.push("favorite".into());
+            row.marked = true;
+        }
+        app.set_rows(rows, app.hosts.clone());
+        for c in "/mark:favorite".chars() {
+            key_at(&mut app, c, t);
+        }
+        app.handle_at(KeyEvent::from(KeyCode::Enter), t);
+        let mut walked = Vec::new();
+        for i in 0..3 {
+            let at = t + Duration::from_millis(100 * i);
+            walked.push(jumped(key_at(&mut app, '\'', at)).unwrap());
+            app.going = None;
+        }
+        assert_eq!(
+            walked,
+            ["mini/codex", "local/seat-a", "mini/codex"],
+            "seat-b is marked by config only, so it is not walked"
+        );
+    }
+
+    #[test]
     fn the_star_favorites_the_selected_pane_by_its_labels_or_unfavorites_it() {
         let mut app = marked();
         let effect = key_at(&mut app, '*', Instant::now());

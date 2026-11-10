@@ -80,7 +80,7 @@ pub fn execute(cli: &Cli) -> Result<()> {
         Command::Views => show::views(cli.json),
         Command::Hosts => show::hosts(cli.json),
         Command::Jump { target } => jump::jump(target, cli.json),
-        Command::Next { back, marked } => jump::next(*back, *marked, cli.json),
+        Command::Next { back, marked } => jump::next(*back, marked.as_deref(), cli.json),
         Command::Upgrade { check } => upgrade::run(*check, cli.json),
         Command::Ext(command) => extension::cli::run(command, cli.json),
         Command::Hook { harness, event } => hook::run(harness, event.as_deref()),
@@ -175,7 +175,9 @@ fn ls(args: &LsArgs, json: bool) -> Result<()> {
         eprintln!("warning: config.toml {why}");
     }
     marks.apply(&mut rows);
-    rows.retain(|row| row.marked || !args.marked);
+    if let Some(source) = &args.marked {
+        rows.retain(|row| row.marked_by_source(source));
+    }
     if json {
         println!(
             "{}",

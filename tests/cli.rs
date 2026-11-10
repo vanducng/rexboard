@@ -1965,6 +1965,121 @@ fn next_marked_goes_to_the_marked_rows_in_list_order_and_back_and_wraps() {
     );
 }
 
+/// `needing_with` rules marking seat-old and seat-done, and a favorite on seat-old and seat-new.
+fn marked_by_two_sources() -> Serve {
+    let serve = needing_with("[[mark]]\nblock = \"seat-old\"\n[[mark]]\nblock = \"seat-done\"\n");
+    for pane in ["seat-old", "seat-new"] {
+        let reply = ask(
+            &serve,
+            serde_json::json!({"cmd": "favorite", "host": "mini", "session": "web", "tab": "build", "pane": pane, "on": true}),
+        );
+        assert_eq!(reply["favorite"], true, "{reply}");
+    }
+    serve
+}
+
+fn ls_keys(serve: &Serve, args: &[&str]) -> Vec<String> {
+    let out = serve
+        .needing_cmd()
+        .args(["ls", "--json"])
+        .args(args)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let rows: Vec<serde_json::Value> = serde_json::from_slice(&out).unwrap();
+    rows.iter()
+        .map(|row| {
+            row["key"]
+                .as_str()
+                .unwrap()
+                .trim_start_matches("mini/block:")
+                .to_owned()
+        })
+        .collect()
+}
+
+#[test]
+fn ls_marked_takes_a_source_and_the_mark_filter_keeps_the_same_rows() {
+    let serve = marked_by_two_sources();
+    let want = |source: &str, keys: &[&str]| {
+        assert_eq!(
+            ls_keys(&serve, &["--marked", source]),
+            keys,
+            "--marked {source}"
+        );
+        assert_eq!(
+            ls_keys(&serve, &["--filter", &format!("mark:{source}")]),
+            keys,
+            "--filter mark:{source}"
+        );
+    };
+    want("favorite", &["seat-old", "seat-new"]);
+    want("config", &["seat-old", "seat-done"]);
+    want("Favorite", &["seat-old", "seat-new"]);
+    want("nope", &[]);
+    let every = ["seat-old", "seat-new", "seat-done"];
+    for bare in [
+        &["--marked"][..],
+        &["--marked", "any"],
+        &["--filter", "mark:"],
+    ] {
+        assert_eq!(ls_keys(&serve, bare), every, "{bare:?}");
+    }
+    assert_eq!(
+        ls_keys(&serve, &["--marked", "config", "--filter", "mark:favorite"]),
+        ["seat-old"],
+        "they narrow each other"
+    );
+    assert_eq!(ls_keys(&serve, &[]).len(), 3);
+    serve
+        .needing_cmd()
+        .args(["ls", "--filter", "mark:nope"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("note:").not());
+}
+
+#[test]
+fn next_marked_takes_a_source_and_walks_only_the_rows_it_marked() {
+    let serve = marked_by_two_sources();
+    assert_eq!(
+        serve.next(&["--marked", "favorite"], None),
+        "mini/block:seat-old"
+    );
+    assert_eq!(
+        serve.next(&["--marked", "favorite"], None),
+        "mini/block:seat-new",
+        "seat-done is not a favorite"
+    );
+    assert_eq!(
+        serve.next(&["--marked", "favorite"], None),
+        "mini/block:seat-old"
+    );
+    assert_eq!(
+        serve.next(&["--marked", "config"], Some("block:seat-old")),
+        "mini/block:seat-done"
+    );
+    assert_eq!(
+        serve.next(&["--marked"], Some("block:seat-old")),
+        "mini/block:seat-new",
+        "bare is every marked row, in board order"
+    );
+    serve
+        .needing_cmd()
+        .args(["next", "--marked", "nope"])
+        .assert()
+        .code(1)
+        .stderr("no row marked by nope · see rexboard ls --marked\n");
+    serve
+        .needing_cmd()
+        .args(["--json", "next", "--marked", "nope"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("\"code\":\"NO_MARKED_ROW\""));
+}
+
 #[test]
 fn next_marked_with_no_marked_row_says_so_and_exits_1() {
     let serve = needing();
@@ -1973,7 +2088,13 @@ fn next_marked_with_no_marked_row_says_so_and_exits_1() {
         .args(["next", "--marked"])
         .assert()
         .code(1)
-        .stderr("no marked row · see [[mark]] in config.toml\n");
+        .stderr("no marked row · * marks one, or see [[mark]] in config.toml\n");
+    serve
+        .needing_cmd()
+        .args(["next", "--marked="])
+        .assert()
+        .code(1)
+        .stderr("no marked row · * marks one, or see [[mark]] in config.toml\n");
     serve
         .needing_cmd()
         .args(["--json", "next", "--marked"])
@@ -3319,7 +3440,7 @@ fn ext_ls_json_and_ext_test_name_the_actions_and_a_hidden_field_has_no_column() 
 #[test]
 fn an_extension_cannot_take_the_name_of_a_source_of_marks() {
     let serve = Serve::new();
-    for name in ["config", "favorite"] {
+    for name in ["config", "favorite", "any"] {
         let dir = serve
             .dir
             .path()

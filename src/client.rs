@@ -412,7 +412,7 @@ fn parse(line: &str) -> Result<Value> {
         return Err(match error["code"].as_str() {
             Some("NOT_FOUND") => Error::NotFound(message),
             Some("NOBODY_NEEDS_YOU") => Error::NobodyNeedsYou,
-            Some("NO_MARKED_ROW") => Error::NoMarkedRow,
+            Some("NO_MARKED_ROW") => Error::NoMarkedRow(message),
             Some("USAGE") => Error::usage_with(message, &["rexboard --help"]),
             code => Error::serve(format!("{}: {message}", code.unwrap_or("ERROR"))),
         });
@@ -503,7 +503,9 @@ pub fn ls(args: &LsArgs, json: bool) -> Result<()> {
         Vec::new()
     };
     let mut list = pick(rows, args.host.as_deref(), args.all)?;
-    list.retain(|row| row.marked || !args.marked);
+    if let Some(source) = &args.marked {
+        list.retain(|row| row.marked_by_source(source));
+    }
     let query = crate::tui::query::Query {
         context: &context,
         ..args.query()

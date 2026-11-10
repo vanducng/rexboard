@@ -59,6 +59,18 @@ pub struct Row {
     pub view_group: Option<String>,
 }
 
+impl Row {
+    /// Whether `source` marked the row, ignoring case; `any` or nothing means any source.
+    pub fn marked_by_source(&self, source: &str) -> bool {
+        if source.is_empty() || source.eq_ignore_ascii_case("any") {
+            return self.marked;
+        }
+        self.marked_by
+            .iter()
+            .any(|by| by.eq_ignore_ascii_case(source))
+    }
+}
+
 /// How old a `working` report can get before a pane that looks idle makes it suspect.
 const SUSPECT_AFTER_SECS: i64 = 120;
 

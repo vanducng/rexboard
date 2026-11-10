@@ -514,7 +514,7 @@ fn new(name: &str, json: bool) -> Result<()> {
     }
     if super::RESERVED.contains(&name) {
         return Err(Error::usage_with(
-            format!("{name:?} is reserved: it names a source of marks"),
+            format!("{name:?} is reserved: it names a source of marks, or every one"),
             &["rexboard ext new my-tool"],
         ));
     }
