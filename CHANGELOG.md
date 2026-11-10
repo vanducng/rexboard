@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/vanducng/rexboard/compare/v0.26.0...v0.27.0) (2026-11-10)
+
+
+### Features
+
+* **ext:** extensions can mark rows, and the card says why a row is marked ([#147](https://github.com/vanducng/rexboard/issues/147)) ([237998f](https://github.com/vanducng/rexboard/commit/237998ff63529cda316c8913174358eeff90a3ea))
+
 ## [0.26.0](https://github.com/vanducng/rexboard/compare/v0.25.0...v0.26.0) (2026-11-10)
 
 
