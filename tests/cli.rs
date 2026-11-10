@@ -2085,6 +2085,155 @@ fn a_serve_that_has_read_its_config_keeps_the_excluded_hosts_through_a_bad_edit(
     });
 }
 
+/// One request to the running serve, as the board sends it.
+fn ask(serve: &Serve, request: serde_json::Value) -> serde_json::Value {
+    use std::io::{BufRead, Write};
+    let mut stream = std::os::unix::net::UnixStream::connect(serve.socket()).unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .unwrap();
+    writeln!(stream, "{request}").unwrap();
+    let mut line = String::new();
+    std::io::BufReader::new(stream)
+        .read_line(&mut line)
+        .unwrap();
+    serde_json::from_str(&line).unwrap()
+}
+
+fn favorite(serve: &Serve, host: &str, session: &str, pane: &str, on: bool) -> serde_json::Value {
+    ask(
+        serve,
+        serde_json::json!({"cmd": "favorite", "host": host, "session": session, "tab": "main", "pane": pane, "on": on}),
+    )
+}
+
+fn favorites_file(serve: &Serve) -> serde_json::Value {
+    serde_json::from_str(&std::fs::read_to_string(serve.file("favorites.json")).unwrap()).unwrap()
+}
+
+#[test]
+fn a_favorite_marks_the_pane_by_its_labels_after_the_rules_and_survives_a_restart() {
+    let serve = Serve::new();
+    serve.config("[[mark]]\nblock = \"seat-a\"\n");
+    local_seat(|| serve.rows(&[]));
+    let by = |serve: &Serve| row(&serve.rows(&[]), SEAT)["marked_by"].clone();
+    assert_eq!(by(&serve), serde_json::json!(["config"]));
+    let reply = favorite(&serve, "local", "api", "seat-a", true);
+    assert_eq!(reply["favorite"], true, "{reply}");
+    assert_eq!(reply["still"], serde_json::json!(["config"]));
+    assert_eq!(
+        by(&serve),
+        serde_json::json!(["config", "favorite"]),
+        "config first, favorite last"
+    );
+    assert_eq!(serve.rows(&["--marked"]).len(), 1);
+    let file = favorites_file(&serve);
+    assert_eq!(
+        file["favorites"][0]["session"], "api",
+        "labels, not a block id: {file}"
+    );
+    assert!(!file.to_string().contains("block:"), "{file}");
+    serve.cmd().args(["serve", "--stop"]).assert().success();
+    local_seat(|| serve.rows(&[]));
+    assert_eq!(
+        by(&serve),
+        serde_json::json!(["config", "favorite"]),
+        "kept across a restart"
+    );
+    serve.config("");
+    serve.cmd().args(["serve", "--stop"]).assert().success();
+    local_seat(|| serve.rows(&[]));
+    assert_eq!(by(&serve), serde_json::json!(["favorite"]));
+    let reply = favorite(&serve, "local", "api", "seat-a", false);
+    assert_eq!(
+        (reply["favorite"].clone(), reply["still"].clone()),
+        (false.into(), serde_json::json!([]))
+    );
+    let rows = serve.rows(&[]);
+    assert_eq!(row(&rows, SEAT)["marked"], false);
+    assert!(serve.rows(&["--marked"]).is_empty());
+}
+
+#[test]
+fn a_pane_with_no_label_cannot_be_a_favorite() {
+    let serve = Serve::new();
+    local_seat(|| serve.rows(&[]));
+    let reply = favorite(&serve, "local", "api", "", true);
+    assert_eq!(reply["error"]["code"], "USAGE", "{reply}");
+    assert!(
+        reply["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("label it in Rex")
+    );
+    assert!(!serve.file("favorites.json").exists());
+}
+
+#[test]
+fn boards_favoriting_at_once_each_keep_their_change() {
+    let serve = Serve::new();
+    local_seat(|| serve.rows(&[]));
+    std::thread::scope(|scope| {
+        for (host, session, pane) in [("local", "api", "seat-a"), ("mini", "web", "seat-b")] {
+            let serve = &serve;
+            scope.spawn(move || {
+                for _ in 0..10 {
+                    favorite(serve, host, session, pane, false);
+                    let reply = favorite(serve, host, session, pane, true);
+                    assert_eq!(reply["favorite"], true, "{reply}");
+                }
+            });
+        }
+    });
+    assert_eq!(
+        favorites_file(&serve)["favorites"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    let rows = serve.rows(&["--marked"]);
+    assert_eq!(rows.len(), 2, "{rows:?}");
+}
+
+#[test]
+fn a_favorites_file_that_cannot_be_read_means_none_one_line_in_the_log_and_is_left_alone() {
+    let serve = Serve::new();
+    std::fs::create_dir_all(serve.file("favorites.json").parent().unwrap()).unwrap();
+    std::fs::write(serve.file("favorites.json"), "{ not json").unwrap();
+    local_seat(|| serve.rows(&[]));
+    assert!(serve.rows(&["--marked"]).is_empty());
+    let reply = favorite(&serve, "local", "api", "seat-a", true);
+    assert_eq!(reply["error"]["code"], "ERROR", "{reply}");
+    assert!(
+        reply["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("move it aside"),
+        "{reply}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(serve.file("favorites.json")).unwrap(),
+        "{ not json"
+    );
+    let log = serve_log(&serve);
+    assert_eq!(
+        log.matches("favorites:").count(),
+        2,
+        "one at the read, one for the refused save: {log}"
+    );
+    assert_eq!(
+        log.matches("no favorites until it reads again").count(),
+        1,
+        "{log}"
+    );
+    std::fs::write(serve.file("favorites.json"), r#"{"favorites": []}"#).unwrap();
+    assert_eq!(
+        favorite(&serve, "local", "api", "seat-a", true)["favorite"],
+        true
+    );
+}
+
 const MARKS: &str = "[[mark]]\nsession = \"web\"\nblock = \"seat-?\"\n\n\
                      [[mark]]\nhost = \"local\"\nblock = \"seat-a\"\n\n\
                      [[mark]]\nsesion = \"x\"\n";

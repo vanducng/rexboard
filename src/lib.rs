@@ -7,6 +7,7 @@ mod config;
 mod error;
 mod event;
 mod extension;
+mod favorites;
 mod harness;
 mod hook;
 mod jump;
