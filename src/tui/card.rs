@@ -1003,14 +1003,14 @@ mod tests {
         let mut marked = grid_app();
         let mut seat = marked.rows[0].clone();
         seat.marked = true;
-        seat.marked_by = vec!["config".into(), "openrig".into()];
+        seat.marked_by = vec!["config".into(), "favorite".into()];
         marked.set_rows(vec![seat], hosts());
         marked.selected = Some(Spot::Row("local/seat-a".into()));
         let facts = facts_at(&marked, 80);
         assert_eq!(
             facts[facts.len() - 2..],
             [
-                " marked  config, openrig        title   seat-a@demo",
+                " marked  config, favorite       title   seat-a@demo",
                 " source  bridge"
             ],
             "the marks lead the pane's facts, in the facts' own style"
@@ -1018,7 +1018,7 @@ mod tests {
         marked.nerd = true;
         let nerd = facts_at(&marked, 80).join("\n");
         assert!(
-            nerd.contains("* config, openrig"),
+            nerd.contains("* config, favorite"),
             "the list's star labels it with glyphs: {nerd}"
         );
         assert!(
@@ -1029,7 +1029,7 @@ mod tests {
         );
         for width in [80, 140] {
             let card = card_of(&render(&marked, width, 40)).join("\n");
-            assert!(card.contains("config, openrig"), "{width}: {card}");
+            assert!(card.contains("config, favorite"), "{width}: {card}");
         }
     }
 

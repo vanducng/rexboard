@@ -1583,8 +1583,8 @@ mod tests {
             assert!(bar.contains(want), "{bar}");
         }
         press(&mut app, KeyCode::Char('?'));
-        // One column of 30 keys under the shortest list.
-        let text = render(&app, 50, 40);
+        // One column of keys under the shortest list.
+        let text = render(&app, 50, 44);
         for (key, _) in listed() {
             assert!(
                 text.lines().any(|l| l.trim_start().starts_with(key)),

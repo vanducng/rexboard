@@ -10,12 +10,13 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::board::{Board, Group, Memory};
+use crate::board::{Board, Group, Memory, Row};
 use crate::collector::{self, Collector, HostEvent, HostId};
 use crate::error::{Error, Result};
 use crate::event::Event;
 use crate::extension::runner::Report;
 use crate::extension::running::Running;
+use crate::favorites::{self, Favorites};
 use crate::harness::usage::{self, Usage};
 use crate::marks::Marks;
 use crate::state::{self, Lock, Paths, Record};
@@ -78,6 +79,14 @@ enum Request {
         /// The marked rows, not NEEDS YOU.
         #[serde(default)]
         marked: bool,
+    },
+    /// `*`: a pane, by its labels, becomes a favorite or stops being one.
+    Favorite {
+        host: String,
+        session: String,
+        tab: String,
+        pane: String,
+        on: bool,
     },
     /// The pane the jump before the last one went to, for `jump -`.
     Back,
@@ -263,6 +272,10 @@ struct Reducer {
     /// A config.toml has read well at least once since serve started.
     config_read: bool,
     mark_warned: BTreeSet<String>,
+    /// The `*` marks from favorites.json, read again with the extensions, and why the file could
+    /// not be read, until it can.
+    favorites: Favorites,
+    favorites_bad: Option<String>,
     usage: BTreeMap<String, Usage>,
     /// The local rows the usage watcher joins its files to.
     usage_panes: Arc<Mutex<Option<Vec<UsagePane>>>>,
@@ -389,6 +402,8 @@ impl Reducer {
             config_bad: None,
             config_read: false,
             mark_warned: BTreeSet::new(),
+            favorites: Favorites::default(),
+            favorites_bad: None,
             usage: BTreeMap::new(),
             usage_panes: Arc::default(),
         }
@@ -510,6 +525,7 @@ impl Reducer {
 
     fn rescan_now(&mut self) {
         self.sync_extensions();
+        self.sync_favorites();
         match collector::hosts_without(&self.exclude) {
             Ok(labels) => self.set_hosts(&labels),
             Err(err) => {
@@ -522,6 +538,7 @@ impl Reducer {
     /// `rex hosts` can be slow over the network, so later scans run off the reducer thread.
     fn rescan(&mut self) {
         self.sync_extensions();
+        self.sync_favorites();
         let tx = self.tx.clone();
         let exclude = self.exclude.clone();
         thread::spawn(move || match collector::hosts_without(&exclude) {
@@ -616,6 +633,99 @@ impl Reducer {
         self.host_errors
             .insert(host.to_owned(), capped(&err.to_string()));
         self.board.mark_stale(host)
+    }
+
+    /// Re-reads favorites.json, so a hand edit shows, after keeping the entries of the panes on the
+    /// board from aging out; a file that cannot be read means none, said once.
+    fn sync_favorites(&mut self) {
+        let Ok(paths) = Paths::find() else { return };
+        let now = chrono::Utc::now();
+        let live: Vec<_> = self
+            .board
+            .rows(now)
+            .iter()
+            .filter_map(favorites::Id::of)
+            .collect();
+        if let Err(why) = favorites::touch(&paths.favorites(), &live, now.timestamp()) {
+            eprintln!("warning: favorites: {why}");
+        }
+        let (favorites, bad) = Favorites::load(&paths.favorites());
+        if bad != self.favorites_bad {
+            if let Some(why) = &bad {
+                eprintln!("warning: favorites: {why}; no favorites until it reads again");
+            }
+            self.favorites_bad = bad;
+        }
+        if favorites != self.favorites {
+            self.favorites = favorites;
+            self.rows_changed();
+        }
+    }
+
+    /// Marks the rows the rules, the extensions and the user's `*` mark, `config` first and
+    /// `favorite` last among the sources.
+    fn mark(&self, rows: &mut [Row]) {
+        self.marks.apply(rows);
+        self.favorites.apply(rows);
+    }
+
+    /// `*`: makes the pane with these labels a favorite or not, in favorites.json, and says what
+    /// else still marks it.
+    fn favorite(&mut self, id: &favorites::Id, on: bool) -> Value {
+        let now = chrono::Utc::now();
+        let names_nothing = id.pane.is_empty()
+            || (on
+                && self.board.rows(now).iter().any(|row| {
+                    let pane = &row.pane;
+                    (
+                        pane.host.as_str(),
+                        pane.session.as_str(),
+                        pane.tab.as_str(),
+                        pane.pane.as_str(),
+                    ) == (
+                        id.host.as_str(),
+                        id.session.as_str(),
+                        id.tab.as_str(),
+                        id.pane.as_str(),
+                    ) && crate::output::generic(pane)
+                }));
+        if names_nothing {
+            return error_line(
+                "USAGE",
+                "this pane has no label of its own; label it in Rex to favorite it",
+            );
+        }
+        let Ok(paths) = Paths::find() else {
+            return error_line("ERROR", "no state dir");
+        };
+        let live: Vec<_> = self
+            .board
+            .rows(now)
+            .iter()
+            .filter_map(favorites::Id::of)
+            .collect();
+        if let Err(why) = favorites::set(&paths.favorites(), id, on, &live, now.timestamp()) {
+            eprintln!("warning: favorites: {why}");
+            return error_line("ERROR", &why);
+        }
+        let (favorites, bad) = Favorites::load(&paths.favorites());
+        self.favorites = favorites;
+        self.favorites_bad = bad;
+        self.rows_changed();
+        let mut rows = self.board.rows(now);
+        self.mark(&mut rows);
+        let still: Vec<_> = rows
+            .iter()
+            .find(|row| favorites::Id::of(row).as_ref() == Some(id))
+            .map(|row| {
+                row.marked_by
+                    .iter()
+                    .filter(|s| *s != favorites::FAVORITE)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        json!({ "v": VERSION, "ok": true, "favorite": on, "still": still })
     }
 
     /// Re-reads the extensions, the model aliases and the mark rules; an extension that stopped takes its fields
@@ -730,7 +840,7 @@ impl Reducer {
                 usage.alias(&self.models);
             }
         }
-        self.marks.apply(&mut rows);
+        self.mark(&mut rows);
         json!({
             "v": VERSION,
             "rows": rows,
@@ -774,6 +884,21 @@ impl Reducer {
                 let after = after.or_else(|| self.jumps.last().cloned());
                 self.next(after.as_deref(), back, marked)
             }
+            Request::Favorite {
+                host,
+                session,
+                tab,
+                pane,
+                on,
+            } => self.favorite(
+                &favorites::Id {
+                    host,
+                    session,
+                    tab,
+                    pane,
+                },
+                on,
+            ),
             Request::Back => self.back(),
             Request::Stop => unreachable!("handled in run"),
             Request::Version => unreachable!("answered by the connection"),
@@ -807,7 +932,7 @@ impl Reducer {
             // Marked rows in list order, seen or not: a mark is the user's own, not a queue.
             let mut rows = self.board.rows(chrono::Utc::now());
             rows.retain(|row| row.pane.is_agent());
-            self.marks.apply(&mut rows);
+            self.mark(&mut rows);
             rows.retain(|row| row.marked);
             if rows.is_empty() {
                 return error_line("NO_MARKED_ROW", &Error::NoMarkedRow.to_string());

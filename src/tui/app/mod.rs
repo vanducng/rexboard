@@ -110,6 +110,12 @@ pub enum Effect {
     SavePrefs(Box<super::prefs::Prefs>),
     /// Keep the picker's view and sort in pick.json.
     SavePick(super::pick_prefs::PickPrefs),
+    /// Make the pane with these labels a favorite, or stop; `label` is how the footer names it.
+    Favorite {
+        id: Box<crate::favorites::Id>,
+        on: bool,
+        label: String,
+    },
     Reconnect,
     Quit,
 }
@@ -585,6 +591,7 @@ impl App {
             Act::PrevGroup => self.group(true),
             Act::NextNeeds => return self.next_waiting(now, false),
             Act::Marked => return self.go_marked(now),
+            Act::Favorite => return self.favorite(),
             Act::PrevNeeds => {
                 self.tell(
                     'N',

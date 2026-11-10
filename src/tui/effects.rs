@@ -204,8 +204,39 @@ pub(super) fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>)
                 )));
             }
         }
+        Effect::Favorite { id, on, label } => {
+            thread::spawn(move || {
+                let reply = client::call(&json!({
+                    "cmd": "favorite", "host": id.host, "session": id.session,
+                    "tab": id.tab, "pane": id.pane, "on": on,
+                }));
+                let text = match reply {
+                    Ok(reply) => favorite_message(&label, on, &reply),
+                    Err(err) => format!("could not keep the favorite: {err}"),
+                };
+                let _ = tx.send(Msg::Say(text));
+            });
+        }
         Effect::Reconnect => listen(&tx, generation),
         Effect::Quit => {}
+    }
+}
+
+/// `seat-a is a favorite`, or `seat-a is not a favorite · still marked by config`.
+fn favorite_message(label: &str, on: bool, reply: &serde_json::Value) -> String {
+    let still: Vec<&str> = reply["still"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    match (on, still.is_empty()) {
+        (true, _) => format!("{label} is a favorite"),
+        (false, true) => format!("{label} is not a favorite"),
+        (false, false) => format!(
+            "{label} is not a favorite · still marked by {}",
+            still.join(", ")
+        ),
     }
 }
 
@@ -374,6 +405,17 @@ fn seen_message(label: &str, state: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_favorite_message_says_what_still_marks_the_pane() {
+        let said = |on, still: &[&str]| favorite_message("seat-a", on, &json!({ "still": still }));
+        assert_eq!(said(true, &["config"]), "seat-a is a favorite");
+        assert_eq!(said(false, &[]), "seat-a is not a favorite");
+        assert_eq!(
+            said(false, &["config", "team"]),
+            "seat-a is not a favorite · still marked by config, team"
+        );
+    }
 
     /// A rex that logs its argv and pid to `dir`, sleeps `sleep` seconds, then prints `reply`.
     fn fake_rex(

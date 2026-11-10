@@ -26,6 +26,8 @@ pub enum Act {
     PrevNeeds,
     /// `'`: go to the first marked row, and again within 2 s the next.
     Marked,
+    /// `*`: make the selected pane a favorite, or not.
+    Favorite,
     /// `1`-`9`, then maybe another: the row with that number on screen, selected or jumped to as
     /// tui.json's `digits` says.
     Nth,
@@ -215,6 +217,13 @@ pub const BOARD: &[Entry] = &[
         "'",
         "jump to marked; again, next",
         "marked",
+    ),
+    e(
+        Act::Favorite,
+        &[&[c('*')]],
+        "*",
+        "favorite or unfavorite the row",
+        "favorite",
     ),
     digits(
         Act::Nth,
