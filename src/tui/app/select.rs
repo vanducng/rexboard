@@ -206,6 +206,25 @@ impl App {
         self.rows.iter().any(|row| row.marked && self.matches(row))
     }
 
+    /// `*`: the selected pane becomes a favorite, or stops being one. Serve keeps the list, so
+    /// the row changes when serve says so.
+    pub(super) fn favorite(&mut self) -> Option<Effect> {
+        let row = self.current()?;
+        let Some(id) = crate::favorites::Id::of(row) else {
+            self.say("this pane has no label of its own · label it in Rex to favorite it");
+            return None;
+        };
+        let on = !row
+            .marked_by
+            .iter()
+            .any(|s| s == crate::favorites::FAVORITE);
+        Some(Effect::Favorite {
+            label: id.pane.clone(),
+            id: Box::new(id),
+            on,
+        })
+    }
+
     /// `'`: the first marked row in list order, after opening the groups that hold one as `n`
     /// does, and a jump to its pane; pressed again within 2 s, the next, wrapping.
     pub(super) fn go_marked(&mut self, now: Instant) -> Option<Effect> {
@@ -223,7 +242,7 @@ impl App {
             self.say(if rules {
                 "no marked row in this view"
             } else {
-                "no marked row · see [[mark]] in config.toml"
+                "no marked row · * marks one, or see [[mark]] in config.toml"
             });
             return None;
         }
@@ -924,6 +943,57 @@ mod tests {
     }
 
     #[test]
+    fn the_star_favorites_the_selected_pane_by_its_labels_or_unfavorites_it() {
+        let mut app = marked();
+        let effect = key_at(&mut app, '*', Instant::now());
+        let Some(Effect::Favorite { id, on, label }) = effect else {
+            panic!("want a favorite effect, got {effect:?}");
+        };
+        assert_eq!(
+            (
+                id.host.as_str(),
+                id.session.as_str(),
+                id.tab.as_str(),
+                id.pane.as_str()
+            ),
+            ("mini", "api", "main", "seat-b"),
+            "the labels, with no block id"
+        );
+        assert!(
+            (on, label.as_str()) == (true, "seat-b"),
+            "marked by config only: * adds"
+        );
+        let mut rows = app.rows.clone();
+        rows[0].marked_by.push("favorite".into());
+        app.set_rows(rows, app.hosts.clone());
+        let effect = key_at(&mut app, '*', Instant::now());
+        assert!(
+            matches!(effect, Some(Effect::Favorite { on: false, .. })),
+            "{effect:?}"
+        );
+    }
+
+    #[test]
+    fn a_pane_with_no_label_of_its_own_is_not_favorited_and_the_footer_says_what_to_do() {
+        let mut app = marked();
+        let mut rows = app.rows.clone();
+        rows[0].pane.pane.clear();
+        app.set_rows(rows, app.hosts.clone());
+        assert_eq!(key_at(&mut app, '*', Instant::now()), None);
+        assert_eq!(
+            app.toast(),
+            Some("this pane has no label of its own · label it in Rex to favorite it")
+        );
+        let mut empty = crate::tui::app::testkit::app();
+        empty.selected = None;
+        assert_eq!(
+            key_at(&mut empty, '*', Instant::now()),
+            None,
+            "no row, nothing to do"
+        );
+    }
+
+    #[test]
     fn with_no_marked_row_the_quote_says_so_and_goes_nowhere() {
         let mut app = crate::tui::app::testkit::app();
         let before = selected(&app);
@@ -931,7 +1001,7 @@ mod tests {
         assert_eq!(effect, None);
         assert_eq!(
             app.toast(),
-            Some("no marked row · see [[mark]] in config.toml")
+            Some("no marked row · * marks one, or see [[mark]] in config.toml")
         );
         assert_eq!(selected(&app), before);
         let mut app = marked();
