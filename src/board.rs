@@ -53,6 +53,10 @@ pub struct Row {
     /// What marked it: `config`.
     #[serde(default)]
     pub marked_by: Vec<String>,
+    /// The group `ls --view` puts the row in, as the board's header names it without the count
+    /// (`API`, `API @MINI`, `-`); null for any other row, as serve sends them.
+    #[serde(default)]
+    pub view_group: Option<String>,
 }
 
 /// How old a `working` report can get before a pane that looks idle makes it suspect.
@@ -141,6 +145,7 @@ impl Entry {
             usage: self.pane.reported_usage.clone(),
             marked: !self.ext_marks.is_empty(),
             marked_by: self.ext_marks.iter().cloned().collect(),
+            view_group: None,
         }
     }
 }

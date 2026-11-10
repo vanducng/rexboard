@@ -495,6 +495,9 @@ pub fn ls(args: &LsArgs, json: bool) -> Result<()> {
     let mut list = pick(rows, args.host.as_deref(), args.all)?;
     list.retain(|row| row.marked || !args.marked);
     let query = args.query();
+    let heading = query
+        .view
+        .and_then(|view| crate::tui::query::heading(fields.clone(), view));
     if !query.is_empty() {
         list = crate::tui::query::arrange(list, fields, &query)?;
     }
@@ -533,7 +536,12 @@ pub fn ls(args: &LsArgs, json: bool) -> Result<()> {
     } else {
         print!(
             "{}",
-            output::table(&list, chrono::Utc::now(), output::terminal_width())
+            output::table_by(
+                &list,
+                chrono::Utc::now(),
+                output::terminal_width(),
+                heading.as_deref()
+            )
         );
     }
     Ok(())

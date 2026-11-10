@@ -32,15 +32,29 @@ pub fn terminal_width() -> Option<usize> {
 /// The `ls` table. Given a width, WHAT and then WHERE are cut so a line fits it. Every cell is
 /// cleaned, since titles and messages come from programs in other panes.
 pub fn table(rows: &[Row], now: DateTime<Utc>, width: Option<usize>) -> String {
+    table_by(rows, now, width, None)
+}
+
+/// `table`, with `heading` as the first column's header and each row's `view_group` as its cell
+/// in place of the status `GROUP`, for `ls --view` that groups by something else.
+pub fn table_by(
+    rows: &[Row],
+    now: DateTime<Utc>,
+    width: Option<usize>,
+    heading: Option<&str>,
+) -> String {
     let mut cells: Vec<[String; 7]> = rows
         .iter()
         .map(|row| {
             let pane = &row.pane;
             [
-                serde_json::to_value(row.group)
-                    .ok()
-                    .and_then(|group| group.as_str().map(str::to_owned))
-                    .unwrap_or_default(),
+                match (&row.view_group, heading) {
+                    (Some(group), Some(_)) => group.clone(),
+                    _ => serde_json::to_value(row.group)
+                        .ok()
+                        .and_then(|group| group.as_str().map(str::to_owned))
+                        .unwrap_or_default(),
+                },
                 state_word(row),
                 in_state(row, now),
                 harness(row),
@@ -54,7 +68,16 @@ pub fn table(rows: &[Row], now: DateTime<Utc>, width: Option<usize>) -> String {
     for (cell, place) in cells.iter_mut().zip(wheres(rows, usize::MAX, false, true)) {
         cell[5] = place;
     }
-    let header = ["GROUP", "STATE", "AGE", "HARNESS", "HOST", "WHERE", "WHAT"].map(String::from);
+    let header = [
+        heading.unwrap_or("GROUP"),
+        "STATE",
+        "AGE",
+        "HARNESS",
+        "HOST",
+        "WHERE",
+        "WHAT",
+    ]
+    .map(String::from);
     let mut widths = [0; 7];
     for row in std::iter::once(&header).chain(&cells) {
         for (width, cell) in widths.iter_mut().zip(row) {
