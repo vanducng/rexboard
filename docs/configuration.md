@@ -26,6 +26,15 @@ separator = "-"
 # as written.
 "claude-opus-5-5" = "opus-5.5"
 "Opus 5.5" = "opus-5.5"
+
+# Rows to mark. Every key of one rule must match; any rule marks the row.
+[[mark]]
+session = "api"
+block = "seat-*"
+
+[[mark]]
+host = "studio"
+field."session-prefix.project" = "api-?"
 ```
 
 | Key | Type | Default | What |
@@ -36,14 +45,31 @@ separator = "-"
 | `extensions.dirs` | array of strings | `[]` | Roots to look in for extensions after `$XDG_CONFIG_HOME/rexboard/extensions`. `~/` is your home. The first extension of a name wins |
 | `extensions.settings.NAME` | table | `{}` | Handed to extension `NAME` in every request, untouched |
 | `models` | table of strings | `{}` | Model aliases. A model name a harness reports that equals a key, character for character (no prefix, no case folding), is shown as the value, as written, in the board's `MODEL` column and card, in `show`, and as `model_display` in `ls --json` and `show --json`, which keep the reported name in `model`; a name with no key is shown as reported. Harnesses name one model differently (pi reports `claude-opus-5-5`, Claude Code `Opus 5.5`), so this is where they are made to read alike. rexboard has no names of its own. A blank value is ignored; the value is held to 64 characters. It applies to the rows this host's serve shows, whichever host reported them |
+| `mark` | array of tables | `[]` | `[[mark]]` rules: the rows to [mark](tui.md#marked-rows). See below |
 
 A `[jump]` table is ignored, so an old config that still has one loads.
+
+## `[[mark]]`
+
+Each `[[mark]]` table is one rule, and a row is marked when any rule matches it. A rule holds one or more of these keys, and every key it has must match:
+
+| Key | Matches |
+| --- | --- |
+| `session` | the session label |
+| `window` | the window (tab) label |
+| `block` | the block (pane) label |
+| `host` | `local`, or the label from `rex hosts` |
+| `field."<id>"` | an extension field, by its id as `ext` in [`ls --json`](cli.md#json-fields) names it (`<extension>.<field>`). The id has a dot, so it is quoted; `"field.<id>" = ...` is the same key. A row without that field does not match |
+
+A value is an exact label, or a glob: `*` stands for any run of characters, none too, and `?` for any one character. The whole label must match, and case counts. A rule that has no keys, a key not listed here, or a value that is not text is skipped, and named once in `serve.log` (`ls --direct` prints it on stderr); the other rules still apply. A `mark` that is not an array of tables is skipped the same way. The file still loads, so a bad rule never takes a mark away from a good one.
+
+serve applies the rules, so the board, `pick` and `ls` show the same marks: `ls --json` gives each row `marked` and `marked_by` (`["config"]`), and `ls --marked` lists only the marked rows. `ls --direct` applies them too, but runs no extension, so it sees no `field` match. A broad glob can mark most of the board; `rexboard ls --marked` shows what the rules catch. The board draws a mark as `*` before the row's number, see [Marked rows](tui.md#marked-rows). The record is [decision 18](decisions/0018-rows-can-be-marked.md); its `'` key, `next --marked`, extension marks and favorites come in later releases.
 
 The board's own display settings (`icons`, `card_height`, `motion`, `columns`, `digits`) live in `tui.json`, not here; see [TUI](tui.md#turn-card) and, for `digits`, [Digits](tui.md#digits).
 
 ## When a change takes effect
 
-serve reads the file when it starts and each time it rescans `rex hosts`, every 5 minutes. After `rexboard serve --stop`, the next command starts a serve that reads it at once. `jump`, `next`, `pick`, `ls --direct`, `watch --raw`, `watch --direct`, `ext ls` and `ext test` read it each time they run.
+serve reads the file when it starts and each time it rescans `rex hosts`, every 5 minutes; a new or changed `[[mark]]` rule marks rows at that read. After `rexboard serve --stop`, the next command starts a serve that reads it at once. `jump`, `next`, `pick`, `ls --direct`, `watch --raw`, `watch --direct`, `ext ls` and `ext test` read it each time they run.
 
 A file that cannot be read, or that has a key rexboard does not know, fails those commands with `CONFIG` (exit 1), naming the file and the key. serve keeps going: while the file is bad, a starting serve watches only this host, and a running one keeps the hosts it has.
 

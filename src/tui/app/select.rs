@@ -458,7 +458,7 @@ mod tests {
     fn the_number_column_numbers_rows_by_place_and_leaves_headers_blank() {
         let text = render(&app(), 80, 30);
         let lines: Vec<&str> = text.lines().collect();
-        assert!(lines[2].starts_with(" #  "), "{}", lines[2]);
+        assert!(lines[2].starts_with("  #  "), "{}", lines[2]);
         let heads: Vec<&&str> = lines.iter().filter(|l| l.contains(" (")).collect();
         assert!(heads.iter().all(|l| !l.starts_with(' ')), "{heads:?}");
         for (n, who) in [(1, "seat-b"), (2, "claude"), (3, "codex"), (4, "seat-a")] {
@@ -466,7 +466,7 @@ mod tests {
                 .iter()
                 .find(|l| l.contains(&format!("{who} msg")))
                 .unwrap();
-            assert!(row.starts_with(&format!(" {n} ")), "{n}: {row}");
+            assert!(row.starts_with(&format!("  {n} ")), "{n}: {row}");
         }
     }
 
@@ -555,7 +555,7 @@ mod tests {
     fn numbered_as_drawn(text: &str, n: usize) -> String {
         let line = text
             .lines()
-            .find(|l| l.starts_with(&format!("{n:>2} ")))
+            .find(|l| l.starts_with(&format!("{n:>3} ")))
             .unwrap();
         let words: Vec<&str> = line.split_whitespace().collect();
         format!("local/{}", words[words.len() - 2])
@@ -593,7 +593,10 @@ mod tests {
         for view in ["table", "harness", "host"] {
             let mut app = harnesses(view);
             let text = render(&app, 120, 30);
-            assert!(text.lines().any(|l| l.starts_with(" 1 ")), "{view}\n{text}");
+            assert!(
+                text.lines().any(|l| l.starts_with("  1 ")),
+                "{view}\n{text}"
+            );
             key_at(&mut app, '2', Instant::now());
             assert!(app.current().is_some(), "{view}");
         }

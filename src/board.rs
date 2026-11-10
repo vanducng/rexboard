@@ -47,6 +47,12 @@ pub struct Row {
     /// What the agent's last turn used, for a pane on serve's own host; see `rexboard usage`.
     #[serde(default)]
     pub usage: Option<crate::harness::usage::Usage>,
+    /// A `[[mark]]` rule in config.toml marks the row (decision 18).
+    #[serde(default)]
+    pub marked: bool,
+    /// What marked it: `config`.
+    #[serde(default)]
+    pub marked_by: Vec<String>,
 }
 
 /// How old a `working` report can get before a pane that looks idle makes it suspect.
@@ -131,6 +137,8 @@ impl Entry {
             group: self.group(now),
             ext: self.ext.clone(),
             usage: self.pane.reported_usage.clone(),
+            marked: false,
+            marked_by: Vec::new(),
         }
     }
 }

@@ -493,7 +493,9 @@ fn ls_json_adds_board_fields() {
     assert_eq!(claude["usage"], serde_json::Value::Null, "no usage file");
     assert_eq!(by_block(&panes, "block:api-seat-a")["tmux"], true);
     assert_eq!(codex["tmux"], false);
-    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 30));
+    assert_eq!(claude["marked"], false, "no [[mark]] rule");
+    assert_eq!(claude["marked_by"], serde_json::json!([]));
+    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 32));
 }
 
 /// A status line for the fixture's idle seat on `host`, sent after the recorded stream ends.
@@ -1936,6 +1938,86 @@ fn config_excludes_hosts_and_rejects_unknown_keys() {
         .code(1)
         .stderr(predicate::str::contains("\"code\":\"CONFIG\""))
         .stderr(predicate::str::contains("colour"));
+}
+
+const MARKS: &str = "[[mark]]\nsession = \"web\"\nblock = \"seat-?\"\n\n\
+                     [[mark]]\nhost = \"local\"\nblock = \"seat-a\"\n\n\
+                     [[mark]]\nsesion = \"x\"\n";
+
+fn marked_blocks(rows: &[serde_json::Value]) -> Vec<&str> {
+    let mut blocks: Vec<&str> = rows
+        .iter()
+        .filter(|row| row["marked"] == true)
+        .map(|row| row["block_id"].as_str().unwrap())
+        .collect();
+    blocks.sort_unstable();
+    blocks
+}
+
+#[test]
+fn serve_marks_rows_by_config_rules_and_ls_marked_lists_only_those() {
+    let serve = Serve::new();
+    serve.config(MARKS);
+    let rows = serve.rows(&["--all"]);
+    assert_eq!(
+        marked_blocks(&rows),
+        ["block:api-seat-a", "block:web-seat-b"]
+    );
+    for row in &rows {
+        let by = if row["marked"] == true {
+            serde_json::json!(["config"])
+        } else {
+            serde_json::json!([])
+        };
+        assert_eq!(row["marked_by"], by, "{}", row["key"]);
+    }
+    assert_eq!(serve.rows(&["--all", "--marked"]).len(), 2);
+    serve
+        .cmd()
+        .args(["ls", "--marked"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("seat-b").and(predicate::str::contains("codex").not()));
+    let log = std::fs::read_to_string(serve.file("serve.log")).unwrap();
+    assert_eq!(
+        log.matches("[[mark]] #3: skipped, unknown key \"sesion\"")
+            .count(),
+        1,
+        "{log}"
+    );
+}
+
+#[test]
+fn ls_direct_marks_by_config_and_with_no_rules_marks_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("rexboard")).unwrap();
+    let ls = || {
+        let mut cmd = ls();
+        cmd.env("XDG_CONFIG_HOME", dir.path());
+        cmd
+    };
+    let rows = ls_json(ls().arg("--all"));
+    assert!(marked_blocks(&rows).is_empty());
+    assert!(
+        rows.iter()
+            .all(|r| r["marked"] == false && r["marked_by"] == serde_json::json!([]))
+    );
+    std::fs::write(dir.path().join("rexboard/config.toml"), MARKS).unwrap();
+    let out = ls().args(["--all", "--json"]).assert().success();
+    let said = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
+    assert!(said.contains("[[mark]] #3: skipped, unknown key"), "{said}");
+    let rows: Vec<serde_json::Value> = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert_eq!(
+        marked_blocks(&rows),
+        [
+            "block:api-seat-a",
+            "block:web-codex-seat",
+            "block:web-rig-review",
+            "block:web-seat-b"
+        ]
+    );
+    let only = ls_json(ls().args(["--all", "--marked"]));
+    assert_eq!(only.len(), 4);
 }
 
 #[test]

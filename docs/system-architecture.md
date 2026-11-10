@@ -58,6 +58,7 @@ rexboard reaches Rex only through the `rex` command: `rex do` for the scripts, `
 | `src/send.rs` | Runs `send.lua` for an answer, within 5s, and turns its refusals into plain reasons; runs `rex block close` for a close |
 | `src/upgrade.rs` | `rexboard upgrade`: finds how this binary was installed and upgrades it the same way |
 | `src/config.rs` | `config.toml` |
+| `src/marks.rs` | `[[mark]]` rules: the glob match, and which rows a rule marks. serve, `ls` and `watch --json --direct` apply them to the rows ([18](decisions/0018-rows-can-be-marked.md)) |
 | `src/extension/` | Extensions: discovery and manifests (`mod.rs`), the contract 1 request and response with its limits (`contract.rs`), one thread per enabled extension with its timeout and last-good rule (`runner.rs`), serve's set of them (`running.rs`), and `rexboard ext` (`cli.rs`), which builds `ext new` from `examples/extensions/session-prefix`. `board.rs` takes their fields and fallback status. No tool is named in `src/` |
 | `src/lua/tail.lua` | Defines `tail(a)`: the last `a.max_bytes` of a pane, starting at a whole line, through `format` and `blob_read`, as `text` or `vt` |
 | `src/lua/jump.lua` | Finds this Mac's Rex app, attaches to the pane's session, focuses the pane on its own server, and asks the app to select the session |

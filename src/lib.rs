@@ -10,6 +10,7 @@ mod extension;
 mod harness;
 mod hook;
 mod jump;
+mod marks;
 mod output;
 mod pane;
 mod rex;
@@ -168,6 +169,12 @@ fn ls(args: &LsArgs, json: bool) -> Result<()> {
     for usage in rows.iter_mut().filter_map(|row| row.usage.as_mut()) {
         usage.alias(&config.models);
     }
+    let marks = marks::Marks::new(config.mark.as_ref());
+    for why in &marks.skipped {
+        eprintln!("warning: config.toml {why}");
+    }
+    marks.apply(&mut rows);
+    rows.retain(|row| row.marked || !args.marked);
     if json {
         println!(
             "{}",
@@ -209,6 +216,10 @@ fn watch(args: &WatchArgs, json: bool) -> Result<()> {
         ));
     }
     let hosts = watch_hosts(args.host.as_deref())?;
+    let marks = marks::Marks::new(config::load()?.mark.as_ref());
+    for why in &marks.skipped {
+        eprintln!("warning: config.toml {why}");
+    }
     stop_on_signals();
     let deadline = args
         .duration
@@ -229,7 +240,7 @@ fn watch(args: &WatchArgs, json: bool) -> Result<()> {
     while !interrupted() && deadline.is_none_or(|d| Instant::now() < d) {
         if due.is_some_and(|due| Instant::now() >= due) {
             due = None;
-            if print_rows(&mut out, &board).is_err() {
+            if print_rows(&mut out, &board, &marks).is_err() {
                 return Ok(());
             }
         }
@@ -275,7 +286,7 @@ fn watch(args: &WatchArgs, json: bool) -> Result<()> {
         }
     }
     if due.is_some() {
-        let _ = print_rows(&mut out, &board);
+        let _ = print_rows(&mut out, &board, &marks);
     }
     Ok(())
 }
@@ -323,12 +334,13 @@ fn stop_host(failed: &mut BTreeSet<String>, hosts: usize, host: &str, err: Error
     Ok(())
 }
 
-fn print_rows(out: &mut impl Write, board: &Board) -> std::io::Result<()> {
-    let rows: Vec<_> = board
+fn print_rows(out: &mut impl Write, board: &Board, marks: &marks::Marks) -> std::io::Result<()> {
+    let mut rows: Vec<_> = board
         .rows(chrono::Utc::now())
         .into_iter()
         .filter(|row| row.pane.is_agent())
         .collect();
+    marks.apply(&mut rows);
     writeln!(out, "{}", serde_json::to_string(&rows)?)?;
     out.flush()
 }
