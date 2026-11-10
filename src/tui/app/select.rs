@@ -204,37 +204,45 @@ impl App {
         rows.take(NUMBERED).collect()
     }
 
-    /// `1`-`9`: selects that row of the screen at once, unless a two-digit number starts with
-    /// it, which waits for the second digit.
-    pub(super) fn number_key(&mut self, digit: usize, now: Instant) {
+    /// `1`-`9`: goes to that row of the screen at once (selects it, or jumps to it with `jump`),
+    /// unless a two-digit number starts with it, which waits for the second digit.
+    pub(super) fn number_key(&mut self, digit: usize, now: Instant, jump: bool) -> Option<Effect> {
         if digit * 10 <= self.numbered().len() {
-            self.number = Some((digit, now));
-        } else {
-            self.select_number(digit);
+            self.number = Some((digit, now, jump));
+            return None;
         }
+        self.go_number(digit, jump)
     }
 
-    /// Selects row `n` of the screen, or says why not.
-    pub(super) fn select_number(&mut self, n: usize) {
+    /// Selects row `n` of the screen, and with `jump` goes to its pane; or says why not.
+    pub(super) fn go_number(&mut self, n: usize, jump: bool) -> Option<Effect> {
         let rows = self.numbered();
         match rows.get(n.wrapping_sub(1)) {
-            Some(&i) => self.selected = Some(Spot::Row(self.rows[i].key.clone())),
+            Some(&i) => {
+                self.selected = Some(Spot::Row(self.rows[i].key.clone()));
+                return if jump { self.jump() } else { None };
+            }
             None if rows.is_empty() => self.say("no rows on screen"),
             None => self.say(format!("no row {n} · rows 1-{} on screen", rows.len())),
         }
+        None
     }
 
-    /// A first digit that waited long enough for a second selects its own row. True when it did.
-    pub fn number_due(&mut self, now: Instant) -> bool {
-        let Some((first, at)) = self.number else {
-            return false;
+    /// A first digit that waited long enough for a second goes to its own row. Whether the board
+    /// changed, and the jump when that is what the digit does, or a jump parked behind another
+    /// key's effect.
+    pub fn number_due(&mut self, now: Instant) -> (bool, Option<Effect>) {
+        if let Some(effect) = self.deferred.take() {
+            return (true, Some(effect));
+        }
+        let Some((first, at, jump)) = self.number else {
+            return (false, None);
         };
         if now.duration_since(at) < NUMBER_WAIT {
-            return false;
+            return (false, None);
         }
         self.number = None;
-        self.select_number(first);
-        true
+        (true, self.go_number(first, jump))
     }
 
     /// `n` (or `tab`, or `N` the other way): a done row read for READ is seen; then on to the
@@ -490,8 +498,8 @@ mod tests {
         );
         let text = render(&app, 100, 30);
         assert!(text.lines().last().unwrap().starts_with("1… "), "{text}");
-        assert!(!app.number_due(t + Duration::from_millis(399)));
-        assert!(app.number_due(t + Duration::from_millis(400)));
+        assert!(!app.number_due(t + Duration::from_millis(399)).0);
+        assert!(app.number_due(t + Duration::from_millis(400)).0);
         assert_eq!((selected(&app), app.number), ("local/r0".into(), None));
         // A second digit selects that row, with no wait.
         key_at(&mut app, '1', t);
@@ -593,6 +601,190 @@ mod tests {
         app.pick = true;
         key_at(&mut app, '3', Instant::now());
         assert_eq!(selected(&app), "local/r2");
+    }
+
+    /// `crowd`, with tui.json's `"digits"` as `value`.
+    fn digits(count: usize, value: Option<&str>) -> App {
+        let mut app = crowd(count, 30);
+        app.tuning.digits = value.map(|v| v.into());
+        app
+    }
+
+    /// The key of the row a jump goes to, and None for anything else.
+    fn jumped(effect: Option<Effect>) -> Option<String> {
+        match effect {
+            Some(Effect::Jump(row)) => Some(row.key),
+            _ => None,
+        }
+    }
+
+    fn g(app: &mut App, c: char, at: Instant) -> Option<Effect> {
+        key_at(app, 'g', at);
+        key_at(app, c, at)
+    }
+
+    #[test]
+    fn digits_select_by_default_and_jump_when_asked_and_g_does_the_other() {
+        let t = Instant::now();
+        for value in [None, Some("select"), Some("nope")] {
+            let mut app = digits(5, value);
+            assert_eq!(jumped(key_at(&mut app, '3', t)), None, "{value:?}");
+            assert_eq!(selected(&app), "local/r2");
+            assert_eq!(jumped(g(&mut app, '4', t)).as_deref(), Some("local/r3"));
+        }
+        let mut app = digits(5, Some("jump"));
+        assert_eq!(
+            jumped(key_at(&mut app, '3', t)).as_deref(),
+            Some("local/r2")
+        );
+        app.going = None;
+        assert_eq!(jumped(g(&mut app, '4', t)), None);
+        assert_eq!(
+            selected(&app),
+            "local/r3",
+            "g and a number selects under jump"
+        );
+    }
+
+    #[test]
+    fn the_two_digit_wait_holds_in_both_modes_for_both_actions() {
+        let t = Instant::now();
+        let late = t + Duration::from_millis(400);
+        for (value, plain_jumps) in [(None, false), (Some("jump"), true)] {
+            let mut app = digits(12, value);
+            // The plain digits: a wait, then the row at 400 ms, or a second digit, or enter.
+            assert_eq!(jumped(key_at(&mut app, '1', t)), None);
+            assert!(app.number.is_some(), "{value:?}: waiting");
+            let footer = render(&app, 100, 30);
+            let word = if plain_jumps {
+                "enter jumps"
+            } else {
+                "enter selects"
+            };
+            assert!(footer.lines().last().unwrap().contains(word), "{footer}");
+            let (due, effect) = app.number_due(late);
+            assert!(due);
+            assert_eq!(
+                jumped(effect).is_some(),
+                plain_jumps,
+                "{value:?}: after 400 ms"
+            );
+            assert_eq!(selected(&app), "local/r0");
+            app.going = None;
+            key_at(&mut app, '1', t);
+            let second = key_at(&mut app, '2', t);
+            assert_eq!(jumped(second).as_deref().is_some(), plain_jumps);
+            assert_eq!(selected(&app), "local/r11");
+            app.going = None;
+            key_at(&mut app, '1', t);
+            let enter = app.handle_at(KeyEvent::from(KeyCode::Enter), t);
+            assert_eq!(jumped(enter).is_some(), plain_jumps, "{value:?}: enter");
+            assert_eq!(selected(&app), "local/r0");
+            app.going = None;
+            key_at(&mut app, '1', t);
+            let esc = app.handle_at(KeyEvent::from(KeyCode::Esc), t);
+            assert_eq!((esc.is_none(), app.number), (true, None), "esc cancels");
+            // After `g` the same wait, doing the other action.
+            g(&mut app, '1', t);
+            assert!(app.number.is_some(), "{value:?}: g1 waits");
+            let (_, effect) = app.number_due(late);
+            assert_eq!(
+                jumped(effect).is_some(),
+                !plain_jumps,
+                "{value:?}: g after 400 ms"
+            );
+            app.going = None;
+            g(&mut app, '1', t);
+            let second = key_at(&mut app, '2', t);
+            assert_eq!(jumped(second).as_deref().is_some(), !plain_jumps);
+            assert_eq!(selected(&app), "local/r11");
+            app.going = None;
+        }
+    }
+
+    #[test]
+    fn a_key_that_ends_the_wait_does_its_own_job_after_a_jump() {
+        let t = Instant::now();
+        for (value, plain_jumps) in [(None, false), (Some("jump"), true)] {
+            let mut app = digits(12, value);
+            key_at(&mut app, '1', t);
+            let effect = key_at(&mut app, 'j', t);
+            assert_eq!(jumped(effect).is_some(), plain_jumps, "{value:?}");
+            assert_eq!(
+                selected(&app),
+                "local/r1",
+                "{value:?}: 1 went to r0, then j moved"
+            );
+            assert!(app.number.is_none());
+            app.going = None;
+            g(&mut app, '1', t);
+            let effect = key_at(&mut app, 'j', t);
+            assert_eq!(jumped(effect).is_some(), !plain_jumps, "{value:?} g");
+            assert_eq!(selected(&app), "local/r1", "{value:?} g: moved after");
+        }
+    }
+
+    #[test]
+    fn a_key_with_an_effect_of_its_own_keeps_it_and_the_jump_waits_for_the_loop() {
+        let t = Instant::now();
+        let mut app = digits(12, Some("jump"));
+        key_at(&mut app, '1', t);
+        let own = key_at(&mut app, ' ', t);
+        assert!(
+            app.full.is_some() && own.is_some(),
+            "the full view gets its read: {own:?}"
+        );
+        assert!(!matches!(own, Some(Effect::Jump(_))));
+        let (changed, jump) = app.number_due(t);
+        assert_eq!((changed, jumped(jump).as_deref()), (true, Some("local/r0")));
+        assert_eq!(app.number_due(t), (false, None), "handed out once");
+        let mut app = digits(12, Some("jump"));
+        key_at(&mut app, '1', t);
+        let own = key_at(&mut app, 'c', t);
+        assert!(matches!(own, Some(Effect::SavePrefs(_))), "{own:?}");
+        assert_eq!(jumped(app.number_due(t).1).as_deref(), Some("local/r0"));
+        let mut app = digits(12, Some("jump"));
+        key_at(&mut app, '1', t);
+        assert_eq!(key_at(&mut app, 'q', t), Some(Effect::Quit), "quit wins");
+        assert_eq!(app.number_due(t), (false, None));
+    }
+
+    #[test]
+    fn a_number_with_no_row_says_so_in_both_modes_and_for_g() {
+        let t = Instant::now();
+        for value in [None, Some("jump")] {
+            let mut app = digits(5, value);
+            let before = selected(&app);
+            assert_eq!(jumped(key_at(&mut app, '9', t)), None);
+            assert_eq!(
+                app.toast(),
+                Some("no row 9 · rows 1-5 on screen"),
+                "{value:?}"
+            );
+            app.toast = None;
+            assert_eq!(jumped(g(&mut app, '8', t)), None);
+            assert_eq!(
+                app.toast(),
+                Some("no row 8 · rows 1-5 on screen"),
+                "{value:?} g"
+            );
+            assert_eq!(selected(&app), before, "the selection stays");
+        }
+    }
+
+    #[test]
+    fn pick_follows_the_setting_and_a_digit_picks_under_jump() {
+        let t = Instant::now();
+        let mut app = digits(5, Some("jump"));
+        app.pick = true;
+        assert_eq!(
+            jumped(key_at(&mut app, '3', t)).as_deref(),
+            Some("local/r2")
+        );
+        let mut app = digits(5, None);
+        app.pick = true;
+        assert_eq!(jumped(key_at(&mut app, '3', t)), None);
+        assert_eq!(jumped(g(&mut app, '2', t)).as_deref(), Some("local/r1"));
     }
 
     #[test]

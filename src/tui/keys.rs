@@ -4,6 +4,8 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use super::prefs::Digits;
+
 /// What a key does.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Act {
@@ -22,8 +24,11 @@ pub enum Act {
     PrevGroup,
     NextNeeds,
     PrevNeeds,
-    /// `1`-`9`, then maybe another: the row with that number on screen.
+    /// `1`-`9`, then maybe another: the row with that number on screen, selected or jumped to as
+    /// tui.json's `digits` says.
     Nth,
+    /// `g`, then `1`-`9` and maybe another: the same, doing the other one.
+    NthOther,
     Jump,
     Back,
     Filter,
@@ -95,6 +100,8 @@ const fn code(code: KeyCode) -> K {
 
 pub struct Entry {
     pub act: Act,
+    /// What `?` says and the footer calls it when tui.json has `"digits": "jump"`.
+    pub jump: Option<(&'static str, &'static str)>,
     /// Every key sequence that does it: one key, or a prefix and a key.
     pub seqs: &'static [&'static [K]],
     /// How `?` lists the keys; empty when another row lists them, or for a moved key.
@@ -113,10 +120,25 @@ const fn e(
 ) -> Entry {
     Entry {
         act,
+        jump: None,
         seqs,
         keys,
         help,
         word,
+    }
+}
+
+/// An entry whose `?` help and footer word change with tui.json's `digits`.
+const fn digits(
+    act: Act,
+    seqs: &'static [&'static [K]],
+    keys: &'static str,
+    select: (&'static str, &'static str),
+    jump: (&'static str, &'static str),
+) -> Entry {
+    Entry {
+        jump: Some(jump),
+        ..e(act, seqs, keys, select.0, select.1)
     }
 }
 
@@ -185,7 +207,7 @@ pub const BOARD: &[Entry] = &[
         "needs you",
     ),
     e(Act::PrevNeeds, &[&[c('N')]], "", "", "previous"),
-    e(
+    digits(
         Act::Nth,
         &[
             &[c('1')],
@@ -199,8 +221,25 @@ pub const BOARD: &[Entry] = &[
             &[c('9')],
         ],
         "1-99",
-        "row by number; 2 digits wait",
-        "select",
+        ("select row; 2 digits wait", "select"),
+        ("jump to row; 2 digits wait", "jump"),
+    ),
+    digits(
+        Act::NthOther,
+        &[
+            &[c('g'), c('1')],
+            &[c('g'), c('2')],
+            &[c('g'), c('3')],
+            &[c('g'), c('4')],
+            &[c('g'), c('5')],
+            &[c('g'), c('6')],
+            &[c('g'), c('7')],
+            &[c('g'), c('8')],
+            &[c('g'), c('9')],
+        ],
+        "g1-99",
+        ("jump to a row by number", "jump"),
+        ("select a row by number", "select"),
     ),
     e(
         Act::Jump,
@@ -531,14 +570,31 @@ pub fn starts(table: &[Entry], key: K) -> bool {
         .any(|seq| seq.len() == 2 && seq[0] == key)
 }
 
-/// A prefix's continuations: each second key and its word, in table order.
-pub fn after(table: &[Entry], prefix: K) -> Vec<(char, &'static str)> {
-    table
-        .iter()
-        .flat_map(|entry| entry.seqs.iter().map(move |seq| (seq, entry.word)))
-        .filter(|(seq, _)| seq.len() == 2 && seq[0] == prefix)
-        .filter_map(|(seq, word)| Some((seq[1].char()?, word)))
-        .collect()
+impl Entry {
+    /// The help and the footer's word under `digits`.
+    pub fn text(&self, digits: Digits) -> (&'static str, &'static str) {
+        match (digits, self.jump) {
+            (Digits::Jump, Some(jump)) => jump,
+            _ => (self.help, self.word),
+        }
+    }
+}
+
+/// A prefix's continuations: each second key and its word, in table order; the digits are one
+/// `1-9`.
+pub fn after(table: &[Entry], prefix: K, digits: Digits) -> Vec<(String, &'static str)> {
+    let mut pairs = Vec::new();
+    for entry in table {
+        for seq in entry.seqs.iter().filter(|s| s.len() == 2 && s[0] == prefix) {
+            let Some(key) = seq[1].char() else { continue };
+            match key {
+                '1' => pairs.push(("1-9".to_owned(), entry.text(digits).1)),
+                '2'..='9' => {}
+                _ => pairs.push((key.to_string(), entry.word)),
+            }
+        }
+    }
+    pairs
 }
 
 /// The entry for `act` in `table`, as the footer and `?` show it.
@@ -592,10 +648,14 @@ mod tests {
             let text = section(title);
             for seq in live(table) {
                 let Some(name) = doc_name(seq) else { continue };
-                // `1`-`9` names the digits between.
+                // `1`-`9` and `g1`-`g9` name the digits between.
                 let digit = name.len() == 1 && name.as_bytes()[0].is_ascii_digit();
+                let g_digit =
+                    name.len() == 2 && name.starts_with('g') && name.as_bytes()[1].is_ascii_digit();
                 assert!(
-                    text.contains(&format!("`{name}`")) || digit && text.contains("`1`-`9`"),
+                    text.contains(&format!("`{name}`"))
+                        || digit && text.contains("`1`-`9`")
+                        || g_digit && text.contains("`g1`-`g9`"),
                     "{title} in docs/tui.md does not name `{name}`"
                 );
             }
@@ -650,13 +710,18 @@ mod tests {
     #[test]
     fn a_prefix_lists_what_follows_it() {
         let words = |p| {
-            after(BOARD, c(p))
+            after(BOARD, c(p), Digits::Select)
                 .into_iter()
                 .map(|(k, w)| format!("{k} {w}"))
                 .collect::<Vec<_>>()
                 .join(" · ")
         };
-        assert_eq!(words('g'), "g top · t next view · T previous view");
+        assert_eq!(
+            words('g'),
+            "g top · 1-9 jump · t next view · T previous view"
+        );
+        let under_jump = after(BOARD, c('g'), Digits::Jump);
+        assert!(under_jump.contains(&("1-9".to_owned(), "select")));
         assert_eq!(
             words('z'),
             "a toggle · o open · c fold · R open all · M fold all"

@@ -15,6 +15,7 @@ use super::full::Full;
 use super::keys::{self, Act, K};
 use super::markdown::{self, Block, Run};
 use super::pick_prefs::PickPrefs;
+use super::prefs::Digits;
 use super::screen::Screen;
 use super::status::Status;
 use super::views::{Bucket, Key, View, arrange, bucket, views};
@@ -104,7 +105,7 @@ pub enum Effect {
         shown: String,
     },
     /// Keep whether the card is hidden in tui.json.
-    SavePrefs(super::prefs::Prefs),
+    SavePrefs(Box<super::prefs::Prefs>),
     /// Keep the picker's view and sort in pick.json.
     SavePick(super::pick_prefs::PickPrefs),
     Reconnect,
@@ -198,8 +199,11 @@ pub struct App {
     pub filtering: bool,
     /// `f` and a letter: only rows with that status show.
     pub status: Option<Status>,
-    /// A row number's first digit, and when it came, while a second may still follow.
-    pub number: Option<(usize, Instant)>,
+    /// A row number's first digit, when it came and whether it jumps, while a second may follow.
+    pub number: Option<(usize, Instant, bool)>,
+    /// A jump a number's wait ended in, while the key that ended it had an effect of its own;
+    /// `number_due` hands it out next.
+    deferred: Option<Effect>,
     /// A prefix key (`g o z y f d`) waiting for the key after it.
     pub pending: Option<char>,
     /// The `:` prompt: a view name being typed.
@@ -462,24 +466,34 @@ impl App {
             self.keep_selection_visible();
             return None;
         }
-        if let Some((first, _)) = self.number.take() {
+        if let Some((first, _, jump)) = self.number.take() {
             let digit = match key.code {
                 KeyCode::Char(c) if k.is_some_and(|k| !k.1) => c.to_digit(10),
                 _ => None,
             };
             match (digit, key.code) {
-                (Some(second), _) => {
-                    self.select_number(first * 10 + second as usize);
-                    return None;
-                }
+                (Some(second), _) => return self.go_number(first * 10 + second as usize, jump),
                 (_, KeyCode::Esc) => return None,
-                (_, KeyCode::Enter) => {
-                    self.select_number(first);
-                    return None;
+                (_, KeyCode::Enter) => return self.go_number(first, jump),
+                _ => {
+                    let went = self.go_number(first, jump);
+                    let own = self.board_key(k, now);
+                    return match (went, own) {
+                        (Some(_), Some(Effect::Quit)) => Some(Effect::Quit),
+                        (Some(went), Some(own)) => {
+                            self.deferred = Some(went);
+                            Some(own)
+                        }
+                        (went, own) => went.or(own),
+                    };
                 }
-                _ => self.select_number(first),
             }
         }
+        self.board_key(k, now)
+    }
+
+    /// A key for the board's own table, after the prompts and a number's wait have had theirs.
+    fn board_key(&mut self, k: Option<K>, now: Instant) -> Option<Effect> {
         let k = k?;
         // A ctrl chord after a prefix keeps its own meaning, so ctrl-c still quits.
         if let Some(prefix) = self.pending.take()
@@ -571,7 +585,10 @@ impl App {
                 );
                 return self.next_waiting(now, true);
             }
-            Act::Nth => self.number_key(k.char()? as usize - '0' as usize, now),
+            Act::Nth | Act::NthOther => {
+                let jump = (act == Act::Nth) == (self.tuning.digits() == Digits::Jump);
+                return self.number_key(k.char()? as usize - '0' as usize, now, jump);
+            }
             Act::Jump => return self.jump(),
             Act::Back => return self.back(),
             Act::Filter => self.filtering = true,
@@ -598,7 +615,7 @@ impl App {
             Act::FoldAll => self.fold_all(),
             Act::Card => {
                 self.card = !self.card;
-                return Some(Effect::SavePrefs(self.prefs()));
+                return Some(Effect::SavePrefs(Box::new(self.prefs())));
             }
             Act::Full => return self.open_full(now),
             Act::Answer => return self.start_answer(now),

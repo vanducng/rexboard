@@ -77,12 +77,36 @@ pub struct Tuning {
         skip_serializing_if = "Option::is_none"
     )]
     pub tail_lines: Option<serde_json::Value>,
+    /// `"digits": "jump"`, kept as written so a save carries a value a later build knows.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub digits: Option<serde_json::Value>,
+}
+
+/// What the row-number keys `1`-`99` do: `"select"` (the default) puts the selection on the row,
+/// `"jump"` goes to its pane. `g` and the number does the other one.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Digits {
+    #[default]
+    Select,
+    Jump,
 }
 
 impl Tuning {
     /// The tail the card and the full view keep, 50-5000 lines; anything else is 200.
     pub fn tail(&self) -> usize {
         within(&self.tail_lines, 50..=5000, DEFAULT_TAIL as u64) as usize
+    }
+
+    /// `"digits"`: `"jump"`, else (any other value too) `"select"`.
+    pub fn digits(&self) -> Digits {
+        match self.digits.as_ref().and_then(serde_json::Value::as_str) {
+            Some("jump") => Digits::Jump,
+            _ => Digits::Select,
+        }
     }
 }
 
@@ -248,6 +272,27 @@ mod tests {
     }
 
     #[test]
+    fn digits_jump_only_when_written_so_and_a_save_keeps_the_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rexboard/tui.json");
+        for (text, want) in [
+            (r#"{"digits": "jump"}"#, Digits::Jump),
+            (r#"{"digits": "select"}"#, Digits::Select),
+            (r#"{"digits": "Jump"}"#, Digits::Select),
+            (r#"{"digits": 1}"#, Digits::Select),
+            (r#"{"digits": null}"#, Digits::Select),
+            (r#"{}"#, Digits::Select),
+        ] {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, text).unwrap();
+            let prefs = load(&path);
+            assert_eq!(prefs.tuning.digits(), want, "{text}");
+            save(&path, &prefs).unwrap();
+            assert_eq!(load(&path), prefs, "{text}: a save keeps it");
+        }
+    }
+
+    #[test]
     fn prefs_round_trip_and_bad_files_give_the_default() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("rexboard/tui.json");
@@ -260,6 +305,7 @@ mod tests {
                 preview_lines: Some(6.into()),
                 preview_every: Some(3.into()),
                 tail_lines: Some(1000.into()),
+                digits: Some("jump".into()),
             },
             motion: Motion::Reduced,
             icons: Icons::Nerd,

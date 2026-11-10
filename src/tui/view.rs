@@ -34,7 +34,12 @@ pub fn key_rows(app: &App) -> Vec<(String, String)> {
     let mut rows: Vec<(String, String)> = keys::BOARD
         .iter()
         .filter(|entry| !entry.keys.is_empty())
-        .map(|entry| (entry.keys.to_owned(), entry.help.to_owned()))
+        .map(|entry| {
+            (
+                entry.keys.to_owned(),
+                entry.text(app.tuning.digits()).0.to_owned(),
+            )
+        })
         .collect();
     if app.fields.is_empty() {
         return rows;
@@ -186,10 +191,14 @@ fn prefix_keys(app: &App, prefix: char, width: usize) -> Line<'static> {
     } else if prefix == 'x' {
         app.action_pairs()
     } else {
-        keys::after(keys::BOARD, keys::K(KeyCode::Char(prefix), false))
-            .into_iter()
-            .map(|(k, word)| (k.to_string(), word.to_owned()))
-            .collect()
+        keys::after(
+            keys::BOARD,
+            keys::K(KeyCode::Char(prefix), false),
+            app.tuning.digits(),
+        )
+        .into_iter()
+        .map(|(k, word)| (k, word.to_owned()))
+        .collect()
     };
     let mut spans = vec![Span::styled(format!("{prefix}… "), theme::strong())];
     let mut used = prefix.len_utf8() + "… ".width();
@@ -670,8 +679,9 @@ fn footer_overlay(app: &App, width: usize) -> Option<Line<'static>> {
     if let Some(line) = app.action_footer(width) {
         return Some(line);
     }
-    if let Some((first, _)) = app.number {
-        let text = format!("{first}… · a second digit or enter selects · esc cancels");
+    if let Some((first, _, jump)) = app.number {
+        let what = if jump { "jumps" } else { "selects" };
+        let text = format!("{first}… · a second digit or enter {what} · esc cancels");
         return Some(Line::styled(fit(&text, width), theme::strong()));
     }
     match app.pending {
@@ -708,7 +718,7 @@ fn key_bar(app: &App, width: usize) -> Line<'static> {
             .copied()
             .filter(|&act| act != Act::CardDown || app.card_shown())
             .filter_map(|act| keys::entry(keys::BOARD, act))
-            .map(|entry| (keys::short(entry), entry.word))
+            .map(|entry| (keys::short(entry), entry.text(app.tuning.digits()).1))
             .collect()
     };
     let (quit_key, quit_what) = if app.pick {
@@ -1417,7 +1427,7 @@ mod tests {
         };
         assert_eq!(
             last("g", 140),
-            "g… g top · t next view · T previous view · esc cancels"
+            "g… g top · 1-9 jump · t next view · T previous view · esc cancels"
         );
         assert_eq!(
             last("z", 140),

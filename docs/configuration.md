@@ -39,7 +39,7 @@ separator = "-"
 
 A `[jump]` table is ignored, so an old config that still has one loads.
 
-The board's own display settings (`icons`, `card_height`, `motion`, `columns`) live in `tui.json`, not here; see [TUI](tui.md#turn-card).
+The board's own display settings (`icons`, `card_height`, `motion`, `columns`, `digits`) live in `tui.json`, not here; see [TUI](tui.md#turn-card) and, for `digits`, [Digits](tui.md#digits).
 
 ## When a change takes effect
 
