@@ -247,7 +247,11 @@ fn stop_child(child: &mut Child, pgid: &AtomicI32) -> Option<std::process::ExitS
 
 /// Remote host labels from `rex hosts --json`, less `hosts.exclude` in config.toml.
 pub fn hosts() -> Result<Vec<String>> {
-    let exclude = crate::config::load()?.hosts.exclude;
+    hosts_without(&crate::config::load()?.hosts.exclude)
+}
+
+/// The same scan with the exclude list given, for serve, which must not lose a host to a bad file.
+pub fn hosts_without(exclude: &[String]) -> Result<Vec<String>> {
     let rex = rex::locate()?;
     let mut cmd = rex::command(&rex);
     cmd.args(["hosts", "--json"])

@@ -1998,6 +1998,90 @@ fn config_excludes_hosts_and_rejects_unknown_keys() {
         .stderr(predicate::str::contains("colour"));
 }
 
+const BAD_CONFIG: &str = "[hosts]\nexclude = []\n[[mark]\nblock = \"x\"\n";
+
+#[test]
+fn a_bad_config_keeps_the_remote_hosts_and_warns_until_the_file_reads_again() {
+    let serve = Serve::new();
+    serve.config(BAD_CONFIG);
+    local_seat(|| serve.rows(&[]));
+    let rows = serve.rows(&[]);
+    assert!(
+        rows.iter().any(|r| r["host"] == "mini"),
+        "remote rows kept: {rows:?}"
+    );
+    let out = serve.cmd().args(["ls", "--json"]).assert().success();
+    let said = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
+    assert_eq!(said.matches("warning: ").count(), 1, "one warning: {said}");
+    assert!(
+        said.contains("config.toml: line 3: unclosed array table"),
+        "{said}"
+    );
+    let text = serve.cmd().arg("ls").assert().success();
+    assert!(
+        String::from_utf8_lossy(&text.get_output().stderr).contains("config.toml"),
+        "the text path warns too"
+    );
+    let log = serve_log(&serve);
+    assert!(
+        log.contains("keeping the hosts and rules serve has"),
+        "{log}"
+    );
+    assert!(!log.contains("watching this host only"), "{log}");
+    serve
+        .cmd()
+        .args(["--json", "ls", "--direct"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("\"code\":\"CONFIG\""));
+    serve
+        .cmd()
+        .args(["--json", "ext", "ls"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("\"code\":\"CONFIG\""));
+    serve.config("[hosts]\nexclude = []\n");
+    serve.cmd().args(["serve", "--stop"]).assert().success();
+    local_seat(|| serve.rows(&[]));
+    serve
+        .cmd()
+        .args(["ls", "--json"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("config.toml").not());
+}
+
+#[test]
+fn a_serve_that_has_read_its_config_keeps_the_excluded_hosts_through_a_bad_edit() {
+    let serve = Serve::new();
+    serve.config("[hosts]\nexclude = [\"mini\"]\n");
+    let ls = || {
+        serve
+            .cmd()
+            .env("REXBOARD_TEST_RESCAN_SECS", "1")
+            .args(["ls", "--json"])
+            .output()
+            .unwrap()
+    };
+    local_seat(|| {
+        serde_json::from_slice::<Vec<serde_json::Value>>(&ls().stdout).unwrap_or_default()
+    });
+    serve.config(BAD_CONFIG);
+    eventually("the warning", || {
+        String::from_utf8_lossy(&ls().stderr).contains("config.toml")
+    });
+    let out = ls();
+    let rows: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        rows.iter().all(|r| r["host"] == "local"),
+        "still excluded: {rows:?}"
+    );
+    serve.config("[hosts]\nexclude = [\"mini\"]\n");
+    eventually("the warning goes", || {
+        !String::from_utf8_lossy(&ls().stderr).contains("config.toml")
+    });
+}
+
 const MARKS: &str = "[[mark]]\nsession = \"web\"\nblock = \"seat-?\"\n\n\
                      [[mark]]\nhost = \"local\"\nblock = \"seat-a\"\n\n\
                      [[mark]]\nsesion = \"x\"\n";

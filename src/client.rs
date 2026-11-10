@@ -47,6 +47,9 @@ pub struct Rows {
     /// Why a host is down or stopped.
     #[serde(default)]
     pub host_errors: BTreeMap<String, String>,
+    /// Set while config.toml cannot be read; serve works without it.
+    #[serde(default)]
+    pub config_problem: Option<crate::config::Bad>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -488,6 +491,7 @@ pub fn ls(args: &LsArgs, json: bool) -> Result<()> {
         .filter(|(h, _)| args.host.as_deref().is_none_or(|want| want == h.as_str()))
         .map(|(h, s)| (h.clone(), s.clone()))
         .collect();
+    let config_problem = rows.config_problem.clone();
     let mut list = pick(rows, args.host.as_deref(), args.all)?;
     list.retain(|row| row.marked || !args.marked);
     let query = args.query();
@@ -507,6 +511,9 @@ pub fn ls(args: &LsArgs, json: bool) -> Result<()> {
             "every host is unreachable: {}{see}",
             names.join(", ")
         )));
+    }
+    if let Some(bad) = &config_problem {
+        eprintln!("warning: {}; serve is going on without it", bad.why);
     }
     for (host, state) in down {
         match state.as_str() {

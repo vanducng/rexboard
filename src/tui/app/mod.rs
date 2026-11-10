@@ -196,6 +196,8 @@ pub struct App {
     pub fields: Vec<(Field, Option<char>)>,
     /// How each enabled extension's last run went.
     pub ext_runs: BTreeMap<String, ExtRun>,
+    /// `config.toml bad: line 12` while serve cannot read the file.
+    pub config_bad: Option<String>,
     pub selected: Option<Spot>,
     pub filter: Input,
     pub filtering: bool,

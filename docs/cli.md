@@ -95,7 +95,7 @@ Fields are a contract. New fields may appear. Renaming or removing one is a brea
 
 | Exit | When |
 | --- | --- |
-| 0 | Listed. A host that cannot be reached prints `warning: HOST is unreachable: ...` on stderr (through serve: one line per host that is `starting`, `down` or `stopped`), and the rest are listed. When a host is `down` or `stopped`, the warning and the `HOSTS_UNREACHABLE` error end with `; see STATE_DIR/serve.log` |
+| 0 | Listed. A host that cannot be reached prints `warning: HOST is unreachable: ...` on stderr (through serve: one line per host that is `starting`, `down` or `stopped`), and the rest are listed. While serve cannot read `config.toml`, `ls` through serve also prints one `warning: FILE: line N: WHY; serve is going on without it` (text and `--json` alike); the exit code stays 0 and serve still lists every host ([When a change takes effect](configuration.md#when-a-change-takes-effect)). When a host is `down` or `stopped`, the warning and the `HOSTS_UNREACHABLE` error end with `; see STATE_DIR/serve.log` |
 | 1 | `REX_NOT_FOUND`: no `rex` CLI. `REX`: `rex do` failed, timed out, or returned a snapshot rexboard does not understand; the message names the Rex version. `SERVE`: serve did not start or answer; the message names `serve.log`. `CONFIG`, with `--direct`: config.toml cannot be read or has an unknown key |
 | 2 | `HOSTS_UNREACHABLE`: every host failed; next steps `rex hosts` and `rexboard ls`. `USAGE`: a bad flag, `--host` names no host, or `--view`, `--status` or `--sort` names nothing |
 

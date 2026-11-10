@@ -38,6 +38,7 @@ pub(super) enum Msg {
 pub(super) fn apply(app: &mut App, msg: Msg) -> Option<Effect> {
     match msg {
         Msg::Rows(rows) => {
+            app.config_bad = rows.config_problem.map(|bad| bad.short);
             app.set_extensions(rows.fields, rows.extensions);
             app.offered = rows.actions;
             app.set_rows(rows.rows, rows.hosts);

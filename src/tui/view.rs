@@ -282,7 +282,8 @@ fn view_label(app: &App) -> Option<String> {
     })
 }
 
-/// Hosts that are not up, then extensions whose last run failed: `mini down, ext fake failed`.
+/// Hosts that are not up, a config.toml serve cannot read, then extensions whose last run failed:
+/// `mini down, config.toml bad: line 12, ext fake failed`.
 /// Failed extensions that would not fit after `rexboard · ` collapse to `2 ext failed`.
 fn alerts(app: &App, width: usize) -> String {
     let mut alerts: Vec<String> = app
@@ -291,6 +292,7 @@ fn alerts(app: &App, width: usize) -> String {
         .filter(|(_, state)| *state != "up")
         .map(|(host, state)| format!("{host} {state}"))
         .collect();
+    alerts.extend(app.config_bad.clone());
     let failed: Vec<&str> = app
         .ext_runs
         .iter()
@@ -3647,6 +3649,33 @@ mod extension_tests {
             "{}",
             top(&app, 50)
         );
+    }
+
+    #[test]
+    fn a_bad_config_is_a_red_alert_beside_the_hosts_and_gone_when_it_reads_again() {
+        let mut app = with_fields(&[]);
+        let top = |app: &App, width| render(app, width, 30).lines().next().unwrap().to_owned();
+        assert!(!top(&app, 80).contains("config.toml"));
+        app.config_bad = Some("config.toml bad: line 12".into());
+        assert!(
+            top(&app, 80)
+                .starts_with("rexboard · 2 hosts · 4 panes · 4 agents · config.toml bad: line 12"),
+            "{}",
+            top(&app, 80)
+        );
+        app.hosts.insert("studio".into(), "down".into());
+        assert!(
+            top(&app, 140).contains("studio down, config.toml bad: line 12"),
+            "{}",
+            top(&app, 140)
+        );
+        assert!(
+            top(&app, 50).starts_with("rexboard · studio down, config.toml bad: line 12"),
+            "{}",
+            top(&app, 50)
+        );
+        app.config_bad = None;
+        assert!(!top(&app, 80).contains("config.toml"));
     }
 
     #[test]
