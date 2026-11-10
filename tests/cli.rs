@@ -3074,6 +3074,30 @@ fn ext_ls_json_and_ext_test_name_the_actions_and_a_hidden_field_has_no_column() 
 }
 
 #[test]
+fn an_extension_cannot_take_the_name_of_a_source_of_marks() {
+    let serve = Serve::new();
+    for name in ["config", "favorite"] {
+        let dir = serve
+            .dir
+            .path()
+            .join("config/rexboard/extensions")
+            .join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        let manifest = format!("contract = 1\nname = \"{name}\"\ncmd = [\"true\"]\n");
+        std::fs::write(dir.join("extension.toml"), manifest).unwrap();
+        serve
+            .cmd()
+            .args(["ext", "new", name])
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains("is reserved"));
+    }
+    let out = serve.cmd().args(["ext", "ls", "--json"]).output().unwrap();
+    let list = String::from_utf8(out.stdout).unwrap();
+    assert!(list.contains("is reserved"), "{list}");
+}
+
+#[test]
 fn ext_new_scaffold_passes_ext_test_unchanged() {
     let serve = Serve::new();
     serve

@@ -512,6 +512,12 @@ fn new(name: &str, json: bool) -> Result<()> {
             &["rexboard ext new my-tool"],
         ));
     }
+    if super::RESERVED.contains(&name) {
+        return Err(Error::usage_with(
+            format!("{name:?} is reserved: it names a source of marks"),
+            &["rexboard ext new my-tool"],
+        ));
+    }
     let root = roots(&[])
         .into_iter()
         .next()
