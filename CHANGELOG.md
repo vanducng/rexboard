@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.0](https://github.com/vanducng/rexboard/compare/v0.24.0...v0.25.0) (2026-11-10)
+
+
+### Features
+
+* **tui:** add a built-in session view ([#141](https://github.com/vanducng/rexboard/issues/141)) ([7a372de](https://github.com/vanducng/rexboard/commit/7a372de84a25c630e784e1a70cc63e612ff6faec))
+* **tui:** tui.json digits jump to a row, g and digits swap ([#143](https://github.com/vanducng/rexboard/issues/143)) ([a7cdedf](https://github.com/vanducng/rexboard/commit/a7cdedf08351d0d903a6a18daa04ec1d96472f5c))
+
 ## [0.24.0](https://github.com/vanducng/rexboard/compare/v0.23.0...v0.24.0) (2026-11-01)
 
 
