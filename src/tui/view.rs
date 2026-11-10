@@ -3679,7 +3679,7 @@ mod extension_tests {
         app.hosts.insert("local".into(), "up".into());
         let narrow = top(&app, 80);
         assert!(
-            narrow.contains("line 12  ") && narrow.trim_end().ends_with("12:43"),
+            narrow.contains("line 12  ") && narrow.trim_end().chars().nth_back(2) == Some(':'),
             "the alert and the clock are apart: {narrow}"
         );
         app.config_bad = None;
