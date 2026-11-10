@@ -495,7 +495,8 @@ fn ls_json_adds_board_fields() {
     assert_eq!(codex["tmux"], false);
     assert_eq!(claude["marked"], false, "no [[mark]] rule");
     assert_eq!(claude["marked_by"], serde_json::json!([]));
-    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 32));
+    assert_eq!(claude["view_group"], serde_json::Value::Null, "no --view");
+    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 33));
 }
 
 /// A status line for the fixture's idle seat on `host`, sent after the recorded stream ends.
@@ -533,6 +534,12 @@ fn watch_json_prints_debounced_rows() {
     assert_eq!(last[0]["host"], "mini");
     assert_eq!(last[0]["group"], "needs_you");
     assert_eq!(last[0]["source"], "bridge");
+    assert!(
+        last[0]
+            .get("view_group")
+            .is_some_and(serde_json::Value::is_null),
+        "watch shares the row but takes no --view: view_group is there and null"
+    );
 }
 
 #[test]
@@ -3450,6 +3457,193 @@ fn keys(rows: &[serde_json::Value]) -> Vec<&str> {
     rows.iter()
         .map(|row| row["key"].as_str().unwrap())
         .collect()
+}
+
+/// A serve whose mini has two panes in a session named `api`, as this host does, and one in a
+/// session with no label.
+fn shared_session_serve() -> Serve {
+    shared_session_serve_with(|_| {})
+}
+
+/// `shared_session_serve`, with `setup` run before serve starts, as an extension needs.
+fn shared_session_serve_with(setup: impl FnOnce(&Serve)) -> Serve {
+    let serve = Serve::new();
+    setup(&serve);
+    let block = |id: &str, label: &str| {
+        serde_json::json!({ "block_id": id, "label": label, "title": "", "process": {},
+            "records": [{ "state": "working", "app": "claude-code", "msg": "Writing",
+                "updated_at": "2026-01-01T00:00:00Z" }] })
+    };
+    let snapshot = serde_json::json!({ "v": 1, "type": "snapshot", "rex_version": "0.0.1-test",
+        "sessions": [
+            { "session_id": "session:api", "label": "api", "windows": [{
+                "window_id": "window:api", "label": "main", "blocks": [
+                    block("block:api-m1", "seat-m"), block("block:api-m2", "seat-n")] }] },
+            { "session_id": "session:none", "label": "", "windows": [{
+                "window_id": "window:none", "label": "main", "blocks": [
+                    block("block:none-o", "seat-o")] }] },
+        ] });
+    let path = serve.dir.path().join("observer-mini-shared.ndjson");
+    std::fs::write(&path, format!("{snapshot}\n")).unwrap();
+    serve_mini(&serve, path.to_str().unwrap());
+    local_seat(|| serve.rows(&[]));
+    serve
+}
+
+fn view_groups(serve: &Serve, view: &str) -> Vec<(String, serde_json::Value)> {
+    serve
+        .rows(&["--view", view])
+        .iter()
+        .map(|row| {
+            (
+                row["key"].as_str().unwrap().to_owned(),
+                row["view_group"].clone(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn ls_view_says_each_rows_group_in_json_and_in_the_first_column() {
+    let serve = shared_session_serve();
+    let session = view_groups(&serve, "session");
+    let group = |key: &str| {
+        session
+            .iter()
+            .find(|(k, _)| k == key)
+            .unwrap_or_else(|| panic!("{key} in {session:?}"))
+            .1
+            .clone()
+    };
+    assert_eq!(
+        group(SEAT),
+        "API @LOCAL",
+        "a session name two hosts share carries its host"
+    );
+    assert_eq!(group("mini/block:api-m1"), "API @MINI");
+    assert_eq!(group("mini/block:api-m2"), "API @MINI");
+    assert_eq!(group("mini/block:none-o"), "-", "no session label");
+    let names: Vec<_> = session.iter().map(|(_, g)| g.as_str().unwrap()).collect();
+    assert_eq!(
+        names.iter().filter(|g| **g == "API @MINI").count(),
+        2,
+        "{names:?}"
+    );
+    let host = view_groups(&serve, "host");
+    assert!(
+        host.iter().all(|(k, g)| *g
+            == if k.starts_with("local/") {
+                "LOCAL"
+            } else {
+                "MINI"
+            }),
+        "{host:?}"
+    );
+    for plain in ["status", "table"] {
+        assert!(
+            view_groups(&serve, plain).iter().all(|(_, g)| g.is_null()),
+            "{plain}: status has `group` already, table has none"
+        );
+    }
+    assert!(
+        serve
+            .rows(&[])
+            .iter()
+            .all(|row| row["view_group"].is_null() && row.get("view_group").is_some()),
+        "no --view: null, and the key is there"
+    );
+    let header = |args: &[&str]| {
+        let out = serve.cmd().arg("ls").args(args).assert().success();
+        let text = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
+        text.lines()
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(header(&[]), "GROUP");
+    assert_eq!(header(&["--view", "status"]), "GROUP");
+    assert_eq!(header(&["--view", "table"]), "GROUP");
+    assert_eq!(header(&["--view", "session"]), "SESSION");
+    assert_eq!(header(&["--view", "host"]), "HOST");
+    assert_eq!(header(&["--view", "harness"]), "HARNESS");
+    let out = serve
+        .cmd()
+        .args(["ls", "--view", "session"])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
+    for want in ["API @LOCAL", "API @MINI", "\n-  "] {
+        assert!(text.contains(want), "{want:?} in:\n{text}");
+    }
+    assert!(
+        text.lines()
+            .skip(1)
+            .all(|line| !["needs_you", "working", "quiet", "unreported"]
+                .iter()
+                .any(|group| line.starts_with(group))),
+        "the view's group replaces GROUP:\n{text}"
+    );
+}
+
+#[test]
+fn ls_view_names_a_group_by_every_host_even_when_host_or_marked_keeps_only_one() {
+    let serve = shared_session_serve_with(|serve| serve.config("[[mark]]\nblock = \"seat-m\"\n"));
+    for extra in [&["--host", "mini"][..], &["--marked"][..]] {
+        let json = serve.rows(&[&["--view", "session"], extra].concat());
+        assert!(!json.is_empty(), "{extra:?}");
+        for row in json.iter().filter(|row| row["session"] == "api") {
+            assert_eq!(
+                row["view_group"], "API @MINI",
+                "{extra:?}: the board's header, not API"
+            );
+        }
+        let out = serve
+            .cmd()
+            .args(["ls", "--view", "session"])
+            .args(extra)
+            .assert()
+            .success();
+        let text = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
+        assert!(
+            text.contains("API @MINI") && !text.contains("API  "),
+            "{extra:?}:\n{text}"
+        );
+    }
+    let json = serve.rows(&["--view", "session", "--marked"]);
+    assert_eq!(json.len(), 1, "only seat-m is marked: {json:?}");
+}
+
+#[test]
+fn ls_view_on_an_extension_field_names_the_field_and_a_row_without_it_is_dash() {
+    let serve = shared_session_serve_with(|serve| {
+        extension(
+            serve,
+            "fake",
+            "",
+            "",
+            &answers(r#"{"local/block:api-seat-a": {"fields": {"rig": "web"}}}"#),
+        );
+        serve.config("[extensions]\nenabled = [\"fake\"]\n");
+    });
+    eventually("the field", || {
+        view_groups(&serve, "rig")
+            .iter()
+            .any(|(k, g)| k == SEAT && g == "WEB")
+    });
+    let groups = view_groups(&serve, "rig");
+    assert!(
+        groups
+            .iter()
+            .filter(|(k, _)| k != SEAT)
+            .all(|(_, g)| g == "-"),
+        "{groups:?}"
+    );
+    let out = serve.cmd().args(["ls", "--view", "rig"]).assert().success();
+    let text = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
+    assert!(text.lines().next().unwrap().starts_with("RIG "), "{text}");
 }
 
 #[test]

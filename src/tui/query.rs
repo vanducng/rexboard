@@ -23,6 +23,9 @@ pub struct Query<'a> {
     pub status: Option<&'a str>,
     /// `COLUMN`, `COLUMN:asc` or `COLUMN:desc`.
     pub sort: Option<&'a str>,
+    /// Every row the board has, when the rows given are only some of them (`--host`, `--marked`):
+    /// a group's name, `API @MINI`, depends on the rows of the other hosts too.
+    pub context: &'a [Row],
 }
 
 impl Query<'_> {
@@ -39,7 +42,12 @@ impl Query<'_> {
 pub fn arrange(rows: Vec<Row>, fields: Vec<Field>, query: &Query) -> Result<Vec<Row>> {
     let mut app = board(fields);
     // Not set_rows, which keeps only agents: `ls --all` asks for plain shells too.
-    app.rows = rows;
+    let wanted: BTreeSet<String> = rows.iter().map(|row| row.key.clone()).collect();
+    app.rows = if query.context.is_empty() {
+        rows
+    } else {
+        query.context.to_vec()
+    };
     if let Some(name) = query.view {
         app.view = view(&app, name)?;
     }
@@ -50,6 +58,8 @@ pub fn arrange(rows: Vec<Row>, fields: Vec<Field>, query: &Query) -> Result<Vec<
         app.sort = Some(sort_of(&app, spec)?);
     }
     let mut shown = listed(&app);
+    shown.retain(|&i| wanted.contains(&app.rows[i].key));
+    let groups = view_groups(&app);
     for filter in query.filters {
         app.filter = Input::new(filter.clone());
         // As the board's `/` does, a `key:` no row has is plain text, so `failed: 2` or a URL
@@ -63,7 +73,52 @@ pub fn arrange(rows: Vec<Row>, fields: Vec<Field>, query: &Query) -> Result<Vec<
         let kept: BTreeSet<usize> = listed(&app).into_iter().collect();
         shown.retain(|i| kept.contains(i));
     }
-    Ok(shown.into_iter().map(|i| app.rows[i].clone()).collect())
+    Ok(shown
+        .into_iter()
+        .map(|i| Row {
+            view_group: groups.get(&i).cloned(),
+            ..app.rows[i].clone()
+        })
+        .collect())
+}
+
+/// Each row's group under a view that groups by something but status, which `group` has said
+/// already, by the row's index: the header's name with no count.
+fn view_groups(app: &App) -> BTreeMap<usize, String> {
+    let mut groups = BTreeMap::new();
+    if app.view.group_by.is_none_or(|key| key == Key::Status) {
+        return groups;
+    }
+    let mut title = String::new();
+    for item in app.items() {
+        match item {
+            Item::Header { bucket, .. } => title = app.group_title(&bucket),
+            Item::Row(i) => {
+                groups.insert(i, title.clone());
+            }
+            Item::Gap => {}
+        }
+    }
+    groups
+}
+
+/// The first column's header for `ls --view NAME`: what the view groups by (`SESSION`, `HOST`,
+/// `HARNESS`, a field's title), or None when it keeps the status `GROUP`.
+pub fn heading(fields: Vec<Field>, name: &str) -> Option<String> {
+    let app = board(fields);
+    Some(match view(&app, name).ok()?.group_by? {
+        Key::Status => return None,
+        Key::Harness => "HARNESS".to_owned(),
+        Key::Host => "HOST".to_owned(),
+        Key::Session => "SESSION".to_owned(),
+        Key::Field(id) => app
+            .fields
+            .iter()
+            .find(|(field, _)| field.id == id)?
+            .0
+            .title
+            .clone(),
+    })
 }
 
 /// Each view `v` cycles through: its name, and what it groups by, or None for one list.

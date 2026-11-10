@@ -297,6 +297,7 @@ impl LsArgs {
             filters: &self.filter,
             status: self.status.as_deref(),
             sort: self.sort.as_deref(),
+            context: &[],
         }
     }
 }
