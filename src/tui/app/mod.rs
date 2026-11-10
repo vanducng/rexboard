@@ -473,12 +473,19 @@ impl App {
                 (_, KeyCode::Esc) => return None,
                 (_, KeyCode::Enter) => return self.go_number(first, jump),
                 _ => {
-                    if let Some(effect) = self.go_number(first, jump) {
-                        return Some(effect);
-                    }
+                    let went = self.go_number(first, jump);
+                    return match (went, self.board_key(k, now)) {
+                        (Some(_), Some(Effect::Quit)) => Some(Effect::Quit),
+                        (went, own) => went.or(own),
+                    };
                 }
             }
         }
+        self.board_key(k, now)
+    }
+
+    /// A key for the board's own table, after the prompts and a number's wait have had theirs.
+    fn board_key(&mut self, k: Option<K>, now: Instant) -> Option<Effect> {
         let k = k?;
         // A ctrl chord after a prefix keeps its own meaning, so ctrl-c still quits.
         if let Some(prefix) = self.pending.take()

@@ -699,6 +699,28 @@ mod tests {
     }
 
     #[test]
+    fn a_key_that_ends_the_wait_does_its_own_job_after_a_jump() {
+        let t = Instant::now();
+        for (value, plain_jumps) in [(None, false), (Some("jump"), true)] {
+            let mut app = digits(12, value);
+            key_at(&mut app, '1', t);
+            let effect = key_at(&mut app, 'j', t);
+            assert_eq!(jumped(effect).is_some(), plain_jumps, "{value:?}");
+            assert_eq!(
+                selected(&app),
+                "local/r1",
+                "{value:?}: 1 went to r0, then j moved"
+            );
+            assert!(app.number.is_none());
+            app.going = None;
+            g(&mut app, '1', t);
+            let effect = key_at(&mut app, 'j', t);
+            assert_eq!(jumped(effect).is_some(), !plain_jumps, "{value:?} g");
+            assert_eq!(selected(&app), "local/r1", "{value:?} g: moved after");
+        }
+    }
+
+    #[test]
     fn a_number_with_no_row_says_so_in_both_modes_and_for_g() {
         let t = Instant::now();
         for value in [None, Some("jump")] {
