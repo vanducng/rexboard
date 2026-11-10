@@ -75,6 +75,9 @@ enum Request {
         after: Option<String>,
         #[serde(default)]
         back: bool,
+        /// The marked rows, not NEEDS YOU.
+        #[serde(default)]
+        marked: bool,
     },
     /// The pane the jump before the last one went to, for `jump -`.
     Back,
@@ -738,9 +741,13 @@ impl Reducer {
                 }
                 _ => error_line("NOT_FOUND", &format!("no pane {key}")),
             },
-            Request::Next { after, back } => {
+            Request::Next {
+                after,
+                back,
+                marked,
+            } => {
                 let after = after.or_else(|| self.jumps.last().cloned());
-                self.next(after.as_deref(), back)
+                self.next(after.as_deref(), back, marked)
             }
             Request::Back => self.back(),
             Request::Stop => unreachable!("handled in run"),
@@ -766,23 +773,37 @@ impl Reducer {
         }
     }
 
-    /// The NEEDS YOU row after `after` (a key, or the block id of the pane asking), unseen
+    /// The NEEDS YOU row (or with `marked`, the marked one) after `after` (a key, or the block id of
+    /// the pane asking), unseen
     /// rows first: a jump marks its row seen, so the queue moves on. Seen blocked or erroring
     /// rows still need you, so they cycle once nothing is unseen.
-    fn next(&self, after: Option<&str>, back: bool) -> Value {
-        let needs: Vec<_> = self
-            .board
-            .rows(chrono::Utc::now())
-            .into_iter()
-            .filter(|row| row.group == Group::NeedsYou)
-            .collect();
-        let mut rows: Vec<_> = needs.iter().filter(|row| !row.seen).cloned().collect();
-        if rows.is_empty() {
-            rows = needs;
-        }
-        if rows.is_empty() {
-            return error_line("NOBODY_NEEDS_YOU", "nobody needs you");
-        }
+    fn next(&self, after: Option<&str>, back: bool, marked: bool) -> Value {
+        let mut rows = if marked {
+            // Marked rows in list order, seen or not: a mark is the user's own, not a queue.
+            let mut rows = self.board.rows(chrono::Utc::now());
+            rows.retain(|row| row.pane.is_agent());
+            self.marks.apply(&mut rows);
+            rows.retain(|row| row.marked);
+            if rows.is_empty() {
+                return error_line("NO_MARKED_ROW", &Error::NoMarkedRow.to_string());
+            }
+            rows
+        } else {
+            let needs: Vec<_> = self
+                .board
+                .rows(chrono::Utc::now())
+                .into_iter()
+                .filter(|row| row.group == Group::NeedsYou)
+                .collect();
+            let mut rows: Vec<_> = needs.iter().filter(|row| !row.seen).cloned().collect();
+            if rows.is_empty() {
+                rows = needs;
+            }
+            if rows.is_empty() {
+                return error_line("NOBODY_NEEDS_YOU", "nobody needs you");
+            }
+            rows
+        };
         if back {
             rows.reverse();
         }

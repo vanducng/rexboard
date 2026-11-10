@@ -34,6 +34,8 @@ pub enum Error {
     },
     #[error("nobody needs you")]
     NobodyNeedsYou,
+    #[error("no marked row · see [[mark]] in config.toml")]
+    NoMarkedRow,
     /// No app, or not exactly one, could take a jump on this host.
     #[error("{message}")]
     AmbiguousClient { message: String, steps: Vec<String> },
@@ -103,6 +105,7 @@ impl Error {
             Self::NotFound(_) => "NOT_FOUND",
             Self::Refused { .. } => "REFUSED",
             Self::NobodyNeedsYou => "NOBODY_NEEDS_YOU",
+            Self::NoMarkedRow => "NO_MARKED_ROW",
             Self::AmbiguousClient { .. } => "AMBIGUOUS_CLIENT",
             Self::Config(_) => "CONFIG",
             Self::Upgrade { .. } => "UPGRADE",
@@ -124,6 +127,7 @@ impl Error {
             Self::ServeRunning(_) => vec!["rexboard serve --stop".to_owned()],
             Self::NotFound(_) => vec!["rexboard ls --json".to_owned()],
             Self::NobodyNeedsYou => vec!["rexboard ls".to_owned()],
+            Self::NoMarkedRow => vec!["rexboard ls --marked".to_owned()],
             Self::AmbiguousClient { steps, .. }
             | Self::RexExplained { steps, .. }
             | Self::Upgrade { steps, .. }
@@ -179,7 +183,7 @@ pub fn report(json: bool, err: &Error) {
         eprintln!("{body}");
         return;
     }
-    if let Error::NobodyNeedsYou = err {
+    if let Error::NobodyNeedsYou | Error::NoMarkedRow = err {
         eprintln!("{err}");
         return;
     }

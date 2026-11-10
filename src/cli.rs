@@ -78,6 +78,10 @@ pub enum Command {
         /// Go the other way.
         #[arg(long)]
         back: bool,
+        /// Go to the next marked pane (a `[[mark]]` rule in config.toml) instead. Exit 1 when no
+        /// row is marked.
+        #[arg(long)]
+        marked: bool,
     },
     /// Pick a pane from the board's list and go to it. Enter goes and exits 0; esc exits 1.
     Pick,

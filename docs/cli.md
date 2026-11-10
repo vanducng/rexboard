@@ -457,6 +457,7 @@ rexboard jump 1                       # the first NEEDS YOU row
 rexboard jump -                       # back to the pane before the last jump
 rexboard next                         # the next pane that needs you
 rexboard next --back                  # the other way
+rexboard next --marked                # the next pane a [[mark]] rule marks
 rexboard pick                         # choose from the board's list
 ```
 
@@ -469,6 +470,8 @@ The app has 5 seconds to answer, and it does not answer while the Mac's screen i
 
 `next` picks from `needs_you` in board order: blocked, then error, then unseen done, each longest waiting first. It starts after the pane it runs in (`REX_BLOCK`), or outside a pane, after the pane the last jump went to (kept in `state.json`, so it survives a restart). It goes to unseen rows first, so repeated `next` works through the queue; once every row is seen, the blocked and erroring ones cycle.
 
+`next --marked` goes instead to the next row a [`[[mark]]` rule](configuration.md#mark) marks, in board order, seen or not, starting after the same pane as `next` does and wrapping at the end; `--back` goes the other way. With no marked row it exits 1 with `no marked row · see [[mark]] in config.toml` (`NO_MARKED_ROW` with `--json`, next step `rexboard ls --marked`), as `next` does when nobody needs you.
+
 `jump -` goes to the pane the jump before the last one went to, and the two swap, as `cd -` does, so a second `jump -` comes back. Every jump counts: `jump`, `next`, `pick`, and the board's `enter` and `-`.
 
 `pick` opens the board's list without the turn card: Enter jumps and exits 0, esc exits 1. [TUI](tui.md#pick) has the rest.
@@ -478,7 +481,7 @@ The app has 5 seconds to answer, and it does not answer while the Mac's screen i
 | Exit | When |
 | --- | --- |
 | 0 | Jumped |
-| 1 | `NOBODY_NEEDS_YOU`: `next`, or `jump N`, with nothing in `needs_you`; prints `nobody needs you`. `NOT_FOUND`: no such key, no row N, or for `jump -`, `no previous jump yet` or `previous pane is gone`. `AMBIGUOUS_CLIENT`: no app client named, and none or more than one on the unix socket; the message says which, and the next steps name each app (`open the Rex app` when there is none). `CONFIG`: config.toml cannot be read or has an unknown key, or `client` names no app. `REX`: a step in Rex failed; the message names it. `pick`: esc |
+| 1 | `NOBODY_NEEDS_YOU`: `next`, or `jump N`, with nothing in `needs_you`; prints `nobody needs you`. `NO_MARKED_ROW`: `next --marked` with no row marked by a [`[[mark]]` rule](configuration.md#mark); prints `no marked row · see [[mark]] in config.toml`. `NOT_FOUND`: no such key, no row N, or for `jump -`, `no previous jump yet` or `previous pane is gone`. `AMBIGUOUS_CLIENT`: no app client named, and none or more than one on the unix socket; the message says which, and the next steps name each app (`open the Rex app` when there is none). `CONFIG`: config.toml cannot be read or has an unknown key, or `client` names no app. `REX`: a step in Rex failed; the message names it. `pick`: esc |
 | 2 | `USAGE`: TARGET is neither a key, a number nor `-`, or `pick` without a terminal |
 
 ## `rexboard ext`

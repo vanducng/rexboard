@@ -79,7 +79,7 @@ pub fn execute(cli: &Cli) -> Result<()> {
         Command::Views => show::views(cli.json),
         Command::Hosts => show::hosts(cli.json),
         Command::Jump { target } => jump::jump(target, cli.json),
-        Command::Next { back } => jump::next(*back, cli.json),
+        Command::Next { back, marked } => jump::next(*back, *marked, cli.json),
         Command::Upgrade { check } => upgrade::run(*check, cli.json),
         Command::Ext(command) => extension::cli::run(command, cli.json),
         Command::Hook { harness, event } => hook::run(harness, event.as_deref()),
