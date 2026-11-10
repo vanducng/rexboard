@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.1](https://github.com/vanducng/rexboard/compare/v0.27.0...v0.27.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **serve:** a bad config.toml keeps the remote hosts and says so ([#149](https://github.com/vanducng/rexboard/issues/149)) ([f9ed40b](https://github.com/vanducng/rexboard/commit/f9ed40bbfc5d3ae066948e6456330beca1f32c98))
+
 ## [0.27.0](https://github.com/vanducng/rexboard/compare/v0.26.0...v0.27.0) (2026-11-10)
 
 
