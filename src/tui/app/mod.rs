@@ -201,6 +201,9 @@ pub struct App {
     pub status: Option<Status>,
     /// A row number's first digit, when it came and whether it jumps, while a second may follow.
     pub number: Option<(usize, Instant, bool)>,
+    /// A jump a number's wait ended in, while the key that ended it had an effect of its own;
+    /// `number_due` hands it out next.
+    deferred: Option<Effect>,
     /// A prefix key (`g o z y f d`) waiting for the key after it.
     pub pending: Option<char>,
     /// The `:` prompt: a view name being typed.
@@ -474,8 +477,13 @@ impl App {
                 (_, KeyCode::Enter) => return self.go_number(first, jump),
                 _ => {
                     let went = self.go_number(first, jump);
-                    return match (went, self.board_key(k, now)) {
+                    let own = self.board_key(k, now);
+                    return match (went, own) {
                         (Some(_), Some(Effect::Quit)) => Some(Effect::Quit),
+                        (Some(went), Some(own)) => {
+                            self.deferred = Some(went);
+                            Some(own)
+                        }
                         (went, own) => went.or(own),
                     };
                 }

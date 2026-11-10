@@ -229,8 +229,12 @@ impl App {
     }
 
     /// A first digit that waited long enough for a second goes to its own row. Whether the board
-    /// changed, and the jump when that is what the digit does.
+    /// changed, and the jump when that is what the digit does, or a jump parked behind another
+    /// key's effect.
     pub fn number_due(&mut self, now: Instant) -> (bool, Option<Effect>) {
+        if let Some(effect) = self.deferred.take() {
+            return (true, Some(effect));
+        }
         let Some((first, at, jump)) = self.number else {
             return (false, None);
         };
@@ -718,6 +722,31 @@ mod tests {
             assert_eq!(jumped(effect).is_some(), !plain_jumps, "{value:?} g");
             assert_eq!(selected(&app), "local/r1", "{value:?} g: moved after");
         }
+    }
+
+    #[test]
+    fn a_key_with_an_effect_of_its_own_keeps_it_and_the_jump_waits_for_the_loop() {
+        let t = Instant::now();
+        let mut app = digits(12, Some("jump"));
+        key_at(&mut app, '1', t);
+        let own = key_at(&mut app, ' ', t);
+        assert!(
+            app.full.is_some() && own.is_some(),
+            "the full view gets its read: {own:?}"
+        );
+        assert!(!matches!(own, Some(Effect::Jump(_))));
+        let (changed, jump) = app.number_due(t);
+        assert_eq!((changed, jumped(jump).as_deref()), (true, Some("local/r0")));
+        assert_eq!(app.number_due(t), (false, None), "handed out once");
+        let mut app = digits(12, Some("jump"));
+        key_at(&mut app, '1', t);
+        let own = key_at(&mut app, 'c', t);
+        assert!(matches!(own, Some(Effect::SavePrefs(_))), "{own:?}");
+        assert_eq!(jumped(app.number_due(t).1).as_deref(), Some("local/r0"));
+        let mut app = digits(12, Some("jump"));
+        key_at(&mut app, '1', t);
+        assert_eq!(key_at(&mut app, 'q', t), Some(Effect::Quit), "quit wins");
+        assert_eq!(app.number_due(t), (false, None));
     }
 
     #[test]
