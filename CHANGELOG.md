@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.0](https://github.com/vanducng/rexboard/compare/v0.25.0...v0.26.0) (2026-11-10)
+
+
+### Features
+
+* **tui:** ' jumps to marked rows, and next --marked does it from a script ([#146](https://github.com/vanducng/rexboard/issues/146)) ([d09e66d](https://github.com/vanducng/rexboard/commit/d09e66d2f8d171041fed0162c8381e224b37d762))
+* **tui:** mark rows by config rules, shown as a star before the number ([#144](https://github.com/vanducng/rexboard/issues/144)) ([cb7f1ab](https://github.com/vanducng/rexboard/commit/cb7f1ab1603857956e374870b8245faa2f658b41))
+
 ## [0.25.0](https://github.com/vanducng/rexboard/compare/v0.24.0...v0.25.0) (2026-11-10)
 
 
