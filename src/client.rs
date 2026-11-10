@@ -513,7 +513,7 @@ pub fn ls(args: &LsArgs, json: bool) -> Result<()> {
         )));
     }
     if let Some(bad) = &config_problem {
-        eprintln!("warning: {}; serve is going on without it", bad.why);
+        eprintln!("warning: {}; {}", bad.why, bad.going_on());
     }
     for (host, state) in down {
         match state.as_str() {

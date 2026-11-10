@@ -260,6 +260,8 @@ struct Reducer {
     exclude: Vec<String>,
     /// Why config.toml could not be read, until a read succeeds.
     config_bad: Option<crate::config::Bad>,
+    /// A config.toml has read well at least once since serve started.
+    config_read: bool,
     mark_warned: BTreeSet<String>,
     usage: BTreeMap<String, Usage>,
     /// The local rows the usage watcher joins its files to.
@@ -385,6 +387,7 @@ impl Reducer {
             marks: Marks::default(),
             exclude: Vec::new(),
             config_bad: None,
+            config_read: false,
             mark_warned: BTreeSet::new(),
             usage: BTreeMap::new(),
             usage_panes: Arc::default(),
@@ -621,18 +624,19 @@ impl Reducer {
         let now = chrono::Utc::now();
         let mut changed = false;
         let loaded = crate::config::try_load();
-        let bad = loaded.as_ref().err().cloned();
+        let mut bad = loaded.as_ref().err().cloned();
+        if let Some(bad) = &mut bad {
+            bad.last_good = self.config_read;
+        }
         if bad != self.config_bad {
             if let Some(bad) = &bad {
-                eprintln!(
-                    "warning: {}; keeping the hosts and rules serve has",
-                    bad.why
-                );
+                eprintln!("warning: {}; {}", bad.why, bad.going_on());
             }
             self.config_bad = bad;
             changed = true;
         }
         if let Ok(config) = loaded {
+            self.config_read = true;
             self.exclude = config.hosts.exclude.clone();
             changed |= std::mem::replace(&mut self.models, config.models) != self.models;
             let marks = Marks::new(config.mark.as_ref());

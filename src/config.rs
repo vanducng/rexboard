@@ -90,6 +90,20 @@ pub struct Bad {
     /// The `CONFIG` error's message, which the commands that read the file themselves print.
     #[serde(skip)]
     error: String,
+    /// serve had read a good file before this one, and keeps what it took from it.
+    #[serde(default)]
+    pub last_good: bool,
+}
+
+impl Bad {
+    /// What serve does without the file, for a warning.
+    pub fn going_on(&self) -> &'static str {
+        if self.last_good {
+            "serve keeps its last good settings"
+        } else {
+            "serve is using defaults"
+        }
+    }
 }
 
 pub fn load() -> Result<Config> {
@@ -109,6 +123,7 @@ pub fn try_load() -> std::result::Result<Config, Bad> {
                 short: "config.toml unreadable".to_owned(),
                 error: why.clone(),
                 why,
+                last_good: false,
             });
         }
     };
@@ -127,6 +142,7 @@ pub fn try_load() -> std::result::Result<Config, Bad> {
             short,
             why: format!("{}:{at} {}", path.display(), err.message()),
             error: format!("{}: {}", path.display(), err.message()),
+            last_good: false,
         }
     })
 }
