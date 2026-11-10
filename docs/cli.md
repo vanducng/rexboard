@@ -22,6 +22,7 @@ rexboard ls --host mini     # one host: local, or a label from `rex hosts`
 rexboard ls --json          # an array of panes
 rexboard ls --direct        # one snapshot here, without serve
 rexboard ls --view host     # grouped and ordered as a board view (`rexboard views`)
+rexboard ls --view session  # one group per session, on each host that has it
 rexboard ls --filter host:mini --filter tests   # as the board's `/`; each one narrows
 rexboard ls --status q      # one status, by name or first letter, as the board's `f`
 rexboard ls --sort age:desc # within each group, as the board's `o`
@@ -42,7 +43,7 @@ The text table has these columns:
 
 In a terminal each line fits its width: `WHAT` is cut first, then `WHERE` (a long tab first, down to `…` alone below 6 columns, then the session down to an 8-column stem such as `api-…way`, then the last label down to 6 columns, and only then a short tab and the stems). The ` › ` separators always stay. Rows that would still read the same end in `#N`, the pane's place among its tab's agent panes, oldest first. Piped output keeps every column whole. Cells are printed without escape sequences or control characters, since titles and messages come from the programs in each pane. Wide characters such as CJK and emoji count as two columns. `--json` keeps every label and title whole, and the full harness name (`claude-code`).
 
-`--view`, `--filter`, `--status` and `--sort` run the board's own code, so `ls` lists what the board would. `--view NAME` groups and orders as that view does: `status`, `table`, `harness`, `host`, or one per extension field (`rexboard views` lists them). `--filter TEXT` keeps the rows the board's `/` would: words match any label, the message or the harness as one phrase, and `key:value` matches one key (`host`, `state`, `harness`, `session`, `window`, `block`, or a field's name); every term must match, ignoring case. A `key:` that names no key is plain text, as on the board, so `failed: 2` or a URL searches the message; stderr gets a `note:` naming the keys there are. Each `--filter` narrows further. `--status` takes `working`, `done`, `question`, `permission`, `error`, `unreported` or `idle`, or its first letter. `--sort COLUMN` sorts within each group by a column the board can sort by (`state`, `age`, `turn`, `harness`, `host`, `where`, `session`, `window`, `block`, `msg`) or a field, in the direction its first `o` press takes; `:asc` or `:desc` picks one. An unknown view, status, column or direction fails with `USAGE` and lists the ones there are. None of them work with `--direct`. Without them the order is serve's, as above.
+`--view`, `--filter`, `--status` and `--sort` run the board's own code, so `ls` lists what the board would. `--view NAME` groups and orders as that view does: `status`, `table`, `harness`, `host`, `session`, or one per extension field (`rexboard views` lists them). `--filter TEXT` keeps the rows the board's `/` would: words match any label, the message or the harness as one phrase, and `key:value` matches one key (`host`, `state`, `harness`, `session`, `window`, `block`, or a field's name); every term must match, ignoring case. A `key:` that names no key is plain text, as on the board, so `failed: 2` or a URL searches the message; stderr gets a `note:` naming the keys there are. Each `--filter` narrows further. `--status` takes `working`, `done`, `question`, `permission`, `error`, `unreported` or `idle`, or its first letter. `--sort COLUMN` sorts within each group by a column the board can sort by (`state`, `age`, `turn`, `harness`, `host`, `where`, `session`, `window`, `block`, `msg`) or a field, in the direction its first `o` press takes; `:asc` or `:desc` picks one. An unknown view, status, column or direction fails with `USAGE` and lists the ones there are. None of them work with `--direct`. Without them the order is serve's, as above.
 
 ### JSON fields
 
@@ -428,7 +429,7 @@ rexboard views
 The views `ls --view` and the board's `v` take, in the board's order: the built-in ones, then one per extension field. Each says what it groups by, or `one list`. With `--json`:
 
 ```json
-[{"group_by":"status","name":"status"},{"group_by":null,"name":"table"},{"group_by":"harness","name":"harness"},{"group_by":"host","name":"host"}]
+[{"group_by":"status","name":"status"},{"group_by":null,"name":"table"},{"group_by":"harness","name":"harness"},{"group_by":"host","name":"host"},{"group_by":"session","name":"session"}]
 ```
 
 ## `rexboard hosts`

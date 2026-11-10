@@ -76,6 +76,7 @@ pub fn views(fields: Vec<Field>) -> Vec<(String, Option<String>)> {
                 Key::Status => "status".to_owned(),
                 Key::Harness => "harness".to_owned(),
                 Key::Host => "host".to_owned(),
+                Key::Session => "session".to_owned(),
                 Key::Field(id) => id.to_owned(),
             });
             (view.name, by)

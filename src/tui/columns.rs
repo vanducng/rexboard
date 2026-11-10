@@ -744,17 +744,23 @@ impl Columns {
                 );
             }
         }
-        // The location columns: SESSION, WINDOW and BLOCK once WHERE is split, else WHERE.
+        // The location columns: SESSION, WINDOW and BLOCK once WHERE is split (less SESSION when
+        // the view's groups name it), else WHERE.
         let split = [Col::Session, Col::Window, Col::Block];
-        let (group, need, each) = if split.iter().all(|id| self.has(*id)) {
-            (split.to_vec(), longest.parts.to_vec(), PART_MIN)
+        let parts: Vec<(usize, Col)> = (split.iter().copied().enumerate())
+            .filter(|(_, id)| self.has(*id))
+            .collect();
+        let (group, need, each) = if self.has(Col::Window) && self.has(Col::Block) {
+            let group = parts.iter().map(|(_, id)| *id).collect();
+            let need = parts.iter().map(|(i, _)| longest.parts[*i]).collect();
+            (group, need, PART_MIN)
         } else {
             (vec![Col::Where], vec![self.width(Col::Where)], WHERE_MIN)
         };
         let (mut free, mut wanted) = (Vec::new(), Vec::new());
         for (i, id) in group.iter().enumerate() {
             let fixed = ["session", "window", "block"]
-                .get(i)
+                .get(parts.get(i).map_or(i, |(at, _)| *at))
                 .filter(|_| group.len() > 1);
             match fixed.and_then(|name| set(name)) {
                 Some(width) => wants.push((*id, width)),
@@ -1334,7 +1340,7 @@ mod tests {
             Some("click a header to sort · hold Option (iTerm2) or Shift to select text")
         );
         app.toast = None;
-        for _ in 0..4 {
+        for _ in 0..5 {
             press(&mut app, KeyCode::Char('v'));
         }
         assert_eq!(app.view.name, "table");

@@ -32,7 +32,10 @@ pub fn lines(app: &App, now: DateTime<Utc>, width: usize, room: usize) -> Vec<Li
     let Some(row) = app.current() else {
         return match &app.selected {
             Some(Spot::Group(group)) => vec![Line::styled(
-                fit(&format!("{} is folded · za opens it", group.title()), width),
+                fit(
+                    &format!("{} is folded · za opens it", app.group_title(group)),
+                    width,
+                ),
                 theme::quiet(),
             )],
             _ => Vec::new(),

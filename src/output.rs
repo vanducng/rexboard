@@ -166,23 +166,45 @@ pub fn labels(row: &Row, short: bool) -> Vec<&str> {
     }
 }
 
+/// `labels`, and with `in_session` without the session, for a view whose headers name it.
+pub fn place_labels(row: &Row, short: bool, in_session: bool) -> Vec<&str> {
+    let mut labels = labels(row, short);
+    if in_session {
+        labels.remove(0);
+    }
+    labels
+}
+
 /// WHERE for each row in `max` columns. Rows that would still read the same get told apart:
 /// `@HOST` for a host other than `local` when they are on different hosts and the host has no
 /// column of its own, and `#N`, its place among the rows on its host that read the same, when
 /// there are any. The suffix is never cut; the path gives way, down to `…`.
 pub fn wheres(rows: &[Row], max: usize, short: bool, host_column: bool) -> Vec<String> {
-    let first: Vec<String> = rows
-        .iter()
-        .map(|row| path(&labels(row, short), max))
-        .collect();
+    wheres_in(rows, max, short, host_column, false)
+}
+
+/// `wheres`, and with `in_session` the paths leave the session out, so only rows of one session
+/// read as twins, and a row with a session never needs `@HOST`: its group header names it.
+pub fn wheres_in(
+    rows: &[Row],
+    max: usize,
+    short: bool,
+    host_column: bool,
+    in_session: bool,
+) -> Vec<String> {
+    let labels = |row| place_labels(row, short, in_session);
+    let first: Vec<String> = rows.iter().map(|row| path(&labels(row), max)).collect();
     rows.iter()
         .zip(&first)
         .map(|(row, place)| {
+            let host_named = host_column || (in_session && !row.pane.session.is_empty());
             let twins: Vec<&Row> = rows
                 .iter()
                 .zip(&first)
                 .filter(|(other, text)| {
-                    *text == place && (!host_column || other.pane.host == row.pane.host)
+                    *text == place
+                        && (!host_named || other.pane.host == row.pane.host)
+                        && (!in_session || other.pane.session == row.pane.session)
                 })
                 .map(|(other, _)| other)
                 .collect();
@@ -206,7 +228,7 @@ pub fn wheres(rows: &[Row], max: usize, short: bool, host_column: bool) -> Vec<S
             let place = if room < 5 {
                 "…".to_owned()
             } else {
-                path(&labels(row, short), room)
+                path(&labels(row), room)
             };
             format!("{place}{suffix}")
         })
@@ -215,7 +237,8 @@ pub fn wheres(rows: &[Row], max: usize, short: bool, host_column: bool) -> Vec<S
 
 /// BLOCK for each row once WHERE splits, in `block` columns: its name, and `#N` when another row
 /// on its host reads the same in SESSION, WINDOW and BLOCK as drawn `session`, `window` and
-/// `block` columns wide. The suffix is never cut; the name gives way.
+/// `block` columns wide, and in the same session when SESSION is not drawn (`session` 0). The
+/// suffix is never cut; the name gives way.
 pub fn blocks(rows: &[Row], session: usize, window: usize, block: usize) -> Vec<String> {
     let shown: Vec<(String, String, String)> = rows
         .iter()
@@ -233,7 +256,11 @@ pub fn blocks(rows: &[Row], session: usize, window: usize, block: usize) -> Vec<
             let twins: Vec<&Row> = rows
                 .iter()
                 .zip(&shown)
-                .filter(|(other, text)| *text == own && other.pane.host == row.pane.host)
+                .filter(|(other, text)| {
+                    *text == own
+                        && other.pane.host == row.pane.host
+                        && (session > 0 || other.pane.session == row.pane.session)
+                })
                 .map(|(other, _)| other)
                 .collect();
             if twins.len() > 1 {

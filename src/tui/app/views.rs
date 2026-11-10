@@ -98,6 +98,19 @@ impl App {
             .map(|column| column.id)
     }
 
+    /// A group header's name: a session on two hosts carries its host, `API @MINI`.
+    pub fn group_title(&self, bucket: &Bucket) -> String {
+        match bucket {
+            Bucket::Session { session, host }
+                if (self.rows.iter())
+                    .any(|r| r.pane.session == *session && r.pane.host != *host) =>
+            {
+                format!("{} @{}", bucket.title(), host.to_uppercase())
+            }
+            _ => bucket.title(),
+        }
+    }
+
     /// Switches to `view`; the selection keeps its row.
     pub(super) fn show(&mut self, view: View) {
         self.show_view(view);
@@ -307,7 +320,8 @@ impl App {
     }
 
     /// The list's columns on a board `board` wide, `list` of it for the list: a view grouped by
-    /// harness or host leaves that column to its group headers, and nerd marks widen HARNESS.
+    /// harness, host or session leaves that column to its group headers, and nerd marks widen
+    /// HARNESS.
     pub fn columns(&self, board: u16, list: usize) -> Columns {
         let fields: Vec<_> = (self.field_columns().into_iter())
             .filter(|c| self.field_has_values(id_of(c)))
@@ -316,6 +330,7 @@ impl App {
         match self.view.group_by {
             Some(Key::Harness) => columns.resize(Col::Harness, 0),
             Some(Key::Host) => columns.resize(Col::Host, 0),
+            Some(Key::Session) => columns.resize(Col::Session, 0),
             _ => {}
         }
         if self.nerd {
@@ -340,8 +355,13 @@ impl App {
                     widest(&|row| clean(&row.pane.tab)).min(LABEL_MAX),
                     widest(&crate::output::name).min(LABEL_MAX) + 3,
                 ],
-                place: widest(&|row| path(&labels(row, columns.tier != Tier::Wide), usize::MAX))
-                    + 3,
+                place: widest(&|row| {
+                    let in_session = self.view.group_by == Some(Key::Session);
+                    path(
+                        &crate::output::place_labels(row, columns.tier != Tier::Wide, in_session),
+                        usize::MAX,
+                    )
+                }) + 3,
                 fields: self
                     .fields
                     .iter()

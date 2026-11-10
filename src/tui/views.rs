@@ -1,5 +1,5 @@
 //! Views: a group-by key plus a sort. `status` is the board as serve orders it; `table`,
-//! `harness` and `host` regroup the same rows.
+//! `harness`, `host` and `session` regroup the same rows.
 
 use super::columns::{Sort, compare};
 use super::theme;
@@ -11,6 +11,7 @@ pub enum Key {
     Status,
     Harness,
     Host,
+    Session,
     /// An extension field, by its id.
     Field(&'static str),
 }
@@ -29,6 +30,7 @@ pub fn views() -> Vec<View> {
         ("table", None),
         ("harness", Some(Key::Harness)),
         ("host", Some(Key::Host)),
+        ("session", Some(Key::Session)),
     ]
     .into_iter()
     .map(|(name, group_by)| View {
@@ -49,6 +51,11 @@ impl Default for View {
 pub enum Bucket {
     Status(Group),
     Value(String),
+    /// A session label on one host: the same name on two hosts is two groups.
+    Session {
+        session: String,
+        host: String,
+    },
 }
 
 impl Bucket {
@@ -57,6 +64,7 @@ impl Bucket {
         match self {
             Bucket::Status(group) => theme::group_title(*group).to_owned(),
             Bucket::Value(value) => value.to_uppercase(),
+            Bucket::Session { session, .. } => session.to_uppercase(),
         }
     }
 }
@@ -70,6 +78,11 @@ fn value(key: Key, row: &Row) -> Bucket {
             _ => "?".to_owned(),
         }),
         Key::Host => Bucket::Value(row.pane.host.clone()),
+        Key::Session if row.pane.session.is_empty() => Bucket::Value(NONE.to_owned()),
+        Key::Session => Bucket::Session {
+            session: row.pane.session.clone(),
+            host: row.pane.host.clone(),
+        },
         Key::Field(id) => {
             Bucket::Value(row.ext.get(id).cloned().unwrap_or_else(|| NONE.to_owned()))
         }
@@ -316,11 +329,14 @@ mod tests {
     fn v_cycles_the_views_and_comes_back_to_status() {
         let mut app = app();
         let mut seen = vec![app.view.name.clone()];
-        for _ in 0..4 {
+        for _ in 0..5 {
             press(&mut app, KeyCode::Char('v'));
             seen.push(app.view.name.clone());
         }
-        assert_eq!(seen, ["status", "table", "harness", "host", "status"]);
+        assert_eq!(
+            seen,
+            ["status", "table", "harness", "host", "session", "status"]
+        );
     }
 
     #[test]
@@ -460,7 +476,7 @@ mod tests {
         while app.selected != Some(Spot::Row("mini/run".into())) {
             press(&mut app, KeyCode::Char('j'));
         }
-        for _ in 0..3 {
+        for _ in 0..4 {
             press(&mut app, KeyCode::Char('v'));
         }
         assert_eq!(app.view.name, "status");
@@ -468,6 +484,103 @@ mod tests {
             app.selected,
             Some(Spot::Group(Bucket::Status(Group::Working))),
             "the folded group's header, not the first row"
+        );
+    }
+
+    /// Two hosts with an `api` session each, `web` on one, and a row with no session label.
+    fn sessions() -> Vec<Row> {
+        let mut rows = Vec::new();
+        for (key, session) in [
+            ("mini/a-one", "web"),
+            ("local/b-one", "api"),
+            ("mini/c-one", "api"),
+            ("local/d-one", ""),
+            ("local/e-one", "api"),
+        ] {
+            let mut r = row(key, "idle", "quiet", true);
+            r.pane.session = session.to_owned();
+            rows.push(r);
+        }
+        rows
+    }
+
+    fn at(session: &str, host: &str) -> Option<Bucket> {
+        Some(Bucket::Session {
+            session: session.to_owned(),
+            host: host.to_owned(),
+        })
+    }
+
+    #[test]
+    fn session_groups_by_host_and_session_a_to_z_with_no_session_last() {
+        let rows = sessions();
+        let groups = arrange(&rows, &named("session"), None);
+        let buckets: Vec<_> = groups.iter().map(|(b, _)| b.clone()).collect();
+        assert_eq!(
+            buckets,
+            [
+                at("api", "local"),
+                at("api", "mini"),
+                at("web", "mini"),
+                Some(Bucket::Value(NONE.to_owned())),
+            ],
+            "one group per host and session, and `-` last"
+        );
+        assert_eq!(
+            keys(&rows, &groups),
+            [
+                "local/b-one",
+                "local/e-one",
+                "mini/c-one",
+                "mini/a-one",
+                "local/d-one"
+            ]
+        );
+    }
+
+    #[test]
+    fn session_groups_keep_the_status_orders_inside_and_follow_a_sort() {
+        let mut rows = sessions();
+        rows[1].since = "2026-01-01T05:00:00Z".into();
+        rows[4].since = "2026-01-01T01:00:00Z".into();
+        let sorted = arrange(&rows, &named("session"), Some((Col::Age, Dir::Down)));
+        assert_eq!(sorted[0].1, [4, 1], "the older row first in AGE order");
+    }
+
+    #[test]
+    fn a_header_names_the_host_only_for_a_session_on_more_than_one() {
+        let mut app = App::default();
+        app.set_rows(sessions(), hosts());
+        let title = |session: &str, host: &str| app.group_title(&at(session, host).unwrap());
+        assert_eq!(title("api", "local"), "API @LOCAL");
+        assert_eq!(title("api", "mini"), "API @MINI");
+        assert_eq!(title("web", "mini"), "WEB", "only on one host");
+    }
+
+    #[test]
+    fn a_field_named_session_keeps_its_view_under_its_id() {
+        use crate::client::Field;
+        let mut app = App::default();
+        app.set_extensions(
+            vec![Field {
+                id: "ext.session".into(),
+                name: "session".into(),
+                title: "SESSION".into(),
+                ..Field::default()
+            }],
+            std::collections::BTreeMap::new(),
+        );
+        let names: Vec<String> = app.views().into_iter().map(|v| v.name).collect();
+        assert_eq!(
+            names,
+            [
+                "status",
+                "table",
+                "harness",
+                "host",
+                "session",
+                "ext.session"
+            ]
         );
     }
 }

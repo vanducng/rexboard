@@ -16,7 +16,7 @@ use super::status::ALL;
 use super::theme;
 use super::views::{Bucket, Key, View};
 use crate::board::Row;
-use crate::output::{blocks, fit, wheres};
+use crate::output::{blocks, fit, wheres_in};
 
 /// Below this many rows the column header and the blank row above it are left out, so no row
 /// is lost to them.
@@ -415,12 +415,13 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
     let offset = scroll_offset(at, kept, items.len(), room);
     app.drawn.set((area.y, offset, room));
     let places = if columns.has(Col::Where) {
-        wheres(
+        wheres_in(
             &app.rows,
             columns.width(Col::Where).saturating_sub(1),
             columns.tier != Tier::Wide,
             // The host view's groups already name the host, so its rows need no `@HOST`.
             columns.has(Col::Host) || app.view.group_by == Some(Key::Host),
+            app.view.group_by == Some(Key::Session),
         )
     } else {
         blocks(
@@ -441,7 +442,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
                 count,
                 folded,
             } => group_header_line(
-                bucket,
+                &app.group_title(bucket),
                 *count,
                 *folded,
                 group_mark(app, bucket),
@@ -543,7 +544,7 @@ fn group_mark(app: &App, bucket: &Bucket) -> Option<&'static str> {
 }
 
 fn group_header_line(
-    bucket: &Bucket,
+    name: &str,
     count: usize,
     folded: bool,
     mark: Option<&str>,
@@ -552,7 +553,7 @@ fn group_header_line(
 ) -> Line<'static> {
     let fold = if folded { theme::FOLDED } else { "" };
     let mark = mark.map(|m| format!("{m} ")).unwrap_or_default();
-    let title = format!("{fold}{mark}{} ({count}) ", bucket.title());
+    let title = format!("{fold}{mark}{name} ({count}) ");
     let fill = theme::GROUP_FILL.repeat(width.saturating_sub(title.width()));
     let line = Line::styled(format!("{title}{fill}"), theme::header());
     if selected {
@@ -3277,9 +3278,11 @@ mod extension_tests {
         let names: Vec<String> = app.views().into_iter().map(|v| v.name).collect();
         assert_eq!(
             names,
-            ["status", "table", "harness", "host", "rig", "project"]
+            [
+                "status", "table", "harness", "host", "session", "rig", "project"
+            ]
         );
-        for _ in 0..4 {
+        for _ in 0..5 {
             press(&mut app, KeyCode::Char('v'));
         }
         assert_eq!(app.view.name, "rig");
@@ -3505,5 +3508,127 @@ mod extension_tests {
             .map(|w| render(&plain, w, 30))
             .into();
         assert_eq!(before, after, "with no extensions the board is as it was");
+    }
+}
+
+#[cfg(test)]
+mod session_view_tests {
+    use crate::tui::app::App;
+    use crate::tui::app::testkit::{app, hosts, render};
+    use crate::tui::columns::Col;
+    use crate::tui::views::views;
+
+    fn in_session_view() -> App {
+        let mut app = app();
+        let mut rows = app.rows.clone();
+        for row in &mut rows {
+            row.pane.session = if row.key.starts_with("mini") {
+                "api".into()
+            } else {
+                "web".into()
+            };
+        }
+        app.set_rows(rows, hosts());
+        app.view = views().into_iter().find(|v| v.name == "session").unwrap();
+        app
+    }
+
+    fn header(text: &str) -> &str {
+        text.lines().find(|l| l.contains("STATE")).unwrap()
+    }
+
+    #[test]
+    fn split_layout_drops_session_and_widens_the_rest() {
+        let app = in_session_view();
+        let mut status = in_session_view();
+        status.view = views().remove(0);
+        for width in [140u16, 200] {
+            let text = render(&app, width, 30);
+            let (shown, plain) = (header(&text), render(&status, width, 30));
+            assert!(
+                !shown.contains("SESSION") && shown.contains("WINDOW") && shown.contains("BLOCK"),
+                "{width}: {shown}"
+            );
+            assert!(header(&plain).contains("SESSION"), "{width}");
+            assert!(
+                text.contains("API @MINI") || text.contains("API ("),
+                "{width}:\n{text}"
+            );
+            assert_eq!(
+                app.columns(width, usize::from(width)).width(Col::Session),
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn unsplit_where_leaves_out_its_session() {
+        let app = in_session_view();
+        let text = render(&app, 120, 30);
+        assert!(header(&text).contains("WHERE"), "{text}");
+        let row = text.lines().find(|l| l.contains("seat-b")).unwrap();
+        assert!(row.contains("main › seat-b"), "{row}");
+        assert!(!row.contains("api ›"), "{row}");
+        let mut status = in_session_view();
+        status.view = views().remove(0);
+        let plain = render(&status, 120, 30);
+        let row = plain.lines().find(|l| l.contains("seat-b")).unwrap();
+        assert!(row.contains("api › main › seat-b"), "{row}");
+    }
+
+    #[test]
+    fn rows_alike_in_different_sessions_are_not_numbered_as_twins() {
+        let mut app = in_session_view();
+        let mut rows = app.rows.clone();
+        let mut twin = rows[0].clone();
+        twin.key = "mini/seat-z".into();
+        twin.pane.block_id = "seat-z".into();
+        twin.pane.pane = rows[0].pane.pane.clone();
+        twin.pane.session = "other".into();
+        rows.push(twin);
+        app.set_rows(rows, hosts());
+        for width in [120u16, 140] {
+            let text = render(&app, width, 40);
+            assert!(
+                !text.contains(" #1") && !text.contains(" #2"),
+                "{width}:\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn rows_with_no_session_on_two_hosts_keep_their_host_where_nothing_names_it() {
+        let mut app = in_session_view();
+        let mut rows = app.rows.clone();
+        for (key, host) in [("mini/none-a", "mini"), ("local/none-b", "studio")] {
+            let mut row = rows[0].clone();
+            row.key = key.into();
+            row.pane.block_id = key.split_once('/').unwrap().1.into();
+            row.pane.pane = "seat-n".into();
+            row.pane.session = String::new();
+            row.pane.host = host.into();
+            rows.push(row);
+        }
+        app.set_rows(rows, hosts());
+        let text = render(&app, 50, 40);
+        let places: Vec<&str> = text
+            .lines()
+            .filter(|l| l.contains("seat-n"))
+            .map(|l| {
+                let place = &l[l.find("seat-n").unwrap()..];
+                &place[..place.find("  ").unwrap_or(place.len())]
+            })
+            .collect();
+        assert_eq!(
+            places,
+            ["seat-n @mini", "seat-n @studio"],
+            "no HOST column and no header names the host:\n{text}"
+        );
+        assert!(
+            !text
+                .lines()
+                .any(|l| l.contains("seat-b  ") && l.contains('@')),
+            "a row with a session needs no @HOST:\n{text}"
+        );
     }
 }
