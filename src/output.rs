@@ -151,7 +151,7 @@ pub fn what(row: &Row) -> &str {
 }
 
 /// A pane label that names nothing: `shell`, or what runs in the pane.
-fn generic(pane: &Pane) -> bool {
+pub(crate) fn generic(pane: &Pane) -> bool {
     pane.pane == "shell" || pane.process.as_deref() == Some(pane.pane.as_str())
 }
 

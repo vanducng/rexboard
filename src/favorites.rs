@@ -19,6 +19,10 @@ pub const FAVORITE: &str = "favorite";
 /// An entry whose pane has not been on the board for this long goes at the next save.
 const KEEP_SECS: i64 = 30 * 24 * 60 * 60;
 
+/// A live entry is written again once it is this much older than now, so a favorite on the board
+/// all the time is never dropped, and an idle board writes at most once a day.
+const REFRESH_SECS: i64 = 24 * 60 * 60;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Id {
     pub host: String,
@@ -28,10 +32,11 @@ pub struct Id {
 }
 
 impl Id {
-    /// None for a pane with no label of its own: nothing names it but its place.
+    /// None for a pane with no label of its own, or one that names nothing (`shell`, or what runs
+    /// in it): the board shows such a pane as `session › tab`, so nothing names it but its place.
     pub fn of(row: &Row) -> Option<Id> {
         let pane = &row.pane;
-        (!pane.pane.is_empty()).then(|| Id {
+        (!pane.pane.is_empty() && !crate::output::generic(pane)).then(|| Id {
             host: pane.host.clone(),
             session: pane.session.clone(),
             tab: pane.tab.clone(),
@@ -102,11 +107,7 @@ impl Favorites {
 /// be read is left alone: it is the user's list.
 pub fn set(path: &Path, id: &Id, on: bool, live: &[Id], now: i64) -> Result<(), String> {
     let mut file = read(path).map_err(|why| format!("{why}; move it aside to start a new list"))?;
-    for entry in &mut file.favorites {
-        if live.contains(&entry.id) {
-            entry.seen = now;
-        }
-    }
+    see(&mut file, live, now, 0);
     let at = file.favorites.iter().position(|entry| entry.id == *id);
     match (on, at) {
         (true, None) => file.favorites.push(Entry {
@@ -118,6 +119,33 @@ pub fn set(path: &Path, id: &Id, on: bool, live: &[Id], now: i64) -> Result<(), 
             file.favorites.remove(at);
         }
         (false, None) => {}
+    }
+    file.favorites.retain(|entry| now - entry.seen <= KEEP_SECS);
+    write(path, &file).map_err(|err| format!("{}: {err}", path.display()))
+}
+
+/// Sets `seen` to `now` on the entries whose pane is live and was seen `older` seconds ago or
+/// more; says whether it changed one.
+fn see(file: &mut File, live: &[Id], now: i64, older: i64) -> bool {
+    let mut changed = false;
+    for entry in &mut file.favorites {
+        if live.contains(&entry.id) && now - entry.seen >= older && entry.seen != now {
+            entry.seen = now;
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// Keeps the entries of the panes on the board now from aging out: for each one last seen over a
+/// day ago, `seen` becomes `now`, and the file is written only then. A file that cannot be read is
+/// left alone.
+pub fn touch(path: &Path, live: &[Id], now: i64) -> Result<(), String> {
+    let Ok(mut file) = read(path) else {
+        return Ok(());
+    };
+    if !see(&mut file, live, now, REFRESH_SECS) {
+        return Ok(());
     }
     file.favorites.retain(|entry| now - entry.seen <= KEEP_SECS);
     write(path, &file).map_err(|err| format!("{}: {err}", path.display()))
@@ -342,5 +370,76 @@ mod tests {
         let mut back = vec![pane("local", "main", "seat-a", "b2")];
         Favorites::load(&path).0.apply(&mut back);
         assert!(back[0].marked, "the labels returned");
+    }
+
+    #[test]
+    fn a_pane_labelled_shell_or_after_its_program_is_no_favorite() {
+        let mut row = pane("local", "main", "shell", "b");
+        assert_eq!(Id::of(&row), None, "shell names nothing");
+        row.pane.pane = "zsh".into();
+        row.pane.process = Some("zsh".into());
+        assert_eq!(Id::of(&row), None, "the label is the program");
+        row.pane.process = Some("tmux".into());
+        assert_eq!(Id::of(&row), Some(id("zsh")));
+        let favorites = Favorites(vec![id("shell")]);
+        let mut rows = vec![pane("local", "main", "shell", "b")];
+        favorites.apply(&mut rows);
+        assert!(
+            !rows[0].marked,
+            "an old entry for a generic label shows nothing"
+        );
+    }
+
+    #[test]
+    fn a_favorite_on_the_board_never_ages_out_even_when_a_save_finds_its_pane_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = file(&dir);
+        let day = 24 * 60 * 60;
+        set(&path, &id("seat-a"), true, &[], 0).unwrap();
+        set(&path, &id("gone"), true, &[], 0).unwrap();
+        for d in [10, 20, 28] {
+            touch(&path, &[id("seat-a")], d * day).unwrap();
+        }
+        // On day 35 the pane is briefly absent when a toggle saves: without the refreshes its
+        // entry, last written on day 0, would go.
+        set(&path, &id("seat-b"), true, &[], 35 * day).unwrap();
+        assert_eq!(
+            loaded(&path),
+            [id("seat-a"), id("seat-b")],
+            "gone was never live"
+        );
+    }
+
+    #[test]
+    fn a_rescan_writes_only_for_a_live_entry_last_seen_over_a_day_ago() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = file(&dir);
+        let day = 24 * 60 * 60;
+        set(&path, &id("seat-a"), true, &[], 100).unwrap();
+        let before = fs::read_to_string(&path).unwrap();
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o500)).unwrap();
+        let quiet = touch(&path, &[id("seat-a")], 100 + day - 1);
+        let absent = touch(&path, &[id("other")], 100 + 40 * day);
+        let due = touch(&path, &[id("seat-a")], 100 + day);
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(
+            quiet.is_ok() && absent.is_ok(),
+            "nothing due, nothing written"
+        );
+        assert!(due.is_err(), "a day old: it tried to write");
+        assert_eq!(fs::read_to_string(&path).unwrap(), before);
+        touch(&path, &[id("seat-a")], 100 + day).unwrap();
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains(&format!("{}", 100 + day))
+        );
+        fs::write(&path, "garbage").unwrap();
+        assert_eq!(
+            touch(&path, &[id("seat-a")], 100 + 9 * day),
+            Ok(()),
+            "an unreadable file is left alone"
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), "garbage");
     }
 }

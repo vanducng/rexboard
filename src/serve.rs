@@ -635,9 +635,20 @@ impl Reducer {
         self.board.mark_stale(host)
     }
 
-    /// Re-reads favorites.json, so a hand edit shows; a file that cannot be read means none, said once.
+    /// Re-reads favorites.json, so a hand edit shows, after keeping the entries of the panes on the
+    /// board from aging out; a file that cannot be read means none, said once.
     fn sync_favorites(&mut self) {
         let Ok(paths) = Paths::find() else { return };
+        let now = chrono::Utc::now();
+        let live: Vec<_> = self
+            .board
+            .rows(now)
+            .iter()
+            .filter_map(favorites::Id::of)
+            .collect();
+        if let Err(why) = favorites::touch(&paths.favorites(), &live, now.timestamp()) {
+            eprintln!("warning: favorites: {why}");
+        }
         let (favorites, bad) = Favorites::load(&paths.favorites());
         if bad != self.favorites_bad {
             if let Some(why) = &bad {
@@ -661,7 +672,24 @@ impl Reducer {
     /// `*`: makes the pane with these labels a favorite or not, in favorites.json, and says what
     /// else still marks it.
     fn favorite(&mut self, id: &favorites::Id, on: bool) -> Value {
-        if id.pane.is_empty() {
+        let now = chrono::Utc::now();
+        let names_nothing = id.pane.is_empty()
+            || (on
+                && self.board.rows(now).iter().any(|row| {
+                    let pane = &row.pane;
+                    (
+                        pane.host.as_str(),
+                        pane.session.as_str(),
+                        pane.tab.as_str(),
+                        pane.pane.as_str(),
+                    ) == (
+                        id.host.as_str(),
+                        id.session.as_str(),
+                        id.tab.as_str(),
+                        id.pane.as_str(),
+                    ) && crate::output::generic(pane)
+                }));
+        if names_nothing {
             return error_line(
                 "USAGE",
                 "this pane has no label of its own; label it in Rex to favorite it",
@@ -670,7 +698,6 @@ impl Reducer {
         let Ok(paths) = Paths::find() else {
             return error_line("ERROR", "no state dir");
         };
-        let now = chrono::Utc::now();
         let live: Vec<_> = self
             .board
             .rows(now)

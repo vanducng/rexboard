@@ -984,6 +984,19 @@ mod tests {
             app.toast(),
             Some("this pane has no label of its own · label it in Rex to favorite it")
         );
+        let mut rows = app.rows.clone();
+        rows[0].pane.pane = "shell".into();
+        app.set_rows(rows, app.hosts.clone());
+        app.say("");
+        assert_eq!(
+            key_at(&mut app, '*', Instant::now()),
+            None,
+            "shell names nothing"
+        );
+        assert_eq!(
+            app.toast(),
+            Some("this pane has no label of its own · label it in Rex to favorite it")
+        );
         let mut empty = crate::tui::app::testkit::app();
         empty.selected = None;
         assert_eq!(
