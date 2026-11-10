@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/vanducng/rexboard/compare/v0.28.0...v0.29.0) (2026-11-10)
+
+
+### Features
+
+* **cli:** filter rows by the source that marked them ([#154](https://github.com/vanducng/rexboard/issues/154)) ([d108d77](https://github.com/vanducng/rexboard/commit/d108d7744f5e328616a598638cee74094c46cd7a))
+
 ## [0.28.0](https://github.com/vanducng/rexboard/compare/v0.27.1...v0.28.0) (2026-11-10)
 
 
