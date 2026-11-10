@@ -23,6 +23,9 @@ impl App {
         let mut free = Vec::new();
         for term in query.split_whitespace() {
             let keyed = term.split_once(':').and_then(|(key, want)| {
+                if key == "mark" {
+                    return Some(row.marked_by_source(want));
+                }
                 let value = self.value_of(row, key)?;
                 Some(value.is_some_and(|v| v.to_lowercase().contains(want)))
             });
@@ -54,7 +57,9 @@ impl App {
             .to_lowercase()
             .split_whitespace()
             .filter_map(|term| term.split_once(':'))
-            .find(|(key, _)| !key.is_empty() && self.value_of(probe, key).is_none())
+            .find(|(key, _)| {
+                !key.is_empty() && *key != "mark" && self.value_of(probe, key).is_none()
+            })
             .map(|(key, _)| key.to_owned())
     }
 
@@ -84,6 +89,69 @@ impl App {
 mod tests {
     use super::*;
     use crate::tui::app::testkit::*;
+
+    /// `marked_board`'s seat-b (config) and codex (config, favorite), and a favorite and `team`
+    /// mark on `local/seat-a`.
+    fn by_source() -> App {
+        let mut app = marked_board();
+        let mut rows = app.rows.clone();
+        for row in &mut rows {
+            let more: &[&str] = match row.key.as_str() {
+                "mini/codex" => &["favorite"],
+                "local/seat-a" => &["team", "favorite"],
+                _ => &[],
+            };
+            row.marked_by.extend(more.iter().map(|s| (*s).to_owned()));
+            row.marked = !row.marked_by.is_empty();
+        }
+        app.set_rows(rows, app.hosts.clone());
+        app
+    }
+
+    fn kept(app: &mut App, text: &str) -> Vec<String> {
+        app.filter = tui_input::Input::new(text.to_owned());
+        app.rows
+            .iter()
+            .filter(|row| app.matches(row))
+            .map(|row| row.key.clone())
+            .collect()
+    }
+
+    #[test]
+    fn mark_keeps_the_rows_a_source_marked_and_bare_or_any_keeps_every_marked_row() {
+        let mut app = by_source();
+        let all = ["mini/seat-b", "mini/codex", "local/seat-a"];
+        assert_eq!(kept(&mut app, "mark:config"), ["mini/seat-b", "mini/codex"]);
+        assert_eq!(
+            kept(&mut app, "mark:favorite"),
+            ["mini/codex", "local/seat-a"]
+        );
+        assert_eq!(kept(&mut app, "mark:team"), ["local/seat-a"]);
+        assert_eq!(kept(&mut app, "mark:"), all);
+        assert_eq!(kept(&mut app, "mark:any"), all);
+        assert_eq!(
+            kept(&mut app, "MARK:Favorite"),
+            ["mini/codex", "local/seat-a"]
+        );
+        assert_eq!(
+            kept(&mut app, "mark:favorite host:mini"),
+            ["mini/codex"],
+            "and-ed with the other terms"
+        );
+    }
+
+    #[test]
+    fn a_source_nothing_has_is_an_empty_result_not_an_unknown_key() {
+        let mut app = by_source();
+        assert!(kept(&mut app, "mark:nope").is_empty());
+        assert_eq!(app.unknown_key(), None, "mark is a key");
+        assert!(
+            kept(&mut app, "mark:fav").is_empty(),
+            "a name, not a part of one"
+        );
+        kept(&mut app, "nope:1");
+        assert_eq!(app.unknown_key().as_deref(), Some("nope"));
+    }
 
     #[test]
     fn filter_narrows_across_groups() {

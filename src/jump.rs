@@ -30,11 +30,13 @@ pub fn jump(target: &str, json: bool) -> Result<()> {
 }
 
 /// `rexboard next`: the NEEDS YOU row after this pane (`REX_BLOCK`), unseen rows first; with
-/// `marked`, the marked row after it instead.
-pub fn next(back: bool, marked: bool, json: bool) -> Result<()> {
+/// `marked` (a source, or `any`), the row that source marked after it instead.
+pub fn next(back: bool, marked: Option<&str>, json: bool) -> Result<()> {
     let after = std::env::var("REX_BLOCK").ok().filter(|id| !id.is_empty());
-    let reply =
-        client::call(&json!({ "cmd": "next", "after": after, "back": back, "marked": marked }))?;
+    let reply = client::call(&json!({
+        "cmd": "next", "after": after, "back": back,
+        "marked": marked.is_some(), "source": marked,
+    }))?;
     let row: Row = serde_json::from_value(reply["row"].clone())
         .map_err(|err| Error::serve(format!("serve sent a row in an unexpected shape: {err}")))?;
     go(&row)?;

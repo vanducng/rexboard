@@ -78,10 +78,11 @@ pub enum Command {
         /// Go the other way.
         #[arg(long)]
         back: bool,
-        /// Go to the next marked pane (a `[[mark]]` rule in config.toml) instead. Exit 1 when no
-        /// row is marked.
-        #[arg(long)]
-        marked: bool,
+        /// Go to the next marked pane instead (a `[[mark]]` rule, a favorite or an extension),
+        /// or with a SOURCE (`config`, `favorite`, an extension's name) the next one it marked.
+        /// Exit 1 when no row is.
+        #[arg(long, value_name = "SOURCE", num_args = 0..=1, default_missing_value = "any")]
+        marked: Option<String>,
     },
     /// Pick a pane from the board's list and go to it. Enter goes and exits 0; esc exits 1.
     Pick,
@@ -269,15 +270,16 @@ pub struct LsArgs {
     /// Take one snapshot here instead of asking serve.
     #[arg(long, conflicts_with_all = ["view", "filter", "status", "sort"])]
     pub direct: bool,
-    /// Only the rows a `[[mark]]` rule in config.toml marks.
-    #[arg(long)]
-    pub marked: bool,
+    /// Only the marked rows (a `[[mark]]` rule, a favorite or an extension), or with a SOURCE
+    /// (`config`, `favorite`, an extension's name) only those it marked.
+    #[arg(long, value_name = "SOURCE", num_args = 0..=1, default_missing_value = "any")]
+    pub marked: Option<String>,
     /// Group and order the rows as this board view does (`rexboard views` lists them).
     #[arg(long, value_name = "NAME")]
     pub view: Option<String>,
     /// Keep only rows this text matches, as the board's `/` does: words match any label, and
-    /// `key:value` one key (host, state, harness, session, window, block, a field). Repeat to
-    /// narrow further.
+    /// `key:value` one key (host, state, harness, session, window, block, mark, a field). Repeat
+    /// to narrow further.
     #[arg(long, value_name = "TEXT")]
     pub filter: Vec<String>,
     /// Keep only one status, by name or first letter: working, done, question, permission,
