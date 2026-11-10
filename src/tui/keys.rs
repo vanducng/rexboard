@@ -222,7 +222,7 @@ pub const BOARD: &[Entry] = &[
         Act::Favorite,
         &[&[c('*')]],
         "*",
-        "favorite the row, or not",
+        "favorite or unfavorite the row",
         "favorite",
     ),
     digits(
