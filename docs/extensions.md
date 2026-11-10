@@ -215,4 +215,4 @@ It exits 1 with `EXTENSION` when the extension, action or row is not there, the 
 
 ### `rexboard ext new NAME`
 
-Copies the example into `$XDG_CONFIG_HOME/rexboard/extensions/NAME`, with `NAME` as its name, and prints the next steps. `ext test NAME` passes on it unchanged. It fails with `EXTENSION` when the directory is already there, and with `USAGE` (exit 2) when `NAME` is not `[a-z0-9-]+`.
+Copies the example into `$XDG_CONFIG_HOME/rexboard/extensions/NAME`, with `NAME` as its name, and prints the next steps. `ext test NAME` passes on it unchanged. It fails with `EXTENSION` when the directory is already there, and with `USAGE` (exit 2) when `NAME` is not `[a-z0-9-]+` or is reserved (`config` and `favorite`, the sources of marks that are not extensions).

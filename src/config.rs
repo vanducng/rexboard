@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 
@@ -80,7 +80,37 @@ pub fn path() -> Option<PathBuf> {
     Some(base.join("rexboard/config.toml"))
 }
 
+/// A config.toml that could not be read: what `load` fails with, and how serve says it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Bad {
+    /// For the board's top bar: `config.toml bad: line 12`.
+    pub short: String,
+    /// For a warning: the file, the line and what is wrong.
+    pub why: String,
+    /// The `CONFIG` error's message, which the commands that read the file themselves print.
+    #[serde(skip)]
+    error: String,
+    /// serve had read a good file before this one, and keeps what it took from it.
+    #[serde(default)]
+    pub last_good: bool,
+}
+
+impl Bad {
+    /// What serve does without the file, for a warning.
+    pub fn going_on(&self) -> &'static str {
+        if self.last_good {
+            "serve keeps its last good settings"
+        } else {
+            "serve is using defaults"
+        }
+    }
+}
+
 pub fn load() -> Result<Config> {
+    try_load().map_err(|bad| Error::Config(bad.error))
+}
+
+pub fn try_load() -> std::result::Result<Config, Bad> {
     let Some(path) = path() else {
         return Ok(Config::default());
     };
@@ -88,12 +118,31 @@ pub fn load() -> Result<Config> {
         Ok(text) => text,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Config::default()),
         Err(err) => {
-            return Err(Error::Config(format!(
-                "could not read {}: {err}",
-                path.display()
-            )));
+            let why = format!("could not read {}: {err}", path.display());
+            return Err(Bad {
+                short: "config.toml unreadable".to_owned(),
+                error: why.clone(),
+                why,
+                last_good: false,
+            });
         }
     };
-    toml::from_str(&text)
-        .map_err(|err| Error::Config(format!("{}: {}", path.display(), err.message())))
+    toml::from_str(&text).map_err(|err| {
+        let line = err
+            .span()
+            .map(|span| text[..span.start.min(text.len())].matches('\n').count() + 1);
+        let (short, at) = match line {
+            Some(line) => (
+                format!("config.toml bad: line {line}"),
+                format!(" line {line}:"),
+            ),
+            None => ("config.toml bad".to_owned(), String::new()),
+        };
+        Bad {
+            short,
+            why: format!("{}:{at} {}", path.display(), err.message()),
+            error: format!("{}: {}", path.display(), err.message()),
+            last_good: false,
+        }
+    })
 }

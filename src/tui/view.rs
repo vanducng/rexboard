@@ -282,7 +282,8 @@ fn view_label(app: &App) -> Option<String> {
     })
 }
 
-/// Hosts that are not up, then extensions whose last run failed: `mini down, ext fake failed`.
+/// Hosts that are not up, a config.toml serve cannot read, then extensions whose last run failed:
+/// `mini down, config.toml bad: line 12, ext fake failed`.
 /// Failed extensions that would not fit after `rexboard · ` collapse to `2 ext failed`.
 fn alerts(app: &App, width: usize) -> String {
     let mut alerts: Vec<String> = app
@@ -291,6 +292,7 @@ fn alerts(app: &App, width: usize) -> String {
         .filter(|(_, state)| *state != "up")
         .map(|(host, state)| format!("{host} {state}"))
         .collect();
+    alerts.extend(app.config_bad.clone());
     let failed: Vec<&str> = app
         .ext_runs
         .iter()
@@ -325,6 +327,7 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
     );
     let healthy = app.hosts.keys().cloned().collect::<Vec<_>>().join(" + ");
     let label = view_label(app);
+    let shows_hosts = app.link == Link::Up && app.hosts.values().all(|s| s == "up");
     let clock = now.with_timezone(&Local).format("%H:%M").to_string();
     let width = usize::from(area.width);
     // Alerts stay; the host list goes first, then the counts, then the clock.
@@ -346,7 +349,7 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
                     3 + alert.width()
                 };
             let right = if k { clock.width() } else { 0 }
-                + if h && alert.is_empty() {
+                + if h && shows_hosts {
                     3 + healthy.width()
                 } else {
                     0
@@ -371,7 +374,7 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
     if with_clock {
         right.push(Span::styled(clock, theme::quiet()));
     }
-    if with_hosts && app.link == Link::Up && app.hosts.values().all(|s| s == "up") {
+    if with_hosts && shows_hosts {
         right.push(Span::styled(format!(" · {healthy}"), theme::quiet()));
     }
     let used = |spans: &[Span]| spans.iter().map(|s| s.content.width()).sum::<usize>();
@@ -3647,6 +3650,58 @@ mod extension_tests {
             "{}",
             top(&app, 50)
         );
+    }
+
+    #[test]
+    fn a_bad_config_is_a_red_alert_beside_the_hosts_and_gone_when_it_reads_again() {
+        let mut app = with_fields(&[]);
+        let top = |app: &App, width| render(app, width, 30).lines().next().unwrap().to_owned();
+        assert!(!top(&app, 80).contains("config.toml"));
+        app.config_bad = Some("config.toml bad: line 12".into());
+        assert!(
+            top(&app, 80)
+                .starts_with("rexboard · 2 hosts · 4 panes · 4 agents · config.toml bad: line 12"),
+            "{}",
+            top(&app, 80)
+        );
+        let clock_at_the_end = |line: &str| line.trim_end().chars().nth_back(2) == Some(':');
+        let narrow = top(&app, 80);
+        assert!(
+            !narrow.contains(" local") && narrow.contains("line 12  ") && clock_at_the_end(&narrow),
+            "at 80 the host list goes first and the alert keeps clear of the clock: {narrow}"
+        );
+        let wide = top(&app, 140);
+        assert!(
+            wide.trim_end().ends_with("local + mini"),
+            "where it fits the host list stays beside the alert: {wide}"
+        );
+        app.ext_runs = BTreeMap::from([(
+            "fake".to_owned(),
+            ExtRun {
+                ok: false,
+                error: None,
+            },
+        )]);
+        let both = top(&app, 140);
+        assert!(
+            both.contains("config.toml bad: line 12, ext fake failed")
+                && both.trim_end().ends_with("local + mini"),
+            "{both}"
+        );
+        app.ext_runs.clear();
+        app.hosts.insert("studio".into(), "down".into());
+        assert!(
+            top(&app, 140).contains("studio down, config.toml bad: line 12"),
+            "{}",
+            top(&app, 140)
+        );
+        assert!(
+            top(&app, 50).starts_with("rexboard · studio down, config.toml bad: line 12"),
+            "{}",
+            top(&app, 50)
+        );
+        app.config_bad = None;
+        assert!(!top(&app, 80).contains("config.toml"));
     }
 
     #[test]

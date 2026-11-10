@@ -256,6 +256,12 @@ struct Reducer {
     /// `[[mark]]` from config.toml, read again with the extensions, and the rules already named
     /// in the log as skipped.
     marks: Marks,
+    /// `[hosts] exclude` from the last config.toml that read; a bad file keeps it.
+    exclude: Vec<String>,
+    /// Why config.toml could not be read, until a read succeeds.
+    config_bad: Option<crate::config::Bad>,
+    /// A config.toml has read well at least once since serve started.
+    config_read: bool,
     mark_warned: BTreeSet<String>,
     usage: BTreeMap<String, Usage>,
     /// The local rows the usage watcher joins its files to.
@@ -379,6 +385,9 @@ impl Reducer {
             extensions: Running::new(ext_tx),
             models: BTreeMap::new(),
             marks: Marks::default(),
+            exclude: Vec::new(),
+            config_bad: None,
+            config_read: false,
             mark_warned: BTreeSet::new(),
             usage: BTreeMap::new(),
             usage_panes: Arc::default(),
@@ -501,7 +510,7 @@ impl Reducer {
 
     fn rescan_now(&mut self) {
         self.sync_extensions();
-        match collector::hosts() {
+        match collector::hosts_without(&self.exclude) {
             Ok(labels) => self.set_hosts(&labels),
             Err(err) => {
                 eprintln!("serve: rex hosts failed, watching this host only: {err}");
@@ -514,7 +523,8 @@ impl Reducer {
     fn rescan(&mut self) {
         self.sync_extensions();
         let tx = self.tx.clone();
-        thread::spawn(move || match collector::hosts() {
+        let exclude = self.exclude.clone();
+        thread::spawn(move || match collector::hosts_without(&exclude) {
             Ok(labels) => {
                 let _ = tx.send(Msg::Hosts(labels));
             }
@@ -613,8 +623,22 @@ impl Reducer {
     fn sync_extensions(&mut self) {
         let now = chrono::Utc::now();
         let mut changed = false;
-        if let Ok(config) = crate::config::load() {
-            changed = std::mem::replace(&mut self.models, config.models) != self.models;
+        let loaded = crate::config::try_load();
+        let mut bad = loaded.as_ref().err().cloned();
+        if let Some(bad) = &mut bad {
+            bad.last_good = self.config_read;
+        }
+        if bad != self.config_bad {
+            if let Some(bad) = &bad {
+                eprintln!("warning: {}; {}", bad.why, bad.going_on());
+            }
+            self.config_bad = bad;
+            changed = true;
+        }
+        if let Ok(config) = loaded {
+            self.config_read = true;
+            self.exclude = config.hosts.exclude.clone();
+            changed |= std::mem::replace(&mut self.models, config.models) != self.models;
             let marks = Marks::new(config.mark.as_ref());
             for why in &marks.skipped {
                 if self.mark_warned.insert(why.clone()) {
@@ -712,6 +736,7 @@ impl Reducer {
             "rows": rows,
             "hosts": self.hosts,
             "host_errors": self.host_errors,
+            "config_problem": self.config_bad,
             "extensions": self.extensions.states,
             "fields": self.extensions.fields(),
             "actions": actions,
