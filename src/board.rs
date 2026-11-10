@@ -71,6 +71,8 @@ struct Entry {
     seen: bool,
     stale: bool,
     ext: BTreeMap<String, String>,
+    /// The extensions whose last answer marks the row, a to z.
+    ext_marks: BTreeSet<String>,
 }
 
 impl Entry {
@@ -137,8 +139,8 @@ impl Entry {
             group: self.group(now),
             ext: self.ext.clone(),
             usage: self.pane.reported_usage.clone(),
-            marked: false,
-            marked_by: Vec::new(),
+            marked: !self.ext_marks.is_empty(),
+            marked_by: self.ext_marks.iter().cloned().collect(),
         }
     }
 }
@@ -356,6 +358,7 @@ impl Board {
                 continue;
             };
             entry.ext.clone_from(&prev.ext);
+            entry.ext_marks.clone_from(&prev.ext_marks);
             if prev.src.fallback.is_some() {
                 entry.src.fallback.clone_from(&prev.src.fallback);
                 let pane = self.derive(host, &self.rows[key].src);
@@ -428,6 +431,7 @@ impl Board {
             seen: !matches!(pane.state.as_str(), "done" | "blocked" | "error"),
             stale: false,
             ext: BTreeMap::new(),
+            ext_marks: BTreeSet::new(),
             src,
             pane,
         };
@@ -481,7 +485,7 @@ impl Board {
         vec![key]
     }
 
-    /// An extension's latest answer: its fields replace the ones it gave before, and its status,
+    /// An extension's latest answer: its fields and its mark replace the ones it gave before, and its status,
     /// when the manifest provides one, becomes the fallback of a row with no native record.
     /// Another extension's fallback is kept until it lets go. Returns the rows that changed.
     pub fn extension(
@@ -502,7 +506,13 @@ impl Board {
             for (field, value) in item.iter().flat_map(|item| &item.fields) {
                 fields.insert(field_id(name, field), value.clone());
             }
-            let fields_changed = fields != entry.ext;
+            let marked = item.is_some_and(|item| item.mark);
+            let marks_changed = if marked {
+                entry.ext_marks.insert(name.to_owned())
+            } else {
+                entry.ext_marks.remove(name)
+            };
+            let fields_changed = fields != entry.ext || marks_changed;
             entry.ext = fields;
             let mine = item
                 .and_then(|item| item.status.clone())
@@ -1125,6 +1135,48 @@ mod tests {
                 || reason.starts_with("reported working at Dec 31 "),
             "a report a day old gives its date: {reason}"
         );
+    }
+
+    #[test]
+    fn an_extension_marks_a_row_until_its_answer_goes_and_a_snapshot_keeps_it() {
+        use crate::extension::contract::Item;
+        let mut board = replay(3);
+        let key = format!("mini/{PANE}");
+        let marking = BTreeMap::from([(
+            key.clone(),
+            Item {
+                mark: true,
+                ..Item::default()
+            },
+        )]);
+        assert_eq!(board.extension("team", &marking, false, at(4)).len(), 1);
+        let marked = row(&board, PANE);
+        assert_eq!(
+            (marked.marked, marked.marked_by),
+            (true, vec!["team".to_owned()])
+        );
+        assert!(
+            board.extension("team", &marking, false, at(5)).is_empty(),
+            "the same answer changes nothing"
+        );
+        board.extension("fake", &marking, false, at(5));
+        assert_eq!(row(&board, PANE).marked_by, ["fake", "team"], "a to z");
+        let snap = snapshot(json!([block(PANE, "idle", "2026-01-01T00:00:00Z")]));
+        board.apply("mini", &snap, at(6)).unwrap();
+        assert_eq!(
+            row(&board, PANE).marked_by,
+            ["fake", "team"],
+            "a snapshot knows no extensions"
+        );
+        let nothing = BTreeMap::new();
+        assert_eq!(board.extension("team", &nothing, false, at(7)).len(), 1);
+        assert_eq!(
+            row(&board, PANE).marked_by,
+            ["fake"],
+            "its answer went, its mark with it"
+        );
+        board.extension("fake", &nothing, false, at(8));
+        assert!(!row(&board, PANE).marked);
     }
 
     #[test]

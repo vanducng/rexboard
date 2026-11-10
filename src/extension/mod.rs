@@ -196,6 +196,13 @@ fn check(m: &Manifest, dir: &Path) -> Result<(), String> {
     if !is_name(&m.name) {
         return Err(format!("name {:?} must be [a-z0-9-]+", m.name));
     }
+    if RESERVED.contains(&m.name.as_str()) {
+        return Err(format!(
+            "name {:?} is reserved: it names a source of marks ({})",
+            m.name,
+            RESERVED.join(", ")
+        ));
+    }
     if dir.file_name().and_then(|n| n.to_str()) != Some(m.name.as_str()) {
         return Err(format!("name {:?} must match its directory's name", m.name));
     }
@@ -261,6 +268,9 @@ fn is_icon(icon: &str) -> bool {
         && chars.next().is_none()
         && unicode_width::UnicodeWidthStr::width(icon) == 1
 }
+
+/// Names that `marked_by` uses for sources that are not extensions.
+pub(crate) const RESERVED: [&str; 2] = ["config", "favorite"];
 
 pub(crate) fn is_name(name: &str) -> bool {
     !name.is_empty()
@@ -413,6 +423,16 @@ pub mod tests {
                 "broad",
                 manifest("broad", &["rig"]) + "width = 61\n",
                 "field \"rig\"'s width 61 must be a whole number from 4 to 60",
+            ),
+            (
+                "config",
+                manifest("config", &["rig"]),
+                "name \"config\" is reserved",
+            ),
+            (
+                "favorite",
+                manifest("favorite", &["rig"]),
+                "name \"favorite\" is reserved",
             ),
             (
                 "mark",

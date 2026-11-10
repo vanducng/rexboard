@@ -73,6 +73,8 @@ struct RowOut {
     fields: BTreeMap<String, Value>,
     #[serde(default)]
     status: Option<Value>,
+    #[serde(default)]
+    mark: Option<Value>,
     #[serde(flatten)]
     unknown: BTreeMap<String, Value>,
 }
@@ -89,11 +91,13 @@ pub struct Status {
     pub msg: Option<String>,
 }
 
-/// One row's answer: field values by the field's short name, and its status.
+/// One row's answer: field values by the field's short name, its status and its mark.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Item {
     pub fields: BTreeMap<String, String>,
     pub status: Option<Status>,
+    /// `"mark": true`: the extension says the row is one the user wants to reach.
+    pub mark: bool,
 }
 
 /// A valid response, and each part of it that was dropped and why.
@@ -157,6 +161,13 @@ pub fn parse(out: &[u8], ext: &Extension, keys: &BTreeSet<String>) -> Result<Par
             }
             None => None,
         };
+        match row.mark {
+            Some(Value::Bool(mark)) => item.mark = mark,
+            Some(Value::Null) | None => {}
+            Some(_) => parsed
+                .problems
+                .push(format!("row {key}: mark is not a boolean")),
+        }
         parsed.rows.insert(key, item);
     }
     Ok(parsed)
@@ -298,6 +309,10 @@ mod tests {
         let parsed = parse(response.as_bytes(), &ext, &sent).unwrap();
         assert_eq!(parsed.problems, Vec::<String>::new());
         assert_eq!(parsed.rows["mini/block:7f3a"].fields["project"], "api");
+        assert!(
+            parsed.rows["mini/block:7f3a"].mark,
+            "the sample marks its row"
+        );
         assert_eq!(
             parsed.rows["mini/block:7f3a"]
                 .status
@@ -318,6 +333,33 @@ mod tests {
             uncommented,
             "the doc shows the example's adapter"
         );
+    }
+
+    #[test]
+    fn a_mark_is_a_boolean_that_is_optional_and_anything_else_is_dropped_and_named() {
+        let marked = |mark: &str| {
+            let out = format!(r#"{{"contract": 1, "rows": {{"local/b1": {{{mark}}}}}}}"#);
+            let parsed = parse(out.as_bytes(), &ext(false), &keys()).unwrap();
+            (parsed.rows["local/b1"].mark, parsed.problems)
+        };
+        assert_eq!(marked(r#""mark": true"#), (true, vec![]));
+        assert_eq!(marked(r#""mark": false"#), (false, vec![]));
+        assert_eq!(marked(r#""mark": null"#), (false, vec![]));
+        assert_eq!(
+            marked(r#""fields": {"rig": "api"}"#),
+            (false, vec![]),
+            "the key is optional"
+        );
+        for bad in [r#""mark": "yes""#, r#""mark": 1"#, r#""mark": {}"#] {
+            assert_eq!(
+                marked(bad),
+                (
+                    false,
+                    vec!["row local/b1: mark is not a boolean".to_owned()]
+                ),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

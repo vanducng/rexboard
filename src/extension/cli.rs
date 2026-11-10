@@ -455,12 +455,13 @@ fn read_rows(file: &Path) -> Result<Vec<Row>> {
 fn answer_text(name: &str, enabled: bool, parsed: &Parsed, sent: usize, ms: u64) -> String {
     let off = if enabled { "" } else { " (not enabled)" };
     let mut out = format!(
-        "{name}{off}: answered in {ms}ms, fields for {} of {sent} rows\n",
+        "{name}{off}: answered in {ms}ms, fields for {} of {sent} rows, marks {}\n",
         parsed
             .rows
             .values()
             .filter(|i| !i.fields.is_empty())
-            .count()
+            .count(),
+        marks(parsed)
     );
     for (key, item) in &parsed.rows {
         let mut parts: Vec<String> = item
@@ -470,6 +471,9 @@ fn answer_text(name: &str, enabled: bool, parsed: &Parsed, sent: usize, ms: u64)
             .collect();
         if let Some(status) = &item.status {
             parts.push(format!("status={}", status.state));
+        }
+        if item.mark {
+            parts.push("mark".to_owned());
         }
         if !parts.is_empty() {
             out.push_str(&format!("  {key}  {}\n", parts.join("  ")));
@@ -481,15 +485,23 @@ fn answer_text(name: &str, enabled: bool, parsed: &Parsed, sent: usize, ms: u64)
     out
 }
 
+/// How many rows the answer marks.
+fn marks(parsed: &Parsed) -> usize {
+    parsed.rows.values().filter(|item| item.mark).count()
+}
+
 fn answer_json(name: &str, parsed: &Parsed, sent: usize, ms: u64) -> Value {
     let rows: BTreeMap<&String, Value> = parsed
         .rows
         .iter()
-        .map(|(key, item)| (key, json!({ "fields": item.fields, "status": item.status })))
+        .map(|(key, item)| {
+            let row = json!({ "fields": item.fields, "status": item.status, "mark": item.mark });
+            (key, row)
+        })
         .collect();
     json!({
         "ok": parsed.problems.is_empty(), "extension": name, "ms": ms, "sent": sent,
-        "rows": rows, "problems": parsed.problems,
+        "marks": marks(parsed), "rows": rows, "problems": parsed.problems,
     })
 }
 
@@ -497,6 +509,12 @@ fn new(name: &str, json: bool) -> Result<()> {
     if !is_name(name) {
         return Err(Error::usage_with(
             format!("an extension's name is [a-z0-9-]+, not {name:?}"),
+            &["rexboard ext new my-tool"],
+        ));
+    }
+    if super::RESERVED.contains(&name) {
+        return Err(Error::usage_with(
+            format!("{name:?} is reserved: it names a source of marks"),
             &["rexboard ext new my-tool"],
         ));
     }

@@ -216,8 +216,8 @@
 {Reset/Reset/NONE} {Reset/Reset/BOLD}seat-b msg{Reset/Reset/NONE}                                                                     
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE} {Reset/Reset/DIM}where   {Reset/Reset/NONE}api › main › seat-b                                                    
-{Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title           {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                  
-{Reset/Reset/NONE}                                                                                
+{Reset/Reset/NONE} {Reset/Reset/DIM}marked  {Reset/Reset/NONE}config                 {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title                            
+{Reset/Reset/NONE} {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                 
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
 {Reset/Reset/NONE}                                                                                
@@ -246,7 +246,7 @@
 {Reset/Reset/DIM}━━{Red/Reset/BOLD} ! blocked · seat-b · waiting 5h43m {Reset/Reset/DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {Reset/Reset/NONE} {Reset/Reset/BOLD}seat-b msg{Reset/Reset/NONE}                                                                                                                                 
 {Reset/Reset/NONE}                                                                                                                                            
-{Reset/Reset/NONE} {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title           {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                                                              
+{Reset/Reset/NONE} {Reset/Reset/DIM}marked  {Reset/Reset/NONE}config                 {Reset/Reset/DIM}title   {Reset/Reset/NONE}seat-b title           {Reset/Reset/DIM}source  {Reset/Reset/NONE}native                                                               
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            
 {Reset/Reset/NONE}                                                                                                                                            

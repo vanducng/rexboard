@@ -29,6 +29,8 @@ pub enum Fact {
     Quota,
     Title,
     Source,
+    /// Why the row is marked: `config`, an extension's name.
+    Marked,
     Where,
 }
 
@@ -51,6 +53,8 @@ impl Fact {
                 Fact::Quota => icons::QUOTA.glyph,
                 Fact::Title => icons::TITLE.glyph,
                 Fact::Source => icons::source(&row.pane.source).map_or("source", |i| i.glyph),
+                // The star the list draws before a marked row's number.
+                Fact::Marked => "*",
                 // The session's mark leads `where`, whose window and block carry their own.
                 Fact::Where => icons::SESSION.glyph,
             };
@@ -66,6 +70,7 @@ impl Fact {
             Fact::Quota => "5h",
             Fact::Title => "title",
             Fact::Source => "source",
+            Fact::Marked => "marked",
             Fact::Where => "where",
         }
     }
@@ -128,6 +133,8 @@ pub fn lines(app: &App, row: &Row, width: usize, board: usize) -> Vec<Line<'stat
         .collect();
     let repeats = title.is_empty() || title == clean(&crate::output::name(row));
     let names = vec![
+        row.marked
+            .then(|| fact(Fact::Marked, clean(&row.marked_by.join(", ")))),
         (!repeats).then(|| fact(Fact::Title, clean(title))),
         Some(fact(Fact::Source, row.pane.source.clone())),
     ]

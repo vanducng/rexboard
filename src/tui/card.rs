@@ -999,6 +999,41 @@ mod tests {
     }
 
     #[test]
+    fn a_marked_row_names_what_marked_it_in_the_pane_group_and_an_unmarked_one_says_nothing() {
+        let mut marked = grid_app();
+        let mut seat = marked.rows[0].clone();
+        seat.marked = true;
+        seat.marked_by = vec!["config".into(), "openrig".into()];
+        marked.set_rows(vec![seat], hosts());
+        marked.selected = Some(Spot::Row("local/seat-a".into()));
+        let facts = facts_at(&marked, 80);
+        assert_eq!(
+            facts[facts.len() - 2..],
+            [
+                " marked  config, openrig        title   seat-a@demo",
+                " source  bridge"
+            ],
+            "the marks lead the pane's facts, in the facts' own style"
+        );
+        marked.nerd = true;
+        let nerd = facts_at(&marked, 80).join("\n");
+        assert!(
+            nerd.contains("* config, openrig"),
+            "the list's star labels it with glyphs: {nerd}"
+        );
+        assert!(
+            !facts_at(&grid_app(), 80)
+                .iter()
+                .any(|l| l.contains("marked")),
+            "an unmarked row has no such fact"
+        );
+        for width in [80, 140] {
+            let card = card_of(&render(&marked, width, 40)).join("\n");
+            assert!(card.contains("config, openrig"), "{width}: {card}");
+        }
+    }
+
+    #[test]
     fn tracks_to_a_row_follow_the_card_width_in_words_and_with_glyphs() {
         let tracks = |app: &App, width: u16| {
             let private = |c: char| ('\u{e000}'..='\u{f8ff}').contains(&c);
