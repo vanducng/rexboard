@@ -2376,8 +2376,7 @@ fn ext_status_fallback_only_reaches_unreported_rows_and_only_when_provided() {
 fn good_then(serve: &Serve, failure: &str, timing: &str) {
     let fail_now = serve.dir.path().join("fail-now");
     let failed = serve.dir.path().join("failed");
-    const GOOD: &str =
-        r#"{"contract": 1, "rows": {"local/block:api-seat-a": {"fields": {"rig": "api"}}}}"#;
+    const GOOD: &str = r#"{"contract": 1, "rows": {"local/block:api-seat-a": {"fields": {"rig": "api"}, "mark": true}}}"#;
     let script = format!(
         "cat > /dev/null\nif [ -e '{n}' ]; then\necho run >> '{f}'\n{failure}\nfi\necho '{GOOD}'",
         n = fail_now.display(),
@@ -2394,6 +2393,14 @@ fn kept_three_runs_then_dropped(serve: &Serve, logged: &str) {
     eventually("the first good run", || {
         ext_of(&serve.rows(&[]), SEAT)["fake.rig"] == "api"
     });
+    let marks = |rows: &[serde_json::Value]| {
+        let seat = row(rows, SEAT);
+        (seat["marked"].clone(), seat["marked_by"].clone())
+    };
+    assert_eq!(
+        marks(&serve.rows(&[])),
+        (serde_json::json!(true), serde_json::json!(["fake"]))
+    );
     std::fs::write(serve.dir.path().join("fail-now"), "").unwrap();
     eventually("a failed run", || serve_log(serve).contains(logged));
     // Counted by the adapter, not the clock: a slow poll must not let the third failure land
@@ -2405,10 +2412,16 @@ fn kept_three_runs_then_dropped(serve: &Serve, logged: &str) {
     let runs = failed();
     if runs < 3 {
         assert_eq!(rig, "api", "kept after {runs} failed runs");
+        assert_eq!(marks(&serve.rows(&[])).0, true, "its mark is kept with it");
     }
     eventually_within("the field to go after three failed runs", 40, || {
         ext_of(&serve.rows(&[]), SEAT).get("fake.rig").is_none()
     });
+    assert_eq!(
+        marks(&serve.rows(&[])),
+        (serde_json::json!(false), serde_json::json!([])),
+        "the mark goes with the answer"
+    );
 }
 
 #[test]
@@ -2594,6 +2607,104 @@ fn ext_ls_shows_enabled_disabled_and_broken_with_why() {
         list.iter()
             .any(|e| e["name"] == "fake" && e["last_run"]["ok"] == true)
     });
+}
+
+#[test]
+fn an_extension_marks_rows_and_serve_unions_them_with_the_config_rules() {
+    const SEAT_B: &str = "mini/block:web-seat-b";
+    let serve = Serve::new();
+    extension(
+        &serve,
+        "fake",
+        "",
+        "",
+        &answers(
+            r#"{"local/block:api-seat-a": {"mark": true}, "mini/block:web-seat-b": {"mark": "yes"}}"#,
+        ),
+    );
+    serve.config("[extensions]\nenabled = [\"fake\"]\n[[mark]]\nblock = \"seat-*\"\n");
+    local_seat(|| serve.rows(&[]));
+    let sources = |key: &str| row(&serve.rows(&[]), key)["marked_by"].clone();
+    eventually("the extension's mark", || {
+        sources(SEAT) == serde_json::json!(["config", "fake"])
+    });
+    assert_eq!(
+        sources(SEAT_B),
+        serde_json::json!(["config"]),
+        "a mark that is not a boolean marks nothing"
+    );
+    assert_eq!(
+        serve.rows(&["--marked"]).len(),
+        2,
+        "both rows: the rule marks both"
+    );
+    let log = serve_log(&serve);
+    assert_eq!(
+        log.matches("mark is not a boolean").count(),
+        1,
+        "named once: {log}"
+    );
+}
+
+#[test]
+fn an_extension_alone_marks_a_row_and_false_marks_nothing() {
+    let serve = Serve::new();
+    extension(
+        &serve,
+        "fake",
+        "",
+        "",
+        &answers(
+            r#"{"local/block:api-seat-a": {"mark": true}, "mini/block:web-seat-b": {"mark": false}}"#,
+        ),
+    );
+    serve.config("[extensions]\nenabled = [\"fake\"]\n");
+    local_seat(|| serve.rows(&[]));
+    eventually("the extension's mark", || {
+        row(&serve.rows(&[]), SEAT)["marked"] == true
+    });
+    let rows = serve.rows(&[]);
+    assert_eq!(row(&rows, SEAT)["marked_by"], serde_json::json!(["fake"]));
+    assert_eq!(row(&rows, "mini/block:web-seat-b")["marked"], false);
+    let only = serve.rows(&["--marked"]);
+    assert_eq!(only.len(), 1);
+    assert_eq!(only[0]["key"], SEAT);
+}
+
+#[test]
+fn ext_test_counts_the_marks_in_text_and_json_and_names_a_non_boolean() {
+    let serve = Serve::new();
+    local_seat(|| serve.rows(&[]));
+    extension(
+        &serve,
+        "fake",
+        "",
+        "",
+        &answers(
+            r#"{"local/block:api-seat-a": {"fields": {"rig": "api"}, "mark": true},
+                "mini/block:web-seat-b": {"mark": 1}}"#,
+        ),
+    );
+    let out = serve.cmd().args(["ext", "test", "fake"]).assert().code(1);
+    let text = String::from_utf8_lossy(&out.get_output().stdout).into_owned();
+    assert!(text.contains("fields for 1 of 2 rows, marks 1\n"), "{text}");
+    assert!(
+        text.contains(&format!("  {SEAT}  rig=api  mark\n")),
+        "{text}"
+    );
+    assert!(
+        text.contains("problem: row mini/block:web-seat-b: mark is not a boolean"),
+        "{text}"
+    );
+    let out = serve
+        .cmd()
+        .args(["--json", "ext", "test", "fake"])
+        .output()
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json["marks"], 1);
+    assert_eq!(json["rows"][SEAT]["mark"], true);
+    assert_eq!(json["rows"]["mini/block:web-seat-b"]["mark"], false);
 }
 
 #[test]

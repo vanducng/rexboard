@@ -93,7 +93,8 @@ The adapter prints one JSON object on stdout and exits 0:
   "rows": {
     "mini/block:7f3a": {
       "fields": { "project": "api" },
-      "status": { "state": "working", "kind": null, "msg": "Building the release" }
+      "status": { "state": "working", "kind": null, "msg": "Building the release" },
+      "mark": true
     }
   }
 }
@@ -102,6 +103,7 @@ The adapter prints one JSON object on stdout and exits 0:
 - `rows` is keyed by the request's `key`s. A row left out gets no fields.
 - `fields` maps a declared field's name to a string, or to `null` for no value.
 - `status` is optional, and only allowed when the manifest sets `provides.status = true`. `state` is one of `idle`, `working`, `blocked`, `done` and `error`. `kind` and `msg` are optional.
+- `mark` is optional: `true` marks the row, as a [`[[mark]]` rule](configuration.md#mark) does; `false`, `null` and leaving it out are the same, and nothing else is allowed. It needs no manifest key. serve unions it with the config rules: the row's `marked` is `true` and its `marked_by` in [`ls --json`](cli.md#json-fields) names every source, `config` first, then the extensions' names a to z. See [Marked rows](tui.md#marked-rows).
 
 A row's fields reach `rexboard ls --json` under `ext`, by id: `"ext": {"session-prefix.project": "api"}`. A field's short name is its own (`project`), unless another enabled extension declares a field of the same name; then both go by id. On the board each field gets a view, a column and a filter key; see [TUI](tui.md#extension-fields).
 
@@ -117,15 +119,17 @@ A row's own status record always wins: an extension's status reaches only rows w
 | A status `msg` | 2048 bytes |
 | A run | `timeout` seconds, then the adapter and whatever it started are killed |
 
-A run fails whole when the adapter exits with an error, times out, prints more than 1 MiB, prints something that is not JSON, answers for another contract, or leaves its stdout open after it exits. A failed run keeps the last good answer for 3 runs, then drops it.
+A run fails whole when the adapter exits with an error, times out, prints more than 1 MiB, prints something that is not JSON, answers for another contract, or leaves its stdout open after it exits. A failed run keeps the last good answer for 3 runs, then drops it, and the marks it gave go with it.
 
 Anything else wrong drops only that part, and the rest is kept:
 
 - a row key that was not in the request (`unknown row KEY`);
 - a field the manifest does not declare (`undeclared field NAME`);
 - a key the contract does not have, at the top, in a row, or in a status (`unknown key NAME`);
-- a value that is not a string, or is over its limit;
+- a value that is not a string, or is over its limit, or a `mark` that is not a boolean (`row KEY: mark is not a boolean`);
 - a status without `provides.status`, or with a state not in the list.
+
+Contract 1 stays 1: `mark` is an addition. An older rexboard does not know it and does not call the extension broken: it drops the key as `row KEY: unknown key mark`, logged once, and the row is not marked there.
 
 serve logs each problem once to `serve.log` as `ext NAME: …`, with the first 4 KiB of the adapter's stderr per run. `rexboard ext test` prints them all.
 
@@ -186,18 +190,18 @@ gone            -         yes      enabled, but not found         -
 
 ### `rexboard ext test NAME [--rows FILE]`
 
-Runs extension `NAME` once, enabled or not, with its manifest's timeout and its settings from config.toml. Then it prints the fields it gave each row and every problem with its answer:
+Runs extension `NAME` once, enabled or not, with its manifest's timeout and its settings from config.toml. Then it prints the fields and the mark it gave each row, how many rows it marks, and every problem with its answer:
 
 ```
-my-tool (not enabled): answered in 38ms, fields for 2 of 5 rows
-  mini/block:7f3a  project=api
+my-tool (not enabled): answered in 38ms, fields for 2 of 5 rows, marks 1
+  mini/block:7f3a  project=api  mark
   mini/block:9c21  project=web
 problem: undeclared field owner
 ```
 
 It sends serve's rows, starting serve when nothing answers, as `ls` does. `--rows FILE` sends the rows in FILE instead: an array as `rexboard ls --json` prints it, so `rexboard ls --json --all > rows.json` saves a set to test against. The adapter's stderr goes to stderr.
 
-It exits 0 when the answer is valid. It exits 1 with `EXTENSION` when the answer breaks the contract, when the run fails (`my-tool: exited with exit status: 3`, `my-tool: timed out after 5s and was stopped`), when the extension is broken, or when there is none of that name. `--json` prints `{ok, extension, ms, sent, rows, problems, actions}`. It lists the extension's actions after the rows and checks each without running it: the program must be an executable file, and the first row the action applies to must fill every placeholder (`problem: action send: on mini/seat-a: this row has no session`). With no such row it says so on stderr and passes. A problem there exits 1 with `EXTENSION`, `acts's actions have 1 problem`.
+It exits 0 when the answer is valid. It exits 1 with `EXTENSION` when the answer breaks the contract, when the run fails (`my-tool: exited with exit status: 3`, `my-tool: timed out after 5s and was stopped`), when the extension is broken, or when there is none of that name. `--json` prints `{ok, extension, ms, sent, marks, rows, problems, actions}`, where `marks` counts the marked rows and each row in `rows` has `fields`, `status` and `mark`. It lists the extension's actions after the rows and checks each without running it: the program must be an executable file, and the first row the action applies to must fill every placeholder (`problem: action send: on mini/seat-a: this row has no session`). With no such row it says so on stderr and passes. A problem there exits 1 with `EXTENSION`, `acts's actions have 1 problem`.
 
 ### `rexboard ext run NAME ACTION KEY --text TEXT [--dry-run | --yes] [--rows FILE]`
 

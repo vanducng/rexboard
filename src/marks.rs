@@ -87,16 +87,15 @@ impl Marks {
         })
     }
 
-    /// Sets `marked` and `marked_by` on the rows a rule matches, and clears them on the rest.
+    /// Adds `config` to the sources of the rows a rule matches, ahead of the extensions the row
+    /// already names (a to z), and marks them.
     pub fn apply(&self, rows: &mut [Row]) {
         for row in rows {
-            let marked = self.marks(row);
-            row.marked = marked;
-            row.marked_by = if marked {
-                vec![CONFIG.into()]
-            } else {
-                Vec::new()
-            };
+            row.marked_by.retain(|source| source != CONFIG);
+            if self.marks(row) {
+                row.marked_by.insert(0, CONFIG.into());
+            }
+            row.marked = !row.marked_by.is_empty();
         }
     }
 }
@@ -290,23 +289,36 @@ mod tests {
     }
 
     #[test]
-    fn applying_sets_the_source_and_clears_a_mark_no_rule_holds() {
+    fn applying_puts_config_first_among_the_extensions_a_row_already_names() {
         let mut rows = rows();
+        rows[1].marked_by = vec!["openrig".into(), "team".into()];
         rows[1].marked = true;
-        rows[1].marked_by = vec!["stale".into()];
-        marks("[[mark]]\nblock = \"seat-a\"").apply(&mut rows);
+        rows[3].marked_by = vec!["team".into()];
+        rows[3].marked = true;
+        marks("[[mark]]\nblock = \"seat-a\"\n[[mark]]\nblock = \"claude\"").apply(&mut rows);
         let got: Vec<_> = rows
             .iter()
             .map(|r| (r.marked, r.marked_by.clone()))
             .collect();
+        let s = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!(
             got,
             [
                 (false, vec![]),
+                (true, s(&["config", "openrig", "team"])),
                 (false, vec![]),
-                (false, vec![]),
-                (true, vec![CONFIG.to_owned()])
+                (true, s(&["config", "team"])),
             ]
         );
+        let mut again = rows.clone();
+        marks("[[mark]]\nblock = \"seat-a\"\n[[mark]]\nblock = \"claude\"").apply(&mut again);
+        assert_eq!(again, rows, "applying twice changes nothing");
+        Marks::default().apply(&mut again);
+        assert_eq!(
+            again[1].marked_by,
+            s(&["openrig", "team"]),
+            "no rule: the extensions' marks stay"
+        );
+        assert!(!again[0].marked);
     }
 }
