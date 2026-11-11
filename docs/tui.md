@@ -376,4 +376,27 @@ The filter combines with the `/` text and with every view. Setting it opens fold
 
 ## Pick
 
-`rexboard pick` shows the same list, with the same column header, without the turn card, at every width. Enter goes to the selected pane and exits 0; esc exits 1. `/` filters, as on the board. `rexboard pick --filter`, `--status` and `--view` open it already narrowed, and `f*` keeps the marked rows (see [Marked rows](#marked-rows)); `pick` keeps a `--view` for its next run, as it keeps one chosen with `v`, once the view or sort changes.
+`rexboard pick` shows the same list, with the same column header, without the turn card, at every width. It takes the keys that choose a row, not the ones that act on a pane or open the card; [Popup](#popup) lists them, and `rexboard board --once` is the board with every key for a popup. Enter goes to the selected pane and exits 0; esc exits 1. `/` filters, as on the board. `rexboard pick --filter`, `--status` and `--view` open it already narrowed, and `f*` keeps the marked rows (see [Marked rows](#marked-rows)); `pick` keeps a `--view` for its next run, as it keeps one chosen with `v`, once the view or sort changes.
+
+## Popup
+
+`rexboard board --once` runs the whole board for one choice, for a floating pane that should close once you have gone somewhere: every key of the board works (the turn card on `c`, the full view, answer mode, `dd`, extension actions, `m`), and a jump that lands leaves it. These jumps exit 0, after going to the pane and marking it seen: `enter`, `'`, a digit under `"digits": "jump"` (see [Digits](#digits)), `g` and a digit, and `-`; `--json` prints the jump as `pick` does. `q`, or `esc` with nothing to clear, exits 1. `esc` first closes the `?` table and clears the `/` text, the status filter, the sort and the peek, as on the board, so `board --once --status marked` takes two. Answering, closing, an action and `m` do not exit. A jump that fails exits 1 with its error. `--filter`, `--status` and `--view` open it narrowed, as they do `board` and `pick` (`--view` is not kept: only `pick` keeps its view).
+
+It reads and writes `tui.json` as the board does, so `c` keeps the card choice for the next board and the next popup; it never touches `pick.json`. Several boards and popups can run at once: `tui.json` is written through a temp file and a rename, so a board starting during a save reads the old file or the new one, and only `c` changes it at run time. A pane running `pick` stays as it was, a plain list with its own view and sort.
+
+`pick` ignores these board keys, so a popup that needs them is `board --once`:
+
+| Key | Does on the board | In `pick` |
+| --- | --- | --- |
+| `c` | show or hide the turn card | nothing |
+| `ctrl-e` / `ctrl-y` | scroll the card | nothing to scroll |
+| `space` | full view of the pane | nothing |
+| `a`, `i` | answer mode | nothing |
+| `dd` | close the pane, `y` confirms | nothing |
+| `x`, then a key | extension actions | nothing |
+| `n` / `N`, `tab` | select the next, previous row that needs you | nothing |
+| `-`, `ctrl-o` | back to the pane before the last jump | nothing |
+| `esc` | cancel a key, then clear filters | exits 1 |
+| `q` | close a layer, else quit | exits 1 |
+
+Every other key does the same in both: moving, `gg`/`G`, `H`/`M`/`L`, paging, `]`/`[`, `1`-`9` and `g1`-`g9`, `enter`, `'`, `*`, `/`, `f`, `:`, `v`/`V`, `o`, the folds, `m`, `yy`/`yp`, `R` and `?`. The `?` table of a `pick` lists keys it does not take.

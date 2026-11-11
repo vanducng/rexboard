@@ -186,12 +186,15 @@ A line rexboard cannot read restarts that host's observer the same way: a line t
 rexboard          # in a terminal, with no command
 rexboard board
 rexboard board --status marked                 # only the marked rows, as `f*` does
+rexboard board --once                          # a popup: leaves once a jump lands
 rexboard board --filter host:mini --view host  # as `/host:mini` and `v`
 ```
 
 The board: the agent panes `ls` lists, grouped as `NEEDS YOU`, `WORKING`, `QUIET` and `UNREPORTED`, with a ticking time in state. It is a client of [`rexboard serve`](#rexboard-serve) and starts it when nothing answers. `board` without a terminal fails with `USAGE`. [TUI](tui.md) has the layout and keys.
 
-`--filter TEXT`, `--status STATUS` and `--view NAME` open the board already narrowed, for a window that should start on one thing: they take the values `ls --filter`, `--status` and `--view` take, and set what `/`, `f` and `v` set. `--filter` can repeat; the terms join into the one `/` text, so keyed terms narrow as in `ls` and loose words match as one phrase. `esc` and `ff` clear them as they clear what the keys set. A status or view that names nothing fails with `USAGE` before the terminal changes, as `ls` does, and lists the ones there are. A built-in view opens with no serve to ask; only an extension field's view waits for serve to name it. `pick` takes the same three.
+`--filter TEXT`, `--status STATUS` and `--view NAME` open the board already narrowed, for a window that should start on one thing: they take the values `ls --filter`, `--status` and `--view` take, and set what `/`, `f` and `v` set. `--filter` can repeat; the terms join into the one `/` text, so keyed terms narrow as in `ls` and loose words match as one phrase. `esc` and `ff` clear them as they clear what the keys set. A status or view that names nothing fails with `USAGE` before the terminal is even checked, as `ls` does, and lists the ones there are. A built-in view opens with no serve to ask; only an extension field's view waits for serve to name it. `pick` takes the same three.
+
+`--once` runs the whole board, with every key, for a floating pane: a jump that lands (`enter`, `'`, a digit under `"digits": "jump"`, `g` and a digit, `-`) goes to the pane, prints `jumped to SESSION › TAB › PANE on HOST` (`{"ok":true,"key":...}` with `--json`) and exits 0, as `pick` does. `q`, or `esc` with nothing left to clear, exits 1; answering, closing and actions do not exit. It keeps the card choice in `tui.json`, as the board does. A failed jump exits 1 with its error. [TUI](tui.md#popup) has the keys.
 
 ## `rexboard serve`
 

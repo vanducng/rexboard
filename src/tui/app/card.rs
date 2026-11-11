@@ -96,6 +96,17 @@ mod tests {
     }
 
     #[test]
+    fn c_toggles_the_card_under_once_where_pick_ignores_it() {
+        let mut app = listed();
+        app.once = true;
+        press(&mut app, KeyCode::Char('c'));
+        assert!(app.card && app.card_shown());
+        assert!(render(&app, 100, 30).contains("━━"), "the card draws");
+        let effect = press(&mut app, KeyCode::Char('c'));
+        assert!(matches!(effect, Some(Effect::SavePrefs(prefs)) if prefs.card == Some(false)));
+    }
+
+    #[test]
     fn the_list_fills_the_body_by_default_and_c_toggles_and_saves_and_p_does_nothing() {
         let mut app = listed();
         let text = render(&app, 100, 30);

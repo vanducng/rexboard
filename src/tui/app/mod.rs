@@ -260,6 +260,8 @@ pub struct App {
     pub link: Link,
     /// `rexboard pick`: the list alone; enter goes and esc gives up.
     pub pick: bool,
+    /// `rexboard board --once`: the whole board, left once a jump lands or esc has nothing to cancel.
+    pub once: bool,
     /// `c` has the card showing, from tui.json; off by default.
     pub card: bool,
     /// The settings tui.json carries that the board only reads.
@@ -553,6 +555,14 @@ impl App {
         None
     }
 
+    /// Whether `esc` has a filter, status, sort or peek to clear.
+    fn narrowed(&self) -> bool {
+        !self.filter.value().is_empty()
+            || self.status.is_some()
+            || self.sort.is_some()
+            || self.peek.is_some()
+    }
+
     fn act(&mut self, act: Act, k: K, now: Instant) -> Option<Effect> {
         // `pick` only picks: nothing that leaves the list or acts on a pane but going to it.
         if self.pick
@@ -655,6 +665,7 @@ impl App {
             Act::Keys => self.keys = !self.keys,
             Act::Cancel if self.pick => return Some(Effect::Quit),
             Act::Cancel if self.keys => self.keys = false,
+            Act::Cancel if self.once && !self.narrowed() => return Some(Effect::Quit),
             Act::Cancel => {
                 self.filter.reset();
                 self.status = None;

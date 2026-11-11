@@ -1451,20 +1451,30 @@ fn board_under_pty(
     signal: Option<libc::c_int>,
     hang_up: bool,
 ) -> (String, std::process::ExitStatus) {
-    on_pty(&["board"], None, &[], signal, hang_up)
+    let ran = on_pty(&["board"], None, &[], &[], signal, hang_up);
+    (ran.out, ran.status)
+}
+
+/// What a run on a pty wrote, how it exited, and whether it was still running 2.5 s after the
+/// last key sent (`alive`; always true without keys).
+struct Ran {
+    out: String,
+    status: std::process::ExitStatus,
+    alive: bool,
 }
 
 /// Runs `rexboard ARGS` on a fresh pty, against `serve`'s rows when there is one, until it is on
-/// the alternate screen and has drawn every `expect` (or has exited with them said), then sends
-/// `signal` (if any) and returns everything it wrote plus how it exited.
+/// the alternate screen and has drawn every `expect` (or has exited with them said), then types
+/// each of `send` and, if it is still running, sends `signal` (if any).
 fn on_pty(
     args: &[&str],
     serve: Option<&Serve>,
     expect: &[&str],
+    send: &[&str],
     signal: Option<libc::c_int>,
     hang_up: bool,
-) -> (String, std::process::ExitStatus) {
-    use std::io::Read;
+) -> Ran {
+    use std::io::{Read, Write};
     use std::os::fd::FromRawFd;
     let size = libc::winsize {
         ws_row: 24,
@@ -1566,7 +1576,11 @@ fn on_pty(
                 {
                     std::thread::sleep(std::time::Duration::from_millis(20));
                 }
-                return (text(), status);
+                return Ran {
+                    out: text(),
+                    status,
+                    alive: false,
+                };
             }
             let _ = child.kill();
             panic!(
@@ -1575,6 +1589,30 @@ fn on_pty(
             );
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let mut alive = true;
+    if !send.is_empty() {
+        let mut writer =
+            unsafe { std::fs::File::from_raw_fd(libc::fcntl(master, libc::F_DUPFD_CLOEXEC, 0)) };
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        for keys in send {
+            writer.write_all(keys.as_bytes()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+        drop(writer);
+        let until = std::time::Instant::now() + std::time::Duration::from_millis(2500);
+        while std::time::Instant::now() < until && child.try_wait().unwrap().is_none() {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        if let Some(status) = child.try_wait().unwrap() {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            return Ran {
+                out: text(),
+                status,
+                alive: false,
+            };
+        }
+        alive = true;
     }
     if hang_up {
         close.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1597,7 +1635,11 @@ fn on_pty(
     if !hang_up {
         eventually("the restore sequence", || text().contains("\x1b[?1049l"));
     }
-    (text(), status)
+    Ran {
+        out: text(),
+        status,
+        alive,
+    }
 }
 
 #[test]
@@ -1638,46 +1680,51 @@ const MARK_SEAT_OLD: &str = "[[mark]]\nblock = \"seat-old\"\n";
 fn board_and_pick_open_narrowed_by_status_filter_and_view() {
     let serve = needing_with(MARK_SEAT_OLD);
     for command in ["board", "pick"] {
-        let (out, _) = on_pty(
+        let out = on_pty(
             &[command, "--status", "marked"],
             Some(&serve),
             &["only marked", "seat-old"],
+            &[],
             Some(libc::SIGTERM),
             false,
-        );
+        )
+        .out;
         assert!(
             !out.contains("seat-new") && !out.contains("seat-done"),
             "{command} --status marked shows the marked row only: {out:?}"
         );
-        let (out, _) = on_pty(
+        let out = on_pty(
             &[
                 command, "--filter", "mark:", "--filter", "web", "--view", "table",
             ],
             Some(&serve),
             &["/mark: web", "view: table", "seat-old"],
+            &[],
             Some(libc::SIGTERM),
             false,
-        );
+        )
+        .out;
         assert!(!out.contains("seat-new"), "{command} --filter: {out:?}");
     }
 }
 
 #[test]
 fn board_opens_on_a_built_in_view_with_no_serve_to_ask() {
-    let (out, status) = on_pty(
+    let ran = on_pty(
         &["board", "--view", "table"],
         None,
         &["view: table"],
+        &[],
         Some(libc::SIGTERM),
         false,
     );
-    assert!(status.success(), "{status:?}: {out:?}");
+    assert!(ran.status.success(), "{:?}: {:?}", ran.status, ran.out);
 }
 
 #[test]
-fn board_and_pick_refuse_a_bad_view_or_status_with_usage() {
+fn board_once_and_pick_refuse_a_bad_view_or_status_with_usage_before_the_terminal_check() {
     let serve = needing();
-    for command in ["board", "pick"] {
+    for command in [&["board"][..], &["board", "--once"], &["pick"]] {
         for (args, said) in [
             (
                 ["--view", "nope"],
@@ -1688,16 +1735,135 @@ fn board_and_pick_refuse_a_bad_view_or_status_with_usage() {
                 "no status named x; statuses: working, done",
             ),
         ] {
-            let (out, status) = on_pty(
-                &[command, args[0], args[1]],
-                Some(&serve),
-                &[said],
-                None,
-                false,
-            );
-            assert_eq!(status.code(), Some(2), "{command} {args:?}: {out:?}");
+            serve
+                .cmd()
+                .arg("--json")
+                .args(command)
+                .args(args)
+                .assert()
+                .code(2)
+                .stderr(
+                    predicate::str::contains("\"code\":\"USAGE\"")
+                        .and(predicate::str::contains(said)),
+                );
         }
     }
+}
+
+/// `board --once` on a pty over `serve`'s rows, with `send` typed once the rows are drawn.
+fn once_with(serve: &Serve, args: &[&str], send: &[&str]) -> Ran {
+    let mut argv = vec!["board", "--once"];
+    argv.extend(args);
+    on_pty(
+        &argv,
+        Some(serve),
+        &["seat-old"],
+        send,
+        Some(libc::SIGTERM),
+        false,
+    )
+}
+
+fn last_jump(serve: &Serve) -> Option<String> {
+    let jumps = serve.jumps();
+    jumps
+        .last()
+        .map(|j| j["block_id"].as_str().unwrap().to_owned())
+}
+
+#[test]
+fn board_once_exits_0_after_each_jump_key_lands() {
+    let mark_new = "[[mark]]\nblock = \"seat-new\"\n";
+    let jump_digits = |serve: &Serve| {
+        let dir = serve.dir.path().join("state/rexboard");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("tui.json"), r#"{"digits": "jump"}"#).unwrap();
+    };
+    for (what, config, send, want) in [
+        ("enter", "", vec!["\r"], "block:seat-old"),
+        ("'", mark_new, vec!["'"], "block:seat-new"),
+        ("g and a digit", "", vec!["g", "2"], "block:seat-new"),
+        ("a digit under jump", "", vec!["2"], "block:seat-new"),
+        ("-", "", vec!["-"], "block:seat-new"),
+    ] {
+        let serve = needing_with(config);
+        if what == "a digit under jump" {
+            jump_digits(&serve);
+        }
+        if what == "-" {
+            for target in ["mini/block:seat-new", "mini/block:seat-done"] {
+                serve
+                    .needing_cmd()
+                    .args(["jump", target])
+                    .assert()
+                    .success();
+            }
+        }
+        let before = serve.jumps().len();
+        let ran = once_with(&serve, &[], &send);
+        assert!(!ran.alive, "{what}: still running: {:?}", ran.out);
+        assert_eq!(ran.status.code(), Some(0), "{what}: {:?}", ran.out);
+        assert_eq!(serve.jumps().len(), before + 1, "{what}: one jump");
+        assert_eq!(last_jump(&serve).as_deref(), Some(want), "{what}");
+        assert!(ran.out.contains("jumped to"), "{what}: {:?}", ran.out);
+    }
+}
+
+#[test]
+fn board_once_exits_1_on_q_and_on_esc_with_nothing_to_clear() {
+    let serve = needing_with(MARK_SEAT_OLD);
+    for (what, args, send, alive) in [
+        ("q", vec![], vec!["q"], false),
+        ("esc", vec![], vec!["\x1b"], false),
+        (
+            "esc clears a status first",
+            vec!["--status", "marked"],
+            vec!["\x1b"],
+            true,
+        ),
+        (
+            "then leaves",
+            vec!["--status", "marked"],
+            vec!["\x1b", "\x1b"],
+            false,
+        ),
+    ] {
+        let ran = once_with(&serve, &args, &send);
+        assert_eq!(ran.alive, alive, "{what}: {:?}", ran.out);
+        if !alive {
+            assert_eq!(ran.status.code(), Some(1), "{what}: {:?}", ran.out);
+        }
+    }
+    assert!(serve.jumps().is_empty(), "nothing jumped");
+}
+
+#[test]
+fn board_once_stays_for_answer_close_and_actions() {
+    let serve = needing();
+    for (what, send) in [
+        ("answer", vec!["a"]),
+        ("close", vec!["d", "d"]),
+        ("actions", vec!["x"]),
+    ] {
+        let ran = once_with(&serve, &[], &send);
+        assert!(ran.alive, "{what} left the board: {:?}", ran.out);
+    }
+    assert!(serve.jumps().is_empty(), "nothing jumped");
+}
+
+#[test]
+fn board_once_toggles_the_card_and_keeps_it_in_tui_json_not_pick_json() {
+    let serve = needing();
+    let dir = serve.dir.path().join("state/rexboard");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("tui.json"), r#"{"digits": "jump"}"#).unwrap();
+    let ran = once_with(&serve, &[], &["c"]);
+    assert!(ran.alive, "{:?}", ran.out);
+    let kept: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join("tui.json")).unwrap()).unwrap();
+    assert_eq!(kept["card"], "on", "{kept}");
+    assert_eq!(kept["digits"], "jump", "what was there stays: {kept}");
+    assert!(!dir.join("pick.json").exists());
 }
 
 #[test]
