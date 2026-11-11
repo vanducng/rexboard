@@ -262,6 +262,8 @@ pub struct App {
     pub pick: bool,
     /// `rexboard board --once`: the whole board, left once a jump lands or esc has nothing to cancel.
     pub once: bool,
+    /// The row a `--once` back jump found, for the loop to leave on.
+    pub chosen: Option<Row>,
     /// `c` has the card showing, from tui.json; off by default.
     pub card: bool,
     /// The settings tui.json carries that the board only reads.

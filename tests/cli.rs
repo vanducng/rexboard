@@ -1844,6 +1844,7 @@ fn board_once_stays_for_answer_close_and_actions() {
         ("answer", vec!["a"]),
         ("close", vec!["d", "d"]),
         ("actions", vec!["x"]),
+        ("back with no previous jump", vec!["-"]),
     ] {
         let ran = once_with(&serve, &[], &send);
         assert!(ran.alive, "{what} left the board: {:?}", ran.out);

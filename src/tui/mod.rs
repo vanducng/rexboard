@@ -62,6 +62,8 @@ pub(crate) fn icons_on(prefs: &prefs::Prefs) -> bool {
 
 /// Fails with `USAGE` when `open` names a view or status there is not, before any terminal check.
 pub fn check(open: &OpenArgs) -> Result<()> {
+    // A field's view asks serve, which may restart it and say so: not onto the screen.
+    client::QUIET.store(true, Ordering::Relaxed);
     query::open(&mut App::default(), &open.query())
 }
 
@@ -192,12 +194,15 @@ fn board(pick: bool, once: bool, open: &OpenArgs) -> Result<Option<Row>> {
                         match app.handle(key) {
                             Some(Effect::Quit) => return Ok(None),
                             Some(Effect::Jump(row)) if once => return Ok(Some(*row)),
-                            Some(Effect::Back) if once => match jump::previous() {
-                                Ok(row) => return Ok(Some(row)),
-                                Err(err) => {
-                                    let _ = tx.send(Msg::Went(Err(err.to_string())));
-                                }
-                            },
+                            Some(Effect::Back) if once => {
+                                let tx = tx.clone();
+                                thread::spawn(move || {
+                                    let row = jump::previous()
+                                        .map(Box::new)
+                                        .map_err(|err| err.to_string());
+                                    let _ = tx.send(Msg::Back(row));
+                                });
+                            }
                             Some(effect) => act(effect, &tx, &generation),
                             None => {}
                         }
@@ -217,6 +222,9 @@ fn board(pick: bool, once: bool, open: &OpenArgs) -> Result<Option<Row>> {
                 Some(true) => changed = true,
                 Some(false) => {}
                 None => return Ok(None),
+            }
+            if let Some(row) = app.chosen.take() {
+                return Ok(Some(row));
             }
             let now = Instant::now();
             let (due, effect) = app.number_due(now);

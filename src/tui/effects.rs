@@ -26,6 +26,8 @@ pub(super) enum Msg {
     /// A failure the footer shows in the alert role until the next key.
     Failed(String),
     Went(std::result::Result<String, String>),
+    /// The pane `-` goes back to under `--once`, or why there is none.
+    Back(std::result::Result<Box<Row>, String>),
     Screen(String, std::result::Result<Screen, String>),
     Sent {
         key: String,
@@ -51,6 +53,8 @@ pub(super) fn apply(app: &mut App, msg: Msg) -> Option<Effect> {
         Msg::Say(text) => app.say(text),
         Msg::Failed(why) => app.failed = Some(why),
         Msg::Went(result) => app.went(result),
+        Msg::Back(Ok(row)) => app.chosen = Some(*row),
+        Msg::Back(Err(why)) => app.went(Err(why)),
         Msg::Screen(key, screen) => app.screen(&key, screen),
         Msg::Sent { key, what, result } => return app.sent(&key, &what, result),
     }
