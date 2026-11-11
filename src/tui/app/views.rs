@@ -3,6 +3,15 @@
 use super::*;
 use crate::tui::columns::{Tier, width_set};
 
+/// A sort as the settings files name it; None for a column with no letter.
+fn sort_key((col, dir): Sort) -> Option<(String, bool)> {
+    let key = match col {
+        Col::Field(id) => format!("field:{id}"),
+        _ => format!("builtin:{}", column_of(col).letter?),
+    };
+    Some((key, dir == Dir::Down))
+}
+
 impl App {
     /// The views `v` cycles through: the built-in ones, then one per field, by its name, or by
     /// its id when a built-in view has that name.
@@ -67,15 +76,7 @@ impl App {
             prefs.view = key;
         }
         prefs.sort = match self.sort {
-            Some((col, dir)) => {
-                let key = match col {
-                    Col::Field(id) => Some(format!("field:{id}")),
-                    _ => column_of(col)
-                        .letter
-                        .map(|letter| format!("builtin:{letter}")),
-                };
-                key.map(|key| (key, dir == Dir::Down))
-            }
+            Some(sort) => sort_key(sort),
             None => self
                 .view_restore
                 .as_ref()
@@ -224,14 +225,16 @@ impl App {
         let Some(column) = self.column_by_letter(letter) else {
             return;
         };
-        if self.keeps_view_sort() {
-            self.forget_sort();
-        }
         self.sort = match self.sort {
             Some((id, dir)) if id == column.id && dir == column.first => Some((id, dir.flip())),
             Some((id, _)) if id == column.id => None,
             _ => Some((column.id, column.first)),
         };
+        if self.keeps_view_sort()
+            && let Some(prefs) = &mut self.view_restore
+        {
+            prefs.sort = self.sort.and_then(sort_key);
+        }
         // A column with no values has nothing to sort on: say so rather than do nothing, silently.
         if let Some((id @ (Col::Field(_) | Col::Tok | Col::Cost | Col::Quota), _)) =
             self.sort.filter(|(id, _)| *id == column.id)
@@ -677,5 +680,33 @@ mod tests {
             sort: None,
         });
         assert_ne!(app.view.name, "table");
+    }
+
+    #[test]
+    fn a_sort_on_a_field_that_goes_away_stays_to_be_saved_and_comes_back_with_it() {
+        let field = |id: &str| Field {
+            id: id.into(),
+            name: "quux".into(),
+            title: "Quux".into(),
+            icon: None,
+            extension_icon: None,
+            width: None,
+        };
+        let mut app = app();
+        app.remember = true;
+        app.restore_view_sort(ViewSort::default());
+        app.set_extensions(vec![field("ext.quux")], Default::default());
+        let letter = app.fields[0].1.unwrap();
+        typed(&mut app, &format!("o{letter}"));
+        let want = app.view_sort().sort;
+        assert!(
+            want.as_ref()
+                .is_some_and(|(key, _)| key == "field:ext.quux")
+        );
+        app.set_extensions(vec![], Default::default());
+        assert_eq!(app.sort, None);
+        assert_eq!(app.view_sort().sort, want, "still the one to save");
+        app.set_extensions(vec![field("ext.quux")], Default::default());
+        assert!(app.sort.is_some(), "and the sort returns with its field");
     }
 }
