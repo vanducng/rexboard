@@ -1,7 +1,8 @@
 //! tui.json: the board's own settings on this machine.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -238,18 +239,86 @@ pub fn load(path: &Path) -> Prefs {
 }
 
 pub fn save(path: &Path, prefs: &Prefs) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    std::fs::write(
+    write_whole(
         path,
-        serde_json::to_vec(prefs).map_err(std::io::Error::other)?,
+        &serde_json::to_vec(prefs).map_err(std::io::Error::other)?,
     )
+}
+
+static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Removes an uncommitted temporary file when writing or replacing the target fails.
+struct TempFile(PathBuf);
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Writes `bytes` through a temp file and a rename, so a board starting at that moment reads the
+/// old file or the new one, never half of it.
+pub(super) fn write_whole(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+    let (temp_path, mut temp_file) = loop {
+        let sequence = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let temp_path = parent.join(format!(
+            ".{file_name}.{}.{}.tmp",
+            std::process::id(),
+            sequence
+        ));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+        {
+            Ok(file) => break (temp_path, file),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    };
+    let _cleanup = TempFile(temp_path.clone());
+    temp_file.write_all(bytes)?;
+    drop(temp_file);
+    std::fs::rename(&temp_path, path)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_board_starting_during_a_save_reads_the_old_file_or_the_new_never_half() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tui.json");
+        let prefs = Prefs {
+            widths: (0..400).map(|i| (format!("col{i}"), 1.into())).collect(),
+            ..Prefs::default()
+        };
+        save(&path, &prefs).unwrap();
+        let writer = {
+            let (path, prefs) = (path.clone(), prefs.clone());
+            std::thread::spawn(move || {
+                for _ in 0..400 {
+                    save(&path, &prefs).unwrap();
+                }
+            })
+        };
+        while !writer.is_finished() {
+            let text = std::fs::read_to_string(&path).unwrap();
+            assert!(
+                serde_json::from_str::<serde_json::Value>(&text).is_ok(),
+                "{text:?}"
+            );
+        }
+        writer.join().unwrap();
+        assert_eq!(load(&path), prefs);
+        let left: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(left.len(), 1, "no temp file stays: {left:?}");
+    }
 
     #[test]
     fn widths_are_kept_as_written_and_checked_only_when_applied() {

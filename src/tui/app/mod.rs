@@ -260,6 +260,10 @@ pub struct App {
     pub link: Link,
     /// `rexboard pick`: the list alone; enter goes and esc gives up.
     pub pick: bool,
+    /// `rexboard board --once`: the whole board, left once a jump lands or esc closes no layer.
+    pub once: bool,
+    /// The row a `--once` back jump found, for the loop to leave on.
+    pub chosen: Option<Row>,
     /// `c` has the card showing, from tui.json; off by default.
     pub card: bool,
     /// The settings tui.json carries that the board only reads.
@@ -655,6 +659,7 @@ impl App {
             Act::Keys => self.keys = !self.keys,
             Act::Cancel if self.pick => return Some(Effect::Quit),
             Act::Cancel if self.keys => self.keys = false,
+            Act::Cancel if self.once => return Some(Effect::Quit),
             Act::Cancel => {
                 self.filter.reset();
                 self.status = None;

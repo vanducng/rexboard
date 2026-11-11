@@ -27,7 +27,7 @@ pub enum Command {
     Serve(ServeArgs),
     /// Open the board: agent panes grouped by what they need. `rexboard` with no command opens it
     /// in a terminal.
-    Board(OpenArgs),
+    Board(BoardArgs),
     /// Mark a pane seen by the `key` from `ls --json`, or every unseen done row with `--all-done`.
     Seen(SeenArgs),
     /// What the board's card says about a pane, by its `key`; `--tail N` adds its last lines.
@@ -189,6 +189,19 @@ pub enum ExtCommand {
         #[arg(value_name = "NAME")]
         name: String,
     },
+}
+
+#[derive(Debug, Default, Args)]
+pub struct BoardArgs {
+    /// Run as a popup: the whole board, with every key, that exits 0 once a jump lands (enter, `'`,
+    /// a digit under `"digits": "jump"`, `g` and a digit, `-`), and 1 on `q`, or on `esc` once it
+    /// has closed the layer in front (the `?` table, a prompt); `esc` never clears a filter, as in
+    /// `pick`. Answering, closing and actions do not exit. It keeps the card choice in tui.json,
+    /// as the board does; `pick` keeps its own view and sort.
+    #[arg(long)]
+    pub once: bool,
+    #[command(flatten)]
+    pub open: OpenArgs,
 }
 
 /// How the board or the picker opens, for a window that should start narrowed. `esc` and `ff`

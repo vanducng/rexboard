@@ -1,25 +1,12 @@
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::io;
+use std::path::Path;
 
 use serde_json::Value;
-
-static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Default, Clone, PartialEq, Debug)]
 pub struct PickPrefs {
     pub view: String,
     pub sort: Option<(String, bool)>,
-}
-
-/// Remove an uncommitted temporary file when writing or replacing the target fails.
-struct TempFile(PathBuf);
-
-impl Drop for TempFile {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
-    }
 }
 
 /// Read the picker settings. Missing, malformed, or incorrectly typed settings use defaults.
@@ -69,30 +56,7 @@ pub fn save(path: &Path, prefs: &PickPrefs) -> io::Result<()> {
     }
     let text = serde_json::to_vec_pretty(&Value::Object(object))?;
 
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent)?;
-    let file_name = path.file_name().unwrap_or_default().to_string_lossy();
-    let (temp_path, mut temp_file) = loop {
-        let sequence = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let temp_path = parent.join(format!(
-            ".{file_name}.{}.{}.tmp",
-            std::process::id(),
-            sequence
-        ));
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp_path)
-        {
-            Ok(file) => break (temp_path, file),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(error),
-        }
-    };
-    let _temp_file = TempFile(temp_path.clone());
-    temp_file.write_all(&text)?;
-    drop(temp_file);
-    fs::rename(&temp_path, path)
+    super::prefs::write_whole(path, &text)
 }
 
 #[cfg(test)]

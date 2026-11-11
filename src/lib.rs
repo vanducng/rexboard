@@ -92,17 +92,18 @@ pub fn execute(cli: &Cli) -> Result<()> {
         }
         Command::Hooks(cli::HooksCommand::Status) => hook::install::status(cli.json),
         Command::Hooks(cli::HooksCommand::Replay { session }) => hook::replay(session),
-        Command::Board(open) | Command::Pick(open) => {
+        Command::Board(cli::BoardArgs { open, .. }) | Command::Pick(open) => {
+            tui::check(open)?;
             if !stdout().is_terminal() || !stdin().is_terminal() {
                 return Err(Error::usage_with(
                     "the board needs a terminal",
                     &["rexboard ls", "rexboard jump N"],
                 ));
             }
-            if matches!(command, Command::Pick(_)) {
-                tui::pick(open, cli.json)
-            } else {
-                tui::run(open)
+            match command {
+                Command::Pick(_) => tui::pick(open, cli.json),
+                Command::Board(args) if args.once => tui::once(open, cli.json),
+                _ => tui::run(open),
             }
         }
     }

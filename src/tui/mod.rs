@@ -60,10 +60,18 @@ pub(crate) fn icons_on(prefs: &prefs::Prefs) -> bool {
     }
 }
 
+/// Fails with `USAGE` when `open` names a view or status there is not, before any terminal check.
+pub fn check(open: &OpenArgs) -> Result<()> {
+    // A field's view asks serve, which may restart it and say so: not onto the screen.
+    client::QUIET.store(true, Ordering::Relaxed);
+    query::open(&mut App::default(), &open.query())
+}
+
 /// The board as tui.json, the environment, the pane it runs in and `open` set it up.
-fn start_app(pick: bool, open: &OpenArgs) -> Result<App> {
+fn start_app(pick: bool, once: bool, open: &OpenArgs) -> Result<App> {
     let mut app = App::default();
     app.pick = pick;
+    app.once = once;
     let prefs = prefs();
     app.nerd = icons_on(&prefs);
     app.card = prefs.card_on();
@@ -130,26 +138,36 @@ pub fn run(open: &OpenArgs) -> Result<()> {
     // SIGTERM or SIGHUP (the board window closing) stops the loop, which puts the terminal back.
     stop_on_signals();
     watchdog();
-    board(false, open).map(drop)
+    board(false, false, open).map(drop)
+}
+
+/// `rexboard board --once`: the whole board. A jump that lands leaves it and goes to the row;
+/// `q` gives up.
+pub fn once(open: &OpenArgs, json: bool) -> Result<()> {
+    choose(false, open, json)
 }
 
 /// `rexboard pick`: the list alone. Enter leaves it and goes to the row; esc gives up.
 pub fn pick(open: &OpenArgs, json: bool) -> Result<()> {
+    choose(true, open, json)
+}
+
+fn choose(pick: bool, open: &OpenArgs, json: bool) -> Result<()> {
     LEAVE_CODE.store(1, Ordering::SeqCst);
     stop_on_signals();
     watchdog();
-    let row = board(true, open)?.ok_or(Error::Cancelled)?;
+    let row = board(pick, true, open)?.ok_or(Error::Cancelled)?;
     jump::go(&row)?;
     jump::done(&row, json);
     Ok(())
 }
 
-/// Runs the board until it quits, or until a pick chooses a row.
-fn board(pick: bool, open: &OpenArgs) -> Result<Option<Row>> {
+/// Runs the board until it quits, or, when `once`, until a jump chooses a row.
+fn board(pick: bool, once: bool, open: &OpenArgs) -> Result<Option<Row>> {
     // Before start_app, whose `--view` asks serve, and the subscriber thread: either may restart
     // serve and say so.
     client::QUIET.store(true, Ordering::Relaxed);
-    let mut app = start_app(pick, open)?;
+    let mut app = start_app(pick, once, open)?;
     let (tx, rx) = mpsc::channel();
     let generation = Arc::new(AtomicU64::new(0));
     listen(&tx, &generation);
@@ -175,7 +193,16 @@ fn board(pick: bool, open: &OpenArgs) -> Result<Option<Row>> {
                         let before = pick.then(|| app.pick_prefs());
                         match app.handle(key) {
                             Some(Effect::Quit) => return Ok(None),
-                            Some(Effect::Jump(row)) if pick => return Ok(Some(*row)),
+                            Some(Effect::Jump(row)) if once => return Ok(Some(*row)),
+                            Some(Effect::Back) if once => {
+                                let tx = tx.clone();
+                                thread::spawn(move || {
+                                    let row = jump::previous()
+                                        .map(Box::new)
+                                        .map_err(|err| err.to_string());
+                                    let _ = tx.send(Msg::Back(row));
+                                });
+                            }
                             Some(effect) => act(effect, &tx, &generation),
                             None => {}
                         }
@@ -196,11 +223,14 @@ fn board(pick: bool, open: &OpenArgs) -> Result<Option<Row>> {
                 Some(false) => {}
                 None => return Ok(None),
             }
+            if let Some(row) = app.chosen.take() {
+                return Ok(Some(row));
+            }
             let now = Instant::now();
             let (due, effect) = app.number_due(now);
             changed |= due;
             match effect {
-                Some(Effect::Jump(row)) if pick => return Ok(Some(*row)),
+                Some(Effect::Jump(row)) if once => return Ok(Some(*row)),
                 Some(effect) => act(effect, &tx, &generation),
                 None => {}
             }
