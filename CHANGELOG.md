@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.0](https://github.com/vanducng/rexboard/compare/v0.32.0...v0.33.0) (2026-11-11)
+
+
+### Features
+
+* **hook:** report configured decision signals ([#163](https://github.com/vanducng/rexboard/issues/163)) ([e38ca66](https://github.com/vanducng/rexboard/commit/e38ca66b962827b02197dac6861bccda4d9d3f65))
+
 ## [0.32.0](https://github.com/vanducng/rexboard/compare/v0.31.0...v0.32.0) (2026-11-11)
 
 
