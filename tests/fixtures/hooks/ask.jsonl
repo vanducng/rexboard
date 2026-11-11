@@ -1,0 +1,10 @@
+{"name":"match","config":"[hooks.ask]\npattern = '**ASK'\n","text":"\n \n**ASK: choose a route\nOther details","state":"blocked","kind":"question","msg":"**ASK: choose a route","ask":"decision"}
+{"name":"reply and label","config":"[hooks.ask]\npattern = '**ASK'\nreply = 'Reply here'\nlabel = 'route'\n","text":"**ASK: choose a route\nOther details","state":"blocked","kind":"question","msg":"**ASK: choose a route ⏎ Reply here","ask":"route"}
+{"name":"no match","config":"[hooks.ask]\npattern = '**ASK'\n","text":"Finished\n**ASK later","state":"done","kind":null,"msg":"Finished ⏎ **ASK later","ask":null}
+{"name":"no config","config":null,"text":"**ASK: choose a route","state":"done","kind":null,"msg":"**ASK: choose a route","ask":null}
+{"name":"bad config","config":"[hooks.ask]\npattern = 42\n","text":"**ASK: choose a route","state":"done","kind":null,"msg":"**ASK: choose a route","ask":null,"bad":true}
+{"name":"blank pattern","config":"[hooks.ask]\npattern = ''\n","text":"Finished","state":"done","kind":null,"msg":"Finished","ask":null,"bad":true}
+{"name":"blank label","config":"[hooks.ask]\npattern = '**ASK'\nlabel = ''\n","text":"**ASK: choose a route","state":"done","kind":null,"msg":"**ASK: choose a route","ask":null,"bad":true}
+{"name":"missing pattern","config":"[hooks.ask]\nreply = 'Reply here'\n","text":"Finished","state":"done","kind":null,"msg":"Finished","ask":null,"bad":true}
+{"name":"exact prefix","config":"[hooks.ask]\npattern = '**ASK'\n","text":"  **ASK later","state":"done","kind":null,"msg":"  **ASK later","ask":null}
+{"name":"empty message","config":"[hooks.ask]\npattern = '**ASK'\n","text":"\n\n","state":"done","kind":null,"msg":"Done","ask":null}

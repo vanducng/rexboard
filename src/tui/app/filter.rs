@@ -76,6 +76,8 @@ impl App {
         Some(Some(match key {
             "host" => &p.host,
             "state" => &p.state,
+            "kind" => return Some(p.kind.as_deref()),
+            "ask" => return Some(p.ask.as_deref()),
             "harness" => return Some(p.harness.as_deref()),
             "session" => &p.session,
             "tab" | "window" => &p.tab,
@@ -177,6 +179,27 @@ mod tests {
         app.set_rows(rows, app.hosts.clone());
         assert_eq!(kept(&mut app, "fake.mark:foo"), [has]);
         assert!(kept(&mut app, "mark:foo").is_empty(), "mark: is the source");
+    }
+
+    #[test]
+    fn ask_and_kind_filter_decisions_separately_from_dialogs() {
+        let mut app = app();
+        let mut rows = app.rows.clone();
+        rows[0].pane.ask = Some("decision".into());
+        rows[0].pane.kind = Some("question".into());
+        rows[1].pane.kind = Some("question".into());
+        app.set_rows(rows, app.hosts.clone());
+        assert_eq!(kept(&mut app, "ask:decision"), ["mini/seat-b"]);
+        assert_eq!(kept(&mut app, "ask:"), ["mini/seat-b"]);
+        kept(&mut app, "ask:decision");
+        app.selected = Some(Spot::Row("local/claude".into()));
+        press(&mut app, KeyCode::Char('n'));
+        assert_eq!(selected(&app), "mini/seat-b");
+        assert_eq!(
+            kept(&mut app, "kind:question"),
+            ["mini/seat-b", "local/claude"]
+        );
+        assert_eq!(app.unknown_key(), None);
     }
 
     #[test]

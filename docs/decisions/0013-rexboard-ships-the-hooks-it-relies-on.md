@@ -1,6 +1,6 @@
 # 13. rexboard ships the hooks it relies on
 
-**Status:** Accepted, 2026-10-27. Amended 2026-10-27, 2026-10-31
+**Status:** Accepted, 2026-10-27. Amended 2026-10-27, 2026-10-31, 2026-11-11
 
 ## Context
 
@@ -10,6 +10,7 @@
 
 - `rexboard hook HARNESS [EVENT]` is the bridge, ported byte for byte from the Python one: the same statuses, the same OSC 7501 sequences, the same tmux passthrough. A corpus recorded from the Python bridge checks it.
 - `rexboard hooks install` puts `rexboard hook` and `rexboard usage` into Claude Code's and Codex's settings and adds a pi extension. It never runs on its own. It merges: every other key and hook stays, a backup comes first, and a second run changes nothing. A settings file that is a symlink belongs to a dotfiles checkout and is left alone. `rexboard hooks status` says what an install would change.
+- An opt-in `[hooks.ask]` rule maps a configured prefix of the agent's final message to `blocked`/`question`, where the hook owns the status. An `ask` sub-record carries its label without inventing a Rex kind or putting a marker in the message. No built-in pattern, screen scan or transcript read; a missing or bad config leaves `done`.
 - The status still comes from the agent. rexboard writes only the hooks that make an agent report, and only when asked.
 - Not ported: the title spinner that puts Claude Code's glyph back on a plain Rex pane's title is a dotfiles nicety, not reporting, and stays there. grok's status line lives in `~/.grok/config.toml`, which rexboard does not edit.
 
@@ -23,4 +24,4 @@
 
 ## Supersedes
 
-The "rexboard installs nothing into agents" bullet of [3](0003-the-agent-tells-rex-rexboard-shows-it.md). Amended 2026-10-27: the link to 14, and status on a symlinked file. Amended 2026-10-31: any path, and the portable form.
+The "rexboard installs nothing into agents" bullet of [3](0003-the-agent-tells-rex-rexboard-shows-it.md). Amended 2026-10-27: the link to 14, and status on a symlinked file. Amended 2026-10-31: any path, and the portable form. Amended 2026-11-11: configured decision signals alongside the existing hook vocabulary.

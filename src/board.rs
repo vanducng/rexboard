@@ -799,6 +799,27 @@ mod tests {
     }
 
     #[test]
+    fn a_seen_decision_stays_in_needs_you() {
+        let mut board = Board::default();
+        let mut decision = block("block:ask", "blocked", "2026-01-01T00:00:00Z");
+        decision["records"][0]["kind"] = json!("question");
+        decision["records"].as_array_mut().unwrap().push(json!({
+            "id": "ask", "state": "blocked", "msg": "decision",
+            "updated_at": "2026-01-01T00:00:01Z"
+        }));
+        board
+            .apply("mini", &snapshot(json!([decision])), at(1))
+            .unwrap();
+        let before = row(&board, "block:ask");
+        assert!(!before.seen);
+        board.mark_seen(&(before.pane.host.clone(), before.pane.block_id.clone()));
+        let after = row(&board, "block:ask");
+        assert!(after.seen);
+        assert_eq!(after.group, Group::NeedsYou);
+        assert_eq!(after.pane.ask.as_deref(), Some("decision"));
+    }
+
+    #[test]
     fn done_after_working_records_last_turn() {
         let row = row(&replay(13), PANE);
         assert_eq!(

@@ -65,6 +65,11 @@ fn answer(front: &str, title: &str) -> String {
 fn answer_goes_to_a_tmux_client_and_never_to_a_wrapper_or_a_shell() {
     assert_eq!(answer("tmux", "seat-a"), "sent");
     assert_eq!(
+        answer("tmux", "ask-only"),
+        "refused status_changed idle → no status",
+        "ask is never an answer target"
+    );
+    assert_eq!(
         answer("tmux", "seat-b"),
         "refused not_harness tmux",
         "another seat is on screen"

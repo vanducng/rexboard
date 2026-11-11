@@ -21,6 +21,7 @@ use crate::pane::bare_title;
 pub enum Fact {
     Host,
     Harness,
+    Ask,
     Turn,
     Model,
     Effort,
@@ -45,6 +46,7 @@ impl Fact {
                     .as_deref()
                     .and_then(crate::harness::mark)
                     .map_or("harness", |i| i.glyph),
+                Fact::Ask => "ask",
                 Fact::Turn => icons::TURN.glyph,
                 Fact::Model => icons::MODEL.glyph,
                 Fact::Effort => icons::EFFORT.glyph,
@@ -62,6 +64,7 @@ impl Fact {
         match self {
             Fact::Host => "host",
             Fact::Harness => "harness",
+            Fact::Ask => "ask",
             Fact::Turn => "turn",
             Fact::Model => "model",
             Fact::Effort => "effort",
@@ -98,6 +101,10 @@ pub fn lines(app: &App, row: &Row, width: usize, board: usize) -> Vec<Line<'stat
     let runs: Vec<_> = [
         (!drawn(Col::Host)).then(|| fact(Fact::Host, clean(&row.pane.host))),
         (!drawn(Col::Harness)).then(|| fact(Fact::Harness, harness(row))),
+        row.pane
+            .ask
+            .as_deref()
+            .map(|ask| fact(Fact::Ask, clean(ask))),
         row.last_turn
             .filter(|_| !drawn(Col::Turn))
             .map(|s| fact(Fact::Turn, span(s))),

@@ -496,7 +496,8 @@ fn ls_json_adds_board_fields() {
     assert_eq!(claude["marked"], false, "no [[mark]] rule");
     assert_eq!(claude["marked_by"], serde_json::json!([]));
     assert_eq!(claude["view_group"], serde_json::Value::Null, "no --view");
-    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 33));
+    assert!(panes.iter().all(|p| p["ask"].is_null()));
+    assert!(panes.iter().all(|p| p.as_object().unwrap().len() == 34));
 }
 
 /// A status line for the fixture's idle seat on `host`, sent after the recorded stream ends.

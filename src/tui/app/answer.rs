@@ -360,6 +360,36 @@ mod tests {
     }
 
     #[test]
+    fn a_decision_with_an_input_line_offers_text_not_options() {
+        let mut app = app();
+        let mut rows = rows();
+        rows[0].pane.kind = Some("question".into());
+        rows[0].pane.ask = Some("decision".into());
+        app.set_rows(rows, hosts());
+        answering(&mut app, IDLE);
+        assert!(
+            app.answer
+                .as_ref()
+                .unwrap()
+                .screen
+                .as_ref()
+                .unwrap()
+                .options
+                .is_empty()
+        );
+        for c in "go ahead".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        assert!(matches!(
+            press(&mut app, KeyCode::Enter),
+            Some(Effect::Send {
+                action: Action::Text(_),
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn answer_tab_leaves_for_the_next_row_that_needs_you() {
         let mut app = app();
         answering(&mut app, DIALOG);
