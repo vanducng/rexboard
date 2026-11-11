@@ -83,6 +83,7 @@ fn text(row: &Row, fields: &[Field], tail: Option<&[String]>) -> String {
         ("host", row.pane.host.clone()),
         ("harness", harness(row)),
     ];
+    facts.extend(row.pane.ask.as_deref().map(|ask| ("ask", clean(ask))));
     facts.extend(row.last_turn.map(|secs| ("turn", span(secs))));
     if let Some(usage) = &row.usage {
         use crate::tui::columns::{Col, opted};

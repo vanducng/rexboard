@@ -31,7 +31,12 @@ rex = {
   end,
   block = {
     call = function(_, method)
-      if method == "program_status" then return { records = { { id = "", state = "idle" } } } end
+      if method == "program_status" then
+        if seen == "ask-only" then
+          return { records = { { id = "ask", state = "idle", msg = "decision" } } }
+        end
+        return { records = { { id = "ask", state = "blocked", msg = "decision" }, { id = "", state = "idle" } } }
+      end
       if method == "process" then return { foreground = foreground } end
       if method == "title" then return { title = seen } end
     end,

@@ -8,7 +8,7 @@ An agent reports its state (`working`, `blocked`, `done`, `idle` or `error`), wi
 
 | `source` | Where the agent runs | Where its record comes from |
 | --- | --- | --- |
-| `native` | Straight in a Rex pane | The agent itself. Claude Code and Codex report on their own there |
+| `native` | Straight in a Rex pane | The agent itself. pi 1.5.1, Claude Code and Codex report on their own there |
 | `bridge` | Inside tmux, in a Rex pane that runs `tmux attach` (an OpenRig seat, for example) | A hook in the agent that sends the sequence through tmux, which would otherwise swallow it. A record counts as `bridge` when tmux wrote it, or tmux is the pane's foreground process, or the foreground is `/bin/sh` (the `sh -c ... tmux attach` wrapper OpenRig runs) |
 | `inferred` | Anywhere, with nothing reporting | No record. The state comes from the title's glyph (`✳ ` idle, a spinner working, else `unknown`), and the harness, if any, from the process (`claude` or a version such as `2.1.310` for Claude Code, `codex`, `pi`, `grok-…` for grok) or the title, so it ends in `?`. `AGE` is `-`, and the row sits under `UNREPORTED` |
 | An extension's name | Anywhere, with nothing reporting | No record, but an enabled [extension](extensions.md) with `provides.status` gave the row a fallback status. The row is grouped by that state, like a reported one. A pane's own record always wins over it |
@@ -18,6 +18,16 @@ The turn card shows `source`, and `rexboard ls --json` has it on every row ([JSO
 `msg` is whatever the reporter sent. Rex keeps `msg` on one line, so some hooks (the dotfiles ones, for example) join a message's lines with ` ⏎ `; rexboard splits them back. The `MSG` column shows the first line and the turn card the whole message. `MSG` is blank when there is no message, and for the filler a hook sends when it has no words: `Done`, `Working`, `Allow <tool>?`. `rexboard ls --json` keeps `msg` as sent.
 
 An agent's own `done` record carries no message. A hook can add a sub-record with the id `turn` that carries the turn's final message, and rexboard uses its `msg` when the pane's own record has none. It is not counted as a child record. While the pane is `done` the `turn` message always applies, since the agent's own `done` lands just after it; in any other state it applies only when it is not older than the pane's record.
+
+## Decision signals
+
+Inside tmux, where the hook owns the pane's record, [`[hooks.ask]`](configuration.md#hooksask) makes a matching final message report `blocked`/`question`, plus a sub-record `id=ask:state=blocked:msg=<label>`. The label defaults to `decision`. Rex keeps known kinds only, so the label travels in the sub-record's `msg`, not as a new kind. The pane's own message holds the question and optional reply line.
+
+serve reads the label into `ask` (string or null), only when the sub-record is not older than the pane's status. Like `turn` and `usage`, `ask` is neither the main record nor a child. `UserPromptSubmit` and `SessionEnd` clear both `ask` and `turn`. Inside tmux, `@rex_ask` keeps the label for `hooks replay` when a client attaches later.
+
+The row keeps the `?` look, matches `fq`, and stays in NEEDS YOU even after being seen. `/ask:decision` selects only that label, `/ask:` any label, and `/kind:question` includes on-screen questions too. The card shows the label as a fact. Answering still reads the screen: a finished turn with an input line offers text, not numbered choices. A decision answered elsewhere stays blocked until the pane's next prompt.
+
+An older rexboard counts `ask` as a child, or takes it as the status when there is no main record. Upgrade the host running serve before enabling the rule on agent hosts. Plain Rex panes running pi 1.5.1, Claude Code or Codex are not promoted: their native status still wins and a finished turn stays `done`. pi's native `done` arrives after the hook's `ask`, so that label is stale and `ask` is `null`. The hook uses no delay or retry to override native reports.
 
 ## Usage on every host
 
@@ -34,7 +44,7 @@ A rexboard older than this does not know the record. It counts it as a child rec
 
 ## Setting it up
 
-Straight in a Rex pane, Claude Code and Codex report on their own. Inside tmux they need hooks, and pi needs its extension everywhere:
+Straight in a Rex pane, pi 1.5.1, Claude Code and Codex report on their own. Inside tmux they need hooks; pi's extension also reports usage:
 
 ```bash
 rexboard hooks status                # what each harness has

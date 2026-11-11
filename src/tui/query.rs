@@ -260,7 +260,7 @@ fn sort_of(app: &App, spec: &str) -> Result<Sort> {
 
 fn keys(app: &App) -> String {
     let mut keys = vec![
-        "host", "state", "harness", "session", "window", "block", "mark",
+        "host", "state", "kind", "ask", "harness", "session", "window", "block", "mark",
     ];
     keys.extend(app.fields.iter().map(|(field, _)| field.name.as_str()));
     format!("keys: {}", keys.join(", "))

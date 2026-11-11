@@ -151,6 +151,8 @@ pub struct Pane {
     pub harness: Option<String>,
     pub state: String,
     pub kind: Option<String>,
+    #[serde(default)]
+    pub ask: Option<String>,
     pub msg: Option<String>,
     pub updated_at: Option<String>,
     pub source: String,
@@ -224,11 +226,11 @@ pub fn rank(state: &str) -> u8 {
 
 pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
     let turn = src.records.get(TURN);
-    // The `turn` and `usage` records say something about the pane; neither is the agent's state.
+    // Metadata records describe the pane, not an agent's state.
     let others = || {
         src.records
             .iter()
-            .filter(|(id, _)| *id != TURN && *id != USAGE)
+            .filter(|(id, _)| *id != TURN && *id != USAGE && *id != "ask")
             .map(|(_, r)| r)
     };
     let main = src
@@ -296,6 +298,13 @@ pub fn derive(host: &str, session: &str, tab: &str, src: &Source) -> Pane {
         harness,
         state,
         kind,
+        ask: main.and_then(|root| {
+            let ask = src.records.get("ask")?;
+            if older(ask, root) {
+                return None;
+            }
+            ask.msg.clone().filter(|msg| !msg.trim().is_empty())
+        }),
         msg,
         updated_at,
         source,
@@ -319,15 +328,19 @@ use crate::harness::usage::{REPORT_ID as USAGE, Usage};
 /// takes it only if it is not older, so a stale turn never speaks for a newer state.
 fn turn_msg(root: &Record, turn: Option<&Record>) -> Option<String> {
     let turn = turn?;
+    if root.state != "done" && older(turn, root) {
+        return None;
+    }
+    turn.msg.clone().filter(|msg| !msg.is_empty())
+}
+
+fn older(record: &Record, root: &Record) -> bool {
     let at = |r: &Record| {
         r.updated_at
             .as_deref()
             .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
     };
-    match (at(root), at(turn)) {
-        (Some(root_at), Some(turn_at)) if turn_at < root_at && root.state != "done" => None,
-        _ => turn.msg.clone().filter(|msg| !msg.is_empty()),
-    }
+    matches!((at(record), at(root)), (Some(record), Some(root)) if record < root)
 }
 
 /// Claude Code and the seat status line put a state glyph at the start of the title.
@@ -407,6 +420,32 @@ mod tests {
             alone.source, "inferred",
             "a turn record alone is not the pane's status"
         );
+    }
+
+    #[test]
+    fn ask_is_metadata_never_a_main_record_or_child_and_an_older_ask_is_ignored() {
+        for (state, root, ask, want) in [
+            ("blocked", "00", "01", Some("decision")),
+            ("blocked", "01", "01", Some("decision")),
+            ("blocked", "02", "01", None),
+            ("done", "02", "01", None),
+        ] {
+            let pane = with_records(serde_json::json!([
+                {"state": state, "kind": "question", "updated_at": format!("2026-01-01T00:00:{root}Z")},
+                {"id": "ask", "state": "blocked", "msg": "decision", "updated_at": format!("2026-01-01T00:00:{ask}Z")}
+            ]));
+            assert_eq!(pane.ask.as_deref(), want);
+            assert_eq!(pane.state, state);
+            assert!(pane.children.is_empty());
+        }
+        let alone = with_records(serde_json::json!([
+            {"id": "ask", "state": "blocked", "msg": "decision"}
+        ]));
+        assert_eq!(
+            (alone.state.as_str(), alone.source.as_str(), alone.ask),
+            ("unknown", "inferred", None)
+        );
+        assert!(alone.children.is_empty());
     }
 
     #[test]

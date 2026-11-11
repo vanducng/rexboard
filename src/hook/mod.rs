@@ -82,17 +82,39 @@ fn tell(app: &str, name: Option<&str>, event: &Value) {
     if pane.is_none() && env("REX_BLOCK").is_none() {
         return log(name, None, "skipped: not in tmux or Rex");
     }
-    let Some(status) = report::status(event, app) else {
+    let Some(mut status) = report::status(event, app) else {
         return log(name, pane.as_deref(), "skipped: no status for this event");
     };
+    let owns_status = pane.is_some() || app == "pi";
+    let ask = (owns_status && name == Some("Stop"))
+        .then(|| decision(event, &mut status))
+        .flatten();
+    let clearing = matches!(name, Some("UserPromptSubmit" | "SessionEnd"));
+    let ask_record = if clearing {
+        Some(fields(app, "clear", None, None, Some("ask")))
+    } else {
+        ask.as_deref()
+            .map(|label| fields(app, "blocked", None, Some(label), Some("ask")))
+    };
+    let mut extra: Vec<String> = Vec::new();
+    if owns_status {
+        if clearing {
+            extra.extend(name.and_then(|name| turn_record(app, name, &status)));
+        }
+        extra.extend(ask_record.clone());
+    }
     let pairs = || fields(app, status.state, status.kind, status.msg.as_deref(), None);
     let Some(pane) = pane else {
         match app {
             "codex" => log(name, None, "skipped: codex reports to a Rex pane itself"),
-            // pi reports nothing itself, so in a Rex pane the status goes straight to its tty.
+            // Native pi reports may supersede this hook's report in a plain Rex pane.
             "pi" => match agent_tty() {
                 Some((_, tty)) => {
-                    write(&tty, &osc(&pairs()));
+                    let sequences: String = std::iter::once(pairs())
+                        .chain(extra)
+                        .map(|pairs| osc(&pairs))
+                        .collect();
+                    write(&tty, &sequences);
                     log(
                         name,
                         None,
@@ -126,13 +148,55 @@ fn tell(app: &str, name: Option<&str>, event: &Value) {
         return log(name, Some(&pane), "skipped: tmux gave no tty");
     };
     let pairs = pairs();
-    write(&tty, &wrap(&pairs));
+    let sequences: String = std::iter::once(&pairs)
+        .chain(&extra)
+        .map(|p| wrap(p))
+        .collect();
+    write(&tty, &sequences);
+    if let Some(ask) = ask_record {
+        if clearing {
+            tmux(&["set-option", "-p", "-u", "-t", &pane, "@rex_ask"]);
+        } else {
+            tmux(&["set-option", "-p", "-t", &pane, "@rex_ask", &ask]);
+        }
+    }
     if status.state == "clear" {
         tmux(&["set-option", "-p", "-u", "-t", &pane, "@rex_status"]);
     } else {
         tmux(&["set-option", "-p", "-t", &pane, "@rex_status", &pairs]);
     }
     log(name, Some(&pane), &format!("wrote {}", status.state));
+}
+
+fn decision(event: &Value, status: &mut report::Status) -> Option<String> {
+    let config = match crate::config::try_load() {
+        Ok(config) => config,
+        Err(bad) => {
+            note(&bad.short);
+            return None;
+        }
+    };
+    let rule = config.hooks.ask?;
+    let label = rule.label.as_deref().unwrap_or("decision");
+    if rule.pattern.trim().is_empty() || report::one_line(label).trim().is_empty() {
+        note("hooks.ask needs a non-blank pattern and label");
+        return None;
+    }
+    let first = event["last_assistant_message"]
+        .as_str()?
+        .lines()
+        .find(|line| !line.trim().is_empty())?;
+    if !first.starts_with(&rule.pattern) {
+        return None;
+    }
+    let msg = match rule.reply {
+        Some(reply) if !reply.trim().is_empty() => format!("{first}\n{reply}"),
+        _ => first.to_owned(),
+    };
+    status.state = "blocked";
+    status.kind = Some("question");
+    status.msg = Some(report::one_line(&msg));
+    Some(report::one_line(label))
 }
 
 /// Tells Rex what the agent's last turn used: a `usage` sub-record beside its own status, so
@@ -162,7 +226,7 @@ fn send_usage(pairs: &str) -> bool {
     }
 }
 
-/// `rexboard hooks replay SESSION`: re-sends each pane's last status and usage, for a tmux
+/// `rexboard hooks replay SESSION`: re-sends the status, usage and ask label for a tmux
 /// client that just attached to SESSION.
 pub fn replay(session: &str) -> Result<()> {
     let rows = tmux(&[
@@ -171,10 +235,10 @@ pub fn replay(session: &str) -> Result<()> {
         "-t",
         session,
         "-F",
-        "#{pane_tty}|#{@rex_status}|#{@rex_usage}",
+        "#{pane_tty}|#{@rex_status}|#{@rex_usage}|#{@rex_ask}",
     ]);
     for row in rows.unwrap_or_default().lines() {
-        let mut parts = row.splitn(3, '|');
+        let mut parts = row.splitn(4, '|');
         let Some(tty) = parts.next().filter(|tty| !tty.is_empty()) else {
             continue;
         };

@@ -210,8 +210,8 @@ pub struct BoardArgs {
 #[derive(Debug, Default, Args)]
 pub struct OpenArgs {
     /// Open with this text typed into `/`, as `ls --filter` takes it: words match any label, and
-    /// `key:value` one key (host, state, harness, session, window, block, mark, a field). Repeat
-    /// to add terms; they join into the one `/` text, so loose words match as one phrase.
+    /// `key:value` one key (host, state, kind, ask, harness, session, window, block, mark, a field).
+    /// Repeat to add terms; they join into the one `/` text, so loose words match as one phrase.
     #[arg(long, value_name = "TEXT")]
     pub filter: Vec<String>,
     /// Open showing one status, as `f` does, by name or letter: working, done, question,
@@ -325,8 +325,8 @@ pub struct LsArgs {
     #[arg(long, value_name = "NAME")]
     pub view: Option<String>,
     /// Keep only rows this text matches, as the board's `/` does: words match any label, and
-    /// `key:value` one key (host, state, harness, session, window, block, mark, a field). Repeat
-    /// to narrow further.
+    /// `key:value` one key (host, state, kind, ask, harness, session, window, block, mark, a field).
+    /// Repeat to narrow further.
     #[arg(long, value_name = "TEXT")]
     pub filter: Vec<String>,
     /// Keep only one status, by name or its `f` letter: working, done, question, permission,

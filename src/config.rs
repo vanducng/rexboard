@@ -25,6 +25,22 @@ pub struct Config {
     /// skipped and named by `Marks::new`, not a reason for the whole file to fail.
     #[serde(default)]
     pub mark: Option<toml::Value>,
+    #[serde(default)]
+    pub hooks: Hooks,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Hooks {
+    pub ask: Option<Ask>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Ask {
+    pub pattern: String,
+    pub reply: Option<String>,
+    pub label: Option<String>,
 }
 
 /// `[extensions]`: which discovered extensions run, where else to look, and what each is told.

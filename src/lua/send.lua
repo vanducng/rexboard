@@ -21,7 +21,7 @@ local _, aerr = rex.call("session.attach", { session_id = a.session_id })
 if aerr then return fail("session.attach", aerr) end
 
 -- The pane's main record, picked as pane.rs derive does: the root, else the most urgent, never
--- the hook's `turn` record.
+-- the hook's metadata records.
 local status, serr = rex.block.call(term, "program_status", where)
 if not status then return fail("program_status", serr) end
 local rank = { blocked = 0, error = 1, done = 2, working = 3, idle = 4 }
@@ -32,7 +32,8 @@ for _, r in ipairs(status.records or {}) do
     main = r
     break
   end
-  if id ~= "turn" and (not main or (rank[r.state] or 5) < (rank[main.state] or 5)) then main = r end
+  if id ~= "turn" and id ~= "ask"
+      and (not main or (rank[r.state] or 5) < (rank[main.state] or 5)) then main = r end
 end
 -- Same state and kind: a fresh report of the same wait (a hook's notification for the dialog
 -- already up) is no change. The fingerprint below tells one dialog from another.
