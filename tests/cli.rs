@@ -1451,6 +1451,19 @@ fn board_under_pty(
     signal: Option<libc::c_int>,
     hang_up: bool,
 ) -> (String, std::process::ExitStatus) {
+    on_pty(&["board"], None, &[], signal, hang_up)
+}
+
+/// Runs `rexboard ARGS` on a fresh pty, against `serve`'s rows when there is one, until it is on
+/// the alternate screen and has drawn every `expect` (or has exited with them said), then sends
+/// `signal` (if any) and returns everything it wrote plus how it exited.
+fn on_pty(
+    args: &[&str],
+    serve: Option<&Serve>,
+    expect: &[&str],
+    signal: Option<libc::c_int>,
+    hang_up: bool,
+) -> (String, std::process::ExitStatus) {
     use std::io::Read;
     use std::os::fd::FromRawFd;
     let size = libc::winsize {
@@ -1495,7 +1508,7 @@ fn board_under_pty(
     // No setsid or controlling tty: crossterm reads a tty stdin, and a pre_exec fork from the
     // busy parallel suite got the child SIGKILLed in about a third of runs.
     let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_rexboard"));
-    cmd.arg("board")
+    cmd.args(args)
         .env("REXBOARD_REX", fixture("fake-rex"))
         .env("XDG_RUNTIME_DIR", NO_SERVE)
         .env("XDG_STATE_HOME", NO_SERVE)
@@ -1504,6 +1517,19 @@ fn board_under_pty(
         .stdin(stdio())
         .stdout(stdio())
         .stderr(stdio());
+    if let Some(serve) = serve {
+        cmd.env_remove("XDG_RUNTIME_DIR").envs(serve.envs());
+        cmd.env(
+            "FAKE_REX_OBSERVER_studio",
+            serve.dir.path().join("observer-studio-quiet.ndjson"),
+        )
+        .env(
+            "FAKE_REX_OBSERVER_mini",
+            serve.dir.path().join("observer-mini-needing.ndjson"),
+        )
+        .env_remove("REX_BLOCK")
+        .env_remove("REX_CLIENT");
+    }
     let mut child = cmd.spawn().unwrap();
     unsafe { libc::close(slave) };
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1527,12 +1553,24 @@ fn board_under_pty(
     });
     let text = || String::from_utf8_lossy(&seen.lock().unwrap()).into_owned();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !text().contains("\x1b[?1049h") {
-        if std::time::Instant::now() >= deadline {
-            let status = child.try_wait().unwrap();
+    let drawn =
+        || text().contains("\x1b[?1049h") && expect.iter().all(|want| text().contains(want));
+    while !drawn() {
+        let exited = child.try_wait().unwrap();
+        if std::time::Instant::now() >= deadline || exited.is_some() {
+            if let Some(status) = exited {
+                // It said what it had to and left: its last bytes may still be on their way.
+                let said = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                while !expect.iter().all(|want| text().contains(want))
+                    && std::time::Instant::now() < said
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                return (text(), status);
+            }
             let _ = child.kill();
             panic!(
-                "no alternate screen in 10s; exit {status:?}; output {:?}",
+                "no alternate screen in 10s with {expect:?}; output {:?}",
                 text()
             );
         }
@@ -1592,6 +1630,62 @@ fn ls_does_not_suspect_a_seat_under_tmux_by_its_title() {
     let text = String::from_utf8(out).unwrap();
     let line = text.lines().find(|l| l.contains("seat-r")).unwrap();
     assert!(!line.contains("idle?"), "{line}");
+}
+
+const MARK_SEAT_OLD: &str = "[[mark]]\nblock = \"seat-old\"\n";
+
+#[test]
+fn board_and_pick_open_narrowed_by_status_filter_and_view() {
+    let serve = needing_with(MARK_SEAT_OLD);
+    for command in ["board", "pick"] {
+        let (out, _) = on_pty(
+            &[command, "--status", "marked"],
+            Some(&serve),
+            &["only marked", "seat-old"],
+            Some(libc::SIGTERM),
+            false,
+        );
+        assert!(
+            !out.contains("seat-new") && !out.contains("seat-done"),
+            "{command} --status marked shows the marked row only: {out:?}"
+        );
+        let (out, _) = on_pty(
+            &[
+                command, "--filter", "mark:", "--filter", "web", "--view", "table",
+            ],
+            Some(&serve),
+            &["/mark: web", "view: table", "seat-old"],
+            Some(libc::SIGTERM),
+            false,
+        );
+        assert!(!out.contains("seat-new"), "{command} --filter: {out:?}");
+    }
+}
+
+#[test]
+fn board_and_pick_refuse_a_bad_view_or_status_with_usage() {
+    let serve = needing();
+    for command in ["board", "pick"] {
+        for (args, said) in [
+            (
+                ["--view", "nope"],
+                "no view named nope; views: status, table, harness, host, session",
+            ),
+            (
+                ["--status", "x"],
+                "no status named x; statuses: working, done",
+            ),
+        ] {
+            let (out, status) = on_pty(
+                &[command, args[0], args[1]],
+                Some(&serve),
+                &[said],
+                None,
+                false,
+            );
+            assert_eq!(status.code(), Some(2), "{command} {args:?}: {out:?}");
+        }
+    }
 }
 
 #[test]
@@ -2400,6 +2494,20 @@ fn serve_marks_rows_by_config_rules_and_ls_marked_lists_only_those() {
         .assert()
         .success()
         .stdout(predicate::str::contains("seat-b").and(predicate::str::contains("codex").not()));
+    for status in ["marked", "*"] {
+        let keys = |args: &[&str]| -> Vec<String> {
+            serve
+                .rows(args)
+                .iter()
+                .map(|row| row["key"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        assert_eq!(
+            keys(&["--all", "--status", status]),
+            keys(&["--all", "--marked"]),
+            "--status {status} keeps the rows --marked keeps"
+        );
+    }
     let log = std::fs::read_to_string(serve.file("serve.log")).unwrap();
     assert_eq!(
         log.matches("[[mark]] #3: skipped, unknown key \"sesion\"")

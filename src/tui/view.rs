@@ -12,7 +12,7 @@ use super::app::{App, CardDrawn, Item, Link, NUMBERED, Spot};
 use super::columns::{Col, Columns, Sort, Tier, Tone, column_of};
 use super::keys::{self, Act};
 use super::prefs::CardHeight;
-use super::status::ALL;
+use super::status::{ALL, Status};
 use super::theme;
 use super::views::{Bucket, Key, View};
 use crate::board::Row;
@@ -226,7 +226,10 @@ fn status_keys(app: &App, width: usize) -> Line<'static> {
     let named = |sep: &str, tail: &str| -> Line<'static> {
         let mut spans = vec![Span::styled("f ", theme::strong())];
         for (i, status) in ALL.iter().enumerate() {
-            let (letter, rest) = status.name().split_at(1);
+            let (letter, rest) = match status {
+                Status::Marked => ("*", " marked"),
+                _ => status.name().split_at(1),
+            };
             if i > 0 {
                 spans.push(Span::styled(sep.to_owned(), theme::quiet()));
             }
@@ -1822,7 +1825,7 @@ mod tests {
             ":        a view, :seen or :q",
             "o        sort by a column's letter",
             "esc      cancel a key, clear filters",
-            "f        one status; ff clears",
+            "f        status or * marked; ff clears",
             "dd       close the pane; y confirms",
             "- ctrl-o back and forth, like cd -",
         ] {
@@ -1844,13 +1847,13 @@ mod tests {
         };
         assert_eq!(
             last(&app, 140),
-            "f working 1 · done 2 · question 1 · permission 2 · error 1 · unreported 2 · idle 1 · ff clears"
+            "f working 1 · done 2 · question 1 · permission 2 · error 1 · unreported 2 · idle 1 · * marked 0 · ff clears"
         );
         assert_eq!(
-            last(&app, 80),
-            "f working 1  done 2  question 1  permission 2  error 1  unreported 2  idle 1"
+            last(&app, 100),
+            "f working 1  done 2  question 1  permission 2  error 1  unreported 2  idle 1  * marked 0"
         );
-        assert_eq!(last(&app, 50), "f w1 d2 q1 p2 e1 u2 i1 · ff clears");
+        assert_eq!(last(&app, 80), "f w1 d2 q1 p2 e1 u2 i1 *0 · ff clears");
         press(&mut app, KeyCode::Char('p'));
         assert!(
             !last(&app, 140).starts_with("f w"),
@@ -2229,7 +2232,7 @@ mod tests {
         press(&mut app, KeyCode::Char('f'));
         press(&mut app, KeyCode::Char('c'));
         assert!(app.card, "c after f belongs to f");
-        assert_eq!(app.toast(), Some("f takes w d q p e u i; ff clears"));
+        assert_eq!(app.toast(), Some("f takes w d q p e u i *; ff clears"));
         crate::tui::app::testkit::sort(&mut app, 's');
         assert!(app.sort.is_some(), "o s sorts");
     }

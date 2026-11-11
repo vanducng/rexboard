@@ -27,7 +27,7 @@ pub enum Command {
     Serve(ServeArgs),
     /// Open the board: agent panes grouped by what they need. `rexboard` with no command opens it
     /// in a terminal.
-    Board,
+    Board(OpenArgs),
     /// Mark a pane seen by the `key` from `ls --json`, or every unseen done row with `--all-done`.
     Seen(SeenArgs),
     /// What the board's card says about a pane, by its `key`; `--tail N` adds its last lines.
@@ -85,7 +85,7 @@ pub enum Command {
         marked: Option<String>,
     },
     /// Pick a pane from the board's list and go to it. Enter goes and exits 0; esc exits 1.
-    Pick,
+    Pick(OpenArgs),
     /// List extensions, run one once against real rows, or start a new one from the example.
     #[command(subcommand)]
     Ext(ExtCommand),
@@ -191,6 +191,38 @@ pub enum ExtCommand {
     },
 }
 
+/// How the board or the picker opens, for a window that should start narrowed. `esc` and `ff`
+/// clear it as they clear what the keys set.
+#[derive(Debug, Default, Args)]
+pub struct OpenArgs {
+    /// Open with this text typed into `/`, as `ls --filter` takes it: words match any label, and
+    /// `key:value` one key (host, state, harness, session, window, block, mark, a field). Repeat
+    /// to add terms; they join into the one `/` text, so loose words match as one phrase.
+    #[arg(long, value_name = "TEXT")]
+    pub filter: Vec<String>,
+    /// Open showing one status, as `f` does, by name or letter: working, done, question,
+    /// permission, error, unreported, idle, or marked (`*`: the rows with a star before the
+    /// number).
+    #[arg(long, value_name = "STATUS")]
+    pub status: Option<String>,
+    /// Open on this view (`rexboard views` lists them). In `pick`, it is kept for next time, as a
+    /// view chosen with `v` is.
+    #[arg(long, value_name = "NAME")]
+    pub view: Option<String>,
+}
+
+impl OpenArgs {
+    pub fn query(&self) -> crate::tui::query::Query<'_> {
+        crate::tui::query::Query {
+            view: self.view.as_deref(),
+            filters: &self.filter,
+            status: self.status.as_deref(),
+            sort: None,
+            context: &[],
+        }
+    }
+}
+
 #[derive(Debug, Args)]
 pub struct ServeArgs {
     /// Run in this terminal instead of in the background.
@@ -282,8 +314,8 @@ pub struct LsArgs {
     /// to narrow further.
     #[arg(long, value_name = "TEXT")]
     pub filter: Vec<String>,
-    /// Keep only one status, by name or first letter: working, done, question, permission,
-    /// error, unreported, idle.
+    /// Keep only one status, by name or its `f` letter: working, done, question, permission,
+    /// error, unreported, idle; or `marked` (`*`), the rows with a star before the number.
     #[arg(long, value_name = "STATUS")]
     pub status: Option<String>,
     /// Sort within each group by a column (state, age, turn, harness, host, where, session,

@@ -17,7 +17,7 @@ use super::markdown::{self, Block, Run};
 use super::pick_prefs::PickPrefs;
 use super::prefs::Digits;
 use super::screen::Screen;
-use super::status::Status;
+use super::status::{ALL, Status};
 use super::views::{Bucket, Key, View, arrange, bucket, views};
 use crate::board::{Group, Row};
 use crate::client::{ExtRun, Field};
@@ -538,7 +538,10 @@ impl App {
                 // Folded groups would hide the very rows asked for.
                 self.unfold_all();
             }
-            ('f', _) if k.0 != KeyCode::Esc => self.say("f takes w d q p e u i; ff clears"),
+            ('f', _) if k.0 != KeyCode::Esc => {
+                let letters: Vec<String> = ALL.iter().map(|s| s.letter().to_string()).collect();
+                self.say(format!("f takes {}; ff clears", letters.join(" ")));
+            }
             ('x', _) => return self.start_action(k),
             ('o' | 'f', _) => {}
             _ => {

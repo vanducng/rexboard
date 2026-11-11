@@ -82,6 +82,23 @@ pub fn arrange(rows: Vec<Row>, fields: Vec<Field>, query: &Query) -> Result<Vec<
         .collect())
 }
 
+/// Opens `app` as `rexboard board` and `pick` ask: the board's own state for `--status`, `--filter`
+/// and `--view`, with the same values and `USAGE` errors as `ls`.
+pub fn open(app: &mut App, query: &Query) -> Result<()> {
+    if let Some(text) = query.status {
+        app.status = Some(status_of(text)?);
+    }
+    if !query.filters.is_empty() {
+        app.filter = Input::new(query.filters.join(" "));
+    }
+    if let Some(name) = query.view {
+        // A field's view exists only once serve has said which extensions declare it.
+        app.set_extensions(crate::client::current()?.fields, BTreeMap::new());
+        app.show(view(app, name)?);
+    }
+    Ok(())
+}
+
 /// Each row's group under a view that groups by something but status, which `group` has said
 /// already, by the row's index: the header's name with no count.
 fn view_groups(app: &App) -> BTreeMap<usize, String> {
@@ -170,7 +187,7 @@ fn view(app: &App, name: &str) -> Result<View> {
         })
 }
 
-fn status_of(text: &str) -> Result<Status> {
+pub(crate) fn status_of(text: &str) -> Result<Status> {
     let mut letters = text.chars();
     let letter = match (letters.next(), letters.next()) {
         (Some(letter), None) => Status::from_letter(letter),
@@ -182,7 +199,7 @@ fn status_of(text: &str) -> Result<Status> {
             let names: Vec<&str> = ALL.iter().map(|status| status.name()).collect();
             Error::usage_with(
                 format!(
-                    "no status named {text}; statuses: {}, or their first letters",
+                    "no status named {text}; statuses: {}, or their `f` letters (w d q p e u i *)",
                     names.join(", ")
                 ),
                 &["rexboard ls --status question"],
