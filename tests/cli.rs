@@ -1663,6 +1663,18 @@ fn board_and_pick_open_narrowed_by_status_filter_and_view() {
 }
 
 #[test]
+fn board_opens_on_a_built_in_view_with_no_serve_to_ask() {
+    let (out, status) = on_pty(
+        &["board", "--view", "table"],
+        None,
+        &["view: table"],
+        Some(libc::SIGTERM),
+        false,
+    );
+    assert!(status.success(), "{status:?}: {out:?}");
+}
+
+#[test]
 fn board_and_pick_refuse_a_bad_view_or_status_with_usage() {
     let serve = needing();
     for command in ["board", "pick"] {

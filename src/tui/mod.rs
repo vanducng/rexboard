@@ -146,11 +146,12 @@ pub fn pick(open: &OpenArgs, json: bool) -> Result<()> {
 
 /// Runs the board until it quits, or until a pick chooses a row.
 fn board(pick: bool, open: &OpenArgs) -> Result<Option<Row>> {
+    // Before start_app, whose `--view` asks serve, and the subscriber thread: either may restart
+    // serve and say so.
+    client::QUIET.store(true, Ordering::Relaxed);
     let mut app = start_app(pick, open)?;
     let (tx, rx) = mpsc::channel();
     let generation = Arc::new(AtomicU64::new(0));
-    // Before the subscriber thread, which may restart serve and say so.
-    client::QUIET.store(true, Ordering::Relaxed);
     listen(&tx, &generation);
     let mut terminal = ratatui::init();
     let _restore = Restore;

@@ -191,7 +191,7 @@ rexboard board --filter host:mini --view host  # as `/host:mini` and `v`
 
 The board: the agent panes `ls` lists, grouped as `NEEDS YOU`, `WORKING`, `QUIET` and `UNREPORTED`, with a ticking time in state. It is a client of [`rexboard serve`](#rexboard-serve) and starts it when nothing answers. `board` without a terminal fails with `USAGE`. [TUI](tui.md) has the layout and keys.
 
-`--filter TEXT`, `--status STATUS` and `--view NAME` open the board already narrowed, for a window that should start on one thing: they take the values `ls --filter`, `--status` and `--view` take, and set what `/`, `f` and `v` set. `--filter` can repeat; the terms join into the one `/` text, so keyed terms narrow as in `ls` and loose words match as one phrase. `esc` and `ff` clear them as they clear what the keys set. A status or view that names nothing fails with `USAGE` before the terminal changes, as `ls` does, and lists the ones there are. `pick` takes the same three.
+`--filter TEXT`, `--status STATUS` and `--view NAME` open the board already narrowed, for a window that should start on one thing: they take the values `ls --filter`, `--status` and `--view` take, and set what `/`, `f` and `v` set. `--filter` can repeat; the terms join into the one `/` text, so keyed terms narrow as in `ls` and loose words match as one phrase. `esc` and `ff` clear them as they clear what the keys set. A status or view that names nothing fails with `USAGE` before the terminal changes, as `ls` does, and lists the ones there are. A built-in view opens with no serve to ask; only an extension field's view waits for serve to name it. `pick` takes the same three.
 
 ## `rexboard serve`
 

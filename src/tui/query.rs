@@ -92,8 +92,11 @@ pub fn open(app: &mut App, query: &Query) -> Result<()> {
         app.filter = Input::new(query.filters.join(" "));
     }
     if let Some(name) = query.view {
-        // A field's view exists only once serve has said which extensions declare it.
-        app.set_extensions(crate::client::current()?.fields, BTreeMap::new());
+        // A field's view exists only once serve has said which extensions declare it; the
+        // built-in views need no serve.
+        if !app.views().iter().any(|view| view.name == name) {
+            app.set_extensions(crate::client::current()?.fields, BTreeMap::new());
+        }
         app.show(view(app, name)?);
     }
     Ok(())
