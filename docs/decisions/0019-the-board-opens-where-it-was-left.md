@@ -16,7 +16,7 @@ The board and `board --once` start fresh on every run: the view, the sort, the `
 ## Consequences
 
 - One more file in the state dir, named in [system architecture](../system-architecture.md#files). To reset, delete it.
-- A status or `/` text that hides every row can greet the next start; the top bar names it and `esc` clears it.
+- A status or `/` text that hides every row can greet the next start. The top bar names the status, and the footer says what clears each: `esc` or `ff` on the board; in `pick` and `board --once`, where `esc` leaves, `ff` for the status and `/` to edit the text.
 - `pick` and the board never write the same file.
 
 ## Supersedes

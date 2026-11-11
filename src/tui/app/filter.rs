@@ -3,6 +3,12 @@
 use super::*;
 
 impl App {
+    /// Whether `esc` clears the `/` text, as it does on the resident board: in `pick` and
+    /// `board --once` it leaves instead, and `/` edits the text.
+    pub fn esc_clears(&self) -> bool {
+        !self.pick && !self.once
+    }
+
     /// Whether the row passes the status filter and the `/` text.
     pub(super) fn matches(&self, row: &Row) -> bool {
         self.status.is_none_or(|status| status.matches(row)) && self.matches_text(row)

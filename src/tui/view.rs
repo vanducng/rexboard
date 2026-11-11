@@ -495,16 +495,23 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
 /// What an empty list says: why nothing matches, or how serve is.
 fn empty_message(app: &App) -> String {
     let query = app.filter.value();
+    let (esc, ff) = if app.esc_clears() {
+        ("esc clears", "ff or esc clears")
+    } else {
+        ("/ edits", "ff clears")
+    };
     if let Some(status) = app.status {
         if query.is_empty() {
-            format!("no {} rows · ff or esc clears", status.name())
+            format!("no {} rows · {ff}", status.name())
+        } else if app.esc_clears() {
+            format!("no {} rows match \"{query}\" · {esc}", status.name())
         } else {
-            format!("no {} rows match \"{query}\" · esc clears", status.name())
+            format!("no {} rows match \"{query}\" · {ff} · {esc}", status.name())
         }
     } else if let Some(key) = app.unknown_key() {
-        format!("no key {key} · esc clears")
+        format!("no key {key} · {esc}")
     } else if !query.is_empty() {
-        format!("no rows match \"{query}\" · esc clears")
+        format!("no rows match \"{query}\" · {esc}")
     } else {
         match &app.link {
             Link::Up => "no agent panes yet".to_owned(),
@@ -712,9 +719,18 @@ fn key_bar(app: &App, width: usize) -> Line<'static> {
     let query = app.filter.value();
     if !query.is_empty() {
         let kept = fit(&format!("/{query}"), 16).trim_end().to_owned();
-        used += kept.width() + " · esc clears · ".width();
+        let hint = if app.esc_clears() {
+            " · esc clears · "
+        } else {
+            " · / edits · "
+        };
+        used += kept.width() + hint.width();
         spans.push(Span::styled(kept, theme::strong()));
-        spans.push(Span::styled(" · esc clears · ", theme::quiet()));
+        spans.push(Span::styled(hint, theme::quiet()));
+    }
+    if app.status.is_some() {
+        used += "ff clears · ".width();
+        spans.push(Span::styled("ff clears · ", theme::quiet()));
     }
     // `keys::FOOTER` ranks the keys; a narrow board drops them from the end.
     let keys: Vec<(&str, &str)> = if app.pick {
@@ -1341,6 +1357,65 @@ mod tests {
         let text = render(&app, 50, 30);
         assert!(text.contains("▸ NEEDS YOU (2)"), "{text}");
         assert!(text.contains("NEEDS YOU is folded · za opens it"), "{text}");
+    }
+
+    fn footer(app: &App, width: u16) -> String {
+        render(app, width, 30).lines().last().unwrap().to_owned()
+    }
+
+    #[test]
+    fn the_footer_names_what_clears_the_text_and_the_status_in_each_mode() {
+        for width in [80, 140] {
+            for (mode, esc_clears) in [("board", true), ("once", false), ("pick", false)] {
+                let mut app = fuller();
+                app.once = mode == "once";
+                app.pick = mode == "pick";
+                press(&mut app, KeyCode::Char('/'));
+                for c in "seat".chars() {
+                    press(&mut app, KeyCode::Char(c));
+                }
+                press(&mut app, KeyCode::Enter);
+                let text = footer(&app, width);
+                let hint = if esc_clears {
+                    "/seat · esc clears · "
+                } else {
+                    "/seat · / edits · "
+                };
+                assert!(text.starts_with(hint), "{mode} {width}: {text}");
+                assert!(
+                    !text.contains("ff clears"),
+                    "{mode} {width}: no status: {text}"
+                );
+                typed(&mut app, "fw");
+                let text = footer(&app, width);
+                let hint = format!("{hint}ff clears · ");
+                assert!(text.starts_with(&hint), "{mode} {width}: {text}");
+                assert!(
+                    text.contains("j/k move") || text.contains("j/k"),
+                    "{mode} {width}: {text}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_status_alone_gets_ff_clears_and_an_empty_list_says_the_mode_s_way_out() {
+        let mut app = fuller();
+        typed(&mut app, "fw");
+        assert!(
+            footer(&app, 80).starts_with("ff clears · j/k"),
+            "{}",
+            footer(&app, 80)
+        );
+        app.once = true;
+        typed(&mut app, "/zzz");
+        press(&mut app, KeyCode::Enter);
+        let text = render(&app, 80, 30);
+        assert!(
+            text.contains("no working rows match \"zzz\" · ff clears · / edits"),
+            "{text}"
+        );
+        assert!(!text.contains("esc clears"), "{text}");
     }
 
     #[test]
