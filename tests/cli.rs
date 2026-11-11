@@ -1810,23 +1810,27 @@ fn board_once_exits_0_after_each_jump_key_lands() {
 }
 
 #[test]
-fn board_once_exits_1_on_q_and_on_esc_with_nothing_to_clear() {
+fn board_once_exits_1_on_q_and_on_esc_but_esc_first_closes_a_layer() {
     let serve = needing_with(MARK_SEAT_OLD);
     for (what, args, send, alive) in [
         ("q", vec![], vec!["q"], false),
         ("esc", vec![], vec!["\x1b"], false),
         (
-            "esc clears a status first",
+            "esc leaves a --status",
             vec!["--status", "marked"],
             vec!["\x1b"],
-            true,
-        ),
-        (
-            "then leaves",
-            vec!["--status", "marked"],
-            vec!["\x1b", "\x1b"],
             false,
         ),
+        (
+            "esc leaves a --filter",
+            vec!["--filter", "web"],
+            vec!["\x1b"],
+            false,
+        ),
+        ("esc closes the ? table", vec![], vec!["?", "\x1b"], true),
+        ("then leaves", vec![], vec!["?", "\x1b", "\x1b"], false),
+        ("esc closes a / prompt", vec![], vec!["/", "\x1b"], true),
+        ("esc drops a waiting f", vec![], vec!["f", "\x1b"], true),
     ] {
         let ran = once_with(&serve, &args, &send);
         assert_eq!(ran.alive, alive, "{what}: {:?}", ran.out);

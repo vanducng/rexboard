@@ -107,6 +107,25 @@ mod tests {
     }
 
     #[test]
+    fn esc_closes_a_layer_then_quits_under_once_and_clears_on_the_board() {
+        let mut once = listed();
+        once.once = true;
+        once.status = Some(crate::tui::status::Status::Done);
+        press(&mut once, KeyCode::Char('?'));
+        assert_eq!(press(&mut once, KeyCode::Esc), None);
+        assert!(
+            !once.keys && once.status.is_some(),
+            "the table closed, nothing cleared"
+        );
+        assert_eq!(press(&mut once, KeyCode::Esc), Some(Effect::Quit));
+        assert!(once.status.is_some(), "esc never clears a status here");
+        let mut board = listed();
+        board.status = Some(crate::tui::status::Status::Done);
+        assert_eq!(press(&mut board, KeyCode::Esc), None);
+        assert!(board.status.is_none(), "the resident board still clears it");
+    }
+
+    #[test]
     fn the_list_fills_the_body_by_default_and_c_toggles_and_saves_and_p_does_nothing() {
         let mut app = listed();
         let text = render(&app, 100, 30);

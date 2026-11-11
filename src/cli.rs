@@ -194,9 +194,10 @@ pub enum ExtCommand {
 #[derive(Debug, Default, Args)]
 pub struct BoardArgs {
     /// Run as a popup: the whole board, with every key, that exits 0 once a jump lands (enter, `'`,
-    /// a digit under `"digits": "jump"`, `g` and a digit, `-`), and 1 on `q`, or on `esc` with
-    /// nothing left to clear. Answering, closing and actions do not exit. It keeps the card
-    /// choice in tui.json, as the board does; `pick` keeps its own view and sort.
+    /// a digit under `"digits": "jump"`, `g` and a digit, `-`), and 1 on `q`, or on `esc` once it
+    /// has closed the layer in front (the `?` table, a prompt); `esc` never clears a filter, as in
+    /// `pick`. Answering, closing and actions do not exit. It keeps the card choice in tui.json,
+    /// as the board does; `pick` keeps its own view and sort.
     #[arg(long)]
     pub once: bool,
     #[command(flatten)]
