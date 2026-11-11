@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/vanducng/rexboard/compare/v0.29.0...v0.30.0) (2026-11-11)
+
+
+### Features
+
+* **cli:** show only the marked rows with f*, and open board and pick narrowed ([#156](https://github.com/vanducng/rexboard/issues/156)) ([a5ae2fd](https://github.com/vanducng/rexboard/commit/a5ae2fd818cdef4f68401e2c250fcf7025e89a2f))
+
 ## [0.29.0](https://github.com/vanducng/rexboard/compare/v0.28.0...v0.29.0) (2026-11-10)
 
 
