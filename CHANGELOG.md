@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.0](https://github.com/vanducng/rexboard/compare/v0.30.0...v0.31.0) (2026-11-11)
+
+
+### Features
+
+* **cli:** run the whole board as a popup with board --once ([#158](https://github.com/vanducng/rexboard/issues/158)) ([a4f8d44](https://github.com/vanducng/rexboard/commit/a4f8d44a8be2e8f87afff60de7229df258a20301))
+
 ## [0.30.0](https://github.com/vanducng/rexboard/compare/v0.29.0...v0.30.0) (2026-11-11)
 
 
