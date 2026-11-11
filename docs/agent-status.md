@@ -23,7 +23,7 @@ An agent's own `done` record carries no message. A hook can add a sub-record wit
 
 Inside tmux, where the hook owns the pane's record, [`[hooks.ask]`](configuration.md#hooksask) makes a matching final message report `blocked`/`question`, plus a sub-record `id=ask:state=blocked:msg=<label>`. The label defaults to `decision`. Rex keeps known kinds only, so the label travels in the sub-record's `msg`, not as a new kind. The pane's own message holds the question and optional reply line.
 
-serve reads the label into `ask` (string or null), only when the sub-record is not older than the pane's status. Like `turn` and `usage`, `ask` is neither the main record nor a child. `UserPromptSubmit` and `SessionEnd` clear both `ask` and `turn`. Inside tmux, `@rex_ask` keeps the label for `hooks replay` when a client attaches later.
+serve reads the label into `ask` (string or null), only when the sub-record is not older than the pane's status. Like `turn` and `usage`, `ask` is neither the main record nor a child. `UserPromptSubmit` and `SessionEnd` clear both `ask` and `turn`. A non-matching `Stop` also clears `ask`, so replay cannot restore an old decision beside a finished status. Inside tmux, `@rex_ask` keeps the label for `hooks replay` when a client attaches later.
 
 The row keeps the `?` look, matches `fq`, and stays in NEEDS YOU even after being seen. `/ask:decision` selects only that label, `/ask:` any label, and `/kind:question` includes on-screen questions too. The card shows the label as a fact. Answering still reads the screen: a finished turn with an input line offers text, not numbered choices. A decision answered elsewhere stays blocked until the pane's next prompt.
 

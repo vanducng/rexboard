@@ -90,7 +90,8 @@ fn tell(app: &str, name: Option<&str>, event: &Value) {
         .then(|| decision(event, &mut status))
         .flatten();
     let clearing = matches!(name, Some("UserPromptSubmit" | "SessionEnd"));
-    let ask_record = if clearing {
+    let clear_ask = clearing || (owns_status && name == Some("Stop") && ask.is_none());
+    let ask_record = if clear_ask {
         Some(fields(app, "clear", None, None, Some("ask")))
     } else {
         ask.as_deref()
@@ -154,7 +155,7 @@ fn tell(app: &str, name: Option<&str>, event: &Value) {
         .collect();
     write(&tty, &sequences);
     if let Some(ask) = ask_record {
-        if clearing {
+        if clear_ask {
             tmux(&["set-option", "-p", "-u", "-t", &pane, "@rex_ask"]);
         } else {
             tmux(&["set-option", "-p", "-t", &pane, "@rex_ask", &ask]);

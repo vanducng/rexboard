@@ -193,12 +193,18 @@ fn a_hook_in_tmux_writes_the_bridges_bytes_to_its_pane_and_keeps_them_there() {
         .success()
         .stdout("");
     let written = std::fs::read_to_string(home.path().join("tty")).unwrap();
-    assert_eq!(written, row["tmux"].as_str().unwrap());
+    assert_eq!(
+        written,
+        format!(
+            "{}\x1bPtmux;\x1b\x1b]7501;id=ask:app=claude-code:state=clear\x07\x1b\\",
+            row["tmux"].as_str().unwrap()
+        )
+    );
     let calls = std::fs::read_to_string(home.path().join("calls")).unwrap();
     assert_eq!(
         calls,
         format!(
-            "set-option -p -t %3 @rex_status {}\n",
+            "set-option -p -u -t %3 @rex_ask\nset-option -p -t %3 @rex_status {}\n",
             row["fields"].as_str().unwrap()
         )
     );
@@ -277,7 +283,13 @@ fn ask_hook_corpus_matches_only_the_configured_first_line_and_fails_open() {
                 let calls = std::fs::read_to_string(home.path().join("calls")).unwrap();
                 assert!(calls.contains("@rex_ask id=ask:"), "{calls}");
             } else {
-                assert_eq!(records.len(), 1, "{}", row["name"]);
+                assert_eq!(records.len(), 2, "{}", row["name"]);
+                assert_eq!(
+                    decode(records[1]),
+                    json!({"id": "ask", "app": app, "state": "clear"})
+                );
+                let calls = std::fs::read_to_string(home.path().join("calls")).unwrap();
+                assert!(calls.contains("set-option -p -u -t %3 @rex_ask"), "{calls}");
             }
             let log = std::fs::read_to_string(home.path().join("hook.log")).unwrap();
             assert_eq!(
@@ -287,6 +299,116 @@ fn ask_hook_corpus_matches_only_the_configured_first_line_and_fails_open() {
             );
         }
     }
+}
+
+#[test]
+fn a_nonmatching_stop_clears_ask_before_replay() {
+    let home = tempfile::tempdir().unwrap();
+    let path = fake_tmux(home.path());
+    let rule: Value = serde_json::from_str(
+        include_str!("fixtures/hooks/ask.jsonl")
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    let config = home.path().join(".config/rexboard");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(config.join("config.toml"), rule["config"].as_str().unwrap()).unwrap();
+    for text in [rule["text"].as_str().unwrap(), "Finished"] {
+        rexboard(home.path())
+            .env("PATH", &path)
+            .env("TMUX", "/tmp/tmux-501/probe,1234,0")
+            .env("TMUX_PANE", "%3")
+            .args(["hook", "pi", "Stop"])
+            .write_stdin(json!({"last_assistant_message": text}).to_string())
+            .assert()
+            .success();
+    }
+    let calls = std::fs::read_to_string(home.path().join("calls")).unwrap();
+    assert!(calls.contains("@rex_ask id=ask:"), "{calls}");
+    let kept = |option: &str| {
+        calls
+            .lines()
+            .rev()
+            .find_map(|line| {
+                line.split_once(&format!(" {option}"))
+                    .map(|(_, value)| value.trim_start())
+            })
+            .unwrap()
+    };
+    assert_eq!(
+        kept("@rex_ask"),
+        "",
+        "a non-matching Stop unsets the old label"
+    );
+    let tty = home.path().join("tty");
+    assert!(
+        std::fs::read_to_string(&tty)
+            .unwrap()
+            .contains("id=ask:app=pi:state=clear")
+    );
+    std::fs::write(&tty, "").unwrap();
+    rexboard(home.path())
+        .env("PATH", path)
+        .env(
+            "FAKE_TMUX_LIST",
+            format!(
+                "{}|{}||{}\n",
+                tty.display(),
+                kept("@rex_status"),
+                kept("@rex_ask")
+            ),
+        )
+        .args(["hooks", "replay", "probe"])
+        .assert()
+        .success();
+    let replay = std::fs::read_to_string(tty).unwrap();
+    let records: Vec<Value> = replay
+        .split("]7501;")
+        .skip(1)
+        .map(|part| {
+            let pairs = part.split('\x07').next().unwrap();
+            let mut record = serde_json::Map::new();
+            for pair in pairs.split(':') {
+                let (key, value) = pair.split_once('=').unwrap();
+                let value = if key == "msg" {
+                    String::from_utf8(unbase64(value)).unwrap()
+                } else {
+                    value.to_owned()
+                };
+                record.insert(key.into(), value.into());
+            }
+            Value::Object(record)
+        })
+        .collect();
+    let snapshot = home.path().join("snapshot.json");
+    std::fs::write(
+        &snapshot,
+        json!({"hosts": [{"host": "mini", "sessions": [{
+            "session_id": "api", "label": "api", "windows": [{
+                "window_id": "main", "blocks": [{"block_id": "seat-a", "records": records}]
+            }]
+        }]}]})
+        .to_string(),
+    )
+    .unwrap();
+    let out = rexboard(home.path())
+        .env(
+            "REXBOARD_REX",
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake-rex"),
+        )
+        .env("FAKE_REX_FIXTURE", snapshot)
+        .args(["ls", "--direct", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let panes: Vec<Value> = serde_json::from_slice(&out).unwrap();
+    assert_eq!(panes.len(), 1);
+    assert_eq!(panes[0]["state"], "done");
+    assert!(panes[0]["ask"].is_null());
 }
 
 #[test]
@@ -659,9 +781,9 @@ fn replay_sends_each_panes_kept_status_usage_and_ask_again() {
     for tty in &ttys {
         std::fs::write(tty, "").unwrap();
     }
-    // One pane with both, one with only a status (a pane an older rexboard kept), one with none.
+    // One pane with metadata, one with only a status (from older rexboard), one with none.
     let rows = format!(
-        "{}|app=pi:state=done|id=usage:app=pi:state=done:msg=e30=|id=ask:app=pi:state=blocked:msg=ZGVjaXNpb24=\n{}|app=pi:state=idle|\n{}||\n",
+        "{}|app=pi:state=blocked:kind=question|id=usage:app=pi:state=done:msg=e30=|id=ask:app=pi:state=blocked:msg=ZGVjaXNpb24=\n{}|app=pi:state=idle|\n{}||\n",
         ttys[0].display(),
         ttys[1].display(),
         ttys[2].display()
@@ -675,7 +797,7 @@ fn replay_sends_each_panes_kept_status_usage_and_ask_again() {
     let wrapped = |pairs: &str| format!("\x1bPtmux;\x1b\x1b]7501;{pairs}\x07\x1b\\");
     assert_eq!(
         std::fs::read_to_string(&ttys[0]).unwrap(),
-        wrapped("app=pi:state=done")
+        wrapped("app=pi:state=blocked:kind=question")
             + &wrapped("id=usage:app=pi:state=done:msg=e30=")
             + &wrapped("id=ask:app=pi:state=blocked:msg=ZGVjaXNpb24=")
     );
