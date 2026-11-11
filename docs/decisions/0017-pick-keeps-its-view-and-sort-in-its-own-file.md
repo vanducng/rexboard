@@ -1,6 +1,6 @@
 # 17. `pick` keeps its view and sort in its own file
 
-**Status:** Accepted, 2026-11-01
+**Status:** Accepted, 2026-11-01; amended 2026-11-11
 
 ## Context
 
@@ -21,4 +21,6 @@
 
 ## Supersedes
 
-None. It follows [principle 1](README.md#principles): the setting could not live in `tui.json` without the race above.
+Amended 2026-11-11 by [19](0019-the-board-opens-where-it-was-left.md): the board now keeps its view, sort, status and `/` text too, in `board.json`. `pick.json` is unchanged and the board still never reads it. The reason for a separate file stands.
+
+It follows [principle 1](README.md#principles): the setting could not live in `tui.json` without the race above.

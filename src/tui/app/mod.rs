@@ -12,9 +12,9 @@ use super::columns::{
 };
 use super::columns::{Dir, column_of};
 use super::full::Full;
+use super::kept::{BoardPrefs, ViewSort};
 use super::keys::{self, Act, K};
 use super::markdown::{self, Block, Run};
-use super::pick_prefs::PickPrefs;
 use super::prefs::Digits;
 use super::screen::Screen;
 use super::status::{ALL, Status};
@@ -109,7 +109,9 @@ pub enum Effect {
     /// Keep whether the card is hidden in tui.json.
     SavePrefs(Box<super::prefs::Prefs>),
     /// Keep the picker's view and sort in pick.json.
-    SavePick(super::pick_prefs::PickPrefs),
+    SavePick(super::kept::ViewSort),
+    /// Keep what the board's user changed of its view, sort, status and `/` text in board.json.
+    SaveBoard(Vec<super::kept::Change>),
     /// Make the pane with these labels a favorite, or stop; `label` is how the footer names it.
     Favorite {
         id: Box<crate::favorites::Id>,
@@ -260,6 +262,8 @@ pub struct App {
     pub link: Link,
     /// `rexboard pick`: the list alone; enter goes and esc gives up.
     pub pick: bool,
+    /// The board keeps its view, sort, status and `/` text in board.json.
+    pub remember: bool,
     /// `rexboard board --once`: the whole board, left once a jump lands or esc closes no layer.
     pub once: bool,
     /// The row a `--once` back jump found, for the loop to leave on.
@@ -299,8 +303,9 @@ pub struct App {
     quiet: bool,
     /// Whether the waiting prefix's key came on its own.
     pending_quiet: bool,
-    /// Picker preferences retained until their extension fields are available.
-    pick_restore: Option<PickPrefs>,
+    /// The view and sort kept in pick.json or board.json, held until their extension fields are
+    /// available.
+    view_restore: Option<ViewSort>,
     needs: BTreeSet<String>,
     /// `a`: answering one row; the board's keys are off.
     pub answer: Option<Answer>,
@@ -402,7 +407,7 @@ impl App {
                 viewed.unwrap_or_else(|| "the pane".to_owned())
             ));
         }
-        self.apply_pick_restore();
+        self.apply_view_restore();
         self.recheck_doing();
         self.keep_selection_visible();
     }
@@ -665,6 +670,7 @@ impl App {
                 self.status = None;
                 self.peek = None;
                 self.sort = None;
+                self.forget_sort();
                 self.keep_selection_visible();
             }
             // `q` closes the layer in front, and quits only from the bare board.
