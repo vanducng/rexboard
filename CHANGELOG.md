@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.32.0](https://github.com/vanducng/rexboard/compare/v0.31.0...v0.32.0) (2026-11-11)
+
+
+### Features
+
+* **tui:** open the board and the popup where the last run left them ([#160](https://github.com/vanducng/rexboard/issues/160)) ([ba88d80](https://github.com/vanducng/rexboard/commit/ba88d808c5e17f002e42d81462e48628b315e684))
+
+
+### Bug Fixes
+
+* **tui:** say what clears the text and the status in the footer of each mode ([#162](https://github.com/vanducng/rexboard/issues/162)) ([9a16810](https://github.com/vanducng/rexboard/commit/9a1681029424f92ebb740de72eb3ab4d9900b452))
+
 ## [0.31.0](https://github.com/vanducng/rexboard/compare/v0.30.0...v0.31.0) (2026-11-11)
 
 
