@@ -196,8 +196,9 @@ pub struct BoardArgs {
     /// Run as a popup: the whole board, with every key, that exits 0 once a jump lands (enter, `'`,
     /// a digit under `"digits": "jump"`, `g` and a digit, `-`), and 1 on `q`, or on `esc` once it
     /// has closed the layer in front (the `?` table, a prompt); `esc` never clears a filter, as in
-    /// `pick`. Answering, closing and actions do not exit. It keeps the card choice in tui.json,
-    /// as the board does; `pick` keeps its own view and sort.
+    /// `pick`. Answering, closing and actions do not exit. It keeps the card choice in tui.json and
+    /// the view, sort, status and `/` text in board.json, as the board does; `pick` keeps its own
+    /// view and sort.
     #[arg(long)]
     pub once: bool,
     #[command(flatten)]
@@ -218,8 +219,9 @@ pub struct OpenArgs {
     /// number).
     #[arg(long, value_name = "STATUS")]
     pub status: Option<String>,
-    /// Open on this view (`rexboard views` lists them). In `pick`, it is kept for next time, as a
-    /// view chosen with `v` is.
+    /// Open on this view (`rexboard views` lists them). `pick` keeps it for next time, as a view
+    /// chosen with `v`; the board and `board --once` open on the last view they had unless this is
+    /// given, and do not save it.
     #[arg(long, value_name = "NAME")]
     pub view: Option<String>,
 }

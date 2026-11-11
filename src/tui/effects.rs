@@ -199,12 +199,24 @@ pub(super) fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>)
             let saved = pick_json()
                 .ok_or_else(|| "no state dir".to_owned())
                 .and_then(|path| {
-                    pick_prefs::save(&path, &prefs)
-                        .map_err(|err| format!("{}: {err}", path.display()))
+                    kept::save(&path, &prefs).map_err(|err| format!("{}: {err}", path.display()))
                 });
             if let Err(why) = saved {
                 let _ = tx.send(Msg::Say(format!(
                     "could not keep the picker's view and sort: {why}"
+                )));
+            }
+        }
+        Effect::SaveBoard(changes) => {
+            let saved = board_json()
+                .ok_or_else(|| "no state dir".to_owned())
+                .and_then(|path| {
+                    kept::save_changes(&path, &changes)
+                        .map_err(|err| format!("{}: {err}", path.display()))
+                });
+            if let Err(why) = saved {
+                let _ = tx.send(Msg::Say(format!(
+                    "could not keep the board's view, sort and filters: {why}"
                 )));
             }
         }
@@ -250,6 +262,10 @@ pub(super) fn tui_json() -> Option<std::path::PathBuf> {
 
 pub(super) fn pick_json() -> Option<std::path::PathBuf> {
     Paths::find().ok().map(|paths| paths.dir.join("pick.json"))
+}
+
+pub(super) fn board_json() -> Option<std::path::PathBuf> {
+    Paths::find().ok().map(|paths| paths.dir.join("board.json"))
 }
 
 /// Starts a subscriber thread. A newer `listen` makes the older one stop at its next tick.

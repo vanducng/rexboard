@@ -1708,6 +1708,166 @@ fn board_and_pick_open_narrowed_by_status_filter_and_view() {
     }
 }
 
+fn board_json_path(serve: &Serve) -> std::path::PathBuf {
+    serve.dir.path().join("state/rexboard/board.json")
+}
+
+fn board_json_now(serve: &Serve) -> serde_json::Value {
+    serde_json::from_slice(&std::fs::read(board_json_path(serve)).unwrap()).unwrap()
+}
+
+fn keep_board_json(serve: &Serve, text: &str) {
+    let path = board_json_path(serve);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, text).unwrap();
+}
+
+#[test]
+fn the_next_board_and_popup_open_with_the_view_sort_status_and_filter_left() {
+    for command in [&["board"][..], &["board", "--once"]] {
+        let serve = needing();
+        let first = on_pty(
+            command,
+            Some(&serve),
+            &["seat-old"],
+            &[":", "table\r", "o", "a", "f", "p", "/", "seat-new", "\r"],
+            Some(libc::SIGTERM),
+            false,
+        );
+        assert!(first.alive, "{command:?}: {:?}", first.out);
+        let kept = board_json_now(&serve);
+        assert_eq!(kept["view"], "table", "{command:?}: {kept}");
+        assert_eq!(
+            kept["sort"],
+            serde_json::json!({"key": "builtin:a", "descending": true}),
+            "{command:?}: {kept}"
+        );
+        assert_eq!(kept["status"], "permission", "{command:?}: {kept}");
+        assert_eq!(kept["filter"], "seat-new", "{command:?}: {kept}");
+        assert!(!serve.dir.path().join("state/rexboard/pick.json").exists());
+
+        let next = on_pty(
+            command,
+            Some(&serve),
+            &["view: table", "only permission", "/seat-new", "seat-new"],
+            &[],
+            Some(libc::SIGTERM),
+            false,
+        );
+        assert!(
+            !next.out.contains("seat-old") && !next.out.contains("seat-done"),
+            "{command:?}: {:?}",
+            next.out
+        );
+        assert_eq!(board_json_now(&serve), kept, "opening saves nothing");
+    }
+}
+
+#[test]
+fn a_clear_is_saved_and_only_what_changed_is_written() {
+    let serve = needing();
+    keep_board_json(
+        &serve,
+        r#"{"view":"table","status":"permission","filter":"seat-new","future":7}"#,
+    );
+    let ran = on_pty(
+        &["board"],
+        Some(&serve),
+        &["only permission"],
+        &["\x1b"],
+        Some(libc::SIGTERM),
+        false,
+    );
+    assert!(ran.alive, "{:?}", ran.out);
+    assert_eq!(
+        board_json_now(&serve),
+        serde_json::json!({"view": "table", "future": 7}),
+        "esc cleared the status and the filter, and kept the rest"
+    );
+    let ran = on_pty(
+        &["board", "--once"],
+        Some(&serve),
+        &["view: table"],
+        &["f", "p", "f", "f"],
+        Some(libc::SIGTERM),
+        false,
+    );
+    assert!(ran.alive, "{:?}", ran.out);
+    assert_eq!(
+        board_json_now(&serve),
+        serde_json::json!({"view": "table", "future": 7}),
+        "a status set and cleared again leaves the file as it was"
+    );
+}
+
+#[test]
+fn launch_flags_win_and_are_not_saved_until_the_user_changes_something() {
+    let serve = needing();
+    keep_board_json(&serve, r#"{"status":"permission"}"#);
+    let flags = ["board", "--status", "done", "--view", "harness"];
+    let ran = on_pty(
+        &flags,
+        Some(&serve),
+        &["view: harness", "only done"],
+        &[],
+        Some(libc::SIGTERM),
+        false,
+    );
+    assert!(!ran.out.contains("only permission"), "{:?}", ran.out);
+    assert_eq!(
+        board_json_now(&serve),
+        serde_json::json!({"status": "permission"}),
+        "a flag saves nothing"
+    );
+    let ran = on_pty(
+        &flags,
+        Some(&serve),
+        &["only done"],
+        &["o", "a"],
+        Some(libc::SIGTERM),
+        false,
+    );
+    assert!(ran.alive, "{:?}", ran.out);
+    assert_eq!(
+        board_json_now(&serve),
+        serde_json::json!({"status": "permission", "sort": {"key": "builtin:a", "descending": true}}),
+        "the sort the user changed is saved, not the flags"
+    );
+}
+
+#[test]
+fn a_bad_board_json_gives_the_defaults_with_one_message_and_the_next_change_still_saves() {
+    let serve = needing();
+    keep_board_json(&serve, "{not json");
+    let ran = on_pty(
+        &["board"],
+        Some(&serve),
+        &["board.json is not valid JSON", "seat-new"],
+        &["f", "p"],
+        Some(libc::SIGTERM),
+        false,
+    );
+    assert!(ran.alive, "{:?}", ran.out);
+    assert!(
+        ran.out.contains("seat-done"),
+        "the defaults show every row: {:?}",
+        ran.out
+    );
+    assert_eq!(
+        board_json_now(&serve),
+        serde_json::json!({"status": "permission"})
+    );
+    let again = on_pty(
+        &["board"],
+        Some(&serve),
+        &["only permission"],
+        &[],
+        Some(libc::SIGTERM),
+        false,
+    );
+    assert!(!again.out.contains("board.json is"), "{:?}", again.out);
+}
+
 #[test]
 fn board_opens_on_a_built_in_view_with_no_serve_to_ask() {
     let ran = on_pty(

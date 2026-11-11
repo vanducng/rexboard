@@ -6,10 +6,10 @@ pub(crate) mod columns;
 mod effects;
 mod full;
 pub(crate) mod icons;
+mod kept;
 mod keys;
 mod markdown;
 mod meta;
-mod pick_prefs;
 mod prefs;
 pub(crate) mod query;
 pub(crate) mod screen;
@@ -40,7 +40,7 @@ use crate::{interrupted, jump, rex, send, stop_on_signals};
 
 use app::{App, Effect, Link};
 pub(crate) use app::{RUNS_THE_BOARD, ending, is_own, runs_rexboard, tmux_note};
-use effects::{Msg, act, apply, listen, pick_json, tui_json};
+use effects::{Msg, act, apply, board_json, listen, pick_json, tui_json};
 pub(crate) use effects::{screen as read_screen, tail};
 use screen::Screen;
 
@@ -82,7 +82,15 @@ fn start_app(pick: bool, once: bool, open: &OpenArgs) -> Result<App> {
     app.columns = prefs.columns;
     app.widths = prefs.widths;
     if pick && let Some(path) = pick_json() {
-        app.restore_pick_prefs(pick_prefs::load(&path));
+        app.restore_view_sort(kept::load(&path));
+    }
+    if !pick && let Some(path) = board_json() {
+        app.remember = true;
+        let (prefs, note) = kept::load_board(&path);
+        app.restore_board(prefs);
+        if let Some(why) = note {
+            app.say(format!("board.json is {why}; using the defaults"));
+        }
     }
     theme::set_motion(
         prefs.motion == prefs::Motion::Full
@@ -97,15 +105,34 @@ fn start_app(pick: bool, once: bool, open: &OpenArgs) -> Result<App> {
 /// are now.
 fn keep_pick(
     app: &App,
-    before: Option<pick_prefs::PickPrefs>,
+    before: Option<kept::ViewSort>,
     tx: &Sender<Msg>,
     generation: &Arc<AtomicU64>,
 ) {
     if let Some(before) = before
-        && before != app.pick_prefs()
+        && before != app.view_sort()
     {
-        act(Effect::SavePick(app.pick_prefs()), tx, generation);
+        act(Effect::SavePick(app.view_sort()), tx, generation);
     }
+}
+
+/// Saves what the user changed of the board's settings since `saved`, and not while `/` is being
+/// typed, so a word is one change and not one per letter.
+fn keep_board(
+    app: &App,
+    saved: &mut kept::BoardPrefs,
+    tx: &Sender<Msg>,
+    generation: &Arc<AtomicU64>,
+) {
+    if !app.remember || app.filtering {
+        return;
+    }
+    let now = app.board_prefs();
+    let changes = saved.changes(&now);
+    if !changes.is_empty() {
+        act(Effect::SaveBoard(changes), tx, generation);
+    }
+    *saved = now;
 }
 
 /// Applies every message waiting and acts on what they ask: whether any came, or None once the
@@ -168,6 +195,7 @@ fn board(pick: bool, once: bool, open: &OpenArgs) -> Result<Option<Row>> {
     // serve and say so.
     client::QUIET.store(true, Ordering::Relaxed);
     let mut app = start_app(pick, once, open)?;
+    let mut saved = app.board_prefs();
     let (tx, rx) = mpsc::channel();
     let generation = Arc::new(AtomicU64::new(0));
     listen(&tx, &generation);
@@ -190,7 +218,7 @@ fn board(pick: bool, once: bool, open: &OpenArgs) -> Result<Option<Row>> {
             if event::poll(Duration::from_millis(50)).unwrap_or_else(|_| leave()) {
                 match event::read().unwrap_or_else(|_| leave()) {
                     Event::Key(key) if key.kind != KeyEventKind::Release => {
-                        let before = pick.then(|| app.pick_prefs());
+                        let before = pick.then(|| app.view_sort());
                         match app.handle(key) {
                             Some(Effect::Quit) => return Ok(None),
                             Some(Effect::Jump(row)) if once => return Ok(Some(*row)),
@@ -207,12 +235,14 @@ fn board(pick: bool, once: bool, open: &OpenArgs) -> Result<Option<Row>> {
                             None => {}
                         }
                         keep_pick(&app, before, &tx, &generation);
+                        keep_board(&app, &mut saved, &tx, &generation);
                         changed = true;
                     }
                     Event::Mouse(event) => {
-                        let before = pick.then(|| app.pick_prefs());
+                        let before = pick.then(|| app.view_sort());
                         changed = mouse(&mut app, event);
                         keep_pick(&app, before.filter(|_| changed), &tx, &generation);
+                        keep_board(&app, &mut saved, &tx, &generation);
                     }
                     Event::Resize(..) => changed = true,
                     _ => {}

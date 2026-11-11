@@ -23,16 +23,44 @@ impl App {
         all
     }
 
-    pub fn restore_pick_prefs(&mut self, prefs: PickPrefs) {
-        if !self.pick {
-            return;
-        }
-        self.pick_restore = Some(prefs);
-        self.apply_pick_restore();
+    /// Whether the view and sort are kept between runs: in `pick` and on the board.
+    fn keeps_view_sort(&self) -> bool {
+        self.pick || self.remember
     }
 
-    pub fn pick_prefs(&self) -> PickPrefs {
-        let mut prefs = self.pick_restore.clone().unwrap_or_default();
+    pub fn restore_view_sort(&mut self, prefs: ViewSort) {
+        if !self.keeps_view_sort() {
+            return;
+        }
+        self.view_restore = Some(prefs);
+        self.apply_view_restore();
+    }
+
+    /// What the board keeps: the view and sort, the status and the `/` text.
+    pub fn board_prefs(&self) -> BoardPrefs {
+        BoardPrefs {
+            view_sort: self.view_sort(),
+            status: self.status,
+            filter: self.filter.value().to_owned(),
+        }
+    }
+
+    /// Opens as the last run left the board; a flag or the user changes it after.
+    pub fn restore_board(&mut self, prefs: BoardPrefs) {
+        self.restore_view_sort(prefs.view_sort);
+        self.status = prefs.status;
+        self.filter = Input::new(prefs.filter);
+    }
+
+    /// A cleared sort is not one to bring back once its column shows.
+    pub(super) fn forget_sort(&mut self) {
+        if let Some(prefs) = &mut self.view_restore {
+            prefs.sort = None;
+        }
+    }
+
+    pub fn view_sort(&self) -> ViewSort {
+        let mut prefs = self.view_restore.clone().unwrap_or_default();
         if (prefs.view.is_empty() || self.pick_view(&prefs.view).is_some())
             && let Some(key) = self.pick_view_key()
         {
@@ -49,15 +77,15 @@ impl App {
                 key.map(|key| (key, dir == Dir::Down))
             }
             None => self
-                .pick_restore
+                .view_restore
                 .as_ref()
                 .and_then(|prefs| prefs.sort.clone()),
         };
         prefs
     }
 
-    pub(super) fn apply_pick_restore(&mut self) {
-        let Some(prefs) = self.pick_restore.as_ref() else {
+    pub(super) fn apply_view_restore(&mut self) {
+        let Some(prefs) = self.view_restore.as_ref() else {
             return;
         };
         if let Some(view) = self.pick_view(&prefs.view) {
@@ -114,9 +142,9 @@ impl App {
     /// Switches to `view`; the selection keeps its row.
     pub fn show(&mut self, view: View) {
         self.show_view(view);
-        if self.pick
+        if self.keeps_view_sort()
             && let Some(key) = self.pick_view_key()
-            && let Some(prefs) = &mut self.pick_restore
+            && let Some(prefs) = &mut self.view_restore
         {
             prefs.view = key;
         }
@@ -196,10 +224,8 @@ impl App {
         let Some(column) = self.column_by_letter(letter) else {
             return;
         };
-        if self.pick
-            && let Some(prefs) = &mut self.pick_restore
-        {
-            prefs.sort = None;
+        if self.keeps_view_sort() {
+            self.forget_sort();
         }
         self.sort = match self.sort {
             Some((id, dir)) if id == column.id && dir == column.first => Some((id, dir.flip())),
@@ -406,7 +432,7 @@ impl App {
     pub fn set_extensions(&mut self, fields: Vec<Field>, runs: BTreeMap<String, ExtRun>) {
         self.ext_runs = runs;
         if self.fields.iter().map(|(f, _)| f).eq(&fields) {
-            self.apply_pick_restore();
+            self.apply_view_restore();
             return;
         }
         let mut taken = Vec::new();
@@ -426,7 +452,7 @@ impl App {
         {
             self.sort = None;
         }
-        self.apply_pick_restore();
+        self.apply_view_restore();
     }
 
     /// `ctrl+s`: every unseen `done` row the list shows, to be marked seen.
@@ -504,13 +530,13 @@ mod tests {
     fn picker_preferences_preserve_unavailable_extension_view_while_saving_sort() {
         let mut app = app();
         app.pick = true;
-        app.restore_pick_prefs(PickPrefs {
+        app.restore_view_sort(ViewSort {
             view: "field:ext.status".into(),
             sort: Some(("builtin:a".into(), true)),
         });
 
         typed(&mut app, "oa");
-        let prefs = app.pick_prefs();
+        let prefs = app.view_sort();
         assert_eq!(prefs.view, "field:ext.status");
         assert_eq!(prefs.sort, Some(("builtin:a".into(), false)));
     }
@@ -519,13 +545,13 @@ mod tests {
     fn picker_preferences_preserve_unavailable_extension_sort_while_saving_view() {
         let mut app = app();
         app.pick = true;
-        app.restore_pick_prefs(PickPrefs {
+        app.restore_view_sort(ViewSort {
             view: "table".into(),
             sort: Some(("field:ext.status".into(), false)),
         });
         typed(&mut app, "v");
 
-        let prefs = app.pick_prefs();
+        let prefs = app.view_sort();
         assert_eq!(prefs.view, "harness");
         assert_eq!(prefs.sort, Some(("field:ext.status".into(), false)));
     }
@@ -544,12 +570,12 @@ mod tests {
     fn picker_restores_a_usage_sort_once_its_column_shows() {
         let mut app = app();
         app.pick = true;
-        app.restore_pick_prefs(PickPrefs {
+        app.restore_view_sort(ViewSort {
             view: "table".into(),
             sort: Some(("builtin:d".into(), false)),
         });
         assert_eq!(app.sort, None, "no row reports usage yet");
-        assert_eq!(app.pick_prefs().sort, Some(("builtin:d".into(), false)));
+        assert_eq!(app.view_sort().sort, Some(("builtin:d".into(), false)));
         app.set_rows(vec![usage_row("mini/model")], hosts());
         assert_eq!(app.sort, Some((Col::Model, Dir::Up)));
     }
@@ -558,14 +584,14 @@ mod tests {
     fn picker_does_not_restore_a_sort_on_a_column_that_is_hidden() {
         let mut app = app();
         app.pick = true;
-        app.restore_pick_prefs(PickPrefs {
+        app.restore_view_sort(ViewSort {
             view: "table".into(),
             sort: Some(("builtin:k".into(), true)),
         });
         app.set_rows(vec![usage_row("mini/model")], hosts());
         assert_eq!(app.sort, None, "TOK is off until tui.json names it");
         assert_eq!(
-            app.pick_prefs().sort,
+            app.view_sort().sort,
             Some(("builtin:k".into(), true)),
             "kept for when it shows"
         );
@@ -579,7 +605,7 @@ mod tests {
         let mut app = app();
         app.pick = true;
         app.sort = Some((Col::Num, Dir::Up));
-        assert_eq!(app.pick_prefs().sort, None);
+        assert_eq!(app.view_sort().sort, None);
     }
 
     #[test]
@@ -587,7 +613,7 @@ mod tests {
         for dir in [Dir::Down, Dir::Up] {
             let mut original = app();
             original.pick = true;
-            original.restore_pick_prefs(PickPrefs::default());
+            original.restore_view_sort(ViewSort::default());
             original.sort_by('a');
             if dir == Dir::Up {
                 original.sort_by('a');
@@ -595,7 +621,7 @@ mod tests {
 
             let mut restored = app();
             restored.pick = true;
-            restored.restore_pick_prefs(original.pick_prefs());
+            restored.restore_view_sort(original.view_sort());
             assert_eq!(restored.sort, Some((Col::Age, dir)));
         }
     }
@@ -604,10 +630,52 @@ mod tests {
     fn picker_default_settings_allow_user_sort_changes() {
         let mut app = app();
         app.pick = true;
-        app.restore_pick_prefs(PickPrefs::default());
-        assert_eq!(app.pick_prefs().view, "status");
+        app.restore_view_sort(ViewSort::default());
+        assert_eq!(app.view_sort().view, "status");
 
         typed(&mut app, "oa");
-        assert_eq!(app.pick_prefs().sort, Some(("builtin:a".into(), true)));
+        assert_eq!(app.view_sort().sort, Some(("builtin:a".into(), true)));
+    }
+
+    #[test]
+    fn the_board_restores_its_four_settings_and_a_clear_does_not_bring_the_sort_back() {
+        let mut app = app();
+        app.remember = true;
+        app.restore_board(BoardPrefs {
+            view_sort: ViewSort {
+                view: "table".into(),
+                sort: Some(("builtin:d".into(), true)),
+            },
+            status: Some(Status::Done),
+            filter: "web".into(),
+        });
+        assert_eq!(app.view.name, "table");
+        assert_eq!(
+            (app.status, app.filter.value()),
+            (Some(Status::Done), "web")
+        );
+        assert_eq!(
+            app.board_prefs().view_sort.sort,
+            Some(("builtin:d".into(), true))
+        );
+        press(&mut app, KeyCode::Esc);
+        let cleared = app.board_prefs();
+        assert_eq!((cleared.status, cleared.filter.as_str()), (None, ""));
+        assert_eq!(
+            cleared.view_sort.sort, None,
+            "esc cleared the pending sort too"
+        );
+        app.set_rows(vec![usage_row("mini/model")], hosts());
+        assert_eq!(app.sort, None);
+    }
+
+    #[test]
+    fn a_board_that_does_not_remember_ignores_what_it_is_given() {
+        let mut app = app();
+        app.restore_view_sort(ViewSort {
+            view: "table".into(),
+            sort: None,
+        });
+        assert_ne!(app.view.name, "table");
     }
 }
