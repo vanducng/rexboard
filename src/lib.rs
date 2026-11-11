@@ -51,7 +51,7 @@ pub fn wants_json_raw(args: &[String]) -> bool {
 pub fn execute(cli: &Cli) -> Result<()> {
     let Some(command) = &cli.command else {
         if !cli.json && stdout().is_terminal() && stdin().is_terminal() {
-            return tui::run();
+            return tui::run(&cli::OpenArgs::default());
         }
         if cli.json {
             return Err(Error::usage_with(
@@ -92,17 +92,17 @@ pub fn execute(cli: &Cli) -> Result<()> {
         }
         Command::Hooks(cli::HooksCommand::Status) => hook::install::status(cli.json),
         Command::Hooks(cli::HooksCommand::Replay { session }) => hook::replay(session),
-        Command::Board | Command::Pick => {
+        Command::Board(open) | Command::Pick(open) => {
             if !stdout().is_terminal() || !stdin().is_terminal() {
                 return Err(Error::usage_with(
                     "the board needs a terminal",
                     &["rexboard ls", "rexboard jump N"],
                 ));
             }
-            if matches!(command, Command::Pick) {
-                tui::pick(cli.json)
+            if matches!(command, Command::Pick(_)) {
+                tui::pick(open, cli.json)
             } else {
-                tui::run()
+                tui::run(open)
             }
         }
     }

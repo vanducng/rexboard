@@ -971,6 +971,24 @@ mod tests {
     }
 
     #[test]
+    fn under_f_star_the_quote_walks_and_the_digits_number_only_the_marked_rows() {
+        let t = Instant::now();
+        let mut app = marked();
+        key_at(&mut app, 'f', t);
+        key_at(&mut app, '*', t);
+        render(&app, 100, 30);
+        assert_eq!(jumped(key_at(&mut app, '2', t)), None);
+        assert_eq!(selected(&app), "mini/codex", "2 is the second row shown");
+        let mut walked = Vec::new();
+        for i in 0..3 {
+            let at = t + Duration::from_millis(100 * i);
+            walked.push(jumped(key_at(&mut app, '\'', at)).unwrap());
+            app.going = None;
+        }
+        assert_eq!(walked, ["mini/seat-b", "mini/codex", "mini/seat-b"]);
+    }
+
+    #[test]
     fn the_star_favorites_the_selected_pane_by_its_labels_or_unfavorites_it() {
         let mut app = marked();
         let effect = key_at(&mut app, '*', Instant::now());

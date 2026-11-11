@@ -31,6 +31,7 @@ use ratatui::crossterm::event::{
 use serde_json::json;
 
 use crate::board::Row;
+use crate::cli::OpenArgs;
 use crate::client::{self, Rows};
 use crate::error::{Error, Result};
 use crate::output::{clean, labels, path};
@@ -59,8 +60,8 @@ pub(crate) fn icons_on(prefs: &prefs::Prefs) -> bool {
     }
 }
 
-/// The board as tui.json, the environment and the pane it runs in set it up.
-fn start_app(pick: bool) -> App {
+/// The board as tui.json, the environment, the pane it runs in and `open` set it up.
+fn start_app(pick: bool, open: &OpenArgs) -> Result<App> {
     let mut app = App::default();
     app.pick = pick;
     let prefs = prefs();
@@ -80,7 +81,8 @@ fn start_app(pick: bool) -> App {
             && std::env::var("REXBOARD_REDUCED_MOTION").as_deref() != Ok("1"),
     );
     app.own = std::env::var("REX_BLOCK").ok().filter(|id| !id.is_empty());
-    app
+    query::open(&mut app, &open.query())?;
+    Ok(app)
 }
 
 /// Saves the picker's view and sort when `before`, taken ahead of a key or click, is not what they
@@ -124,32 +126,33 @@ fn drain(
 /// What the process exits with when a signal or a lost terminal ends it.
 static LEAVE_CODE: AtomicI32 = AtomicI32::new(0);
 
-pub fn run() -> Result<()> {
+pub fn run(open: &OpenArgs) -> Result<()> {
     // SIGTERM or SIGHUP (the board window closing) stops the loop, which puts the terminal back.
     stop_on_signals();
     watchdog();
-    board(false).map(drop)
+    board(false, open).map(drop)
 }
 
 /// `rexboard pick`: the list alone. Enter leaves it and goes to the row; esc gives up.
-pub fn pick(json: bool) -> Result<()> {
+pub fn pick(open: &OpenArgs, json: bool) -> Result<()> {
     LEAVE_CODE.store(1, Ordering::SeqCst);
     stop_on_signals();
     watchdog();
-    let row = board(true)?.ok_or(Error::Cancelled)?;
+    let row = board(true, open)?.ok_or(Error::Cancelled)?;
     jump::go(&row)?;
     jump::done(&row, json);
     Ok(())
 }
 
 /// Runs the board until it quits, or until a pick chooses a row.
-fn board(pick: bool) -> Result<Option<Row>> {
+fn board(pick: bool, open: &OpenArgs) -> Result<Option<Row>> {
+    // Before start_app, whose `--view` asks serve, and the subscriber thread: either may restart
+    // serve and say so.
+    client::QUIET.store(true, Ordering::Relaxed);
+    let mut app = start_app(pick, open)?;
     let (tx, rx) = mpsc::channel();
     let generation = Arc::new(AtomicU64::new(0));
-    // Before the subscriber thread, which may restart serve and say so.
-    client::QUIET.store(true, Ordering::Relaxed);
     listen(&tx, &generation);
-    let mut app = start_app(pick);
     let mut terminal = ratatui::init();
     let _restore = Restore;
     let mut tick = Instant::now();

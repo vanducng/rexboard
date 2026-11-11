@@ -112,7 +112,7 @@ impl App {
     }
 
     /// Switches to `view`; the selection keeps its row.
-    pub(super) fn show(&mut self, view: View) {
+    pub fn show(&mut self, view: View) {
         self.show_view(view);
         if self.pick
             && let Some(key) = self.pick_view_key()

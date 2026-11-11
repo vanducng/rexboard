@@ -284,7 +284,7 @@ pub const BOARD: &[Entry] = &[
         Act::Status,
         &[&[c('f')]],
         "f",
-        "one status; ff clears",
+        "status or * marked; ff clears",
         "status",
     ),
     e(

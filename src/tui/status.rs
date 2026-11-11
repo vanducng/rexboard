@@ -1,5 +1,6 @@
 //! `f` and a letter: the board shows one status. Each letter means what the board shows, so a
-//! row in UNREPORTED (stale, suspect or with no record) only ever matches `u`.
+//! row in UNREPORTED (stale, suspect or with no record) only ever matches `u`. `*` is no status
+//! but the rows that are marked, whatever state they are in.
 
 use crate::board::{Group, Row};
 
@@ -12,10 +13,11 @@ pub enum Status {
     Error,
     Unreported,
     Idle,
+    Marked,
 }
 
 /// In the order the footer lists them.
-pub const ALL: [Status; 7] = [
+pub const ALL: [Status; 8] = [
     Status::Working,
     Status::Done,
     Status::Question,
@@ -23,6 +25,7 @@ pub const ALL: [Status; 7] = [
     Status::Error,
     Status::Unreported,
     Status::Idle,
+    Status::Marked,
 ];
 
 impl Status {
@@ -31,7 +34,10 @@ impl Status {
     }
 
     pub fn letter(self) -> char {
-        self.name().chars().next().unwrap_or('?')
+        match self {
+            Self::Marked => '*',
+            _ => self.name().chars().next().unwrap_or('?'),
+        }
     }
 
     pub fn name(self) -> &'static str {
@@ -43,12 +49,16 @@ impl Status {
             Self::Error => "error",
             Self::Unreported => "unreported",
             Self::Idle => "idle",
+            Self::Marked => "marked",
         }
     }
 
     /// `p` takes every blocked row that is not a question: `permission` is the kind agents
     /// send, and a blocked row with another or no kind still waits on you.
     pub fn matches(self, row: &Row) -> bool {
+        if self == Self::Marked {
+            return row.marked;
+        }
         if row.group == Group::Unreported {
             return self == Self::Unreported;
         }
@@ -61,7 +71,7 @@ impl Status {
             Self::Permission => p.state == "blocked" && !question,
             Self::Error => p.state == "error",
             Self::Idle => p.state == "idle",
-            Self::Unreported => false,
+            Self::Unreported | Self::Marked => false,
         }
     }
 }
@@ -162,7 +172,7 @@ pub mod tests {
         pick(&mut app, 'x');
         assert_eq!(app.status, Some(Status::Working));
         assert!(app.pending.is_none());
-        assert_eq!(app.toast(), Some("f takes w d q p e u i; ff clears"));
+        assert_eq!(app.toast(), Some("f takes w d q p e u i *; ff clears"));
     }
 
     #[test]
@@ -194,12 +204,12 @@ pub mod tests {
     fn counts_follow_the_text_filter() {
         let mut app = every_status();
         let counts = |app: &App| ALL.map(|s| app.status_count(s));
-        assert_eq!(counts(&app), [1, 2, 1, 2, 1, 2, 1]);
+        assert_eq!(counts(&app), [1, 2, 1, 2, 1, 2, 1, 0]);
         press(&mut app, KeyCode::Char('/'));
         press(&mut app, KeyCode::Char('m'));
         press(&mut app, KeyCode::Char('i'));
         press(&mut app, KeyCode::Enter);
-        assert_eq!(counts(&app), [1, 0, 1, 2, 0, 1, 0], "only mini rows");
+        assert_eq!(counts(&app), [1, 0, 1, 2, 0, 1, 0, 0], "only mini rows");
     }
 
     #[test]
@@ -212,5 +222,63 @@ pub mod tests {
         assert!(app.folded.is_empty(), "the done rows are not hidden");
         press(&mut app, KeyCode::Char('1'));
         assert_eq!(app.current().map(|r| r.key.as_str()), Some("local/fresh"));
+    }
+
+    /// `every_status` with a blocked row, a seen done row and an UNREPORTED row marked.
+    fn marked_statuses() -> App {
+        let mut app = every_status();
+        let mut rows = app.rows.clone();
+        for row in &mut rows {
+            if ["mini/ask", "local/old", "local/shell"].contains(&row.key.as_str()) {
+                row.marked_by = vec!["config".into()];
+                row.marked = true;
+            }
+        }
+        app.set_rows(rows, app.hosts.clone());
+        app
+    }
+
+    #[test]
+    fn f_star_shows_the_marked_rows_whatever_their_status_and_ff_clears_it() {
+        let all = shown(&every_status());
+        let mut app = marked_statuses();
+        pick(&mut app, '*');
+        assert_eq!(app.status, Some(Status::Marked));
+        assert_eq!(shown(&app), ["local/old", "local/shell", "mini/ask"]);
+        pick(&mut app, 'f');
+        assert_eq!((app.status, shown(&app).len()), (None, all.len()), "f f");
+        pick(&mut app, '*');
+        press(&mut app, KeyCode::Esc);
+        assert_eq!((app.status, shown(&app).len()), (None, all.len()), "esc");
+    }
+
+    #[test]
+    fn f_star_keeps_the_rows_a_mark_filter_keeps() {
+        let mut app = marked_statuses();
+        let by_text = |app: &mut App, text: &str| {
+            app.filter = tui_input::Input::new(text.into());
+            shown(app)
+        };
+        let by_mark = by_text(&mut app, "mark:");
+        app.filter.reset();
+        pick(&mut app, '*');
+        assert_eq!(shown(&app), by_mark);
+    }
+
+    #[test]
+    fn f_star_combines_with_the_text_filter_and_the_view() {
+        let mut app = marked_statuses();
+        pick(&mut app, '*');
+        press(&mut app, KeyCode::Char('/'));
+        for c in "mini".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(shown(&app), ["mini/ask"], "marked and on mini");
+        press(&mut app, KeyCode::Char('v'));
+        assert_eq!(app.view.name, "table");
+        assert_eq!(shown(&app), ["mini/ask"], "the view keeps the filter");
+        app.filter.reset();
+        assert_eq!(shown(&app), ["local/old", "local/shell", "mini/ask"]);
     }
 }
