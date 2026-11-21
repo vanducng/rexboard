@@ -172,7 +172,7 @@ pub mod tests {
         pick(&mut app, 'x');
         assert_eq!(app.status, Some(Status::Working));
         assert!(app.pending.is_none());
-        assert_eq!(app.toast(), Some("f takes w d q p e u i *; ff clears"));
+        assert_eq!(app.toast(), Some("f takes w d q p e u i * +; ff clears"));
     }
 
     #[test]

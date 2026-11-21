@@ -1837,6 +1837,159 @@ fn launch_flags_win_and_are_not_saved_until_the_user_changes_something() {
 }
 
 #[test]
+fn the_next_board_and_popup_open_on_the_kept_groups_and_pick_does_not() {
+    let serve = needing();
+    let first = on_pty(
+        &["board"],
+        Some(&serve),
+        &["seat-old"],
+        &[":", "session\r", "+", "f", "+"],
+        Some(libc::SIGTERM),
+        false,
+    );
+    assert!(first.alive, "{:?}", first.out);
+    let kept = board_json_now(&serve);
+    assert_eq!(
+        kept["keep"],
+        serde_json::json!({"session": ["web@mini"]}),
+        "{kept}"
+    );
+    assert_eq!(kept["only_kept"], true, "{kept}");
+    for command in [&["board"][..], &["board", "--once"]] {
+        let next = on_pty(
+            command,
+            Some(&serve),
+            &["only 1 session", "seat-old"],
+            &[],
+            Some(libc::SIGTERM),
+            false,
+        );
+        assert!(next.alive, "{command:?}: {:?}", next.out);
+        assert_eq!(board_json_now(&serve), kept, "opening saves nothing");
+    }
+    let pick = on_pty(
+        &["pick"],
+        Some(&serve),
+        &["seat-old"],
+        &["+"],
+        Some(libc::SIGTERM),
+        false,
+    );
+    assert!(!pick.out.contains("only 1 session"), "{:?}", pick.out);
+    assert_eq!(
+        board_json_now(&serve),
+        kept,
+        "pick never reads or writes board.json"
+    );
+    assert!(!serve.dir.path().join("state/rexboard/pick.json").exists());
+}
+
+#[test]
+fn keep_flags_open_the_board_and_pick_narrowed_and_save_nothing() {
+    let serve = needing();
+    for command in ["board", "pick"] {
+        let ran = on_pty(
+            &[command, "--keep", "host=nope"],
+            Some(&serve),
+            &["only 1 host"],
+            &[],
+            Some(libc::SIGTERM),
+            false,
+        );
+        assert!(ran.alive, "{command}: {:?}", ran.out);
+        let ran = on_pty(
+            &[command, "--keep", "host=mini"],
+            Some(&serve),
+            &["only 1 host", "seat-old"],
+            &[],
+            Some(libc::SIGTERM),
+            false,
+        );
+        assert!(ran.alive, "{command}: {:?}", ran.out);
+    }
+    assert!(!board_json_path(&serve).exists(), "a flag saves nothing");
+    assert!(!serve.dir.path().join("state/rexboard/pick.json").exists());
+}
+
+#[test]
+fn a_keep_flag_run_leaves_the_saved_kept_groups_alone_and_saves_the_rest() {
+    let serve = needing();
+    keep_board_json(&serve, r#"{"keep":{"host":["studio"]},"only_kept":true}"#);
+    let before = board_json_now(&serve);
+    let ran = on_pty(
+        &["board", "--keep", "host=mini"],
+        Some(&serve),
+        &["only 1 host", "seat-old"],
+        &["+", "f", "p"],
+        Some(libc::SIGTERM),
+        false,
+    );
+    assert!(ran.alive, "{:?}", ran.out);
+    let after = board_json_now(&serve);
+    assert_eq!(
+        after["status"], "permission",
+        "the status is saved: {after}"
+    );
+    assert_eq!(after["keep"], before["keep"], "{after}");
+    assert_eq!(after["only_kept"], before["only_kept"], "{after}");
+}
+
+#[test]
+fn ls_keep_lists_only_those_groups_and_a_bad_grouping_is_usage() {
+    let serve = shared_session_serve();
+    let list = |args: &[&str]| -> Vec<String> {
+        let rows = serve.rows(&[&["--view", "session"], args].concat());
+        keys(&rows).into_iter().map(str::to_owned).collect()
+    };
+    assert_eq!(
+        list(&["--keep", "session=api@mini"]),
+        ["mini/block:api-m1", "mini/block:api-m2"]
+    );
+    assert_eq!(
+        list(&["--keep", "session=api@mini", "--keep", "session=api@local"]),
+        [SEAT, "mini/block:api-m1", "mini/block:api-m2"],
+        "groups of one grouping are or-ed, in the view's order"
+    );
+    assert_eq!(
+        list(&["--keep", "session=api@local", "--keep", "host=mini"]),
+        Vec::<String>::new(),
+        "groups of two groupings are and-ed"
+    );
+    assert_eq!(
+        list(&["--keep", "host=mini", "--keep", "session=-"]),
+        ["mini/block:none-o"]
+    );
+    assert_eq!(
+        keys(&serve.rows(&["--keep", "host=mini"])).len(),
+        3,
+        "without --view too, and --json gains no field"
+    );
+    let flag = |args: &[&str], said: &str| {
+        serve
+            .cmd()
+            .args(["--json", "ls"])
+            .args(args)
+            .assert()
+            .code(2)
+            .stderr(
+                predicate::str::contains("\"code\":\"USAGE\"").and(predicate::str::contains(said)),
+            );
+    };
+    flag(
+        &["--keep", "nope=x"],
+        "no grouping named nope; groupings: status, harness, host, session",
+    );
+    flag(&["--keep", "table=x"], "no grouping named table");
+    flag(&["--keep", "session"], "write GROUPING=GROUP");
+    flag(&["--keep", "session="], "write GROUPING=GROUP");
+    serve
+        .cmd()
+        .args(["ls", "--direct", "--keep", "host=mini"])
+        .assert()
+        .code(2);
+}
+
+#[test]
 fn a_bad_board_json_gives_the_defaults_with_one_message_and_the_next_change_still_saves() {
     let serve = needing();
     keep_board_json(&serve, "{not json");
@@ -1894,6 +2047,10 @@ fn board_once_and_pick_refuse_a_bad_view_or_status_with_usage_before_the_termina
             (
                 ["--status", "x"],
                 "no status named x; statuses: working, done",
+            ),
+            (
+                ["--keep", "nope=x"],
+                "no grouping named nope; groupings: status, harness, host, session",
             ),
         ] {
             serve

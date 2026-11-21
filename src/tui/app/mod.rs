@@ -12,6 +12,7 @@ use super::columns::{
 };
 use super::columns::{Dir, column_of};
 use super::full::Full;
+use super::keep::Keep;
 use super::kept::{BoardPrefs, ViewSort};
 use super::keys::{self, Act, K};
 use super::markdown::{self, Block, Run};
@@ -31,6 +32,7 @@ mod answer;
 mod card;
 mod filter;
 mod full;
+mod keeping;
 mod pane_keys;
 pub(crate) use pane_keys::{RUNS_THE_BOARD, ending, is_own, runs_rexboard, tmux_note};
 mod select;
@@ -211,6 +213,8 @@ pub struct App {
     pub filtering: bool,
     /// `f` and a letter: only rows with that status show.
     pub status: Option<Status>,
+    /// `+` keeps a row's group; with only-kept on (`f+`) only the kept groups show.
+    pub keep: Keep,
     /// A row number's first digit, when it came and whether it jumps, while a second may follow.
     pub number: Option<(usize, Instant, bool)>,
     /// The marked row the last `'` went to, and when.
@@ -542,6 +546,7 @@ impl App {
                 self.sort_letters().join(" ")
             )),
             ('f', Some('f')) => self.status = None,
+            ('f', Some('+')) => self.toggle_only_kept(),
             ('f', Some(letter)) if Status::from_letter(letter).is_some() => {
                 self.status = Status::from_letter(letter);
                 // Folded groups would hide the very rows asked for.
@@ -549,7 +554,7 @@ impl App {
             }
             ('f', _) if k.0 != KeyCode::Esc => {
                 let letters: Vec<String> = ALL.iter().map(|s| s.letter().to_string()).collect();
-                self.say(format!("f takes {}; ff clears", letters.join(" ")));
+                self.say(format!("f takes {} +; ff clears", letters.join(" ")));
             }
             ('x', _) => return self.start_action(k),
             ('o' | 'f', _) => {}
@@ -604,6 +609,7 @@ impl App {
             Act::NextNeeds => return self.next_waiting(now, false),
             Act::Marked => return self.go_marked(now),
             Act::Favorite => return self.favorite(),
+            Act::Keep => self.keep_group(),
             Act::PrevNeeds => {
                 self.tell(
                     'N',

@@ -45,12 +45,13 @@ impl App {
         self.apply_view_restore();
     }
 
-    /// What the board keeps: the view and sort, the status and the `/` text.
+    /// What the board keeps: the view and sort, the status, the `/` text and the kept groups.
     pub fn board_prefs(&self) -> BoardPrefs {
         BoardPrefs {
             view_sort: self.view_sort(),
             status: self.status,
             filter: self.filter.value().to_owned(),
+            keep: self.keep.clone(),
         }
     }
 
@@ -59,6 +60,7 @@ impl App {
         self.restore_view_sort(prefs.view_sort);
         self.status = prefs.status;
         self.filter = Input::new(prefs.filter);
+        self.keep = prefs.keep;
     }
 
     /// A cleared sort is not one to bring back once its column shows.
@@ -192,11 +194,15 @@ impl App {
         self.command = Input::new(common);
     }
 
-    /// The `:` prompt's Enter: `seen` marks every done row shown seen, `q` quits, else a view's
-    /// name, or the start of exactly one.
+    /// The `:` prompt's Enter: `seen` marks every done row shown seen, `unkeep` drops the kept
+    /// groups, `q` quits, else a view's name, or the start of exactly one.
     pub(super) fn open(&mut self) -> Option<Effect> {
         match self.command.value().trim() {
             "seen" => return self.seen_all(),
+            "unkeep" => {
+                self.unkeep();
+                return None;
+            }
             "q" | "q!" | "quit" => return Some(Effect::Quit),
             _ => {}
         }
@@ -651,6 +657,7 @@ mod tests {
             },
             status: Some(Status::Done),
             filter: "web".into(),
+            ..Default::default()
         });
         assert_eq!(app.view.name, "table");
         assert_eq!(

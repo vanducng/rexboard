@@ -6,6 +6,7 @@ pub(crate) mod columns;
 mod effects;
 mod full;
 pub(crate) mod icons;
+mod keep;
 mod kept;
 mod keys;
 mod markdown;
@@ -117,10 +118,12 @@ fn keep_pick(
 }
 
 /// Saves what the user changed of the board's settings since `saved`, and not while `/` is being
-/// typed, so a word is one change and not one per letter.
+/// typed, so a word is one change and not one per letter. A run opened with `--keep` saves
+/// the rest and leaves the saved kept groups as they were.
 fn keep_board(
     app: &App,
     saved: &mut kept::BoardPrefs,
+    flagged: bool,
     tx: &Sender<Msg>,
     generation: &Arc<AtomicU64>,
 ) {
@@ -128,7 +131,10 @@ fn keep_board(
         return;
     }
     let now = app.board_prefs();
-    let changes = saved.changes(&now);
+    let mut changes = saved.changes(&now);
+    if flagged {
+        changes.retain(|(key, _)| !matches!(*key, "keep" | "only_kept"));
+    }
     if !changes.is_empty() {
         act(Effect::SaveBoard(changes), tx, generation);
     }
@@ -196,6 +202,7 @@ fn board(pick: bool, once: bool, open: &OpenArgs) -> Result<Option<Row>> {
     client::QUIET.store(true, Ordering::Relaxed);
     let mut app = start_app(pick, once, open)?;
     let mut saved = app.board_prefs();
+    let flagged = !open.keep.is_empty();
     let (tx, rx) = mpsc::channel();
     let generation = Arc::new(AtomicU64::new(0));
     listen(&tx, &generation);
@@ -235,14 +242,14 @@ fn board(pick: bool, once: bool, open: &OpenArgs) -> Result<Option<Row>> {
                             None => {}
                         }
                         keep_pick(&app, before, &tx, &generation);
-                        keep_board(&app, &mut saved, &tx, &generation);
+                        keep_board(&app, &mut saved, flagged, &tx, &generation);
                         changed = true;
                     }
                     Event::Mouse(event) => {
                         let before = pick.then(|| app.view_sort());
                         changed = mouse(&mut app, event);
                         keep_pick(&app, before.filter(|_| changed), &tx, &generation);
-                        keep_board(&app, &mut saved, &tx, &generation);
+                        keep_board(&app, &mut saved, flagged, &tx, &generation);
                     }
                     Event::Resize(..) => changed = true,
                     _ => {}

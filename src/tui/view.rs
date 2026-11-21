@@ -223,24 +223,28 @@ fn prefix_keys(app: &App, prefix: char, width: usize) -> Line<'static> {
 /// While `f` waits: each status with its count and its letter underlined, as the column header
 /// marks sort letters. Narrower, the separators tighten and the hint goes, then `w4 d6 …`.
 fn status_keys(app: &App, width: usize) -> Line<'static> {
+    let mut counted: Vec<(&str, &str, usize)> = ALL
+        .iter()
+        .map(|status| match status {
+            Status::Marked => ("*", " marked", app.status_count(*status)),
+            _ => {
+                let (letter, rest) = status.name().split_at(1);
+                (letter, rest, app.status_count(*status))
+            }
+        })
+        .collect();
+    counted.push(("+", " kept", app.kept_count()));
     let named = |sep: &str, tail: &str| -> Line<'static> {
         let mut spans = vec![Span::styled("f ", theme::strong())];
-        for (i, status) in ALL.iter().enumerate() {
-            let (letter, rest) = match status {
-                Status::Marked => ("*", " marked"),
-                _ => status.name().split_at(1),
-            };
+        for (i, (letter, rest, n)) in counted.iter().enumerate() {
             if i > 0 {
                 spans.push(Span::styled(sep.to_owned(), theme::quiet()));
             }
             spans.push(Span::styled(
-                letter.to_owned(),
+                (*letter).to_owned(),
                 theme::letter(theme::strong()),
             ));
-            spans.push(Span::styled(
-                format!("{rest} {}", app.status_count(*status)),
-                theme::strong(),
-            ));
+            spans.push(Span::styled(format!("{rest} {n}"), theme::strong()));
         }
         spans.push(Span::styled(tail.to_owned(), theme::quiet()));
         Line::from(spans)
@@ -250,9 +254,8 @@ fn status_keys(app: &App, width: usize) -> Line<'static> {
             return line;
         }
     }
-    let short: Vec<String> = ALL
-        .iter()
-        .map(|&s| format!("{}{}", s.letter(), app.status_count(s)))
+    let short: Vec<String> = (counted.iter())
+        .map(|(letter, _, n)| format!("{letter}{n}"))
         .collect();
     Line::styled(
         fit(&format!("f {} · ff clears", short.join(" ")), width),
@@ -269,20 +272,60 @@ fn count(n: usize, noun: &str) -> String {
     }
 }
 
-/// `view: table ↓age`, unless the board is on the status view with no sort.
-fn view_label(app: &App) -> Option<String> {
-    let only = app.status.map(|status| format!("only {}", status.name()));
-    if app.view == View::default() && app.sort.is_none() {
-        return only;
+/// `3 sessions`, `1 host`, `2 statuses`. The built-in groupings take `es` after `s` or `x`; an
+/// extension field's name takes `s` unless it ends in one (`projects`, `tasks`).
+fn plural(n: usize, noun: &str, field: bool) -> String {
+    if n == 1 {
+        format!("1 {noun}")
+    } else if field {
+        format!("{n} {noun}{}", if noun.ends_with('s') { "" } else { "s" })
+    } else if noun.ends_with(['s', 'x']) {
+        format!("{n} {noun}es")
+    } else {
+        format!("{n} {noun}s")
     }
-    let sort = app.sort.map_or_else(String::new, |(id, dir)| {
-        format!(" {}{}", dir.arrow(), column_of(id).header.to_lowercase())
-    });
-    let view = format!("view: {}{sort}", app.view.name);
-    Some(match only {
-        Some(only) => format!("{view} · {only}"),
-        None => view,
+}
+
+/// While only-kept is on: `only 3 sessions, 1 host`, or when `short` `3 kept` (`only kept` for
+/// two groupings).
+fn kept_words(app: &App, short: bool) -> Option<String> {
+    if !app.only_kept() {
+        return None;
+    }
+    let groupings = app.kept_groupings();
+    Some(match (short, groupings.as_slice()) {
+        (true, [(_, n, _)]) => format!("{n} kept"),
+        (true, _) => "only kept".to_owned(),
+        (false, _) => {
+            let named: Vec<String> = (groupings.iter())
+                .map(|(name, n, field)| plural(*n, name, *field))
+                .collect();
+            format!("only {}", named.join(", "))
+        }
     })
+}
+
+/// The top bar's words after `rexboard`: `view: table ↓age` unless the board is on the status
+/// view with no sort, then `only working`, the kept groups, and the NEEDS YOU rows outside them.
+/// A higher `shrink` gives up words for room: 1 shortens the kept groups', 2 also drops the view,
+/// 3 drops the kept groups too. The status word and the need-you count stay at every level.
+fn view_label(app: &App, shrink: u8) -> Option<String> {
+    let mut parts = Vec::new();
+    if shrink < 2 && (app.view != View::default() || app.sort.is_some()) {
+        let sort = app.sort.map_or_else(String::new, |(id, dir)| {
+            format!(" {}{}", dir.arrow(), column_of(id).header.to_lowercase())
+        });
+        parts.push(format!("view: {}{sort}", app.view.name));
+    }
+    parts.extend(app.status.map(|status| format!("only {}", status.name())));
+    if shrink < 3 {
+        parts.extend(kept_words(app, shrink > 0));
+    }
+    let elsewhere = app.needs_you_elsewhere();
+    if elsewhere > 0 {
+        parts.push(format!("{elsewhere} need you elsewhere"));
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
 /// Hosts that are not up, a config.toml serve cannot read, then extensions whose last run failed:
@@ -329,22 +372,26 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
         count(app.rows.len(), "agent")
     );
     let healthy = app.hosts.keys().cloned().collect::<Vec<_>>().join(" + ");
-    let label = view_label(app);
     let shows_hosts = app.link == Link::Up && app.hosts.values().all(|s| s == "up");
     let clock = now.with_timezone(&Local).format("%H:%M").to_string();
     let width = usize::from(area.width);
-    // Alerts stay; the host list goes first, then the counts, then the clock.
+    // Alerts stay; the host list goes first, then the counts, then the clock, then the kept
+    // groups' words shorten, then the view and the kept groups go. The status word and the
+    // need-you count never go.
     let shapes = [
-        (true, true, true),
-        (true, false, true),
-        (false, false, true),
-        (false, false, false),
+        (true, true, true, 0),
+        (true, false, true, 0),
+        (false, false, true, 0),
+        (false, false, false, 0),
+        (false, false, false, 1),
+        (false, false, false, 2),
+        (false, false, false, 3),
     ];
-    let (with_counts, with_hosts, with_clock) = shapes
+    let (with_counts, with_hosts, with_clock, shrink) = shapes
         .into_iter()
-        .find(|&(c, h, k)| {
+        .find(|&(c, h, k, shrink)| {
             let left = 8
-                + label.as_ref().map_or(0, |l| 3 + l.width())
+                + view_label(app, shrink).map_or(0, |l| 3 + l.width())
                 + if c { counts.width() } else { 0 }
                 + if alert.is_empty() {
                     0
@@ -358,11 +405,11 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
                     0
                 };
             // At least 3 columns before the clock, so the host list goes before it gets tight.
-            left + right + 3 <= width
+            left + right + if right > 0 { 3 } else { 0 } <= width
         })
-        .unwrap_or((false, false, false));
+        .unwrap_or((false, false, false, 3));
     let mut left = vec![Span::styled("rexboard", theme::accent())];
-    if let Some(label) = label {
+    if let Some(label) = view_label(app, shrink) {
         left.push(Span::styled(" · ", theme::quiet()));
         left.push(Span::styled(label, theme::strong()));
     }
@@ -460,6 +507,7 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
                 &app.group_title(bucket),
                 *count,
                 *folded,
+                app.is_kept(bucket),
                 group_mark(app, bucket),
                 is_selected(app, item),
                 width,
@@ -500,6 +548,9 @@ fn empty_message(app: &App) -> String {
     } else {
         ("/ edits", "ff clears")
     };
+    if app.kept_empties() {
+        return kept_empty_message(app, esc);
+    }
     if let Some(status) = app.status {
         if query.is_empty() {
             format!("no {} rows · {ff}", status.name())
@@ -519,6 +570,33 @@ fn empty_message(app: &App) -> String {
             Link::Lost(why) => why.clone(),
         }
     }
+}
+
+/// The list is empty because of the kept groups: `no working rows in the kept groups · ff clears ·
+/// f+ shows all`.
+fn kept_empty_message(app: &App, esc: &str) -> String {
+    let query = app.filter.value();
+    let rows = app.status.map_or_else(
+        || "rows".to_owned(),
+        |status| format!("{} rows", status.name()),
+    );
+    let matching = if query.is_empty() {
+        String::new()
+    } else {
+        format!(" match \"{query}\"")
+    };
+    let mut ways = Vec::new();
+    if app.status.is_some() {
+        ways.push("ff clears");
+    }
+    if !query.is_empty() {
+        ways.push(esc);
+    }
+    ways.push("f+ shows all");
+    format!(
+        "no {rows}{matching} in the kept groups · {}",
+        ways.join(" · ")
+    )
 }
 
 /// The column header, each sort letter underlined.
@@ -565,24 +643,34 @@ fn group_mark(app: &App, bucket: &Bucket) -> Option<&'static str> {
     }
 }
 
+/// A group's header: the fold mark, `+` in the `marked` look when the group is kept, the
+/// harness mark, the name and the count, then the fill.
 fn group_header_line(
     name: &str,
     count: usize,
     folded: bool,
+    kept: bool,
     mark: Option<&str>,
     selected: bool,
     width: usize,
 ) -> Line<'static> {
     let fold = if folded { theme::FOLDED } else { "" };
+    let plus = if kept { "+ " } else { "" };
     let mark = mark.map(|m| format!("{m} ")).unwrap_or_default();
-    let title = format!("{fold}{mark}{name} ({count}) ");
-    let fill = theme::GROUP_FILL.repeat(width.saturating_sub(title.width()));
-    let line = Line::styled(format!("{title}{fill}"), theme::header());
+    let title = format!("{mark}{name} ({count}) ");
+    let used = fold.width() + plus.width() + title.width();
+    let fill = theme::GROUP_FILL.repeat(width.saturating_sub(used));
+    let mut spans = vec![
+        Span::styled(fold, theme::header()),
+        Span::styled(plus, theme::marked()),
+        Span::styled(format!("{title}{fill}"), theme::header()),
+    ];
     if selected {
-        line.style(theme::selected(theme::header()))
-    } else {
-        line
+        for span in &mut spans {
+            span.style = theme::selected(span.style);
+        }
     }
+    Line::from(spans)
 }
 
 /// The rows past `from` that the list cannot show, counting a folded group's rows.
@@ -1900,7 +1988,7 @@ mod tests {
             ":        a view, :seen or :q",
             "o        sort by a column's letter",
             "esc      cancel a key, clear filters",
-            "f        status or * marked; ff clears",
+            "f        status, * marked, + kept",
             "dd       close the pane; y confirms",
             "- ctrl-o back and forth, like cd -",
         ] {
@@ -1922,13 +2010,13 @@ mod tests {
         };
         assert_eq!(
             last(&app, 140),
-            "f working 1 · done 2 · question 1 · permission 2 · error 1 · unreported 2 · idle 1 · * marked 0 · ff clears"
+            "f working 1 · done 2 · question 1 · permission 2 · error 1 · unreported 2 · idle 1 · * marked 0 · + kept 0 · ff clears"
         );
         assert_eq!(
             last(&app, 100),
-            "f working 1  done 2  question 1  permission 2  error 1  unreported 2  idle 1  * marked 0"
+            "f working 1  done 2  question 1  permission 2  error 1  unreported 2  idle 1  * marked 0  + kept 0"
         );
-        assert_eq!(last(&app, 80), "f w1 d2 q1 p2 e1 u2 i1 *0 · ff clears");
+        assert_eq!(last(&app, 80), "f w1 d2 q1 p2 e1 u2 i1 *0 +0 · ff clears");
         press(&mut app, KeyCode::Char('p'));
         assert!(
             !last(&app, 140).starts_with("f w"),
@@ -2307,7 +2395,7 @@ mod tests {
         press(&mut app, KeyCode::Char('f'));
         press(&mut app, KeyCode::Char('c'));
         assert!(app.card, "c after f belongs to f");
-        assert_eq!(app.toast(), Some("f takes w d q p e u i *; ff clears"));
+        assert_eq!(app.toast(), Some("f takes w d q p e u i * +; ff clears"));
         crate::tui::app::testkit::sort(&mut app, 's');
         assert!(app.sort.is_some(), "o s sorts");
     }
@@ -2528,6 +2616,250 @@ mod tests {
             assert_eq!(got, want, "{name} changed");
         }
         assert_eq!(text, want);
+    }
+    /// Three sessions kept in the `session` view, only-kept on and the `f` status `status`.
+    fn kept_sessions(status: Option<char>) -> App {
+        let mut app = fleet();
+        for key in ["studio/api-1", "studio/web-1", "mini/api-1"] {
+            keep_in(&mut app, "session", key);
+        }
+        typed(&mut app, "f+");
+        if let Some(letter) = status {
+            typed(&mut app, &format!("f{letter}"));
+        }
+        app.toast = None;
+        app
+    }
+
+    fn top_bar(app: &App, width: u16) -> String {
+        render(app, width, 30).lines().next().unwrap().to_owned()
+    }
+
+    #[test]
+    fn the_top_bar_names_the_kept_groups_after_the_status_and_counts_who_needs_you_elsewhere() {
+        let app = kept_sessions(Some('w'));
+        assert_eq!(
+            top_bar(&app, 80),
+            "rexboard \u{b7} view: session \u{b7} only working \u{b7} only 3 sessions \u{b7} 2 need you elsewhere",
+            "the clock, counts and hosts are gone at 80"
+        );
+        let wide = top_bar(&app, 140);
+        assert!(
+            wide.starts_with(
+                "rexboard \u{b7} view: session \u{b7} only working \u{b7} only 3 sessions \u{b7} 2 need you elsewhere \u{b7} 2 hosts"
+            ),
+            "{wide}"
+        );
+        let mut off = app;
+        typed(&mut off, "f+");
+        assert!(
+            !top_bar(&off, 140).contains("only 3 sessions"),
+            "only-kept off"
+        );
+        assert!(
+            !top_bar(&off, 140).contains("elsewhere"),
+            "and nothing hidden"
+        );
+    }
+
+    #[test]
+    fn down_to_50_columns_the_status_word_and_the_need_you_count_stay_whole() {
+        let mut app = kept_sessions(Some('p'));
+        keep_in(&mut app, "host", "studio/api-1");
+        in_view(&mut app, "session");
+        for (width, want) in [
+            (
+                50,
+                "rexboard \u{b7} only permission \u{b7} 2 need you elsewhere",
+            ),
+            (
+                60,
+                "rexboard \u{b7} only permission \u{b7} 2 need you elsewhere",
+            ),
+            (
+                80,
+                "rexboard \u{b7} view: session \u{b7} only permission \u{b7} only kept \u{b7} 2 need you elsewhere",
+            ),
+        ] {
+            assert_eq!(top_bar(&app, width), want, "{width}");
+        }
+        let mut one = kept_sessions(Some('p'));
+        assert_eq!(
+            top_bar(&one, 70),
+            "rexboard \u{b7} only permission \u{b7} 3 kept \u{b7} 2 need you elsewhere"
+        );
+        typed(&mut one, "ff");
+        assert_eq!(
+            top_bar(&one, 50),
+            "rexboard \u{b7} 3 kept \u{b7} 2 need you elsewhere"
+        );
+    }
+
+    #[test]
+    fn a_field_grouping_is_named_with_s_unless_it_ends_in_s_and_built_ins_keep_fixed_plurals() {
+        let mut app = fleet();
+        app.set_extensions(
+            ["tasks", "project"]
+                .map(|name| crate::client::Field {
+                    id: format!("ext.{name}"),
+                    name: name.into(),
+                    title: name.to_uppercase(),
+                    icon: None,
+                    extension_icon: None,
+                    width: None,
+                })
+                .to_vec(),
+            Default::default(),
+        );
+        let mut rows = app.rows.clone();
+        for row in &mut rows {
+            let value = row.key.clone();
+            row.ext.insert("ext.tasks".into(), value.clone());
+            row.ext.insert("ext.project".into(), value);
+        }
+        app.set_rows(rows, app.hosts.clone());
+        keep_in(&mut app, "tasks", "studio/api-1");
+        keep_in(&mut app, "project", "studio/api-1");
+        keep_in(&mut app, "status", "studio/api-1");
+        keep_in(&mut app, "harness", "studio/api-1");
+        typed(&mut app, "f+");
+        let bar = top_bar(&app, 140);
+        for want in ["1 project", "1 tasks", "1 status", "1 harness"] {
+            assert!(bar.contains(want), "{want}: {bar}");
+        }
+        keep_in(&mut app, "tasks", "studio/api-2");
+        keep_in(&mut app, "project", "studio/api-2");
+        let bar = top_bar(&app, 160);
+        assert!(
+            bar.contains("2 tasks") && bar.contains("2 projects"),
+            "{bar}"
+        );
+        assert_eq!(super::plural(2, "tasks", true), "2 tasks");
+        assert_eq!(super::plural(2, "project", true), "2 projects");
+        assert_eq!(super::plural(2, "status", false), "2 statuses");
+        assert_eq!(super::plural(2, "harness", false), "2 harnesses");
+        assert_eq!(super::plural(3, "session", false), "3 sessions");
+    }
+
+    #[test]
+    fn a_kept_group_of_a_field_serve_has_not_declared_yet_is_not_named_in_the_top_bar() {
+        let mut app = fleet();
+        app.keep.add("field:fake.rig", "alpha");
+        app.keep.only = true;
+        let bar = top_bar(&app, 140);
+        assert!(!bar.contains("only") && !bar.contains("elsewhere"), "{bar}");
+    }
+
+    #[test]
+    fn the_need_you_count_ignores_the_status_and_the_text_and_goes_when_none_is_outside() {
+        for status in [None, Some('w'), Some('p')] {
+            let mut app = kept_sessions(status);
+            press(&mut app, KeyCode::Char('/'));
+            typed(&mut app, "api");
+            press(&mut app, KeyCode::Enter);
+            assert_eq!(app.needs_you_elsewhere(), 2, "{status:?}");
+            assert!(
+                top_bar(&app, 140).contains("2 need you elsewhere"),
+                "{status:?}"
+            );
+        }
+        let mut all = kept_sessions(None);
+        for key in ["studio/docs-1", "mini/ops-1"] {
+            keep_in(&mut all, "session", key);
+        }
+        assert_eq!(all.needs_you_elsewhere(), 0);
+        let bar = top_bar(&all, 140);
+        assert!(
+            bar.contains("only 5 sessions") && !bar.contains("elsewhere"),
+            "{bar}"
+        );
+    }
+
+    #[test]
+    fn at_80_the_kept_words_shorten_and_the_status_and_the_need_you_count_stay_whole() {
+        let mut one = kept_sessions(Some('p'));
+        assert_eq!(
+            top_bar(&one, 80),
+            "rexboard \u{b7} view: session \u{b7} only permission \u{b7} 3 kept \u{b7} 2 need you elsewhere"
+        );
+        keep_in(&mut one, "host", "studio/api-1");
+        in_view(&mut one, "session");
+        assert_eq!(
+            top_bar(&one, 80),
+            "rexboard \u{b7} view: session \u{b7} only permission \u{b7} only kept \u{b7} 2 need you elsewhere",
+            "two groupings"
+        );
+        let long = top_bar(&one, 120);
+        assert!(
+            long.contains("only 1 host, 3 sessions \u{b7} 2 need you elsewhere"),
+            "{long}"
+        );
+        let mut down = kept_sessions(Some('p'));
+        down.hosts.insert("mini".into(), "down".into());
+        let bar = top_bar(&down, 80);
+        assert!(
+            bar.contains("only permission") && bar.contains("3 kept"),
+            "{bar}"
+        );
+    }
+
+    #[test]
+    fn a_list_the_kept_groups_leave_empty_says_so_and_how_to_leave_with_or_without_a_status() {
+        let mut app = fleet();
+        app.keep.add("session", "gone@studio");
+        app.keep.only = true;
+        assert!(render(&app, 80, 30).contains("no rows in the kept groups \u{b7} f+ shows all"));
+        typed(&mut app, "fw");
+        let text = render(&app, 80, 30);
+        assert!(
+            text.contains(
+                "no working rows in the kept groups \u{b7} ff clears \u{b7} f+ shows all"
+            ),
+            "{text}"
+        );
+        typed(&mut app, "ff");
+        press(&mut app, KeyCode::Char('/'));
+        typed(&mut app, "api");
+        press(&mut app, KeyCode::Enter);
+        assert!(render(&app, 120, 30).contains(
+            "no rows match \"api\" in the kept groups \u{b7} esc clears \u{b7} f+ shows all"
+        ),);
+        let mut nowhere = fleet();
+        typed(&mut nowhere, "/zzz");
+        press(&mut nowhere, KeyCode::Enter);
+        nowhere.keep.add("session", "gone@studio");
+        nowhere.keep.only = true;
+        assert!(
+            render(&nowhere, 80, 30).contains("no rows match \"zzz\" \u{b7} esc clears"),
+            "the text is why nothing shows, not the kept groups"
+        );
+    }
+
+    #[test]
+    fn f_lists_how_many_rows_the_kept_groups_hold_and_the_idle_footer_has_no_hint_for_it() {
+        let mut app = kept_sessions(None);
+        press(&mut app, KeyCode::Char('f'));
+        let last = |app: &App, width| render(app, width, 30).lines().last().unwrap().to_owned();
+        assert!(last(&app, 140).contains("working 2"), "{}", last(&app, 140));
+        assert!(last(&app, 140).contains("* marked 0 \u{b7} + kept 4 \u{b7} ff clears"));
+        assert!(
+            last(&app, 80).ends_with("*0 +4 \u{b7} ff clears"),
+            "{}",
+            last(&app, 80)
+        );
+        press(&mut app, KeyCode::Esc);
+        for width in [80, 100, 140] {
+            let foot = last(&app, width);
+            assert!(!foot.contains("f+"), "{width}: {foot}");
+            assert!(foot.contains("n needs you"), "{width}: {foot}");
+        }
+    }
+
+    #[test]
+    fn the_key_table_lists_plus() {
+        let mut app = fuller();
+        press(&mut app, KeyCode::Char('?'));
+        assert!(render(&app, 120, 30).contains("+        keep the group; f+ only kept"));
     }
 }
 

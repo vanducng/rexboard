@@ -28,6 +28,8 @@ pub enum Act {
     Marked,
     /// `*`: make the selected pane a favorite, or not.
     Favorite,
+    /// `+`: keep the row's group, or drop it.
+    Keep,
     /// `1`-`9`, then maybe another: the row with that number on screen, selected or jumped to as
     /// tui.json's `digits` says.
     Nth,
@@ -225,6 +227,13 @@ pub const BOARD: &[Entry] = &[
         "favorite or unfavorite the row",
         "favorite",
     ),
+    e(
+        Act::Keep,
+        &[&[c('+')]],
+        "+",
+        "keep the group; f+ only kept",
+        "keep",
+    ),
     digits(
         Act::Nth,
         &[
@@ -284,7 +293,7 @@ pub const BOARD: &[Entry] = &[
         Act::Status,
         &[&[c('f')]],
         "f",
-        "status or * marked; ff clears",
+        "status, * marked, + kept",
         "status",
     ),
     e(

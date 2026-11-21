@@ -1,5 +1,5 @@
 //! What `pick` keeps in pick.json and the board in board.json: view and sort, and for the board
-//! the status filter and `/` text. Both files are written whole through a temp file, with every
+//! the status filter, `/` text and kept groups. Both files are written whole through a temp file, with every
 //! key they do not know kept.
 
 use std::io;
@@ -7,6 +7,7 @@ use std::path::Path;
 
 use serde_json::{Map, Value};
 
+use super::keep::Keep;
 use super::query::status_of;
 use super::status::Status;
 
@@ -24,6 +25,7 @@ pub struct BoardPrefs {
     pub view_sort: ViewSort,
     pub status: Option<Status>,
     pub filter: String,
+    pub keep: Keep,
 }
 
 /// The file's keys, and why it was not used when it exists but holds no JSON object. A missing
@@ -78,6 +80,7 @@ pub fn load_board(path: &Path) -> (BoardPrefs, Option<String>) {
         view_sort: view_sort_of(&object),
         status,
         filter,
+        keep: Keep::from_json(&object),
     };
     (prefs, note)
 }
@@ -116,6 +119,12 @@ impl BoardPrefs {
         if self.filter != now.filter {
             let filter = Some(&now.filter).filter(|f| !f.is_empty());
             changes.push(("filter", filter.map(|f| Value::String(f.clone()))));
+        }
+        if self.keep.groups != now.keep.groups {
+            changes.push(("keep", now.keep.groups_json()));
+        }
+        if self.keep.only != now.keep.only {
+            changes.push(("only_kept", now.keep.only.then_some(Value::Bool(true))));
         }
         changes
     }
@@ -298,6 +307,60 @@ mod tests {
         );
         let saved: Value = serde_json::from_slice(&std::fs::read(&file.0).unwrap()).unwrap();
         assert_eq!(saved["future"], 1);
+    }
+
+    #[test]
+    fn kept_groups_come_back_through_the_file_and_a_clear_removes_their_keys() {
+        let file = TempFile::new();
+        let mut keep = Keep::default();
+        keep.add("session", "api@studio");
+        keep.add("session", "web@studio");
+        keep.add("host", "mini");
+        keep.only = true;
+        let kept = BoardPrefs {
+            keep: keep.clone(),
+            ..Default::default()
+        };
+        std::fs::write(&file.0, r#"{"future":1}"#).unwrap();
+        let changes = BoardPrefs::default().changes(&kept);
+        assert_eq!(
+            changes.iter().map(|(key, _)| *key).collect::<Vec<_>>(),
+            ["keep", "only_kept"]
+        );
+        save_changes(&file.0, &changes).unwrap();
+        let saved: Value = serde_json::from_slice(&std::fs::read(&file.0).unwrap()).unwrap();
+        assert_eq!(
+            saved["keep"],
+            serde_json::json!({"host": ["mini"], "session": ["api@studio", "web@studio"]})
+        );
+        assert_eq!(
+            (saved["only_kept"].clone(), saved["future"].clone()),
+            (true.into(), 1.into())
+        );
+        assert_eq!(load_board(&file.0), (kept.clone(), None));
+        assert!(kept.changes(&kept.clone()).is_empty());
+        save_changes(&file.0, &kept.changes(&BoardPrefs::default())).unwrap();
+        let cleared: Value = serde_json::from_slice(&std::fs::read(&file.0).unwrap()).unwrap();
+        assert_eq!(cleared, serde_json::json!({"future": 1}));
+    }
+
+    #[test]
+    fn a_board_that_changes_its_kept_groups_leaves_another_boards_status_alone() {
+        let file = TempFile::new();
+        let status = BoardPrefs {
+            status: Some(Status::Done),
+            ..Default::default()
+        };
+        let mut keep = Keep::default();
+        keep.add("host", "mini");
+        let kept = BoardPrefs {
+            keep,
+            ..Default::default()
+        };
+        save_changes(&file.0, &BoardPrefs::default().changes(&status)).unwrap();
+        save_changes(&file.0, &BoardPrefs::default().changes(&kept)).unwrap();
+        let (prefs, _) = load_board(&file.0);
+        assert_eq!((prefs.status, prefs.keep.count()), (Some(Status::Done), 1));
     }
 
     #[test]

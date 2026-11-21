@@ -9,16 +9,18 @@ impl App {
         !self.pick && !self.once
     }
 
-    /// Whether the row passes the status filter and the `/` text.
+    /// Whether the row passes the status filter, the `/` text and the kept groups.
     pub(super) fn matches(&self, row: &Row) -> bool {
-        self.status.is_none_or(|status| status.matches(row)) && self.matches_text(row)
+        self.status.is_none_or(|status| status.matches(row))
+            && self.matches_text(row)
+            && self.matches_kept(row)
     }
 
-    /// Rows the `/` text keeps, with any status; the counts `f` shows.
+    /// Rows the `/` text and the kept groups keep, with any status; the counts `f` shows.
     pub fn status_count(&self, status: Status) -> usize {
         self.rows
             .iter()
-            .filter(|row| status.matches(row) && self.matches_text(row))
+            .filter(|row| status.matches(row) && self.matches_text(row) && self.matches_kept(row))
             .count()
     }
 
@@ -225,5 +227,47 @@ mod tests {
         );
         press(&mut app, KeyCode::Esc);
         assert_eq!(app.items().len(), 7, "esc clears the filter");
+    }
+
+    #[test]
+    fn only_kept_shows_a_row_only_when_every_grouping_with_kept_groups_keeps_it() {
+        let mut app = fleet();
+        keep_in(&mut app, "session", "studio/api-1");
+        keep_in(&mut app, "session", "studio/web-1");
+        typed(&mut app, "f+");
+        let both = ["studio/api-1", "studio/api-2", "studio/web-1"];
+        for view in ["session", "status", "table", "host", "harness"] {
+            in_view(&mut app, view);
+            assert_eq!(rows_shown(&app), both, "{view}");
+        }
+        keep_in(&mut app, "host", "studio/api-1");
+        keep_in(&mut app, "session", "mini/api-1");
+        assert_eq!(
+            rows_shown(&app),
+            both,
+            "mini's api is out: the host studio is kept too"
+        );
+        assert_eq!(
+            app.kept_groupings(),
+            [
+                ("host".to_owned(), 1, false),
+                ("session".to_owned(), 3, false)
+            ]
+        );
+        press(&mut app, KeyCode::Char('f'));
+        press(&mut app, KeyCode::Char('+'));
+        assert_eq!(rows_shown(&app).len(), 7, "f+ again shows all");
+    }
+
+    #[test]
+    fn f_plus_with_nothing_kept_changes_nothing_and_says_how_to_keep() {
+        let mut app = fleet();
+        typed(&mut app, "f+");
+        assert!(!app.keep.only);
+        assert_eq!(rows_shown(&app).len(), 7);
+        assert_eq!(
+            app.toast(),
+            Some("nothing kept · + keeps the selected row's group")
+        );
     }
 }
