@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/vanducng/rexboard/compare/v0.33.0...v0.34.0) (2026-11-21)
+
+
+### Features
+
+* **tui:** keep and show only the groups you work in ([#165](https://github.com/vanducng/rexboard/issues/165)) ([90ee3d0](https://github.com/vanducng/rexboard/commit/90ee3d0a997ac41cafbcd88e2bdbb85e04894f94))
+
 ## [0.33.0](https://github.com/vanducng/rexboard/compare/v0.32.0...v0.33.0) (2026-11-11)
 
 
