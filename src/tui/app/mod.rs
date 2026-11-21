@@ -33,6 +33,7 @@ mod card;
 mod filter;
 mod full;
 mod keeping;
+pub use keeping::KeepFlag;
 mod pane_keys;
 pub(crate) use pane_keys::{RUNS_THE_BOARD, ending, is_own, runs_rexboard, tmux_note};
 mod select;
@@ -215,6 +216,8 @@ pub struct App {
     pub status: Option<Status>,
     /// `+` keeps a row's group; with only-kept on (`f+`) only the kept groups show.
     pub keep: Keep,
+    /// The `--keep` names this run opened with, matched again on each rows update.
+    pub keep_flags: Vec<KeepFlag>,
     /// A row number's first digit, when it came and whether it jumps, while a second may follow.
     pub number: Option<(usize, Instant, bool)>,
     /// The marked row the last `'` went to, and when.
@@ -361,6 +364,7 @@ impl App {
             .map(crate::output::name);
         self.panes = all.len();
         self.rows = all.into_iter().filter(|row| row.pane.is_agent()).collect();
+        self.follow_keep_flags();
         let keys: BTreeSet<&str> = self.rows.iter().map(|row| row.key.as_str()).collect();
         self.marked
             .get_mut()

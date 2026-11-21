@@ -4,7 +4,52 @@
 use super::*;
 use crate::tui::views::value;
 
+/// A `--keep NAME` of this run. Until a row matches it, the name as typed stands in the kept
+/// groups so only-kept narrows at once; then the groups it names replace that.
+#[derive(Clone, PartialEq, Debug)]
+pub struct KeepFlag {
+    key: Key,
+    name: String,
+    stand_in: bool,
+    added: BTreeSet<String>,
+}
+
+impl KeepFlag {
+    pub fn new(key: Key, name: String) -> Self {
+        Self {
+            key,
+            name,
+            stand_in: true,
+            added: BTreeSet::new(),
+        }
+    }
+}
+
 impl App {
+    /// Keeps the groups the run's `--keep` names match in the rows now, each once: a group the
+    /// user dropped with `+` is not kept again, and one that appears later, as a session on
+    /// another host, is added.
+    pub fn follow_keep_flags(&mut self) {
+        for flag in &mut self.keep_flags {
+            let found = crate::tui::query::matching(flag.key, &self.rows, &flag.name);
+            if found.is_empty() {
+                continue;
+            }
+            let grouping = flag.key.grouping();
+            if flag.stand_in {
+                flag.stand_in = false;
+                if !found.contains(&flag.name) && self.keep.has(&grouping, &flag.name) {
+                    self.keep.toggle(&grouping, &flag.name);
+                }
+            }
+            for label in found {
+                if flag.added.insert(label.clone()) {
+                    self.keep.add(&grouping, &label);
+                }
+            }
+        }
+    }
+
     /// The grouping `name` as a `Key`, or None for a field no extension declares now.
     fn key_of(&self, grouping: &str) -> Option<Key> {
         match grouping {

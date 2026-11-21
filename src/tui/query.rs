@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use tui_input::Input;
 
-use super::app::{App, Item};
+use super::app::{App, Item, KeepFlag};
 use super::columns::{COLUMNS, Dir, Sort, field_column};
 use super::keep::Keep;
 use super::status::{ALL, Status};
@@ -63,6 +63,22 @@ fn split_keep(specs: &[String]) -> Result<Vec<(&str, &str)>> {
 /// `ls --json` names it (`needs_you`). A name that matches nothing stays as typed, so it keeps
 /// nothing and `arrange` can say so.
 fn kept_groups(app: &App, rows: &[Row], specs: &[String]) -> Result<Vec<(Key, String)>> {
+    Ok(kept_keys(app, specs)?
+        .into_iter()
+        .flat_map(|(key, group)| {
+            let found = matching(key, rows, group);
+            let found = if found.is_empty() {
+                vec![group.to_owned()]
+            } else {
+                found
+            };
+            found.into_iter().map(move |label| (key, label))
+        })
+        .collect())
+}
+
+/// Each `--keep`'s grouping as a key, and its group as typed.
+fn kept_keys<'a>(app: &App, specs: &'a [String]) -> Result<Vec<(Key, &'a str)>> {
     let views = app.views();
     split_keep(specs)?
         .into_iter()
@@ -86,25 +102,11 @@ fn kept_groups(app: &App, rows: &[Row], specs: &[String]) -> Result<Vec<(Key, St
                 })?;
             Ok((key, group))
         })
-        .collect::<Result<Vec<_>>>()
-        .map(|named| {
-            named
-                .into_iter()
-                .flat_map(|(key, group)| {
-                    let found = matching(key, rows, group);
-                    let found = if found.is_empty() {
-                        vec![group.to_owned()]
-                    } else {
-                        found
-                    };
-                    found.into_iter().map(move |label| (key, label))
-                })
-                .collect()
-        })
+        .collect()
 }
 
 /// The labels of the groups of `rows` that `group` names, in the order they first appear.
-fn matching(key: Key, rows: &[Row], group: &str) -> Vec<String> {
+pub fn matching(key: Key, rows: &[Row], group: &str) -> Vec<String> {
     let want = |text: &str| {
         let text = text.trim().to_lowercase();
         if key == Key::Status {
@@ -227,23 +229,25 @@ pub fn open(app: &mut App, query: &Query) -> Result<()> {
         .map(|(grouping, _)| grouping)
         .collect();
     // A field's view exists only once serve has said which extensions declare it; the built-in
-    // views need no serve. A `--keep` asks it for the rows its names match, when it answers.
-    let mut rows = Vec::new();
+    // views need no serve.
     if (query.view.iter().chain(&groupings))
         .any(|name| !app.views().iter().any(|v| v.name == *name))
     {
-        let current = crate::client::current()?;
-        rows = current.rows;
-        app.set_extensions(current.fields, BTreeMap::new());
-    } else if !query.keep.is_empty() {
-        rows = crate::client::current().map_or_else(|_| Vec::new(), |current| current.rows);
+        app.set_extensions(crate::client::current()?.fields, BTreeMap::new());
     }
-    rows.retain(|row| row.pane.is_agent());
     if let Some(name) = query.view {
         app.show(view(app, name)?);
     }
     if !query.keep.is_empty() {
-        keep_only(app, &kept_groups(app, &rows, query.keep)?);
+        let named = kept_keys(app, query.keep)?;
+        let typed: Vec<(Key, String)> = (named.iter())
+            .map(|&(key, group)| (key, group.to_owned()))
+            .collect();
+        keep_only(app, &typed);
+        app.keep_flags = (typed.into_iter())
+            .map(|(key, group)| KeepFlag::new(key, group))
+            .collect();
+        app.follow_keep_flags();
     }
     Ok(())
 }
@@ -446,6 +450,59 @@ mod tests {
                 .collect();
             assert_eq!(got, want, "{text}");
         }
+    }
+
+    #[test]
+    fn a_board_opened_with_keep_matches_the_name_again_as_rows_arrive() {
+        use crate::tui::app::testkit::{fleet, in_view, press, rows_shown};
+        let specs = ["session=WEB".to_owned(), "status=needs_you".to_owned()];
+        let query = Query {
+            keep: &specs[..1],
+            ..Query::default()
+        };
+        let mut app = App::default();
+        open(&mut app, &query).unwrap();
+        assert!(
+            app.keep.has("session", "WEB"),
+            "as typed until a row matches"
+        );
+        let all = fleet();
+        let studio: Vec<Row> = (all.rows.iter())
+            .filter(|row| row.pane.host == "studio")
+            .cloned()
+            .collect();
+        app.set_rows(studio, all.hosts.clone());
+        in_view(&mut app, "session");
+        assert_eq!(rows_shown(&app), ["studio/web-1"]);
+        assert!(!app.keep.has("session", "WEB"), "the typed name gives way");
+        app.set_rows(all.rows.clone(), all.hosts.clone());
+        assert_eq!(
+            rows_shown(&app),
+            ["mini/web-1", "studio/web-1"],
+            "mini's web joins"
+        );
+        let before = app.keep.count();
+        press(&mut app, ratatui::crossterm::event::KeyCode::Char('+'));
+        let kept = app.keep.count();
+        assert!(kept < before, "+ dropped the selected group");
+        app.set_rows(all.rows.clone(), all.hosts.clone());
+        assert_eq!(
+            app.keep.count(),
+            kept,
+            "a group the user drops stays dropped"
+        );
+        let status = Query {
+            keep: &specs[1..],
+            ..Query::default()
+        };
+        let mut app = App::default();
+        open(&mut app, &status).unwrap();
+        app.set_rows(all.rows.clone(), all.hosts.clone());
+        assert_eq!(
+            rows_shown(&app).len(),
+            3,
+            "needs_you reads as the header's group"
+        );
     }
 
     #[test]
