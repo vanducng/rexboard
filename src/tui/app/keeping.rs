@@ -207,6 +207,7 @@ impl App {
     pub(super) fn unkeep(&mut self) {
         let was = self.keep.only;
         let dropped = self.keep.clear();
+        self.keep_flags.clear();
         let groups = if dropped == 1 { "group" } else { "groups" };
         if dropped == 0 && !was {
             self.say("no kept groups");

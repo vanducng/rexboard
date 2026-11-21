@@ -506,6 +506,30 @@ mod tests {
     }
 
     #[test]
+    fn unkeep_also_drops_the_flags_so_a_matching_group_that_arrives_is_not_kept() {
+        use crate::tui::app::testkit::{fleet, press, typed};
+        let specs = ["session=web".to_owned()];
+        let query = Query {
+            keep: &specs,
+            ..Query::default()
+        };
+        let mut app = App::default();
+        open(&mut app, &query).unwrap();
+        let all = fleet();
+        let studio: Vec<Row> = (all.rows.iter())
+            .filter(|row| row.pane.host == "studio")
+            .cloned()
+            .collect();
+        app.set_rows(studio, all.hosts.clone());
+        typed(&mut app, ":unkeep");
+        press(&mut app, ratatui::crossterm::event::KeyCode::Enter);
+        assert_eq!(app.keep.count(), 0);
+        app.set_rows(all.rows.clone(), all.hosts.clone());
+        assert_eq!(app.keep.count(), 0, "mini's web rows keep nothing");
+        assert!(!app.keep.only);
+    }
+
+    #[test]
     fn keep_lists_the_rows_the_board_shows_for_those_kept_groups() {
         use crate::tui::app::testkit::{fleet, in_view, keep_in, rows_shown};
         let mut board = fleet();
