@@ -75,10 +75,10 @@ impl App {
     }
 
     /// Each grouping with kept groups that resolves now, in the order of the views, with how many
-    /// are kept.
-    pub fn kept_groupings(&self) -> Vec<(String, usize)> {
+    /// are kept, and whether the grouping is an extension field's.
+    pub fn kept_groupings(&self) -> Vec<(String, usize, bool)> {
         let views = self.views();
-        let mut named: Vec<(usize, String, usize)> = self
+        let mut named: Vec<(usize, String, usize, bool)> = self
             .keep
             .groups
             .iter()
@@ -88,11 +88,19 @@ impl App {
                     .iter()
                     .position(|view| view.group_by.map(Key::grouping).as_deref() == Some(grouping))
                     .unwrap_or(usize::MAX);
-                (at, self.grouping_name(grouping), labels.len())
+                (
+                    at,
+                    self.grouping_name(grouping),
+                    labels.len(),
+                    grouping.starts_with("field:"),
+                )
             })
             .collect();
         named.sort();
-        named.into_iter().map(|(_, name, n)| (name, n)).collect()
+        named
+            .into_iter()
+            .map(|(_, name, n, field)| (name, n, field))
+            .collect()
     }
 
     /// What a grouping is called: its view's name, or a field's.
@@ -215,7 +223,7 @@ mod tests {
         app.set_rows(rows, app.hosts.clone());
         keep_in(&mut app, "rig", "studio/api-1");
         assert!(app.keep.has("field:fake.rig", "alpha"), "{:?}", app.keep);
-        assert_eq!(app.kept_groupings(), [("rig".to_owned(), 1)]);
+        assert_eq!(app.kept_groupings(), [("rig".to_owned(), 1, true)]);
         press(&mut app, KeyCode::Char('+'));
         in_view(&mut app, "session");
         app.selected = Some(Spot::Row("mini/ops-1".into()));

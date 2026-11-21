@@ -272,12 +272,17 @@ fn count(n: usize, noun: &str) -> String {
     }
 }
 
-/// `3 sessions`, `1 host`, `2 statuses`.
-fn plural(n: usize, noun: &str) -> String {
-    match (n, noun.ends_with(['s', 'x'])) {
-        (1, _) => format!("1 {noun}"),
-        (_, true) => format!("{n} {noun}es"),
-        _ => format!("{n} {noun}s"),
+/// `3 sessions`, `1 host`, `2 statuses`. The built-in groupings take `es` after `s` or `x`; an
+/// extension field's name takes `s` unless it ends in one (`projects`, `tasks`).
+fn plural(n: usize, noun: &str, field: bool) -> String {
+    if n == 1 {
+        format!("1 {noun}")
+    } else if field {
+        format!("{n} {noun}{}", if noun.ends_with('s') { "" } else { "s" })
+    } else if noun.ends_with(['s', 'x']) {
+        format!("{n} {noun}es")
+    } else {
+        format!("{n} {noun}s")
     }
 }
 
@@ -289,11 +294,11 @@ fn kept_words(app: &App, short: bool) -> Option<String> {
     }
     let groupings = app.kept_groupings();
     Some(match (short, groupings.as_slice()) {
-        (true, [(_, n)]) => format!("{n} kept"),
+        (true, [(_, n, _)]) => format!("{n} kept"),
         (true, _) => "only kept".to_owned(),
         (false, _) => {
             let named: Vec<String> = (groupings.iter())
-                .map(|(name, n)| plural(*n, name))
+                .map(|(name, n, field)| plural(*n, name, *field))
                 .collect();
             format!("only {}", named.join(", "))
         }
@@ -2688,6 +2693,52 @@ mod tests {
             top_bar(&one, 50),
             "rexboard \u{b7} 3 kept \u{b7} 2 need you elsewhere"
         );
+    }
+
+    #[test]
+    fn a_field_grouping_is_named_with_s_unless_it_ends_in_s_and_built_ins_keep_fixed_plurals() {
+        let mut app = fleet();
+        app.set_extensions(
+            ["tasks", "project"]
+                .map(|name| crate::client::Field {
+                    id: format!("ext.{name}"),
+                    name: name.into(),
+                    title: name.to_uppercase(),
+                    icon: None,
+                    extension_icon: None,
+                    width: None,
+                })
+                .to_vec(),
+            Default::default(),
+        );
+        let mut rows = app.rows.clone();
+        for row in &mut rows {
+            let value = row.key.clone();
+            row.ext.insert("ext.tasks".into(), value.clone());
+            row.ext.insert("ext.project".into(), value);
+        }
+        app.set_rows(rows, app.hosts.clone());
+        keep_in(&mut app, "tasks", "studio/api-1");
+        keep_in(&mut app, "project", "studio/api-1");
+        keep_in(&mut app, "status", "studio/api-1");
+        keep_in(&mut app, "harness", "studio/api-1");
+        typed(&mut app, "f+");
+        let bar = top_bar(&app, 140);
+        for want in ["1 project", "1 tasks", "1 status", "1 harness"] {
+            assert!(bar.contains(want), "{want}: {bar}");
+        }
+        keep_in(&mut app, "tasks", "studio/api-2");
+        keep_in(&mut app, "project", "studio/api-2");
+        let bar = top_bar(&app, 160);
+        assert!(
+            bar.contains("2 tasks") && bar.contains("2 projects"),
+            "{bar}"
+        );
+        assert_eq!(super::plural(2, "tasks", true), "2 tasks");
+        assert_eq!(super::plural(2, "project", true), "2 projects");
+        assert_eq!(super::plural(2, "status", false), "2 statuses");
+        assert_eq!(super::plural(2, "harness", false), "2 harnesses");
+        assert_eq!(super::plural(3, "session", false), "3 sessions");
     }
 
     #[test]

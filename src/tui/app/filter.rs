@@ -249,7 +249,10 @@ mod tests {
         );
         assert_eq!(
             app.kept_groupings(),
-            [("host".to_owned(), 1), ("session".to_owned(), 3)]
+            [
+                ("host".to_owned(), 1, false),
+                ("session".to_owned(), 3, false)
+            ]
         );
         press(&mut app, KeyCode::Char('f'));
         press(&mut app, KeyCode::Char('+'));
