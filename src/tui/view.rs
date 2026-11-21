@@ -302,16 +302,20 @@ fn kept_words(app: &App, short: bool) -> Option<String> {
 
 /// The top bar's words after `rexboard`: `view: table ↓age` unless the board is on the status
 /// view with no sort, then `only working`, the kept groups, and the NEEDS YOU rows outside them.
-fn view_label(app: &App, short: bool) -> Option<String> {
+/// A higher `shrink` gives up words for room: 1 shortens the kept groups', 2 also drops the view,
+/// 3 drops the kept groups too. The status word and the need-you count stay at every level.
+fn view_label(app: &App, shrink: u8) -> Option<String> {
     let mut parts = Vec::new();
-    if app.view != View::default() || app.sort.is_some() {
+    if shrink < 2 && (app.view != View::default() || app.sort.is_some()) {
         let sort = app.sort.map_or_else(String::new, |(id, dir)| {
             format!(" {}{}", dir.arrow(), column_of(id).header.to_lowercase())
         });
         parts.push(format!("view: {}{sort}", app.view.name));
     }
     parts.extend(app.status.map(|status| format!("only {}", status.name())));
-    parts.extend(kept_words(app, short));
+    if shrink < 3 {
+        parts.extend(kept_words(app, shrink > 0));
+    }
     let elsewhere = app.needs_you_elsewhere();
     if elsewhere > 0 {
         parts.push(format!("{elsewhere} need you elsewhere"));
@@ -367,19 +371,22 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
     let clock = now.with_timezone(&Local).format("%H:%M").to_string();
     let width = usize::from(area.width);
     // Alerts stay; the host list goes first, then the counts, then the clock, then the kept
-    // groups' words shorten. The status word and the need-you count never go.
+    // groups' words shorten, then the view and the kept groups go. The status word and the
+    // need-you count never go.
     let shapes = [
-        (true, true, true, false),
-        (true, false, true, false),
-        (false, false, true, false),
-        (false, false, false, false),
-        (false, false, false, true),
+        (true, true, true, 0),
+        (true, false, true, 0),
+        (false, false, true, 0),
+        (false, false, false, 0),
+        (false, false, false, 1),
+        (false, false, false, 2),
+        (false, false, false, 3),
     ];
-    let (with_counts, with_hosts, with_clock, short) = shapes
+    let (with_counts, with_hosts, with_clock, shrink) = shapes
         .into_iter()
-        .find(|&(c, h, k, short)| {
+        .find(|&(c, h, k, shrink)| {
             let left = 8
-                + view_label(app, short).map_or(0, |l| 3 + l.width())
+                + view_label(app, shrink).map_or(0, |l| 3 + l.width())
                 + if c { counts.width() } else { 0 }
                 + if alert.is_empty() {
                     0
@@ -395,9 +402,9 @@ fn header(frame: &mut Frame, area: Rect, app: &App, now: DateTime<Utc>) {
             // At least 3 columns before the clock, so the host list goes before it gets tight.
             left + right + if right > 0 { 3 } else { 0 } <= width
         })
-        .unwrap_or((false, false, false, true));
+        .unwrap_or((false, false, false, 3));
     let mut left = vec![Span::styled("rexboard", theme::accent())];
-    if let Some(label) = view_label(app, short) {
+    if let Some(label) = view_label(app, shrink) {
         left.push(Span::styled(" · ", theme::quiet()));
         left.push(Span::styled(label, theme::strong()));
     }
@@ -2648,6 +2655,48 @@ mod tests {
             !top_bar(&off, 140).contains("elsewhere"),
             "and nothing hidden"
         );
+    }
+
+    #[test]
+    fn down_to_50_columns_the_status_word_and_the_need_you_count_stay_whole() {
+        let mut app = kept_sessions(Some('p'));
+        keep_in(&mut app, "host", "studio/api-1");
+        in_view(&mut app, "session");
+        for (width, want) in [
+            (
+                50,
+                "rexboard \u{b7} only permission \u{b7} 2 need you elsewhere",
+            ),
+            (
+                60,
+                "rexboard \u{b7} only permission \u{b7} 2 need you elsewhere",
+            ),
+            (
+                80,
+                "rexboard \u{b7} view: session \u{b7} only permission \u{b7} only kept \u{b7} 2 need you elsewhere",
+            ),
+        ] {
+            assert_eq!(top_bar(&app, width), want, "{width}");
+        }
+        let mut one = kept_sessions(Some('p'));
+        assert_eq!(
+            top_bar(&one, 70),
+            "rexboard \u{b7} only permission \u{b7} 3 kept \u{b7} 2 need you elsewhere"
+        );
+        typed(&mut one, "ff");
+        assert_eq!(
+            top_bar(&one, 50),
+            "rexboard \u{b7} 3 kept \u{b7} 2 need you elsewhere"
+        );
+    }
+
+    #[test]
+    fn a_kept_group_of_a_field_serve_has_not_declared_yet_is_not_named_in_the_top_bar() {
+        let mut app = fleet();
+        app.keep.add("field:fake.rig", "alpha");
+        app.keep.only = true;
+        let bar = top_bar(&app, 140);
+        assert!(!bar.contains("only") && !bar.contains("elsewhere"), "{bar}");
     }
 
     #[test]

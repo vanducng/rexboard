@@ -1912,6 +1912,29 @@ fn keep_flags_open_the_board_and_pick_narrowed_and_save_nothing() {
 }
 
 #[test]
+fn a_keep_flag_run_leaves_the_saved_kept_groups_alone_and_saves_the_rest() {
+    let serve = needing();
+    keep_board_json(&serve, r#"{"keep":{"host":["studio"]},"only_kept":true}"#);
+    let before = board_json_now(&serve);
+    let ran = on_pty(
+        &["board", "--keep", "host=mini"],
+        Some(&serve),
+        &["only 1 host", "seat-old"],
+        &["+", "f", "p"],
+        Some(libc::SIGTERM),
+        false,
+    );
+    assert!(ran.alive, "{:?}", ran.out);
+    let after = board_json_now(&serve);
+    assert_eq!(
+        after["status"], "permission",
+        "the status is saved: {after}"
+    );
+    assert_eq!(after["keep"], before["keep"], "{after}");
+    assert_eq!(after["only_kept"], before["only_kept"], "{after}");
+}
+
+#[test]
 fn ls_keep_lists_only_those_groups_and_a_bad_grouping_is_usage() {
     let serve = shared_session_serve();
     let list = |args: &[&str]| -> Vec<String> {

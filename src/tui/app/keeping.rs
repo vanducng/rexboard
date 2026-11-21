@@ -34,9 +34,10 @@ impl App {
         !self.keep.only || self.in_kept(row)
     }
 
-    /// Whether only-kept is on and some group is kept, so it narrows the list.
+    /// Whether only-kept is on and some group is kept in a grouping that resolves now, so it
+    /// narrows the list.
     pub fn only_kept(&self) -> bool {
-        self.keep.only && !self.keep.groups.is_empty()
+        self.keep.only && self.keep.groups.keys().any(|g| self.key_of(g).is_some())
     }
 
     /// Whether `bucket`, a group of the current view, is kept.
@@ -73,13 +74,15 @@ impl App {
             })
     }
 
-    /// Each grouping with kept groups in the order of the views, with how many are kept.
+    /// Each grouping with kept groups that resolves now, in the order of the views, with how many
+    /// are kept.
     pub fn kept_groupings(&self) -> Vec<(String, usize)> {
         let views = self.views();
         let mut named: Vec<(usize, String, usize)> = self
             .keep
             .groups
             .iter()
+            .filter(|(grouping, _)| self.key_of(grouping).is_some())
             .map(|(grouping, labels)| {
                 let at = views
                     .iter()
@@ -126,6 +129,9 @@ impl App {
             self.say(format!("{label} kept · {then}"));
         } else {
             self.say(format!("{label} dropped"));
+            if self.keep.groups.is_empty() {
+                self.keep.only = false;
+            }
         }
         self.keep_selection_visible();
     }
@@ -137,6 +143,11 @@ impl App {
             return;
         }
         self.keep.only = !self.keep.only;
+        self.say(if self.keep.only {
+            "only kept groups"
+        } else {
+            "all groups"
+        });
     }
 
     /// `:unkeep`: drops every kept group, one that is not on the board included.
@@ -381,11 +392,36 @@ mod tests {
     }
 
     #[test]
+    fn dropping_the_last_kept_group_turns_only_kept_off_and_f_plus_says_what_it_did() {
+        let mut app = fleet();
+        keep_in(&mut app, "session", "studio/api-1");
+        typed(&mut app, "f+");
+        assert_eq!(app.toast(), Some("only kept groups"));
+        assert_eq!(rows_shown(&app).len(), 2);
+        press(&mut app, KeyCode::Char('+'));
+        assert!(!app.keep.only && app.keep.groups.is_empty());
+        assert_eq!(rows_shown(&app).len(), 7);
+        keep_in(&mut app, "session", "studio/web-1");
+        assert_eq!(
+            rows_shown(&app).len(),
+            7,
+            "keeping a group does not narrow by itself"
+        );
+        typed(&mut app, "f+f+");
+        assert_eq!(app.toast(), Some("all groups"));
+        assert!(!app.keep.only);
+    }
+
+    #[test]
     fn a_grouping_no_extension_declares_now_does_not_hide_rows() {
         let mut app = fleet();
         app.keep.add("field:gone.rig", "alpha");
         app.keep.only = true;
         assert_eq!(rows_shown(&app).len(), 7);
-        assert_eq!(app.kept_groupings(), [("rig".to_owned(), 1)]);
+        assert!(
+            !app.only_kept(),
+            "nothing is narrowed, so the top bar says nothing"
+        );
+        assert!(app.kept_groupings().is_empty());
     }
 }
