@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.1](https://github.com/vanducng/rexboard/compare/v0.34.0...v0.34.1) (2026-11-21)
+
+
+### Bug Fixes
+
+* **cli:** take --keep group names as rexboard prints them ([#167](https://github.com/vanducng/rexboard/issues/167)) ([c0ee313](https://github.com/vanducng/rexboard/commit/c0ee3134d4e8200f3cf0bf107cbd2cdc4928a04e))
+
 ## [0.34.0](https://github.com/vanducng/rexboard/compare/v0.33.0...v0.34.0) (2026-11-21)
 
 
