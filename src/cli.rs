@@ -197,8 +197,8 @@ pub struct BoardArgs {
     /// a digit under `"digits": "jump"`, `g` and a digit, `-`), and 1 on `q`, or on `esc` once it
     /// has closed the layer in front (the `?` table, a prompt); `esc` never clears a filter, as in
     /// `pick`. Answering, closing and actions do not exit. It keeps the card choice in tui.json and
-    /// the view, sort, status and `/` text in board.json, as the board does; `pick` keeps its own
-    /// view and sort.
+    /// the view, sort, status, `/` text and kept groups in board.json, as the board does; `pick`
+    /// keeps its own view and sort.
     #[arg(long)]
     pub once: bool,
     #[command(flatten)]
@@ -224,6 +224,13 @@ pub struct OpenArgs {
     /// given, and do not save it.
     #[arg(long, value_name = "NAME")]
     pub view: Option<String>,
+    /// Open showing only these groups, as `+` and `f+` do: `GROUPING=GROUP`, where GROUPING is a
+    /// view that groups rows (`status`, `harness`, `host`, `session` or a field's name) and GROUP
+    /// is the group as the board's footer names it (`api@mini` for a session). Repeat for more
+    /// groups; groups of different groupings are and-ed. A flag wins for that run and is not
+    /// saved.
+    #[arg(long, value_name = "GROUPING=GROUP")]
+    pub keep: Vec<String>,
 }
 
 impl OpenArgs {
@@ -233,6 +240,7 @@ impl OpenArgs {
             filters: &self.filter,
             status: self.status.as_deref(),
             sort: None,
+            keep: &self.keep,
             context: &[],
         }
     }
@@ -315,7 +323,7 @@ pub struct LsArgs {
     #[arg(long, value_name = "HOST")]
     pub host: Option<String>,
     /// Take one snapshot here instead of asking serve.
-    #[arg(long, conflicts_with_all = ["view", "filter", "status", "sort"])]
+    #[arg(long, conflicts_with_all = ["view", "filter", "status", "sort", "keep"])]
     pub direct: bool,
     /// Only the marked rows (a `[[mark]]` rule, a favorite or an extension), or with a SOURCE
     /// (`config`, `favorite`, an extension's name) only those it marked.
@@ -337,6 +345,12 @@ pub struct LsArgs {
     /// window, block, msg) or a field, with `:asc` or `:desc`.
     #[arg(long, value_name = "COLUMN[:asc|:desc]")]
     pub sort: Option<String>,
+    /// Keep only the rows in these groups, as the board's `+` and `f+` do: `GROUPING=GROUP`,
+    /// where GROUPING is a view that groups rows (`rexboard views`) and GROUP is the group as the
+    /// board names it (`api@mini` for a session). Repeat for more groups; groups of different
+    /// groupings are and-ed.
+    #[arg(long, value_name = "GROUPING=GROUP")]
+    pub keep: Vec<String>,
 }
 
 impl LsArgs {
@@ -346,6 +360,7 @@ impl LsArgs {
             filters: &self.filter,
             status: self.status.as_deref(),
             sort: self.sort.as_deref(),
+            keep: &self.keep,
             context: &[],
         }
     }

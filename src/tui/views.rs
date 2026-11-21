@@ -16,6 +16,19 @@ pub enum Key {
     Field(&'static str),
 }
 
+impl Key {
+    /// What board.json files a kept group under: a built-in view's name, or `field:<id>`.
+    pub fn grouping(self) -> String {
+        match self {
+            Key::Status => "status".to_owned(),
+            Key::Harness => "harness".to_owned(),
+            Key::Host => "host".to_owned(),
+            Key::Session => "session".to_owned(),
+            Key::Field(id) => format!("field:{id}"),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub struct View {
     pub name: String,
@@ -67,10 +80,20 @@ impl Bucket {
             Bucket::Session { session, .. } => session.to_uppercase(),
         }
     }
+
+    /// How a kept group is named in board.json, `--keep` and the footer: `needs you`, `claude`,
+    /// `studio`, `api@studio`.
+    pub fn label(&self) -> String {
+        match self {
+            Bucket::Status(group) => theme::group_title(*group).to_lowercase(),
+            Bucket::Value(value) => value.clone(),
+            Bucket::Session { session, host } => format!("{session}@{host}"),
+        }
+    }
 }
 
 /// The value a row groups under, `?` when it has none.
-fn value(key: Key, row: &Row) -> Bucket {
+pub fn value(key: Key, row: &Row) -> Bucket {
     match key {
         Key::Status => Bucket::Status(row.group),
         Key::Harness => Bucket::Value(match row.pane.harness.as_deref() {

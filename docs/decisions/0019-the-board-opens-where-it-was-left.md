@@ -1,6 +1,6 @@
 # 19. The board opens where it was left
 
-**Status:** Accepted, 2026-11-11
+**Status:** Accepted, 2026-11-11. Amended 2026-11-22
 
 ## Context
 
@@ -21,4 +21,4 @@ The board and `board --once` start fresh on every run: the view, the sort, the `
 
 ## Supersedes
 
-None. It amends [17](0017-pick-keeps-its-view-and-sort-in-its-own-file.md): the board keeps filters too.
+None. It amends [17](0017-pick-keeps-its-view-and-sort-in-its-own-file.md): the board keeps filters too. Amended 2026-11-22: `board.json` gains `keep` and `only_kept`, by [20](0020-the-board-can-show-only-the-groups-you-keep.md).

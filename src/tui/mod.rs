@@ -6,6 +6,7 @@ pub(crate) mod columns;
 mod effects;
 mod full;
 pub(crate) mod icons;
+mod keep;
 mod kept;
 mod keys;
 mod markdown;

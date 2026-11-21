@@ -341,6 +341,9 @@ impl App {
         };
         match waiting.get(next) {
             Some(spot) => self.selected = Some(spot.clone()),
+            None if self.needs_you_elsewhere() > 0 => {
+                self.say("nobody needs you in the kept groups · f+ shows all");
+            }
             None => self.say("nobody needs you"),
         }
         seen

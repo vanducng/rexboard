@@ -7,8 +7,9 @@ use tui_input::Input;
 
 use super::app::{App, Item};
 use super::columns::{COLUMNS, Dir, Sort, field_column};
+use super::keep::Keep;
 use super::status::{ALL, Status};
-use super::views::{Key, View};
+use super::views::{Key, View, value};
 use crate::board::Row;
 use crate::client::Field;
 use crate::error::{Error, Result};
@@ -23,6 +24,8 @@ pub struct Query<'a> {
     pub status: Option<&'a str>,
     /// `COLUMN`, `COLUMN:asc` or `COLUMN:desc`.
     pub sort: Option<&'a str>,
+    /// `GROUPING=GROUP`: only the rows in these groups, as the kept groups of the board do.
+    pub keep: &'a [String],
     /// Every row the board has, when the rows given are only some of them (`--host`, `--marked`):
     /// a group's name, `API @MINI`, depends on the rows of the other hosts too.
     pub context: &'a [Row],
@@ -34,6 +37,63 @@ impl Query<'_> {
             && self.filters.is_empty()
             && self.status.is_none()
             && self.sort.is_none()
+            && self.keep.is_empty()
+    }
+}
+
+/// `--keep GROUPING=GROUP` split into its two halves, `GROUPING` a view that groups rows.
+fn split_keep(specs: &[String]) -> Result<Vec<(&str, &str)>> {
+    specs
+        .iter()
+        .map(|spec| match spec.split_once('=') {
+            Some((grouping, group)) if !grouping.is_empty() && !group.is_empty() => {
+                Ok((grouping, group))
+            }
+            _ => Err(Error::usage_with(
+                format!("--keep {spec}: write GROUPING=GROUP, as in --keep session=api@mini"),
+                &["rexboard ls --view session --keep session=api@mini"],
+            )),
+        })
+        .collect()
+}
+
+/// What each `--keep` names: the grouping's key, and the group as its header's name reads, in
+/// lower case for a status or a harness, `api@mini` for a session.
+fn kept_groups(app: &App, specs: &[String]) -> Result<Vec<(Key, String)>> {
+    let views = app.views();
+    split_keep(specs)?
+        .into_iter()
+        .map(|(grouping, group)| {
+            let key = views
+                .iter()
+                .find(|view| view.name == grouping)
+                .and_then(|view| view.group_by)
+                .ok_or_else(|| {
+                    let names: Vec<&str> = (views.iter())
+                        .filter(|view| view.group_by.is_some())
+                        .map(|view| view.name.as_str())
+                        .collect();
+                    Error::usage_with(
+                        format!(
+                            "--keep {grouping}={group}: no grouping named {grouping}; groupings: {}",
+                            names.join(", ")
+                        ),
+                        &["rexboard views"],
+                    )
+                })?;
+            Ok((key, group.to_owned()))
+        })
+        .collect()
+}
+
+/// Makes `kept` the board's kept groups, with only-kept on.
+fn keep_only(app: &mut App, kept: &[(Key, String)]) {
+    app.keep = Keep {
+        only: true,
+        ..Keep::default()
+    };
+    for (key, group) in kept {
+        app.keep.add(&key.grouping(), group);
     }
 }
 
@@ -56,6 +116,27 @@ pub fn arrange(rows: Vec<Row>, fields: Vec<Field>, query: &Query) -> Result<Vec<
     }
     if let Some(spec) = query.sort {
         app.sort = Some(sort_of(&app, spec)?);
+    }
+    if !query.keep.is_empty() {
+        let kept = kept_groups(&app, query.keep)?;
+        for (key, group) in &kept {
+            if !app
+                .rows
+                .iter()
+                .any(|row| value(*key, row).label() == *group)
+            {
+                let hint = if *key == Key::Session {
+                    " (SESSION@HOST)"
+                } else {
+                    ""
+                };
+                eprintln!(
+                    "note: --keep {}={group}: no rows in that group{hint}",
+                    key.grouping()
+                );
+            }
+        }
+        keep_only(&mut app, &kept);
     }
     let mut shown = listed(&app);
     shown.retain(|&i| wanted.contains(&app.rows[i].key));
@@ -91,13 +172,22 @@ pub fn open(app: &mut App, query: &Query) -> Result<()> {
     if !query.filters.is_empty() {
         app.filter = Input::new(query.filters.join(" "));
     }
+    let groupings: Vec<&str> = split_keep(query.keep)?
+        .into_iter()
+        .map(|(grouping, _)| grouping)
+        .collect();
+    // A field's view exists only once serve has said which extensions declare it; the built-in
+    // views need no serve.
+    if (query.view.iter().chain(&groupings))
+        .any(|name| !app.views().iter().any(|v| v.name == *name))
+    {
+        app.set_extensions(crate::client::current()?.fields, BTreeMap::new());
+    }
     if let Some(name) = query.view {
-        // A field's view exists only once serve has said which extensions declare it; the
-        // built-in views need no serve.
-        if !app.views().iter().any(|view| view.name == name) {
-            app.set_extensions(crate::client::current()?.fields, BTreeMap::new());
-        }
         app.show(view(app, name)?);
+    }
+    if !query.keep.is_empty() {
+        keep_only(app, &kept_groups(app, query.keep)?);
     }
     Ok(())
 }
@@ -300,6 +390,39 @@ mod tests {
                 .collect();
             assert_eq!(got, want, "{text}");
         }
+    }
+
+    #[test]
+    fn keep_lists_the_rows_the_board_shows_for_those_kept_groups() {
+        use crate::tui::app::testkit::{fleet, in_view, keep_in, rows_shown};
+        let mut board = fleet();
+        for key in ["studio/api-1", "mini/api-1"] {
+            keep_in(&mut board, "session", key);
+        }
+        keep_in(&mut board, "host", "studio/api-1");
+        board.keep.only = true;
+        let rows = board.rows.clone();
+        let specs = ["session=api@studio", "session=api@mini", "host=studio"].map(String::from);
+        let query = Query {
+            view: Some("session"),
+            keep: &specs,
+            ..Query::default()
+        };
+        let mut got: Vec<String> = arrange(rows.clone(), Vec::new(), &query)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.key)
+            .collect();
+        got.sort();
+        in_view(&mut board, "session");
+        assert_eq!(got, rows_shown(&board));
+        assert_eq!(got, ["studio/api-1", "studio/api-2"]);
+        let bad = ["session=api@studio".to_owned(), "nope=x".to_owned()];
+        let query = Query {
+            keep: &bad,
+            ..Query::default()
+        };
+        assert!(arrange(rows, Vec::new(), &query).is_err());
     }
 
     #[test]

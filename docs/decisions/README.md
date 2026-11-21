@@ -34,7 +34,8 @@ These decide between options the records do not cover.
 | [16](0016-extensions-can-offer-actions.md) | Extensions can offer actions | Accepted |
 | [17](0017-pick-keeps-its-view-and-sort-in-its-own-file.md) | `pick` keeps its view and sort in its own file | Accepted; amended |
 | [18](0018-rows-can-be-marked.md) | Rows can be marked | Accepted |
-| [19](0019-the-board-opens-where-it-was-left.md) | The board opens where it was left | Accepted |
+| [19](0019-the-board-opens-where-it-was-left.md) | The board opens where it was left | Accepted; amended |
+| [20](0020-the-board-can-show-only-the-groups-you-keep.md) | The board can show only the groups you keep | Accepted |
 
 ## Adding or changing one
 

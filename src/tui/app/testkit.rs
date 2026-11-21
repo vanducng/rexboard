@@ -288,11 +288,57 @@ pub fn harnesses(view: &str) -> App {
         rows.iter_mut().find(|r| r.key == key).unwrap().pane.harness = Some(harness.into());
     }
     app.set_rows(rows, hosts());
-    app.view = crate::tui::views::views()
-        .into_iter()
-        .find(|v| v.name == view)
-        .unwrap();
+    app.view = app.views().into_iter().find(|v| v.name == view).unwrap();
     app
+}
+
+/// Two hosts with an `api` and a `web` session each, and `docs` and `ops` on one: seven
+/// rows, two of them needing you outside `api` and `web`.
+pub fn fleet() -> App {
+    let mut app = App::default();
+    let mut all = Vec::new();
+    for (key, session, state, group) in [
+        ("studio/api-1", "api", "blocked", "needs_you"),
+        ("studio/api-2", "api", "working", "working"),
+        ("studio/web-1", "web", "idle", "quiet"),
+        ("studio/docs-1", "docs", "done", "needs_you"),
+        ("mini/api-1", "api", "working", "working"),
+        ("mini/web-1", "web", "idle", "quiet"),
+        ("mini/ops-1", "ops", "blocked", "needs_you"),
+    ] {
+        let mut r = row(key, state, group, false);
+        r.pane.session = session.into();
+        all.push(r);
+    }
+    let hosts = [("studio", "up"), ("mini", "up")]
+        .map(|(h, s)| (h.to_owned(), s.to_owned()))
+        .into();
+    app.set_rows(all, hosts);
+    app
+}
+
+pub fn in_view(app: &mut App, name: &str) {
+    app.view = app.views().into_iter().find(|v| v.name == name).unwrap();
+}
+
+/// `+` on `key`'s row in view `name`.
+pub fn keep_in(app: &mut App, name: &str, key: &str) {
+    in_view(app, name);
+    app.selected = Some(Spot::Row(key.into()));
+    press(app, KeyCode::Char('+'));
+}
+
+pub fn rows_shown(app: &App) -> Vec<String> {
+    let mut keys: Vec<String> = app
+        .items()
+        .into_iter()
+        .filter_map(|item| match item {
+            Item::Row(i) => Some(app.rows[i].key.clone()),
+            Item::Header { .. } | Item::Gap => None,
+        })
+        .collect();
+    keys.sort();
+    keys
 }
 
 pub fn render(app: &App, width: u16, height: u16) -> String {
