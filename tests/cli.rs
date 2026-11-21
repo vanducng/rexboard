@@ -1935,6 +1935,141 @@ fn a_keep_flag_run_leaves_the_saved_kept_groups_alone_and_saves_the_rest() {
 }
 
 #[test]
+fn board_and_pick_keep_takes_a_printed_name_too() {
+    let serve = needing();
+    for command in ["board", "pick"] {
+        let ran = on_pty(
+            &[
+                command,
+                "--keep",
+                "session=WEB",
+                "--keep",
+                "status=needs_you",
+            ],
+            Some(&serve),
+            &["only 1 status, 1 session", "seat-old"],
+            &[],
+            Some(libc::SIGTERM),
+            false,
+        );
+        assert!(ran.alive, "{command}: {:?}", ran.out);
+    }
+}
+
+/// `ls --json` with these args on `needing()`'s serve, the keys it lists.
+fn needing_listed(serve: &Serve, args: &[&str]) -> Vec<String> {
+    let out = serve
+        .needing_cmd()
+        .args(["ls", "--json"])
+        .args(args)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let rows: Vec<serde_json::Value> = serde_json::from_slice(&out).unwrap();
+    keys(&rows).into_iter().map(str::to_owned).collect()
+}
+
+#[test]
+fn keep_ignores_case_and_takes_a_session_with_no_host_and_spaces_round_the_at() {
+    let shared = shared_session_serve();
+    let list = |args: &[&str]| -> Vec<String> {
+        let rows = shared.rows(&[&["--view", "session"], args].concat());
+        keys(&rows).into_iter().map(str::to_owned).collect()
+    };
+    let mini = ["mini/block:api-m1", "mini/block:api-m2"];
+    assert_eq!(list(&["--keep", "session=API@MINI"]), mini);
+    assert_eq!(list(&["--keep", "session=Api@Mini"]), mini);
+    assert_eq!(
+        list(&["--keep", "host=MINI"]),
+        list(&["--keep", "host=mini"])
+    );
+    assert_eq!(
+        list(&["--keep", "session=api"]),
+        [SEAT, mini[0], mini[1]],
+        "api is on two hosts, and no @HOST keeps both"
+    );
+    assert_eq!(
+        list(&["--keep", "session=API"]),
+        list(&["--keep", "session=api"])
+    );
+    assert_eq!(list(&["--keep", "session=API @MINI"]), mini);
+    assert_eq!(list(&["--keep", "session=api @ mini"]), mini);
+    assert_eq!(
+        list(&["--keep", "session=api", "--keep", "host=mini"]),
+        mini,
+        "a session on every host still and-s with another grouping"
+    );
+    assert_eq!(list(&["--keep", "session=-"]), ["mini/block:none-o"]);
+
+    let serve = needing();
+    let web = [
+        "mini/block:seat-old",
+        "mini/block:seat-new",
+        "mini/block:seat-done",
+    ];
+    let sorted = |mut keys: Vec<String>| {
+        keys.sort();
+        keys
+    };
+    let want = sorted(web.map(str::to_owned).to_vec());
+    assert_eq!(
+        sorted(needing_listed(&serve, &["--keep", "session=web"])),
+        want
+    );
+    assert_eq!(
+        sorted(needing_listed(&serve, &["--keep", "session=WEB@mini"])),
+        want
+    );
+    assert_eq!(
+        sorted(needing_listed(&serve, &["--keep", "session=web@studio"])),
+        Vec::<String>::new(),
+        "a host with no such session still keeps nothing"
+    );
+    serve
+        .needing_cmd()
+        .args(["ls", "--keep", "session=nope"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "no rows in that group (SESSION@HOST)",
+        ));
+}
+
+#[test]
+fn keep_takes_a_status_as_ls_json_names_it_and_as_the_header_does() {
+    let serve = needing();
+    let json_name = needing_listed(&serve, &["--keep", "status=needs_you"]);
+    assert_eq!(
+        json_name.len(),
+        3,
+        "an unseen done row needs you too: {json_name:?}"
+    );
+    assert_eq!(
+        needing_listed(&serve, &["--keep", "status=needs you"]),
+        json_name
+    );
+    assert_eq!(
+        needing_listed(&serve, &["--keep", "status=NEEDS_YOU"]),
+        json_name
+    );
+    assert_eq!(
+        needing_listed(&serve, &["--keep", "status=Needs You"]),
+        json_name
+    );
+    let rows = serve.needing_rows();
+    for row in &rows {
+        let kept = json_name.contains(&row["key"].as_str().unwrap().to_owned());
+        assert_eq!(kept, row["group"] == "needs_you", "{row}");
+    }
+    assert_eq!(
+        needing_listed(&serve, &["--keep", "status=quiet"]),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
 fn ls_keep_lists_only_those_groups_and_a_bad_grouping_is_usage() {
     let serve = shared_session_serve();
     let list = |args: &[&str]| -> Vec<String> {

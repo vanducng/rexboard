@@ -9,7 +9,7 @@ use super::app::{App, Item};
 use super::columns::{COLUMNS, Dir, Sort, field_column};
 use super::keep::Keep;
 use super::status::{ALL, Status};
-use super::views::{Key, View, value};
+use super::views::{Bucket, Key, View, value};
 use crate::board::Row;
 use crate::client::Field;
 use crate::error::{Error, Result};
@@ -57,9 +57,12 @@ fn split_keep(specs: &[String]) -> Result<Vec<(&str, &str)>> {
         .collect()
 }
 
-/// What each `--keep` names: the grouping's key, and the group as its header's name reads, in
-/// lower case for a status or a harness, `api@mini` for a session.
-fn kept_groups(app: &App, specs: &[String]) -> Result<Vec<(Key, String)>> {
+/// What each `--keep` names: the grouping's key, and the groups of `rows` it matches, as the board
+/// labels them (`needs you`, `claude`, `api@mini`). A name matches ignoring case; a session with no
+/// `@HOST` matches on every host, and spaces round the `@` do not count; a status also reads as
+/// `ls --json` names it (`needs_you`). A name that matches nothing stays as typed, so it keeps
+/// nothing and `arrange` can say so.
+fn kept_groups(app: &App, rows: &[Row], specs: &[String]) -> Result<Vec<(Key, String)>> {
     let views = app.views();
     split_keep(specs)?
         .into_iter()
@@ -81,9 +84,56 @@ fn kept_groups(app: &App, specs: &[String]) -> Result<Vec<(Key, String)>> {
                         &["rexboard views"],
                     )
                 })?;
-            Ok((key, group.to_owned()))
+            Ok((key, group))
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()
+        .map(|named| {
+            named
+                .into_iter()
+                .flat_map(|(key, group)| {
+                    let found = matching(key, rows, group);
+                    let found = if found.is_empty() {
+                        vec![group.to_owned()]
+                    } else {
+                        found
+                    };
+                    found.into_iter().map(move |label| (key, label))
+                })
+                .collect()
+        })
+}
+
+/// The labels of the groups of `rows` that `group` names, in the order they first appear.
+fn matching(key: Key, rows: &[Row], group: &str) -> Vec<String> {
+    let want = |text: &str| {
+        let text = text.trim().to_lowercase();
+        if key == Key::Status {
+            text.replace('_', " ")
+        } else {
+            text
+        }
+    };
+    let name = if key == Key::Session {
+        group.split_once('@').map_or_else(
+            || want(group),
+            |(session, host)| format!("{}@{}", want(session), want(host)),
+        )
+    } else {
+        want(group)
+    };
+    let mut found: Vec<String> = Vec::new();
+    for row in rows {
+        let bucket = value(key, row);
+        let label = bucket.label();
+        let hit = match &bucket {
+            Bucket::Session { session, .. } if !name.contains('@') => want(session) == name,
+            _ => want(&label) == name,
+        };
+        if hit && !found.contains(&label) {
+            found.push(label);
+        }
+    }
+    found
 }
 
 /// Makes `kept` the board's kept groups, with only-kept on.
@@ -118,7 +168,7 @@ pub fn arrange(rows: Vec<Row>, fields: Vec<Field>, query: &Query) -> Result<Vec<
         app.sort = Some(sort_of(&app, spec)?);
     }
     if !query.keep.is_empty() {
-        let kept = kept_groups(&app, query.keep)?;
+        let kept = kept_groups(&app, &app.rows, query.keep)?;
         for (key, group) in &kept {
             if !app
                 .rows
@@ -177,17 +227,23 @@ pub fn open(app: &mut App, query: &Query) -> Result<()> {
         .map(|(grouping, _)| grouping)
         .collect();
     // A field's view exists only once serve has said which extensions declare it; the built-in
-    // views need no serve.
+    // views need no serve. A `--keep` asks it for the rows its names match, when it answers.
+    let mut rows = Vec::new();
     if (query.view.iter().chain(&groupings))
         .any(|name| !app.views().iter().any(|v| v.name == *name))
     {
-        app.set_extensions(crate::client::current()?.fields, BTreeMap::new());
+        let current = crate::client::current()?;
+        rows = current.rows;
+        app.set_extensions(current.fields, BTreeMap::new());
+    } else if !query.keep.is_empty() {
+        rows = crate::client::current().map_or_else(|_| Vec::new(), |current| current.rows);
     }
+    rows.retain(|row| row.pane.is_agent());
     if let Some(name) = query.view {
         app.show(view(app, name)?);
     }
     if !query.keep.is_empty() {
-        keep_only(app, &kept_groups(app, query.keep)?);
+        keep_only(app, &kept_groups(app, &rows, query.keep)?);
     }
     Ok(())
 }

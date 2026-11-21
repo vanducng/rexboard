@@ -226,9 +226,11 @@ pub struct OpenArgs {
     pub view: Option<String>,
     /// Open showing only these groups, as `+` and `f+` do: `GROUPING=GROUP`, where GROUPING is a
     /// view that groups rows (`status`, `harness`, `host`, `session` or a field's name) and GROUP
-    /// is the group as the board's footer names it (`api@mini` for a session). Repeat for more
-    /// groups; groups of different groupings are and-ed. A flag wins for that run and is not
-    /// saved.
+    /// is the group as the board's footer names it (`api@mini` for a session). A name matches
+    /// ignoring case; `session=api` with no `@HOST` keeps it on every host, and spaces round the
+    /// `@` do not count; `status=` takes `needs_you` as `ls --json` says it or `needs you`.
+    /// Repeat for more groups; groups of different groupings are and-ed. A flag wins for that run
+    /// and is not saved.
     #[arg(long, value_name = "GROUPING=GROUP")]
     pub keep: Vec<String>,
 }
@@ -347,8 +349,10 @@ pub struct LsArgs {
     pub sort: Option<String>,
     /// Keep only the rows in these groups, as the board's `+` and `f+` do: `GROUPING=GROUP`,
     /// where GROUPING is a view that groups rows (`rexboard views`) and GROUP is the group as the
-    /// board names it (`api@mini` for a session). Repeat for more groups; groups of different
-    /// groupings are and-ed.
+    /// board names it (`api@mini` for a session). A name matches ignoring case; `session=api`
+    /// with no `@HOST` keeps it on every host, and spaces round the `@` do not count; `status=`
+    /// takes `needs_you` as `ls --json` says it or `needs you`. Repeat for more groups; groups
+    /// of different groupings are and-ed.
     #[arg(long, value_name = "GROUPING=GROUP")]
     pub keep: Vec<String>,
 }
