@@ -1990,11 +1990,13 @@ mod tests {
         render(app, 100, height)
     }
 
-    /// The list's lines: everything between the column header and the footer's `↓ N more`.
+    /// The list's lines: everything between the top bar (and the column header, when there is
+    /// one) and the footer's `↓ N more`.
     fn list_lines(screen: &str) -> Vec<String> {
         screen
             .lines()
-            .skip(usize::from(HEADER_ROW) + 1)
+            .skip(1)
+            .filter(|l| !l.is_empty() && !l.trim_start().starts_with('#'))
             .take_while(|l| !l.starts_with('↓') && !l.starts_with("j/k"))
             .map(str::to_owned)
             .collect()
@@ -2192,6 +2194,63 @@ mod tests {
             at_top + 1,
             "the freed line is the list's"
         );
+    }
+
+    /// Whether the last line says rows are below exactly when some are hidden below the window.
+    fn more_line_matches_the_hidden_rows(app: &App, screen: &str) -> bool {
+        let (_, offset, rows) = app.drawn.get();
+        let hidden = hidden_below(&app.items(), offset + rows) > 0;
+        hidden == screen.lines().any(|l| l.starts_with('↓'))
+    }
+
+    /// Walks `j` down and `k` back on `three_groups` at `height` lines, checking every frame: the
+    /// more line is drawn if and only if a row is hidden below, and drawing again with no key
+    /// gives the same frame.
+    fn walk_is_consistent(height: u16) {
+        let mut app = three_groups();
+        render(&app, 100, height);
+        let walk = (0..13)
+            .map(|_| KeyCode::Char('j'))
+            .chain((0..13).map(|_| KeyCode::Char('k')));
+        for code in walk {
+            press(&mut app, code);
+            let screen = render(&app, 100, height);
+            assert!(
+                more_line_matches_the_hidden_rows(&app, &screen),
+                "height {height}: a hidden row and the more line go together:\n{screen}"
+            );
+            assert_eq!(
+                render(&app, 100, height),
+                screen,
+                "height {height}: the frame holds with no key"
+            );
+            assert!(
+                matches!(app.selected, Some(Spot::Group(_)))
+                    || selected_line(&app, &list_lines(&screen)).is_some_and(|at| at > 0),
+                "height {height}: the selected row is drawn:\n{screen}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_row_is_hidden_below_if_and_only_if_the_more_line_is_drawn_at_every_height() {
+        for height in 8..=15 {
+            walk_is_consistent(height);
+        }
+    }
+
+    #[test]
+    fn the_frame_holds_after_g_then_h_with_no_key_pressed() {
+        let mut app = three_groups();
+        render(&app, 100, 8);
+        press(&mut app, KeyCode::Char('G'));
+        render(&app, 100, 8);
+        press(&mut app, KeyCode::Char('H'));
+        let first = render(&app, 100, 8);
+        for _ in 0..3 {
+            assert_eq!(render(&app, 100, 8), first);
+        }
+        assert!(more_line_matches_the_hidden_rows(&app, &first), "{first}");
     }
 
     #[test]
