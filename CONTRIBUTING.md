@@ -27,13 +27,11 @@ cargo test
 
 `cargo test` also keeps the repo on the direction its docs set, offline and in well under a second:
 
-- every JSON sample in README, CONTRIBUTING and `docs/` parses;
+- every JSON sample in README, CONTRIBUTING and `docs/` parses (`tests/direction.rs`);
 - `docs/tui.md` names every key the board and the full view bind, and its Keys table lists no key the board does not (`src/tui/keys.rs`);
-- `docs/cli.md` names every command and flag in `rexboard --help`;
-- `docs/`, `tests/`, `examples/`, README and CONTRIBUTING name no home directory, tailnet host or private key ([decision 10](docs/decisions/0010-public-repo-hygiene.md));
-- `docs/decisions/README.md` links every record, and each has a `**Status:**` line.
-
-The last four are in `tests/direction.rs`.
+- `docs/cli.md` names every command and flag in `rexboard --help` (`tests/direction.rs`);
+- `docs/`, `tests/`, `examples/`, README and CONTRIBUTING name no home directory, tailnet host or private key ([decision 10](docs/decisions/0010-public-repo-hygiene.md)) (`tests/direction.rs`);
+- `docs/decisions/README.md` links every record, and each has a `**Status:**` line (`tests/direction.rs`).
 
 ## How to add…
 
@@ -43,7 +41,7 @@ The last four are in `tests/direction.rs`.
 
 **An extension.** You do not need a PR: an extension lives in its own directory. `rexboard ext new NAME` starts one, and [Extensions](docs/extensions.md) has the contract. A change to the contract itself is a new contract version and a decision record.
 
-**A doc page.** Put it in `docs/`, add it to the Docs table in `README.md`, and say each fact once: link to the page that owns it instead of repeating it. Write plain sentences, no em dashes.
+**A doc page.** Put it in `docs/`, add it to the docs list in `README.md`, and say each fact once: link to the page that owns it instead of repeating it. Write plain sentences, no em dashes.
 
 ## Conventions
 

@@ -1,6 +1,11 @@
 # System architecture
 
-rexboard reads Rex, remembers what Rex does not, and shows it. It writes to Rex in three places only, each on one pane you chose: a jump focuses the pane and asks the Rex app to show its session; an answer, from the board ([Answer mode](tui.md#answer-mode)) or `rexboard answer`, checks the pane, then sends it a digit, or a line and Enter; a close, from the board (`dd`) or `rexboard close`, closes the pane.
+rexboard reads Rex, remembers what Rex does not, and shows it. What it writes:
+
+- **To a pane you chose, through Rex:** a jump focuses the pane and asks the Rex app to show its session; an answer, from the board ([Answer mode](tui.md#answer-mode)) or `rexboard answer`, checks the pane, then sends it a digit, or a line and Enter; a close, from the board (`dd`) or `rexboard close`, closes the pane.
+- **To an agent's own terminal, from its hooks:** `rexboard hook` and `rexboard usage` print the status and usage records Rex keeps on that pane.
+- **To your files:** its state dir ([Files](#files)), and, only when you run `rexboard hooks install`, the settings of the agents it names, after a backup.
+- **Through an extension action:** the extension's own command, after your `y` ([Actions](tui.md#actions)).
 
 <img alt="rexboard architecture: agents (Claude Code, Codex, pi, grok) report their state to Rex, on their own in a Rex pane or through a hook inside tmux. On this host and every host in rex hosts, Rex runs observer.lua, which streams NDJSON to rexboard serve; serve keeps state on disk, holds the harness adapters, runs the extensions (rows in, fields out) and answers the board, pick and the CLI over a unix socket. Three things write to Rex, each on one pane you chose, from the board or the CLI: a jump, an answer and a close act on the pane's host, and a jump then asks the Rex app to show the pane" src="assets/architecture.svg" width="100%">
 
@@ -20,7 +25,7 @@ sed -n '/<svg /,/<\/svg>/p' docs/assets/architecture.html > docs/assets/architec
 | Lua, in Rex | Scripts built into the binary that Rex runs through `rex [-S HOST] do -`: `observer.lua` for serve's observers, `snapshot.lua` for `ls --direct`, `jump.lua` after `app.lua` for a jump, `tail.lua` for a pane's tail, and `send.lua` after `tail.lua` for an answer. `lib.lua` holds the snapshot code `observer.lua` and `snapshot.lua` share |
 | Rex API | The calls below. A jump, an answer and a close write |
 | Observer contract | NDJSON, one JSON object per line with `"v": 1`, defined in `src/event.rs` |
-| State | `serve.lock`, `serve.sock`, `restart.lock`, `state.json`, `transitions.jsonl`, `tui.json`, `pick.json` and `board.json`, in the state dir (see [Files](#files)) |
+| State | `serve.lock`, `serve.sock`, `restart.lock`, `state.json`, `transitions.jsonl`, `favorites.json`, `usage/`, `serve.log`, `tui.json`, `pick.json` and `board.json`, in the state dir (see [Files](#files)) |
 
 rexboard reaches Rex only through the `rex` command: `rex do` for the scripts, `rex hosts --json` for the hosts, and `rex block close` for a close. It never opens Rex's socket itself.
 
@@ -37,48 +42,80 @@ rexboard reaches Rex only through the `rex` command: `rex do` for the scripts, `
 
 ## Pieces
 
+Rust, under `src/`:
+
 | Module | Does |
 | --- | --- |
+| `src/main.rs`, `src/lib.rs` | `main.rs` parses the command line and reports errors; `lib.rs` dispatches each command |
 | `src/cli.rs` | The clap surface: every command and flag. Help text is interface |
-| `src/lua/observer.lua` | Runs inside `rex do - --all --fail-fast`: one snapshot, then one line per event, and a `tick` every 30s |
-| `src/collector.rs` | Keeps one observer alive per host, with backoff, in its own process group |
+| `src/error.rs` | The error type: a code, a message and `next_steps`, printed as JSON with `--json` |
+| `src/config.rs` | `config.toml` |
+| `src/marks.rs` | `[[mark]]` rules: the glob match, and which rows a rule marks. serve, `ls` and `watch --json --direct` apply them to the rows ([18](decisions/0018-rows-can-be-marked.md)) |
+| `src/favorites.rs` | `favorites.json`: the panes marked with `*`, by their labels; serve reads it, changes it on `favorite` requests, and adds `favorite` to `marked_by` |
+| `src/rex.rs` | Finds `rex`, runs one-shot scripts, and holds the one lock around every spawn, bind, accept and connect |
 | `src/event.rs` | The observer line contract, `v` 1 |
-| `src/harness/` | The agent harnesses rexboard knows, one file each (`claude.rs`, `codex.rs`, `pi.rs`, `grok.rs`) behind one `Harness` trait whose methods default to the shared behaviour: how a pane is recognised as one (its record's app, else the process in front, else the title), and `dialog.rs`, the one grammar the board and `send.lua` read a dialog by |
-| `src/harness/usage.rs` | `rexboard usage`: a harness's per-turn JSON (status line, hook, extension) becomes one usage file per pane, keyed by `REX_BLOCK` or, inside tmux, by the tmux socket, server pid and pane. serve scans them every 2 s off the reducer thread, reading only the files that changed and removing those no live local pane names, joins a tmux pane through its client's pid (`ps`, `tmux list-clients`; the client is the pane's foreground process, or the tmux child of the wrapper that is, as under an `sh -c ... tmux attach`), counts every pane on those tmux servers as live (`tmux list-panes -a`), and puts `usage` on its local rows |
-| `src/hook/` | `rexboard hook`: `report.rs` turns a hook event into a status and its OSC 7501 sequence, pinned by `tests/fixtures/hooks/corpus.jsonl`; `mod.rs` finds the agent's tmux pane or tty and writes it there. `install.rs` is `rexboard hooks install\|status`, which merges the hooks into each harness's settings, and `pi-extension.js` the pi extension it writes |
+| `src/collector.rs` | Keeps one observer alive per host, with backoff, in its own process group |
 | `src/pane.rs` | One pane from Rex's records: the main record, `source`, the harness, the title glyph, the `turn` message |
 | `src/board.rs` | The reducer: rows with `since`, turns, `seen` and groups, from host events and an injected clock |
 | `src/serve.rs` | The daemon: collectors, the reducer thread, the socket |
 | `src/state.rs` | Paths, the `flock`, `state.json`, `transitions.jsonl`, and the startup sweep |
 | `src/client.rs` | `ls`, `watch --json`, `seen` and `serve` as clients; starts serve when nothing answers, and replaces an older one |
 | `src/output.rs` | Text for the `ls` table and the board: labels and paths cut to fit, `#N` for twins, widths, ages |
-| `src/rex.rs` | Finds `rex`, runs one-shot scripts, and holds the one lock around every spawn, bind, accept and connect |
+| `src/show.rs` | `show`, `views` and `hosts`: what the board's card, `v` and top bar show, for the CLI; `show --tail` reads the pane through the board's own tail |
 | `src/jump.rs` | `jump`, `next` and `pick`'s jump: runs `jump.lua`, then marks the row seen through serve; turns Rex's failures into plain errors |
-| `src/show.rs` | `show`, `views` and `hosts`: what the board's card, `v` and top bar show, for the CLI; `show --tail` reads the pane through the board's own tail, and `hosts` reads serve's host states and their last errors |
 | `src/send.rs` | Runs `send.lua` for an answer, within 5s, and turns its refusals into plain reasons; runs `rex block close` for a close |
+| `src/act.rs` | `rexboard answer` and `close`: the same checks as the board's answer mode and `dd` before anything reaches a pane |
 | `src/upgrade.rs` | `rexboard upgrade`: finds how this binary was installed and upgrades it the same way |
-| `src/config.rs` | `config.toml` |
-| `src/marks.rs` | `[[mark]]` rules: the glob match, and which rows a rule marks. serve, `ls` and `watch --json --direct` apply them to the rows ([18](decisions/0018-rows-can-be-marked.md)) |
-| `src/extension/` | Extensions: discovery and manifests (`mod.rs`), the contract 1 request and response with its limits (`contract.rs`), one thread per enabled extension with its timeout and last-good rule (`runner.rs`), serve's set of them (`running.rs`), and `rexboard ext` (`cli.rs`), which builds `ext new` from `examples/extensions/session-prefix`. `board.rs` takes their fields and fallback status. No tool is named in `src/` |
+
+The harnesses and hooks:
+
+| Module | Does |
+| --- | --- |
+| `src/harness/` | The agent harnesses rexboard knows, one file each (`claude.rs`, `codex.rs`, `pi.rs`, `grok.rs`) behind one `Harness` trait whose methods default to the shared behaviour: how a pane is recognised as one (its record's app, else the process in front, else the title) |
+| `src/harness/dialog.rs` | The one grammar the board and `send.lua` read a dialog by |
+| `src/harness/usage.rs` | `rexboard usage`: a harness's per-turn JSON becomes one usage file per pane. serve scans them every 2 s off the reducer thread and puts `usage` on its local rows ([Usage on every host](agent-status.md#usage-on-every-host)) |
+| `src/hook/` | `rexboard hook`: `report.rs` turns a hook event into a status and its OSC 7501 sequence, pinned by `tests/fixtures/hooks/corpus.jsonl`; `mod.rs` finds the agent's tmux pane or tty and writes it there |
+| `src/hook/install.rs`, `pi-extension.js` | `rexboard hooks install`, `uninstall`, `status` and `replay`, which merge the hooks into each harness's settings; and the pi extension it writes |
+
+Extensions:
+
+| Module | Does |
+| --- | --- |
+| `src/extension/mod.rs`, `contract.rs` | Discovery and manifests; the contract 1 request and response with its limits |
+| `src/extension/runner.rs`, `running.rs` | One thread per enabled extension with its timeout and last-good rule; serve's set of them. `board.rs` takes their fields and fallback status |
+| `src/extension/action.rs`, `cli.rs` | An action's argv template, prompt checks and run; `rexboard ext`, which builds `ext new` from `examples/extensions/session-prefix`. No tool is named in `src/` |
+
+Lua, run by Rex through `rex do -`:
+
+| File | Does |
+| --- | --- |
+| `src/lua/lib.lua` | The snapshot code `observer.lua` and `snapshot.lua` share |
+| `src/lua/observer.lua` | Runs inside `rex do - --all --fail-fast`: one snapshot, then one line per event, and a `tick` every 30s |
+| `src/lua/snapshot.lua` | One snapshot, for `ls --direct` |
+| `src/lua/app.lua`, `jump.lua` | `app.lua` finds this Mac's Rex app among a server's clients; `jump.lua` attaches to the pane's session, focuses the pane on its own server, and asks the app to select the session |
 | `src/lua/tail.lua` | Defines `tail(a)`: the last `a.max_bytes` of a pane, starting at a whole line, through `format` and `blob_read`, as `text` or `vt` |
-| `src/lua/jump.lua` | Finds this Mac's Rex app, attaches to the pane's session, focuses the pane on its own server, and asks the app to select the session |
 | `src/lua/send.lua` | After `tail.lua`: re-checks that the pane still shows the report, the agent and the dialog or input line the board read, then sends; a refusal sends nothing |
-| `src/tui/` | The board and `pick`, a client of serve's rows. `mod.rs` keeps the terminal and the loop |
-| `src/tui/effects.rs` | The board's effects and their threads: reads of panes, jumps, closes, answers and seen, the messages they send back, and serve's rows as they change |
-| `src/tui/app/` | The board's state and keys, one file per job: `mod.rs` (the `App` and its dispatch, `act`), `filter.rs` (the `/` text and `f` status), `select.rs` (where the selection rests and how it moves, folds, clicks), `views.rs` (views, the `:` line, sorting and extension fields), `pane_keys.rs` (`enter` and `-` jump, `dd` close, `yy` and `yp` copy), `full.rs` (the full view's state and keys), `answer.rs` (answer mode on the board), `card.rs` (whether the card shows and the tail it reads), and `testkit.rs` (the tests' shared fixtures) |
-| `src/tui/keys.rs` | The keymap: one table per layer (the board, the full view) of key sequences, what they do, and how `?` and the footers name them. Dispatch, `?` and every footer read it, and tests check that no key is bound twice and every key does something |
-| `src/tui/query.rs` | The board's views, `/` filter, `f` status and `o` sort run headless for `ls --view/--filter/--status/--sort` and `seen --all-done`, so the CLI lists what the board would |
-| `src/tui/columns.rs`, `views.rs`, `status.rs` | Which columns a width shows; views (a grouping plus a sort); the `f` status filter |
-| `src/tui/card.rs` | The turn card: the selected row's bar, headline, ask or body, tail, and its facts at the foot |
-| `src/tui/meta.rs` | The card's facts: host, harness, turn, where, extension fields, title and source, each once under a label, in aligned columns |
-| `src/tui/icons.rs` | The Nerd Font glyphs the facts take with `"icons": "nerd"`, pinned by name and code point; nothing else in `src/tui/` writes a private-use glyph, and a test checks it |
-| `src/tui/full.rs`, `vt.rs` | The full view, read again every 2s; `vt.rs` keeps only a line's colours (SGR) and turns them into styles |
-| `src/tui/answer.rs`, `screen.rs` | Answer mode: its keys and card, and what it reads off a pane (options, the input line, a draft) |
-| `src/tui/clipboard.rs` | `yy` and `yp`: `pbcopy`, `wl-copy` or `xclip` |
-| `src/tui/theme.rs` | The one style system: the roles text takes (`quiet`, `strong`, `accent`, `alert`, `note`, `header`, `selected`, `cut_mark` and the rest), and `face`, how each row state looks (its glyph or animation frames and their interval, the glyph it holds under reduced motion, colour and modifiers). Nothing else in `src/tui/` picks a colour or a glyph, and a test checks it. The board redraws at the shortest interval of an animated glyph on screen (the spinner's 160 ms), otherwise once a second |
-| `src/tui/prefs.rs` | `tui.json` |
-| `src/tui/kept.rs` | `pick.json` and `board.json`: load them, and save the keys a user changed |
-| `src/favorites.rs` | `favorites.json`: the panes marked with `*`, by their labels; serve reads it, changes it on `favorite` requests, and adds `favorite` to `marked_by` |
+
+The board and `pick`, under `src/tui/`, a client of serve's rows:
+
+| Module | Does |
+| --- | --- |
+| `mod.rs`, `effects.rs` | The terminal and the loop; the board's effects and their threads: reads of panes, jumps, closes, answers and seen, and serve's rows as they change |
+| `app/mod.rs` | The `App` and its dispatch, `act` |
+| `app/filter.rs`, `keeping.rs`, `select.rs`, `views.rs` | The `/` text and `f` status; kept groups (`+`, `f+`, `:unkeep`); where the selection rests and how it moves, folds and clicks; views, the `:` line, sorting and extension fields |
+| `app/pane_keys.rs`, `actions.rs`, `answer.rs`, `full.rs`, `card.rs` | `enter` and `-` jump, `dd` close, `yy` and `yp` copy; extension actions; answer mode on the board; the full view's state and keys; whether the card shows and the tail it reads. `testkit.rs` holds the tests' shared fixtures |
+| `keys.rs` | The keymap: one table per layer (the board, the full view) of key sequences, what they do, and how `?` and the footers name them. Tests check that no key is bound twice and every key does something |
+| `query.rs` | The views, `/` filter, `f` status, `+` kept groups and `o` sort run headless for `ls --view/--filter/--status/--sort/--keep`, `seen --all-done` and the board's launch flags |
+| `columns.rs`, `views.rs`, `status.rs`, `keep.rs` | Which columns a width shows; views (a grouping plus a sort); the `f` status filter; the kept groups of each grouping |
+| `view.rs` | Draws the board: the top bar, the list, the footer and the `?` table |
+| `card.rs`, `meta.rs` | The turn card: bar, headline, ask or body, tail; and its facts at the foot, each once under a label, in aligned columns |
+| `markdown.rs` | The inline markdown an agent's message carries, drawn as plain and strong runs |
+| `full.rs`, `vt.rs` | The full view, read again every 2s; `vt.rs` keeps a line's colours (SGR) as styles |
+| `answer.rs`, `screen.rs` | Answer mode: its keys and card, and what it reads off a pane (options, the input line, a draft) |
+| `clipboard.rs` | `yy` and `yp`: `pbcopy`, `wl-copy` or `xclip` |
+| `icons.rs` | The Nerd Font glyphs the facts take with `"icons": "nerd"`, pinned by name and code point |
+| `theme.rs` | The one style system: the roles text takes and `face`, how each row state looks. Nothing else in `src/tui/` picks a colour or a glyph, and a test checks it |
+| `prefs.rs`, `kept.rs` | `tui.json`; `pick.json` and `board.json`: load them, and save the keys a user changed |
 
 serve uses std threads and channels, with no async runtime. Collectors, extension runners, the socket listener and each connection run on their own thread, and only the reducer thread touches the board. A runner sends its results to the reducer and never waits on it, so a slow adapter cannot hold up rows.
 
@@ -91,8 +128,10 @@ serve uses std threads and channels, with no async runtime. Collectors, extensio
 | `serve.sock`, beside `serve.lock` | The socket, mode 0600. It depends only on the state dir, not on `TMPDIR` or `XDG_RUNTIME_DIR`, so every caller finds the one serve. A path over 103 bytes fails with `SERVE` (set a shorter `XDG_STATE_HOME`). A client refuses a socket served by another uid |
 | `restart.lock` | Held by the one command replacing an older serve, so commands that find it at once restart it only once |
 | `state.json` | `{"v":1,"panes":{KEY:{state,kind,since,since_estimated,turn_started,last_turn,seen}},"jumps":[KEY,KEY]}`, where `jumps` holds the last two jumps, older first, for `jump -`. Written through a temp file and a rename at most once a second, and on stop. Entries for a host that has not sent its first snapshot this run are kept as loaded |
-| `transitions.jsonl` | One line per state change: `{at, host, block_id, from, to, kind}`. Over 5 MB at serve start, it moves to `transitions.jsonl.1`, replacing the older one |
+| `transitions.jsonl` | One line per state change: `{at, host, block_id, from, to, kind}`. Over 5 MB at serve start, it moves to `transitions.jsonl.1` |
+| `transitions.jsonl.1` | The previous `transitions.jsonl`, replaced each time the file passes 5 MB |
 | `usage/` | One `KEY.json` per pane, `{key, ts, harness, model?, effort?, ctx_pct?, ctx_window?, tok?, cost_usd?, quota_5h?}`, written by `rexboard usage` through a temp file and a rename. `KEY` is `REX_BLOCK`, or `tmux:SOCKET:SERVER_PID:PANE` inside tmux, with any character but letters, digits, `.`, `_` and `-` made `-`. serve reads one again only when its modified time changes, keeps a live pane's at any age, and removes one no local pane names once it is 10 minutes old |
+| `usage/KEY.lock` | The `flock` the callers for one pane take to decide and publish a report once. It goes with its pane's file |
 | `serve.log` | serve's output when a command started it. A client clears it first when it is over 1 MB |
 | `tui.json` | The board's own settings on this machine, `{"card": "on" \| "off", "tail_lines": 50-5000, "motion": "full" \| "reduced", "icons": "text" \| "nerd", "card_height": ROWS \| "N%", "digits": "select" \| "jump", "columns": ["tok", "cost", "5h"]}`: whether `c` has the turn card on, how long a tail the card and the full view keep, whether the spinner holds still, whether the card's facts take Nerd Font glyphs, the card's height, whether `1`-`99` select or jump, and the opt-in columns. The board, and `board --once`, write it on each `c` through a temp file and a rename, keeping every other key as read, an old `detail_hidden` and the retired `preview` keys included (`detail_hidden` counts only while `card` is missing); a missing or unreadable file means no card, full motion and words, and an old `detail` key is ignored |
 | `pick.json` | `rexboard pick`'s own view and sort, `{"view": NAME \| "field:ID", "sort": {"key": "builtin:LETTER" \| "field:ID", "descending": BOOL}}`, in the state dir beside `tui.json` ([17](decisions/0017-pick-keeps-its-view-and-sort-in-its-own-file.md)). `pick` writes it through a temp file and a rename, on a change of view or sort only, keeping any key it does not know; the board never reads it. A missing or unreadable file means the defaults |

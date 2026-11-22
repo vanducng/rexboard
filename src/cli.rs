@@ -344,7 +344,7 @@ pub struct LsArgs {
     #[arg(long, value_name = "STATUS")]
     pub status: Option<String>,
     /// Sort within each group by a column (state, age, turn, harness, host, where, session,
-    /// window, block, msg) or a field, with `:asc` or `:desc`.
+    /// window, block, model, effort, ctx, tok, cost, 5h, msg) or a field, with `:asc` or `:desc`.
     #[arg(long, value_name = "COLUMN[:asc|:desc]")]
     pub sort: Option<String>,
     /// Keep only the rows in these groups, as the board's `+` and `f+` do: `GROUPING=GROUP`,

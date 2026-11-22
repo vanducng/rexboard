@@ -85,9 +85,9 @@ The rule applies where the hook owns the pane's status: inside tmux, including a
 
 ## When a change takes effect
 
-serve reads the file when it starts and each time it rescans `rex hosts`, every 5 minutes; a new or changed `[[mark]]` rule marks rows at that read. After `rexboard serve --stop`, the next command starts a serve that reads it at once. `jump`, `next`, `pick`, `ls --direct`, `watch --raw`, `watch --direct`, `ext ls` and `ext test` read it each time they run.
+serve reads the file when it starts and each time it rescans `rex hosts`, every 5 minutes; a new or changed `[[mark]]` rule marks rows at that read. After `rexboard serve --stop`, the next command starts a serve that reads it at once. `jump`, `next`, `pick`, `ls --direct`, `watch --raw`, `watch --direct`, `ext ls`, `ext test` and `ext run` read it each time they run, and `hook` at each `Stop`.
 
-A file that cannot be read, or that has a key rexboard does not know, fails those commands with `CONFIG` (exit 1), naming the file and the key. serve keeps going and loses nothing: while the file is bad, the host scan runs with no `[hosts] exclude` in a serve that has not read a good file yet, and with the last good one in a serve that has. Models and `[[mark]]` rules stay as the last good read left them (none, in a fresh serve). serve says so: the board's top bar shows `config.toml bad: line 12` in red, `ls` prints one `warning:` on stderr (exit 0), and `serve.log` has it once. Fixing the file clears all three at serve's next read, as above.
+A file that cannot be read, or that has a key rexboard does not know, fails those commands with `CONFIG` (exit 1), naming the file and the key; `hook` never fails on it (see [`[hooks.ask]`](#hooksask)). serve keeps going and loses nothing: while the file is bad, the host scan runs with no `[hosts] exclude` in a serve that has not read a good file yet, and with the last good one in a serve that has. Models and `[[mark]]` rules stay as the last good read left them (none, in a fresh serve). serve says so: the board's top bar shows `config.toml bad: line 12` in red, `ls` prints one `warning:` on stderr (exit 0), and `serve.log` has it once. Fixing the file clears all three at serve's next read, as above.
 
 ## Which window a jump lands in
 

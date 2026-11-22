@@ -1985,7 +1985,7 @@ mod tests {
         for want in [
             "v V      next, previous view (gt gT)",
             "/        filter: text or key:value",
-            ":        a view, :seen or :q",
+            ":        a view, :seen, :unkeep, :q",
             "o        sort by a column's letter",
             "esc      cancel a key, clear filters",
             "f        status, * marked, + kept",

@@ -298,7 +298,7 @@ pub const BOARD: &[Entry] = &[
         Act::Command,
         &[&[c(':')]],
         ":",
-        "a view, :seen or :q",
+        "a view, :seen, :unkeep, :q",
         "command",
     ),
     e(
@@ -589,7 +589,7 @@ mod tests {
     }
 
     /// docs/tui.md names every key the board and the full view bind, each in its own section,
-    /// and the Keys table lists no key the board does not bind,.
+    /// and the Keys table lists no key the board does not bind.
     #[test]
     fn the_tui_doc_names_every_bound_key_and_no_other() {
         let doc = include_str!("../../docs/tui.md");
