@@ -474,8 +474,12 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
     };
     let at = items.iter().position(|item| is_selected(app, item));
     let (_, kept, _) = app.drawn.get();
-    let offset = scroll_offset(at, kept, items.len(), room);
-    app.drawn.set((area.y, offset, room));
+    let (offset, sticky) = scroll_offset(at, kept, &items, room);
+    // A sticky group header takes the first line, so the rows drawn are one fewer and start a line
+    // lower.
+    let top = usize::from(sticky.is_some());
+    let room_for_rows = room - top;
+    app.drawn.set((area.y + top as u16, offset, room_for_rows));
     let places = if columns.has(Col::Where) {
         wheres_in(
             &app.rows,
@@ -494,45 +498,54 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
         )
     };
     let mut shown = 0;
-    let mut lines: Vec<Line> = items
-        .iter()
-        .skip(offset)
-        .take(room)
-        .map(|item| match item {
-            Item::Header {
-                bucket,
-                count,
-                folded,
-            } => group_header_line(
-                &app.group_title(bucket),
-                *count,
-                *folded,
-                app.is_kept(bucket),
-                group_mark(app, bucket),
-                is_selected(app, item),
-                width,
-            ),
-            Item::Gap => Line::default(),
-            &Item::Row(i) => row_line(
-                &app.rows[i],
-                {
-                    shown += 1;
-                    (shown <= NUMBERED).then_some(shown)
-                },
-                &places[i],
-                app,
-                &columns,
-                is_selected(app, item),
-                now,
-            ),
-        })
+    let header_line = |item: &Item, selected: bool| match item {
+        Item::Header {
+            bucket,
+            count,
+            folded,
+        } => group_header_line(
+            &app.group_title(bucket),
+            *count,
+            *folded,
+            app.is_kept(bucket),
+            group_mark(app, bucket),
+            selected,
+            width,
+        ),
+        _ => Line::default(),
+    };
+    let mut lines: Vec<Line> = sticky
+        .map(|at| header_line(&items[at], false))
+        .into_iter()
         .collect();
+    lines.extend(
+        items
+            .iter()
+            .skip(offset)
+            .take(room_for_rows)
+            .map(|item| match item {
+                Item::Header { .. } => header_line(item, is_selected(app, item)),
+                Item::Gap => Line::default(),
+                &Item::Row(i) => row_line(
+                    &app.rows[i],
+                    {
+                        shown += 1;
+                        (shown <= NUMBERED).then_some(shown)
+                    },
+                    &places[i],
+                    app,
+                    &columns,
+                    is_selected(app, item),
+                    now,
+                ),
+            }),
+    );
     if room < height {
         lines.push(Line::styled(
             format!(
                 "{} {} more",
                 theme::MORE,
-                hidden_below(&items, offset + room)
+                hidden_below(&items, offset + room_for_rows)
             ),
             theme::quiet(),
         ));
@@ -620,17 +633,49 @@ fn column_header(columns: &Columns, sort: Option<Sort>) -> Line<'static> {
     Line::from(spans)
 }
 
-/// The first item shown. The list keeps its place while the selection is in view, so a clicked
-/// row stays under the pointer; past the top it scrolls to put the selection first, past the
-/// bottom last.
-fn scroll_offset(at: Option<usize>, kept: usize, len: usize, room: usize) -> usize {
-    let kept = kept.min(len.saturating_sub(room));
-    match at {
+/// The first item shown, and the header to draw above it. The list keeps its place while the
+/// selection is in view, so a clicked row stays under the pointer; past the top it scrolls to put
+/// the selection first, past the bottom last. When the first item is a row, its group's header
+/// takes the top line (the `Some` index), so no row shows without its group, and the selection is
+/// never under it. A group's first row is never first without the header just above it.
+fn scroll_offset(
+    at: Option<usize>,
+    kept: usize,
+    items: &[Item],
+    room: usize,
+) -> (usize, Option<usize>) {
+    let kept = kept.min(items.len().saturating_sub(room));
+    let mut offset = match at {
         Some(at) if at < kept => at,
         Some(at) if at < kept + room => kept,
         Some(at) => (at + 1).saturating_sub(room),
         None => 0,
+    };
+    if let Some(at) = at
+        && at == offset
+        && at > 0
+        && matches!(items[at - 1], Item::Header { .. })
+    {
+        offset = at - 1;
     }
+    loop {
+        let sticky = sticky_header(items, offset, room);
+        let fits = room - usize::from(sticky.is_some());
+        match at {
+            Some(at) if at >= offset + fits => offset = at + 1 - fits,
+            _ => return (offset, sticky),
+        }
+    }
+}
+
+/// The header of the group the row at `offset` is in, when that row is first on the screen.
+fn sticky_header(items: &[Item], offset: usize, room: usize) -> Option<usize> {
+    if offset == 0 || room < 2 || !matches!(items.get(offset), Some(Item::Row(_))) {
+        return None;
+    }
+    items[..offset]
+        .iter()
+        .rposition(|item| matches!(item, Item::Header { .. }))
 }
 
 /// In nerd mode, a harness group's mark before its name.
@@ -1910,7 +1955,7 @@ mod tests {
         assert!(top.contains("2 hosts · 4 panes · 4 agents"), "{top}");
     }
 
-    /// Three groups of four rows that do not fit a 14-line screen.
+    /// Three groups of four rows that do not fit a 14-line screen; the last row is marked.
     fn three_groups() -> App {
         let mut app = App::default();
         let mut rows = Vec::new();
@@ -1923,6 +1968,9 @@ mod tests {
                 rows.push(row(&format!("local/{group}-{n}"), state, group, seen));
             }
         }
+        let last = rows.last_mut().unwrap();
+        last.marked = true;
+        last.marked_by = vec!["config".into()];
         app.set_rows(rows, hosts());
         app
     }
@@ -1931,6 +1979,29 @@ mod tests {
     fn step(app: &mut App, code: KeyCode, height: u16) -> String {
         press(app, code);
         render(app, 100, height)
+    }
+
+    /// The list's lines: everything between the column header and the footer's `↓ N more`.
+    fn list_lines(screen: &str) -> Vec<String> {
+        screen
+            .lines()
+            .skip(usize::from(HEADER_ROW) + 1)
+            .take_while(|l| !l.starts_with('↓') && !l.starts_with("j/k"))
+            .map(str::to_owned)
+            .collect()
+    }
+
+    fn is_group_header(line: &str) -> bool {
+        line.contains(" (4) ┄")
+    }
+
+    /// The line of the selected row, by its message.
+    fn selected_line(app: &App, lines: &[String]) -> Option<usize> {
+        let Some(Spot::Row(key)) = &app.selected else {
+            return None;
+        };
+        let msg = format!("{} msg", key.split_once('/').unwrap().1);
+        lines.iter().position(|l| l.ends_with(&msg))
     }
 
     #[test]
@@ -1952,6 +2023,159 @@ mod tests {
         assert!(
             screen.lines().any(|l| l.starts_with("NEEDS YOU (4)")),
             "the first row shows with its group named:\n{screen}"
+        );
+    }
+
+    #[test]
+    fn a_screen_that_starts_inside_a_group_names_it_on_its_first_line() {
+        let mut app = three_groups();
+        render(&app, 100, 14);
+        for _ in 0..9 {
+            step(&mut app, KeyCode::Char('j'), 14);
+        }
+        let screen = render(&app, 100, 14);
+        let lines = list_lines(&screen);
+        assert!(lines[0].starts_with("WORKING (4)"), "{screen}");
+        assert!(
+            !is_group_header(&lines[1]) && lines[1].contains("working-"),
+            "the next line is the first shown row:\n{screen}"
+        );
+        assert!(
+            !lines[0].trim_start().starts_with(char::is_numeric),
+            "no number"
+        );
+    }
+
+    #[test]
+    fn every_movement_key_leaves_the_selected_row_drawn_under_a_named_group() {
+        let long = |keys: &str| {
+            let mut app = three_groups();
+            render(&app, 100, 14);
+            for key in keys.chars() {
+                step(&mut app, KeyCode::Char(key), 14);
+            }
+            app
+        };
+        let ctrl_key = |c: char| {
+            move |app: &mut App| {
+                key(app, ctrl(c));
+            }
+        };
+        type Move = Box<dyn Fn(&mut App)>;
+        let moves: Vec<(&str, Move)> = vec![
+            ("j", Box::new(|a| drop(press(a, KeyCode::Char('j'))))),
+            ("k", Box::new(|a| drop(press(a, KeyCode::Char('k'))))),
+            ("G", Box::new(|a| drop(press(a, KeyCode::Char('G'))))),
+            ("gg", Box::new(|a| drop(typed(a, "gg")))),
+            ("ctrl-d", Box::new(ctrl_key('d'))),
+            ("ctrl-u", Box::new(ctrl_key('u'))),
+            ("ctrl-f", Box::new(ctrl_key('f'))),
+            ("ctrl-b", Box::new(ctrl_key('b'))),
+            ("H", Box::new(|a| drop(press(a, KeyCode::Char('H'))))),
+            ("M", Box::new(|a| drop(press(a, KeyCode::Char('M'))))),
+            ("L", Box::new(|a| drop(press(a, KeyCode::Char('L'))))),
+            ("n", Box::new(|a| drop(press(a, KeyCode::Char('n'))))),
+            ("3", Box::new(|a| drop(typed(a, "3")))),
+            ("'", Box::new(|a| drop(press(a, KeyCode::Char('\''))))),
+        ];
+        for (name, mv) in &moves {
+            for start in ["", "jjjjjj", "G", "jjjjjjjjjj"] {
+                let mut app = long(start);
+                for _ in 0..3 {
+                    mv(&mut app);
+                    let screen = render(&app, 100, 14);
+                    let lines = list_lines(&screen);
+                    assert!(
+                        is_group_header(&lines[0]),
+                        "{name} from {start:?}: a group heads the list:\n{screen}"
+                    );
+                    if let Some(Spot::Row(_)) = &app.selected {
+                        let at = selected_line(&app, &lines);
+                        assert!(
+                            at.is_some_and(|at| at > 0),
+                            "{name} from {start:?}: the selected row is drawn, not under the sticky line:\n{screen}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_groups_first_row_always_has_its_own_header_directly_above() {
+        let mut app = three_groups();
+        render(&app, 100, 14);
+        let mut walk = vec![KeyCode::Char('j'); 11];
+        walk.extend(vec![KeyCode::Char('k'); 11]);
+        let mut firsts = 0;
+        for code in walk {
+            let screen = step(&mut app, code, 14);
+            let lines = list_lines(&screen);
+            let Some(at) = selected_line(&app, &lines) else {
+                continue;
+            };
+            let Some(Spot::Row(key)) = &app.selected else {
+                continue;
+            };
+            if key.ends_with("-1") {
+                firsts += 1;
+                let group = key.trim_start_matches("local/").trim_end_matches("-1");
+                let name = group.replace('_', " ").to_uppercase();
+                assert!(lines[at - 1].starts_with(&name), "{key}:\n{screen}");
+            }
+        }
+        assert_eq!(firsts, 5, "each first row, down and then up");
+    }
+
+    #[test]
+    fn digits_count_the_rows_under_a_sticky_line_and_a_click_still_leaves_grouped_rows_alone() {
+        let mut app = three_groups();
+        render(&app, 100, 14);
+        while app.drawn.get().0 <= HEADER_ROW + 1 {
+            step(&mut app, KeyCode::Char('j'), 14);
+        }
+        let screen = render(&app, 100, 14);
+        let lines = list_lines(&screen);
+        assert!(is_group_header(&lines[0]), "{screen}");
+        let (first, ..) = app.drawn.get();
+        assert_eq!(usize::from(first), usize::from(HEADER_ROW) + 2, "{screen}");
+        let before = app.selected.clone();
+        for y in [first - 1, first] {
+            app.click(5, y);
+            assert_eq!(app.selected, before, "grouped views take no clicks: {y}");
+        }
+        assert!(
+            lines[0].trim_start().starts_with(|c: char| !c.is_numeric()),
+            "the sticky line has no number"
+        );
+        assert!(lines[1].trim_start().starts_with("1 "), "{screen}");
+        for (digit, line) in [('1', 1), ('3', 3)] {
+            press(&mut app, KeyCode::Char(digit));
+            let screen = render(&app, 100, 14);
+            let lines = list_lines(&screen);
+            let at = selected_line(&app, &lines).unwrap();
+            assert!(
+                lines[at].trim_start().starts_with(&format!("{digit} ")),
+                "{screen}"
+            );
+            assert!(at >= line, "{screen}");
+        }
+    }
+
+    #[test]
+    fn the_table_view_has_no_group_lines_to_stick() {
+        let mut app = three_groups();
+        render(&app, 100, 14);
+        press(&mut app, KeyCode::Char(':'));
+        typed(&mut app, "table");
+        press(&mut app, KeyCode::Enter);
+        for _ in 0..9 {
+            step(&mut app, KeyCode::Char('j'), 14);
+        }
+        let screen = render(&app, 100, 14);
+        assert!(
+            !list_lines(&screen).iter().any(|l| is_group_header(l)),
+            "{screen}"
         );
     }
 
