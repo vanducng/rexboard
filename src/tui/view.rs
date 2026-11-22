@@ -1926,7 +1926,7 @@ mod tests {
             text.lines()
                 .last()
                 .unwrap()
-                .starts_with("waiting for the Rex app on studio…"),
+                .starts_with("waiting for the Rex app on studio… · esc stops"),
             "{text}"
         );
     }

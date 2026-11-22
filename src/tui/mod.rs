@@ -208,6 +208,7 @@ fn board(pick: bool, once: bool, open: &OpenArgs) -> Result<Option<Row>> {
     // Under `once`, a jump runs here while the board stays up to say it waits, and answers here.
     let (landed_tx, landed_rx) = mpsc::channel::<Result<Row>>();
     let land = |row: Row| {
+        jump::rearm();
         let (tx, landed_tx) = (tx.clone(), landed_tx.clone());
         thread::spawn(move || {
             let _ = landed_tx.send(effects::go(&row, &tx).map(|()| row));
@@ -268,6 +269,9 @@ fn board(pick: bool, once: bool, open: &OpenArgs) -> Result<Option<Row>> {
                 None => return Ok(None),
             }
             if let Some(row) = app.chosen.take() {
+                if !app.jumping {
+                    return Err(Error::Cancelled);
+                }
                 app.going = Some("going back…".into());
                 land(row);
             }

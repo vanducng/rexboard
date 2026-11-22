@@ -64,9 +64,9 @@ pub(super) fn apply(app: &mut App, msg: Msg) -> Option<Effect> {
     None
 }
 
-/// A jump from the board: it tells the board when the Rex app is slow, and `esc` can stop it.
+/// A jump from the board: it tells the board when the Rex app is slow, and `esc` can stop it
+/// (whoever starts it calls `jump::rearm` first, so a stop that comes at once is not lost).
 pub(super) fn go(row: &Row, tx: &Sender<Msg>) -> Result<()> {
-    jump::rearm();
     jump::go_with(
         row,
         &jump::Hooks {
@@ -117,6 +117,7 @@ pub(super) fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>)
             });
         }
         Effect::Jump(row) => {
+            jump::rearm();
             thread::spawn(move || {
                 let result = go(&row, &tx)
                     .map(|()| format!("jumped to {}", path(&labels(&row, true), usize::MAX)))
@@ -127,6 +128,7 @@ pub(super) fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>)
         }
         Effect::GiveUp => jump::give_up(),
         Effect::Back => {
+            jump::rearm();
             thread::spawn(move || {
                 let result = jump::previous()
                     .and_then(|row| go(&row, &tx).map(|()| row))
