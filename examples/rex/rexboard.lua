@@ -22,11 +22,13 @@ local VARIANTS = {
   all = {},
   marked = { "--status", "marked" }, -- favorites (*) and rows a [[mark]] rule marks
   sessions = { "--view", "session" },
-  api = { "--keep", "session=api" }, -- named groups, as + and f+ keep them
+  api = { "--keep", "session=api" }, -- named groups, as + and f+ keep them: a session label of yours, or label@host
 }
 
 -- Runs the board; shows what it printed on stderr until enter; re-zooms $2 unless the board jumped.
 -- $0 is a name, $1 the session, $2 the block to zoom again (empty when none), the rest the command.
+-- Rex sets REX_BIN_DIR to the folder of its own rex, which is the copy that matches the server
+-- even when PATH has none; without it, rex is looked up on PATH.
 local RUN = [==[
 sid=$1 zoomed=$2
 shift 2
@@ -40,7 +42,7 @@ if [ -s "$err" ]; then
 fi
 rm -f "$err"
 if [ "$code" != 0 ] && [ -n "$zoomed" ]; then
-  rex api call -s "$sid" session.zoom_block "{\"block_id\":\"$zoomed\",\"zoom\":true}" >/dev/null 2>&1
+  "${REX_BIN_DIR:+$REX_BIN_DIR/}rex" api call -s "$sid" session.zoom_block "{\"block_id\":\"$zoomed\",\"zoom\":true}" >/dev/null 2>&1
 fi
 ]==]
 
@@ -97,6 +99,7 @@ rex.action{
 }
 
 rex.bind(KEY, "rexboard")
+-- One more key per variant: uncomment the ones you want, and change the second key of each.
 -- rex.bind("ctrl+[KeyX]>[KeyM]", "rexboard", { variant = "marked" })
 -- rex.bind("ctrl+[KeyX]>[KeyV]", "rexboard", { variant = "sessions" })
 -- rex.bind("ctrl+[KeyX]>[KeyA]", "rexboard", { variant = "api" })

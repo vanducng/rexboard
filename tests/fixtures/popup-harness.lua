@@ -1,11 +1,12 @@
 -- Runs examples/rex/rexboard.lua against a stand-in for the Rex calls it makes.
--- Usage: lua popup-harness.lua <example> <mode> [variant] [zoomed]
+-- Usage: lua popup-harness.lua <example> <mode> [variant] [zoomed] [flag]
 --   binds                      one line per rex.bind: key, action and variant
 --   layer VARIANT zoomed|tiled the layer one press builds, and the command's own arguments
 --   argv VARIANT zoomed|tiled  the whole command, each element ended by a NUL
+--   flag, when given, is what the api variant's `session=api` becomes: a value with a space and a *
 --   fails VARIANT|-            the error a press raises: an unknown variant, a pane in no window,
 --                              or a layer Rex refuses to create (variant "-" is the default)
-local example, mode, variant, view_kind = arg[1], arg[2], arg[3], arg[4]
+local example, mode, variant, view_kind, flag = arg[1], arg[2], arg[3], arg[4], arg[5]
 if variant == "-" then
   variant = nil
 end
@@ -35,7 +36,13 @@ rex = {
     end,
   },
 }
-dofile(example)
+local file = assert(io.open(example))
+local source = file:read("*a")
+file:close()
+if flag then
+  source = source:gsub('"session=api"', function() return '"' .. flag .. '"' end)
+end
+assert((loadstring or load)(source, "@" .. example))()
 
 local function press(block_id, args)
   return pcall(actions.rexboard.run, { session_id = "session:s", block_id = block_id }, args)

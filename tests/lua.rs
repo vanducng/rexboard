@@ -207,66 +207,102 @@ fn the_rex_example_says_why_it_cannot_open() {
     assert_eq!(popup(&["fails", "-", "refused"]), ["no room"]);
 }
 
+/// What the example's command did under sh.
+struct Ran {
+    /// What the terminal showed.
+    shown: String,
+    /// Each call the stand-in `rex` took, led by where it was found.
+    rex: String,
+    /// The arguments the stand-in `rexboard` got, one per line.
+    board: String,
+}
+
 /// The command the example hands a terminal, run under sh with a stand-in `rexboard` that exits
 /// with `code` after printing `said` on stderr, and a stand-in `rex` that logs its arguments.
-/// Returns what the terminal showed, and the rex calls.
-fn popup_command(view: &str, code: &str, said: &str) -> (String, String) {
-    let argv = popup_harness(&["argv", "-", view]);
+/// With `rex_dir`, Rex's own `REX_BIN_DIR` names the stand-in and the PATH has no `rex`.
+fn popup_command(view: &str, flag: Option<&str>, code: &str, said: &str, rex_dir: bool) -> Ran {
+    let mut args = vec!["argv", if flag.is_some() { "api" } else { "-" }, view];
+    args.extend(flag);
+    let argv = popup_harness(&args);
     let argv: Vec<&str> = std::str::from_utf8(&argv)
         .unwrap()
         .strip_suffix('\0')
         .unwrap()
         .split('\0')
         .collect();
-    let bin = tempfile::tempdir().unwrap();
-    let log = bin.path().join("rex.log");
-    let script = |name: &str, body: String| {
-        let path = bin.path().join(name);
+    let dir = tempfile::tempdir().unwrap();
+    let (tools, rexdir) = (dir.path().join("tools"), dir.path().join("rexdir"));
+    let (log, board_log) = (dir.path().join("rex.log"), dir.path().join("board.log"));
+    let script = |folder: &Path, name: &str, body: String| {
+        std::fs::create_dir_all(folder).unwrap();
+        let path = folder.join(name);
         std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
             .unwrap();
     };
     script(
+        &tools,
         "rexboard",
-        format!("[ -z '{said}' ] || echo '{said}' >&2\nexit {code}"),
+        format!(
+            "[ -z '{said}' ] || echo '{said}' >&2\nfor arg; do echo \"$arg\"; done >{}\nexit {code}",
+            board_log.display()
+        ),
     );
-    script("rex", format!("echo \"$@\" >>{}", log.display()));
+    let rex = |found: &str| format!("echo \"{found}: $@\" >>{}", log.display());
+    script(&tools, "rex", rex("path"));
+    script(&rexdir, "rex", rex("REX_BIN_DIR"));
     let mut run = Command::new("sh");
     run.args(&argv[1..])
-        .env("PATH", format!("{}:/usr/bin:/bin", bin.path().display()))
+        .env_remove("REX_BIN_DIR")
+        .env("PATH", format!("{}:/usr/bin:/bin", tools.display()))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped());
+    if rex_dir {
+        run.env("REX_BIN_DIR", &rexdir);
+    }
     let mut child = run.spawn().unwrap();
     std::io::Write::write_all(child.stdin.as_mut().unwrap(), b"\n").unwrap();
     let out = child.wait_with_output().unwrap();
     assert!(out.status.success(), "{:?}", out.status);
-    (
-        String::from_utf8(out.stdout).unwrap(),
-        std::fs::read_to_string(&log).unwrap_or_default(),
-    )
+    let read = |path: &Path| std::fs::read_to_string(path).unwrap_or_default();
+    Ran {
+        shown: String::from_utf8(out.stdout).unwrap(),
+        rex: read(&log),
+        board: read(&board_log),
+    }
 }
 
 #[test]
 fn the_rex_example_zooms_the_pane_again_unless_the_board_jumped_and_holds_an_error_for_enter() {
-    let zoom =
-        "api call -s session:s session.zoom_block {\"block_id\":\"block:pane\",\"zoom\":true}\n";
+    let zoom = |found: &str| {
+        format!(
+            "{found}: api call -s session:s session.zoom_block {{\"block_id\":\"block:pane\",\"zoom\":true}}\n"
+        )
+    };
+    let ran = |view, code, said, rex_dir| popup_command(view, None, code, said, rex_dir);
     // q or esc: exit 1 and nothing printed. Over a zoomed pane it is zoomed again, quietly.
-    assert_eq!(
-        popup_command("zoomed", "1", ""),
-        (String::new(), zoom.into())
-    );
-    assert_eq!(
-        popup_command("tiled", "1", ""),
-        (String::new(), String::new())
-    );
+    let closed = ran("zoomed", "1", "", false);
+    assert_eq!((closed.shown.as_str(), closed.rex), ("", zoom("path")));
+    assert_eq!(ran("tiled", "1", "", false).rex, "");
     // A jump landed: exit 0. Zooming the old pane again would pull focus back from it.
-    assert_eq!(
-        popup_command("zoomed", "0", ""),
-        (String::new(), String::new())
-    );
+    assert_eq!(ran("zoomed", "0", "", false).rex, "");
     // An error the board printed stays up until enter; the pane is zoomed again after it.
+    let failed = ran("zoomed", "1", "no client", false);
+    assert_eq!(failed.shown, "no client\n\npress enter to close ");
+    assert_eq!(failed.rex, zoom("path"));
+}
+
+#[test]
+fn the_rex_example_zooms_with_the_rex_that_rex_names_when_the_path_has_none() {
+    let ran = popup_command("zoomed", None, "1", "", true);
     assert_eq!(
-        popup_command("zoomed", "1", "no client"),
-        ("no client\n\npress enter to close ".into(), zoom.into())
+        ran.rex,
+        "REX_BIN_DIR: api call -s session:s session.zoom_block {\"block_id\":\"block:pane\",\"zoom\":true}\n"
     );
+}
+
+#[test]
+fn a_flag_with_a_space_and_a_star_reaches_rexboard_as_one_argument() {
+    let ran = popup_command("tiled", Some("session=my api*"), "0", "", false);
+    assert_eq!(ran.board, "board\n--once\n--keep\nsession=my api*\n");
 }

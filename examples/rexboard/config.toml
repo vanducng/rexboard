@@ -10,7 +10,10 @@
 [[mark]]
 block = "seat-*"
 
-# A field an extension reports (examples/extensions/session-prefix gives each row its project), on one host.
+# A field an extension reports, on one host. This one needs the session-prefix extension
+# (examples/extensions/session-prefix, which gives each row its project) enabled: copy it to
+# ~/.config/rexboard/extensions/ and add `[extensions] enabled = ["session-prefix"]` to this
+# file (docs/extensions.md). Without it the rule matches nothing.
 [[mark]]
 host = "studio"
 field."session-prefix.project" = "api"
