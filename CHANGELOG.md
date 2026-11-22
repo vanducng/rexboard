@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.4](https://github.com/vanducng/rexboard/compare/v0.34.3...v0.34.4) (2026-11-22)
+
+
+### Bug Fixes
+
+* **jump:** wait for a slow Rex app and say what is known ([#176](https://github.com/vanducng/rexboard/issues/176)) ([0fe70a4](https://github.com/vanducng/rexboard/commit/0fe70a45ce2bf5bf8597fe16b22433ab12aad52e))
+
 ## [0.34.3](https://github.com/vanducng/rexboard/compare/v0.34.2...v0.34.3) (2026-11-22)
 
 
