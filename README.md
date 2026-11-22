@@ -46,7 +46,7 @@ Agents straight in a Rex pane report on their own. Inside tmux they need hooks: 
 - **Filter.** `/` narrows by text, `f` by status. [Status filter](docs/tui.md#status-filter)
 - **Mark rows and keep favorites.** `*` marks a pane, `'` goes to the marked rows. [Marked rows](docs/tui.md#marked-rows)
 - **Keep groups.** `+` keeps a group, `f+` shows only the kept ones. [Kept groups](docs/tui.md#kept-groups)
-- **Jump.** `enter` goes to the pane on whichever host owns it; `1`-`99` pick a row, `board --once` is a popup. [Digits](docs/tui.md#digits), [Popup](docs/tui.md#popup)
+- **Jump.** `enter` goes to the pane on whichever host owns it; `1`-`99` pick a row, `board --once` is a popup, and [an example](examples/README.md) puts it on a Rex key. [Digits](docs/tui.md#digits), [Popup](docs/tui.md#popup)
 - **Answer and close.** `a` answers, `dd` closes a pane, `x` runs an extension's action. [Answer mode](docs/tui.md#answer-mode), [Actions](docs/tui.md#actions)
 - **Script it.** `ls`, `watch`, `show`, `answer`, `close` and `jump` take `--json`. [CLI](docs/cli.md)
 - **Add columns from any tool.** An extension reads rows and returns fields, marks and actions. [Extensions](docs/extensions.md)
