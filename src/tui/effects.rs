@@ -26,6 +26,8 @@ pub(super) enum Msg {
     /// A failure the footer shows in the alert role until the next key.
     Failed(String),
     Went(std::result::Result<String, String>),
+    /// A jump asked the Rex app again: the app's name.
+    Waiting(String),
     /// The pane `-` goes back to under `--once`, or why there is none.
     Back(std::result::Result<Box<Row>, String>),
     Screen(String, std::result::Result<Screen, String>),
@@ -53,12 +55,35 @@ pub(super) fn apply(app: &mut App, msg: Msg) -> Option<Effect> {
         Msg::Say(text) => app.say(text),
         Msg::Failed(why) => app.failed = Some(why),
         Msg::Went(result) => app.went(result),
+        Msg::Waiting(app_name) => app.waiting_for(&app_name),
         Msg::Back(Ok(row)) => app.chosen = Some(*row),
         Msg::Back(Err(why)) => app.went(Err(why)),
         Msg::Screen(key, screen) => app.screen(&key, screen),
         Msg::Sent { key, what, result } => return app.sent(&key, &what, result),
     }
     None
+}
+
+/// A jump from the board: it tells the board when the Rex app is slow, and `esc` can stop it.
+pub(super) fn go(row: &Row, tx: &Sender<Msg>) -> Result<()> {
+    jump::rearm();
+    jump::go_with(
+        row,
+        &jump::Hooks {
+            waiting: &|app| {
+                let _ = tx.send(Msg::Waiting(app.to_owned()));
+            },
+            cancelled: &jump::given_up,
+        },
+    )
+}
+
+/// A jump given up with `esc` is a note, not a failure.
+fn stopped(err: Error) -> Result<String> {
+    match err {
+        Error::Cancelled => Ok("stopped waiting for the Rex app".to_owned()),
+        err => Err(err),
+    }
 }
 
 pub(super) fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>) {
@@ -93,17 +118,20 @@ pub(super) fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>)
         }
         Effect::Jump(row) => {
             thread::spawn(move || {
-                let result = jump::go(&row)
+                let result = go(&row, &tx)
                     .map(|()| format!("jumped to {}", path(&labels(&row, true), usize::MAX)))
+                    .or_else(stopped)
                     .map_err(|err| err.to_string());
                 let _ = tx.send(Msg::Went(result));
             });
         }
+        Effect::GiveUp => jump::give_up(),
         Effect::Back => {
             thread::spawn(move || {
                 let result = jump::previous()
-                    .and_then(|row| jump::go(&row).map(|()| row))
+                    .and_then(|row| go(&row, &tx).map(|()| row))
                     .map(|row| format!("back to {}", path(&labels(&row, true), usize::MAX)))
+                    .or_else(stopped)
                     .map_err(|err| err.to_string());
                 let _ = tx.send(Msg::Went(result));
             });

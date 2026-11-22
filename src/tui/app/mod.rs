@@ -100,6 +100,8 @@ pub enum Effect {
     SeenAll(Vec<String>),
     /// Go to this row's pane.
     Jump(Box<Row>),
+    /// `esc` while a jump waits for a slow Rex app: stop waiting.
+    GiveUp,
     /// `-`: go to the pane before the last jump.
     Back,
     /// Close this row's pane, which the operator confirmed.
@@ -298,6 +300,8 @@ pub struct App {
     pub height: u16,
     /// `going to …` while a jump or a close runs; a second one starts nothing.
     pub going: Option<String>,
+    /// The jump has asked the Rex app again, and `esc` stops it.
+    pub waiting: bool,
     /// Why the last jump or close failed, until the next key.
     pub failed: Option<String>,
     /// `dd`: the row to close once `y` confirms it, and when it asked.
@@ -425,10 +429,17 @@ impl App {
         self.toast = Some((text.into(), Instant::now()));
     }
 
+    /// The Rex app has not answered the jump yet, and it asks again.
+    pub fn waiting_for(&mut self, app: &str) {
+        self.waiting = true;
+        self.going = Some(format!("waiting for the Rex app on {app}…"));
+    }
+
     /// A jump finished: say where it went, or keep why it failed in view.
     /// A jump, a back or a close came back.
     pub fn went(&mut self, result: Result<String, String>) {
         self.going = None;
+        self.waiting = false;
         self.toast = None;
         match result {
             Ok(text) => self.say(text),
@@ -456,6 +467,10 @@ impl App {
             .is_none_or(|at| now.duration_since(at) >= GUARD);
         self.last_key = Some(now);
         let k = K::of(key);
+        if self.waiting && key.code == KeyCode::Esc {
+            self.waiting = false;
+            return Some(Effect::GiveUp);
+        }
         if self.doing.is_some() {
             return self.doing_key(key, now);
         }

@@ -1475,6 +1475,19 @@ fn on_pty(
     signal: Option<libc::c_int>,
     hang_up: bool,
 ) -> Ran {
+    on_pty_env(args, serve, expect, send, signal, hang_up, &[])
+}
+
+/// `on_pty` with more of the child's environment.
+fn on_pty_env(
+    args: &[&str],
+    serve: Option<&Serve>,
+    expect: &[&str],
+    send: &[&str],
+    signal: Option<libc::c_int>,
+    hang_up: bool,
+    env: &[(&str, &str)],
+) -> Ran {
     use std::io::{Read, Write};
     use std::os::fd::FromRawFd;
     let size = libc::winsize {
@@ -1541,6 +1554,7 @@ fn on_pty(
         .env_remove("REX_BLOCK")
         .env_remove("REX_CLIENT");
     }
+    cmd.envs(env.iter().copied());
     let mut child = cmd.spawn().unwrap();
     unsafe { libc::close(slave) };
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -2262,6 +2276,82 @@ fn board_once_exits_0_after_each_jump_key_lands() {
     }
 }
 
+/// `board --once` over `serve`'s rows with the app slow to answer: `replies` are what the app
+/// does at each ask (the last one repeating), `wait_ms` how long the jump keeps asking.
+fn once_slow(
+    serve: &Serve,
+    replies: &[&str],
+    wait_ms: &str,
+    expect: &[&str],
+    send: &[&str],
+) -> Ran {
+    let seq = serve.dir.path().join("jump-seq");
+    std::fs::write(&seq, replies.join("\n") + "\n").unwrap();
+    let mut want = vec!["seat-old"];
+    want.extend(expect);
+    on_pty_env(
+        &["board", "--once"],
+        Some(serve),
+        &want,
+        send,
+        Some(libc::SIGTERM),
+        false,
+        &[
+            ("FAKE_REX_JUMP_SEQ", seq.to_str().unwrap()),
+            ("FAKE_REX_JUMP_REPLY", replies.last().unwrap()),
+            ("REXBOARD_TEST_JUMP_WAIT_MS", wait_ms),
+        ],
+    )
+}
+
+#[test]
+fn board_once_waits_for_a_slow_app_and_exits_0_when_it_answers() {
+    let serve = needing();
+    let ran = once_slow(
+        &serve,
+        &[SELECT_TIMEOUT, SELECT_TIMEOUT, r#"{"ok":true}"#],
+        "20000",
+        &[],
+        &["\r"],
+    );
+    assert!(!ran.alive, "{:?}", ran.out);
+    assert_eq!(ran.status.code(), Some(0), "{:?}", ran.out);
+    assert!(ran.out.contains("jumped to"), "{:?}", ran.out);
+    assert_eq!(
+        row(&serve.needing_rows(), "mini/block:seat-old")["seen"],
+        true
+    );
+}
+
+#[test]
+fn board_once_exits_1_when_esc_stops_the_wait_and_when_the_wait_runs_out() {
+    let serve = needing();
+    let ran = once_slow(&serve, &[SELECT_TIMEOUT], "20000", &[], &["\r"]);
+    assert!(ran.alive, "still waiting: {:?}", ran.out);
+    let serve = needing();
+    let ran = once_slow(
+        &serve,
+        &[SELECT_TIMEOUT],
+        "20000",
+        &[],
+        &["\r", "j", "j", "\x1b"],
+    );
+    assert!(!ran.alive, "{:?}", ran.out);
+    assert_eq!(ran.status.code(), Some(1), "{:?}", ran.out);
+    assert_eq!(
+        row(&serve.needing_rows(), "mini/block:seat-old")["seen"],
+        false,
+        "a jump given up marks nothing seen"
+    );
+    let serve = needing();
+    let ran = once_slow(&serve, &[SELECT_TIMEOUT], "1000", &[], &["\r"]);
+    assert_eq!(ran.status.code(), Some(1), "{:?}", ran.out);
+    assert_eq!(
+        row(&serve.needing_rows(), "mini/block:seat-old")["seen"],
+        false
+    );
+}
+
 #[test]
 fn board_once_exits_1_on_q_and_on_esc_but_esc_first_closes_a_layer() {
     let serve = needing_with(MARK_SEAT_OLD);
@@ -2447,7 +2537,8 @@ fn jump_builds_remote_select_for_remote_host() {
     assert_eq!(
         jumps[0],
         serde_json::json!({ "host": "mini", "session_id": "session:web",
-            "window_id": "window:web-a", "block_id": "block:seat-new", "app_client": null })
+            "window_id": "window:web-a", "block_id": "block:seat-new", "app_client": null,
+            "select_ms": 5000 })
     );
 }
 
@@ -3187,23 +3278,38 @@ fn ls_direct_marks_by_config_and_with_no_rules_marks_nothing() {
 }
 
 #[test]
-fn jump_explains_an_app_that_does_not_answer() {
+fn jump_gives_up_after_its_patience_and_says_what_is_known() {
     let serve = needing();
-    let raw = r#"stream response \"control-2\" failed: \"studio\" did not answer within 5s (status=504 code=timeout)"#;
-    let reply = format!(r#"{{"ok":false,"step":"session.select","error":"{raw}"}}"#);
+    let reply = SELECT_TIMEOUT;
     serve
         .needing_cmd()
-        .env("FAKE_REX_JUMP_REPLY", &reply)
+        .env("FAKE_REX_JUMP_REPLY", reply)
+        .env("REXBOARD_TEST_JUMP_WAIT_MS", "1000")
         .args(["jump", "1"])
         .assert()
         .code(1)
         .stderr(
-            "error: the Rex app on studio did not answer within 5s; it does not answer while \
-             the Mac's screen is locked\nnext: unlock the Mac, then rexboard jump mini/block:seat-old\n",
+            "error: the Rex app on studio did not answer through mini within 1s; it may still \
+             switch to the pane. A locked screen or a stalled connection to that host can cause \
+             this.\nnext: rexboard jump mini/block:seat-old\n",
         );
+    let jumps = serve.jumps();
+    assert!(jumps.len() > 1, "it asked again: {jumps:?}");
+    assert!(
+        jumps
+            .iter()
+            .all(|jump| jump["select_ms"].as_u64() <= Some(1000)),
+        "no ask outlasts the patience that is left: {jumps:?}"
+    );
+    assert_eq!(
+        row(&serve.needing_rows(), "mini/block:seat-old")["seen"],
+        false,
+        "a jump that did not land marks nothing seen"
+    );
     let out = serve
         .needing_cmd()
-        .env("FAKE_REX_JUMP_REPLY", &reply)
+        .env("FAKE_REX_JUMP_REPLY", reply)
+        .env("REXBOARD_TEST_JUMP_WAIT_MS", "1000")
         .args(["--json", "jump", "1"])
         .assert()
         .code(1)
@@ -3241,6 +3347,25 @@ fn jump_asks_again_when_the_app_times_out_and_lands_when_it_answers() {
         row(&serve.needing_rows(), "mini/block:seat-old")["seen"],
         true,
         "a late success is a landed jump"
+    );
+}
+
+#[test]
+fn jump_does_not_ask_again_when_the_failure_is_not_a_timeout() {
+    let serve = needing();
+    let seq = serve.dir.path().join("jump-seq");
+    let no_app = r#"{"ok":false,"code":"no_app"}"#;
+    std::fs::write(&seq, format!("{no_app}\n{no_app}\n")).unwrap();
+    serve
+        .needing_cmd()
+        .env("FAKE_REX_JUMP_SEQ", &seq)
+        .args(["jump", "1"])
+        .assert()
+        .code(1);
+    assert_eq!(
+        std::fs::read_to_string(&seq).unwrap().lines().count(),
+        1,
+        "one ask, and the second reply was never asked for"
     );
 }
 

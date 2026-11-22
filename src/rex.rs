@@ -90,7 +90,17 @@ pub fn locate() -> Result<PathBuf> {
 
 /// Runs `rex [-S host] do - --json --args <json>` with `lua` on stdin and returns its JSON result.
 pub fn run_script(host: Option<&str>, lua: &str, args: &Value) -> Result<Value> {
-    run_script_with(&locate()?, host, lua, args, TIMEOUT, &|| false).map_err(|err| match err {
+    run_script_cancellable(host, lua, args, &|| false)
+}
+
+/// `run_script`, stopped with `Error::Cancelled` as soon as `cancelled` says so.
+pub fn run_script_cancellable(
+    host: Option<&str>,
+    lua: &str,
+    args: &Value,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Value> {
+    run_script_with(&locate()?, host, lua, args, TIMEOUT, cancelled).map_err(|err| match err {
         Error::Io(io) if io.kind() == std::io::ErrorKind::TimedOut => {
             Error::Rex(format!("rex did not answer within {}s", TIMEOUT.as_secs()))
         }

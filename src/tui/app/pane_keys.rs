@@ -407,6 +407,59 @@ mod tests {
     }
 
     #[test]
+    fn esc_stops_a_jump_that_waits_for_the_app_and_the_board_stays_as_it_was() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('/'));
+        for c in "seat".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        press(&mut app, KeyCode::Enter);
+        let selected = app.selected.clone();
+        press(&mut app, KeyCode::Enter);
+        app.waiting_for("studio");
+        assert_eq!(
+            app.going.as_deref(),
+            Some("waiting for the Rex app on studio…")
+        );
+        press(&mut app, KeyCode::Char('j'));
+        assert_ne!(
+            app.selected, selected,
+            "the list stays usable while it waits"
+        );
+        assert!(matches!(
+            press(&mut app, KeyCode::Esc),
+            Some(Effect::GiveUp)
+        ));
+        app.went(Ok("stopped waiting for the Rex app".into()));
+        assert_eq!(app.toast(), Some("stopped waiting for the Rex app"));
+        assert!(app.going.is_none() && app.failed.is_none());
+        assert_eq!(app.filter.value(), "seat", "esc cleared nothing else");
+        assert!(
+            !matches!(press(&mut app, KeyCode::Esc), Some(Effect::GiveUp)),
+            "with nothing to wait for, esc is the board's again"
+        );
+    }
+
+    #[test]
+    fn in_pick_esc_stops_the_wait_before_it_leaves() {
+        let mut idle = app();
+        idle.pick = true;
+        press(&mut idle, KeyCode::Enter);
+        assert!(
+            matches!(press(&mut idle, KeyCode::Esc), Some(Effect::Quit)),
+            "it leaves a list"
+        );
+        let mut slow = app();
+        slow.pick = true;
+        press(&mut slow, KeyCode::Enter);
+        slow.waiting_for("studio");
+        assert!(matches!(
+            press(&mut slow, KeyCode::Esc),
+            Some(Effect::GiveUp)
+        ));
+    }
+
+    #[test]
     fn minus_goes_back_one_jump_at_a_time() {
         let mut app = app();
         assert!(matches!(
