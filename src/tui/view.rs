@@ -467,17 +467,26 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
         .saturating_sub(1);
     app.spaced.set(gaps > 0 && items.len() + gaps <= height);
     let items = app.items();
-    let room = if items.len() > height {
+    let at = items.iter().position(|item| is_selected(app, item));
+    let (_, kept, _) = app.drawn.get();
+    // The last line says how many rows are below, but only when some are: with none hidden it goes
+    // to the list.
+    let place = |room: usize| {
+        let (offset, sticky) = scroll_offset(at, kept, &items, room);
+        // A sticky group header takes the first line, so the rows drawn are one fewer and start a
+        // line lower.
+        (offset, usize::from(sticky.is_some()), sticky)
+    };
+    let mut room = if items.len() > height {
         height.saturating_sub(1)
     } else {
         height
     };
-    let at = items.iter().position(|item| is_selected(app, item));
-    let (_, kept, _) = app.drawn.get();
-    let (offset, sticky) = scroll_offset(at, kept, &items, room);
-    // A sticky group header takes the first line, so the rows drawn are one fewer and start a line
-    // lower.
-    let top = usize::from(sticky.is_some());
+    let (mut offset, mut top, mut sticky) = place(room);
+    if room < height && hidden_below(&items, offset + room - top) == 0 {
+        room = height;
+        (offset, top, sticky) = place(room);
+    }
     let room_for_rows = room - top;
     app.drawn.set((area.y + top as u16, offset, room_for_rows));
     let places = if columns.has(Col::Where) {
@@ -2160,6 +2169,29 @@ mod tests {
             );
             assert!(at >= line, "{screen}");
         }
+    }
+
+    #[test]
+    fn with_no_row_hidden_below_there_is_no_more_line_and_the_list_uses_the_line() {
+        let mut app = three_groups();
+        render(&app, 100, 14);
+        let hidden = render(&app, 100, 14);
+        assert!(hidden.contains("↓ 5 more"), "rows below say so:\n{hidden}");
+        let at_top = list_lines(&hidden).len();
+        press(&mut app, KeyCode::Char('G'));
+        let screen = render(&app, 100, 14);
+        assert!(!screen.contains(" more"), "nothing is below:\n{screen}");
+        let lines: Vec<&str> = screen.lines().collect();
+        assert!(lines[lines.len() - 1].starts_with("j/k"), "{screen}");
+        assert!(
+            lines[lines.len() - 2].ends_with("quiet-4 msg"),
+            "the last row sits on the line above the footer:\n{screen}"
+        );
+        assert_eq!(
+            list_lines(&screen).len(),
+            at_top + 1,
+            "the freed line is the list's"
+        );
     }
 
     #[test]
