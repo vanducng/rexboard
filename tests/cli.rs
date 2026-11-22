@@ -3222,6 +3222,28 @@ fn jump_explains_an_app_that_does_not_answer() {
     assert_eq!(error["error"]["next_steps"][1], "rex client ls");
 }
 
+/// What Rex says when the app does not answer a `session.select` in time.
+const SELECT_TIMEOUT: &str = r#"{"ok":false,"step":"session.select","error":"stream response \"control-2\" failed: \"studio\" did not answer within 5s (status=504 code=timeout)"}"#;
+
+#[test]
+fn jump_asks_again_when_the_app_times_out_and_lands_when_it_answers() {
+    let serve = needing();
+    let seq = serve.dir.path().join("jump-seq");
+    std::fs::write(&seq, format!("{SELECT_TIMEOUT}\n{SELECT_TIMEOUT}\n")).unwrap();
+    serve
+        .needing_cmd()
+        .env("FAKE_REX_JUMP_SEQ", &seq)
+        .args(["jump", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("jumped to "));
+    assert_eq!(
+        row(&serve.needing_rows(), "mini/block:seat-old")["seen"],
+        true,
+        "a late success is a landed jump"
+    );
+}
+
 #[test]
 fn jump_without_a_usable_app_says_which_case() {
     let serve = needing();
