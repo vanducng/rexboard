@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.2](https://github.com/vanducng/rexboard/compare/v0.34.1...v0.34.2) (2026-11-22)
+
+
+### Miscellaneous Chores
+
+* release 0.34.2 ([#171](https://github.com/vanducng/rexboard/issues/171)) ([bb4ef09](https://github.com/vanducng/rexboard/commit/bb4ef0940c56943c5e4e3cd717c245a9aba4ff43))
+
 ## [0.34.1](https://github.com/vanducng/rexboard/compare/v0.34.0...v0.34.1) (2026-11-21)
 
 
