@@ -1895,8 +1895,9 @@ mod tests {
             "{text}"
         );
         app.went(Err(
-            "the Rex app on studio did not answer within 5s; it does not answer while the \
-             Mac's screen is locked"
+            "the Rex app on studio did not answer through mini within 30s; it may still \
+             switch to the pane. A locked screen or a stalled connection to that host can \
+             cause this."
                 .into(),
         ));
         let text = render(&app, 80, 30);
@@ -1907,11 +1908,27 @@ mod tests {
                 .starts_with("the Rex app on studio"),
             "{text}"
         );
+        let words = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
-            text.contains("screen is locked"),
+            words(&text).contains("can cause this."),
             "wrapped whole in the detail:\n{text}"
         );
         assert!(!text.contains("jump failed: jump failed"), "{text}");
+    }
+
+    #[test]
+    fn the_footer_says_the_jump_waits_for_the_rex_app_by_its_name() {
+        let mut app = app();
+        press(&mut app, KeyCode::Enter);
+        app.waiting_for("studio");
+        let text = render(&app, 140, 30);
+        assert!(
+            text.lines()
+                .last()
+                .unwrap()
+                .starts_with("waiting for the Rex app on studio… · esc stops"),
+            "{text}"
+        );
     }
 
     #[test]

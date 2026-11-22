@@ -10,6 +10,7 @@ impl App {
             return None;
         }
         let row = self.current()?.clone();
+        self.jumping = true;
         self.going = Some(format!(
             "going to {}…",
             path(&labels(&row, true), usize::MAX)
@@ -35,6 +36,7 @@ impl App {
         if self.busy() {
             return None;
         }
+        self.jumping = true;
         self.going = Some("going back…".into());
         Some(Effect::Back)
     }
@@ -404,6 +406,84 @@ mod tests {
         ));
         app.went(Ok("jumped to api › claude on local".into()));
         assert_eq!(app.toast(), Some("jumped to api › claude on local"));
+    }
+
+    #[test]
+    fn esc_stops_a_jump_that_waits_for_the_app_and_the_board_stays_as_it_was() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('/'));
+        for c in "seat".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        press(&mut app, KeyCode::Enter);
+        let selected = app.selected.clone();
+        press(&mut app, KeyCode::Enter);
+        app.waiting_for("studio");
+        assert_eq!(
+            app.going.as_deref(),
+            Some("waiting for the Rex app on studio… · esc stops")
+        );
+        press(&mut app, KeyCode::Char('j'));
+        assert_ne!(
+            app.selected, selected,
+            "the list stays usable while it waits"
+        );
+        assert!(matches!(
+            press(&mut app, KeyCode::Esc),
+            Some(Effect::GiveUp)
+        ));
+        app.went(Ok("stopped waiting for the Rex app".into()));
+        assert_eq!(app.toast(), Some("stopped waiting for the Rex app"));
+        assert!(app.going.is_none() && app.failed.is_none());
+        assert_eq!(app.filter.value(), "seat", "esc cleared nothing else");
+        assert!(
+            !matches!(press(&mut app, KeyCode::Esc), Some(Effect::GiveUp)),
+            "with nothing to wait for, esc is the board's again"
+        );
+    }
+
+    #[test]
+    fn in_pick_esc_stops_the_wait_before_it_leaves() {
+        let mut idle = app();
+        idle.pick = true;
+        press(&mut idle, KeyCode::Enter);
+        assert!(
+            matches!(press(&mut idle, KeyCode::Esc), Some(Effect::Quit)),
+            "it leaves a list"
+        );
+        let mut slow = app();
+        slow.pick = true;
+        press(&mut slow, KeyCode::Enter);
+        slow.waiting_for("studio");
+        assert!(matches!(
+            press(&mut slow, KeyCode::Esc),
+            Some(Effect::GiveUp)
+        ));
+    }
+
+    #[test]
+    fn under_once_and_pick_q_and_esc_give_up_a_jump_still_in_flight_and_only_then() {
+        for key in [KeyCode::Char('q'), KeyCode::Esc] {
+            let mut idle = app();
+            idle.once = true;
+            assert!(
+                matches!(press(&mut idle, key), Some(Effect::Quit)),
+                "idle {key:?}"
+            );
+            let mut flying = app();
+            flying.once = true;
+            press(&mut flying, KeyCode::Enter);
+            assert!(
+                matches!(press(&mut flying, key), Some(Effect::GiveUp)),
+                "in flight {key:?}"
+            );
+        }
+        let mut board = app();
+        press(&mut board, KeyCode::Enter);
+        assert!(
+            !matches!(press(&mut board, KeyCode::Char('q')), Some(Effect::GiveUp)),
+            "the resident board keeps q for itself, and esc only stops a wait"
+        );
     }
 
     #[test]

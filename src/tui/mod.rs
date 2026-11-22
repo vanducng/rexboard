@@ -174,13 +174,13 @@ pub fn run(open: &OpenArgs) -> Result<()> {
     board(false, false, open).map(drop)
 }
 
-/// `rexboard board --once`: the whole board. A jump that lands leaves it and goes to the row;
-/// `q` gives up.
+/// `rexboard board --once`: the whole board. A jump goes to the row and, once it has landed,
+/// leaves the board; `q` gives up.
 pub fn once(open: &OpenArgs, json: bool) -> Result<()> {
     choose(false, open, json)
 }
 
-/// `rexboard pick`: the list alone. Enter leaves it and goes to the row; esc gives up.
+/// `rexboard pick`: the list alone. Enter goes to the row and leaves it; esc gives up.
 pub fn pick(open: &OpenArgs, json: bool) -> Result<()> {
     choose(true, open, json)
 }
@@ -190,12 +190,11 @@ fn choose(pick: bool, open: &OpenArgs, json: bool) -> Result<()> {
     stop_on_signals();
     watchdog();
     let row = board(pick, true, open)?.ok_or(Error::Cancelled)?;
-    jump::go(&row)?;
     jump::done(&row, json);
     Ok(())
 }
 
-/// Runs the board until it quits, or, when `once`, until a jump chooses a row.
+/// Runs the board until it quits, or, when `once`, until a jump to a row has landed: the row.
 fn board(pick: bool, once: bool, open: &OpenArgs) -> Result<Option<Row>> {
     // Before start_app, whose `--view` asks serve, and the subscriber thread: either may restart
     // serve and say so.
@@ -206,6 +205,15 @@ fn board(pick: bool, once: bool, open: &OpenArgs) -> Result<Option<Row>> {
     let (tx, rx) = mpsc::channel();
     let generation = Arc::new(AtomicU64::new(0));
     listen(&tx, &generation);
+    // Under `once`, a jump runs here while the board stays up to say it waits, and answers here.
+    let (landed_tx, landed_rx) = mpsc::channel::<Result<Row>>();
+    let land = |row: Row| {
+        jump::rearm();
+        let (tx, landed_tx) = (tx.clone(), landed_tx.clone());
+        thread::spawn(move || {
+            let _ = landed_tx.send(effects::go(&row, &tx).map(|()| row));
+        });
+    };
     let mut terminal = ratatui::init();
     let _restore = Restore;
     let mut tick = Instant::now();
@@ -228,7 +236,7 @@ fn board(pick: bool, once: bool, open: &OpenArgs) -> Result<Option<Row>> {
                         let before = pick.then(|| app.view_sort());
                         match app.handle(key) {
                             Some(Effect::Quit) => return Ok(None),
-                            Some(Effect::Jump(row)) if once => return Ok(Some(*row)),
+                            Some(Effect::Jump(row)) if once => land(*row),
                             Some(Effect::Back) if once => {
                                 let tx = tx.clone();
                                 thread::spawn(move || {
@@ -261,13 +269,20 @@ fn board(pick: bool, once: bool, open: &OpenArgs) -> Result<Option<Row>> {
                 None => return Ok(None),
             }
             if let Some(row) = app.chosen.take() {
-                return Ok(Some(row));
+                if !app.jumping {
+                    return Err(Error::Cancelled);
+                }
+                app.going = Some("going back…".into());
+                land(row);
+            }
+            if let Ok(landed) = landed_rx.try_recv() {
+                return landed.map(Some);
             }
             let now = Instant::now();
             let (due, effect) = app.number_due(now);
             changed |= due;
             match effect {
-                Some(Effect::Jump(row)) if once => return Ok(Some(*row)),
+                Some(Effect::Jump(row)) if once => land(*row),
                 Some(effect) => act(effect, &tx, &generation),
                 None => {}
             }

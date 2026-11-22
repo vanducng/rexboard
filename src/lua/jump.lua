@@ -32,9 +32,9 @@ local _, perr = api.call("client.perform", {
   action = "session.select",
   args = { session_id = a.session_id, window_id = a.window_id },
   origin = "api",
-  -- Under rexboard's 10s limit on rex do, so an app that does not answer (as on a locked
-  -- screen) fails here with its own reason.
-  timeout_ms = 5000,
+  -- Under rexboard's 10s limit on rex do, so an app that does not answer fails here with its
+  -- own reason, and rexboard decides whether to ask again.
+  timeout_ms = a.select_ms or 5000,
 })
 if perr then return fail("session.select", perr) end
 return { ok = true }
