@@ -27,7 +27,7 @@ serve reads the label into `ask` (string or null), only when the sub-record is n
 
 The row keeps the `?` look, matches `fq`, and stays in NEEDS YOU even after being seen. `/ask:decision` selects only that label, `/ask:` any label, and `/kind:question` includes on-screen questions too. The card shows the label as a fact. Answering still reads the screen: a finished turn with an input line offers text, not numbered choices. A decision answered elsewhere stays blocked until the pane's next prompt.
 
-An older rexboard counts `ask` as a child, or takes it as the status when there is no main record. Upgrade the host running serve before enabling the rule on agent hosts. Plain Rex panes running pi 1.5.1, Claude Code or Codex are not promoted: their native status still wins and a finished turn stays `done`. pi's native `done` arrives after the hook's `ask`, so that label is stale and `ask` is `null`. The hook uses no delay or retry to override native reports.
+Upgrade the host running serve before enabling the rule on agent hosts. Plain Rex panes running pi 1.5.1, Claude Code or Codex are not promoted: their native status still wins and a finished turn stays `done`. pi's native `done` arrives after the hook's `ask`, so that label is stale and `ask` is `null`. The hook uses no delay or retry to override native reports.
 
 ## Usage on every host
 
@@ -40,7 +40,7 @@ An older rexboard counts `ask` as a child, or takes it as the status when there 
 - `REXBOARD_NO_USAGE_REPORT=1` in the agent's environment turns the sending off.
 - A hook tells Rex its usage only when its own status took under 500 ms, so a slow tmux can cost a report but never the status inside the 5 s an agent gives a hook. The local usage file is kept either way.
 
-A rexboard older than this does not know the record. It counts it as a child record of the pane (in `ls --json` only), and for a pane that has no status record of its own it takes the usage record for the pane's status: the row shows `done`, `native` and the raw JSON as its message, until the pane reports a status. Upgrade the host that runs serve first, then the others. A running agent picks the hooks up only when it next starts, so a host's panes show usage after its rexboard is upgraded and each agent has been started again; nothing here asks you to restart one.
+Upgrade the host that runs serve first, then the others. A running agent picks the hooks up only when it next starts, so a host's panes show usage after its rexboard is upgraded and each agent has been started again; nothing here asks you to restart one.
 
 ## Setting it up
 

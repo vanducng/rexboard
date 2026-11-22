@@ -50,7 +50,7 @@ field."session-prefix.project" = "api-?"
 | `hooks.ask.reply` | string | none | A line appended to the question in the reported message |
 | `hooks.ask.label` | string | `decision` | The `ask` label on a matching row |
 
-A `[jump]` table is ignored, so an old config that still has one loads.
+A `[jump]` table is ignored.
 
 ## `[[mark]]`
 
@@ -81,7 +81,7 @@ label = "decision"
 
 At `Stop`, [`rexboard hook`](cli.md#rexboard-hook) checks the first non-blank line of the last assistant message. If it starts with `pattern`, the pane reports `blocked` with kind `question`. Its message is that line, plus `reply` when set, joined with ` ⏎ `. The `ask` field carries `label`, defaulting to `decision`. The card shows `ask decision`; `/ask:decision` separates it from an on-screen dialog. It stays in NEEDS YOU after a jump until the next prompt clears it.
 
-The rule applies where the hook owns the pane's status: inside tmux, including agent and human seats. In plain Rex panes, pi 1.5.1, Claude Code and Codex report natively, so a finished turn stays `done` for now. pi's native `done` lands after its hook; any older `ask` is ignored, leaving `ask: null`. The hook does not delay or retry to override it. The hook reads this host's config on each `Stop`, so no agent restart is needed for a rule change. No match, no rule, an unreadable or invalid config, or a blank pattern or label leaves today's `done` behavior. A bad config adds one error line to `REXBOARD_HOOK_LOG`, without its contents. The rule runs no command and reads no screen or transcript. Upgrade serve's host first ([Agent status](agent-status.md#decision-signals)).
+The rule applies where the hook owns the pane's status: inside tmux, including agent and human seats. In plain Rex panes, pi 1.5.1, Claude Code and Codex report natively, so a finished turn stays `done`. pi's native `done` lands after its hook; any older `ask` is ignored, leaving `ask: null`. The hook does not delay or retry to override it. The hook reads this host's config on each `Stop`, so no agent restart is needed for a rule change. No match, no rule, an unreadable or invalid config, or a blank pattern or label leaves the pane's own `done` status. A bad config adds one error line to `REXBOARD_HOOK_LOG`, without its contents. The rule runs no command and reads no screen or transcript. Upgrade serve's host first ([Agent status](agent-status.md#decision-signals)).
 
 ## When a change takes effect
 
