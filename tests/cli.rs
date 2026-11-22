@@ -2324,6 +2324,39 @@ fn board_once_waits_for_a_slow_app_and_exits_0_when_it_answers() {
 }
 
 #[test]
+fn board_once_and_pick_give_up_a_jump_in_flight_on_q_and_esc_and_nothing_lands_late() {
+    for (args, key) in [
+        (vec!["board", "--once"], "q"),
+        (vec!["board", "--once"], "\x1b"),
+        (vec!["pick"], "\x1b"),
+    ] {
+        let serve = needing();
+        let ran = on_pty_env(
+            &args,
+            Some(&serve),
+            &["seat-old"],
+            &["\r", key],
+            Some(libc::SIGTERM),
+            false,
+            &[("FAKE_REX_JUMP_SLEEP", "2")],
+        );
+        let what = format!("{args:?} {key:?}: {:?}", ran.out);
+        assert!(!ran.alive, "{what}");
+        assert_eq!(ran.status.code(), Some(1), "{what}");
+        std::thread::sleep(std::time::Duration::from_millis(2600));
+        assert!(
+            !serve.log_lines().iter().any(|line| line == "landed"),
+            "the jump was stopped, not left to switch the pane after the popup closed: {what}"
+        );
+        assert_eq!(
+            row(&serve.needing_rows(), "mini/block:seat-old")["seen"],
+            false,
+            "{what}"
+        );
+    }
+}
+
+#[test]
 fn board_once_exits_1_when_esc_stops_the_wait_and_when_the_wait_runs_out() {
     let serve = needing();
     let ran = once_slow(&serve, &[SELECT_TIMEOUT], "20000", &[], &["\r"]);
