@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.3](https://github.com/vanducng/rexboard/compare/v0.34.2...v0.34.3) (2026-11-22)
+
+
+### Bug Fixes
+
+* **tui:** keep the group name on top when the list scrolls ([#173](https://github.com/vanducng/rexboard/issues/173)) ([6fc986c](https://github.com/vanducng/rexboard/commit/6fc986c7725619861e55448ff08c1684d8d791de))
+
 ## [0.34.2](https://github.com/vanducng/rexboard/compare/v0.34.1...v0.34.2) (2026-11-22)
 
 
