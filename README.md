@@ -2,7 +2,7 @@
 
 An attention board for the coding agents running in your [Rex](https://www.superlogical.com/rex/docs) panes, across every Rex host: which one is working, blocked or done, for how long, and a jump to its pane.
 
-<img alt="A rexboard demo over two hosts, mini and studio, with 11 agent panes: NEEDS YOU is on top across hosts; v and :se switch to the session view; / narrows the list by text; f and a letter shows one status; * marks favorites and f* shows only them; + keeps two session groups and f+ shows only those, with / narrowing inside them; n and a digit move between rows. Each scene has a caption." src="docs/assets/demo.gif" width="100%">
+<img alt="A rexboard demo over three hosts, this one, mini and studio, with 13 agent panes: NEEDS YOU is on top across hosts; v and :se switch to the session view; / narrows the list by text; f and a letter shows one status; * marks favorites and f* shows only them; + keeps two session groups and f+ shows only those, with / narrowing inside them and esc clearing the text but keeping the groups; n and a digit move between rows. Each scene has a caption." src="docs/assets/demo.gif" width="100%">
 
 ## Install
 

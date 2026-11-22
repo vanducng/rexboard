@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Records the README demo, docs/assets/demo.cast and demo.gif: the board over two private,
-# throwaway Rex servers labelled mini and studio, driven with tmux keys.
+# Records the README demo, docs/assets/demo.cast and demo.gif: the board over three private,
+# throwaway Rex hosts, this one, mini and studio, driven with tmux keys.
 #
 # Nothing here touches your own Rex server or rexboard: three Rex servers (this host, mini and
 # studio), rexboard serve and the board run under a temporary HOME and XDG dirs, every one of
@@ -152,7 +152,7 @@ cat >"$root/pane.sh" <<'PANE'
 seat=$1 go=$2
 # Each harness reports under its own app name.
 case "$seat" in
-  seat-b | seat-e | seat-j) app=codex ;;
+  seat-b | seat-e | seat-j | seat-m) app=codex ;;
   seat-i) app=grok-build ;;
   seat-g) app=pi ;;
   *) app=claude-code ;;
@@ -205,6 +205,14 @@ case "$seat" in
     title "⠋ seat-j@demo"; printf '● Running the integration suite.\n'
     usage '{"v":1,"m":"gpt-5.1-codex","e":"high","c":47,"w":400000,"t":188000}'
     report working "Running the integration suite" ;;
+  seat-l)
+    title "⠋ seat-l@demo"; printf '● Rotating the logs.\n'
+    usage '{"v":1,"m":"claude-sonnet-4-5","e":"low","c":31,"w":200000,"t":62000,"u":0.27}'
+    report working "Rotating the logs" ;;
+  seat-m)
+    title "✳ seat-m@demo"; printf 'Ready.\n'
+    usage '{"v":1,"m":"gpt-5.1-codex","e":"medium","c":13,"w":400000,"t":52000}'
+    report idle "Waiting for input" ;;
   seat-k)
     title "✳ seat-k@demo"; printf '● Release notes drafted.\n'
     usage '{"v":1,"m":"claude-opus-4-5","e":"medium","c":28,"w":200000,"t":56000,"u":0.49}'
@@ -233,13 +241,16 @@ pane mini claude seat-h new docs --window guides
 pane mini "$grok" seat-i run -s docs --focus=false
 pane mini codex seat-j new web --window deploy
 pane mini claude seat-k run -s web --focus=false
+pane local claude seat-l new ops --window monitor
+pane local codex seat-m run -s ops --focus=false
 sleep 1
 # Tab labels, by the seat each pane titles itself with, on each server.
 label_tabs() {
   as "$1" rex do - >/dev/null <<'LUA'
 local tabs = { ["seat-a"] = "build", ["seat-b"] = "review", ["seat-c"] = "deploy", ["seat-d"] = "docs",
   ["seat-e"] = "notes", ["seat-f"] = "build", ["seat-g"] = "infra", ["seat-h"] = "guides",
-  ["seat-i"] = "notes", ["seat-j"] = "deploy", ["seat-k"] = "release" }
+  ["seat-i"] = "notes", ["seat-j"] = "deploy", ["seat-k"] = "release",
+  ["seat-l"] = "monitor", ["seat-m"] = "backups" }
 rex.call("session.attach_all", { event_scope = "session" })
 for _, s in ipairs(rex.call("session.list").sessions or {}) do
   for _, b in ipairs((rex.call("session.list_blocks", { session_id = s.session_id }) or {}).blocks or {}) do
@@ -253,6 +264,7 @@ for _, s in ipairs(rex.call("session.list").sessions or {}) do
 end
 LUA
 }
+label_tabs local
 label_tabs mini
 label_tabs studio
 
@@ -260,10 +272,10 @@ label_tabs studio
 "$board" ls >/dev/null 2>&1 || true
 for _ in $(seq 1 100); do
   n=$("$board" ls --json 2>/dev/null | "$py" -c 'import json, sys; print(len(json.load(sys.stdin)))' 2>/dev/null || echo 0)
-  [[ "$n" == 11 ]] && break
+  [[ "$n" == 13 ]] && break
   sleep 0.2
 done
-[[ "$n" == 11 ]] || { echo "the board has $n rows, not 11" >&2; exit 1; }
+[[ "$n" == 13 ]] || { echo "the board has $n rows, not 13" >&2; exit 1; }
 
 cast="$root/demo.cast"
 # The board runs in one tmux session whose status line carries the scene captions; asciinema
@@ -302,7 +314,7 @@ touch "$go"
 
 # Seven scenes, each with a caption. Digits select the row with that number, as `1`-`99` do by
 # default. There is no jump scene: a jump needs a Rex app, and a private server has none.
-cap "1/7  The board across hosts: what needs you is on top, whichever host runs it"
+cap "1/7  The board across three hosts: what needs you is on top, whichever host runs it"
 sleep 9
 cap "2/7  v steps through the views, :se opens the session view"
 k v; sleep 2.2; k v; sleep 2; k :; lit "se"; sleep 0.5; k Enter; sleep 3.5
@@ -311,12 +323,11 @@ k /; lit "api"; k Enter; sleep 4.5; k Escape; sleep 2.5
 cap "4/7  f and a letter shows one status: p permission, d done"
 k f p; sleep 4; k f f; sleep 1.2; k f d; sleep 4; k f f; sleep 2
 cap "5/7  * marks a pane as a favorite, f* shows only the marked rows"
-k 4 '*'; sleep 1.5; k 9 '*'; sleep 1.8; k f '*'; sleep 4.5; k f f; sleep 2
-cap "6/7  + keeps a group, f+ shows only the kept ones, / narrows inside them"
-k 1 '+'; sleep 1.5; k 6 '+'; sleep 1.8; k f '+'; sleep 4; k /; lit "claude"; k Enter; sleep 4; k Escape; sleep 1.5; k f '+'; sleep 2.5
+k 4 '*'; sleep 1.5; k 11 '*'; sleep 1.8; k f '*'; sleep 4.5; k f f; sleep 2
+cap "6/7  + keeps a group, f+ shows only the kept ones, / narrows inside them, esc keeps them"
+k 1 '+'; sleep 1.5; k 6 '+'; sleep 1.8; k f '+'; sleep 4; k /; lit "claude"; k Enter; sleep 4; k Escape; sleep 3.5; k f '+'; sleep 2.5
 cap "7/7  n walks the rows that need you, a digit picks a row"
-k n; sleep 3; k n; sleep 3; k 3; sleep 3.5
-sleep 2.5
+k n; sleep 3; k n; sleep 3; k 3; sleep 3
 "$tmux" -L "$demo_sock" kill-server
 for _ in $(seq 1 300); do "$tmux" -L "$rec_sock" has-session -t rec 2>/dev/null || break; sleep 0.1; done
 
