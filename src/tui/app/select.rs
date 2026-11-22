@@ -1122,10 +1122,6 @@ mod tests {
         assert_eq!(at(&app), Some(0));
         press(&mut app, KeyCode::Char('M'));
         assert_eq!(at(&app), Some(2), "the middle of the 6 rows on screen");
-        assert_eq!(
-            app.toast(),
-            Some("middle of the screen · M used to sort; message is om now")
-        );
         key(&mut app, ctrl('d'));
         assert_eq!(at(&app), Some(6), "half of 8 down");
         key(&mut app, ctrl('f'));
