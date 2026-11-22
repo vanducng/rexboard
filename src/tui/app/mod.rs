@@ -245,6 +245,9 @@ pub struct App {
     /// Where the list's rows were last drawn: the first row's line, the first item shown, and
     /// how many rows fit. The draw sets it, so a click can find the row under it.
     pub drawn: std::cell::Cell<(u16, usize, usize)>,
+    /// The first item the list keeps its place by, apart from the line a `↓ N more` would give
+    /// back: what the next draw starts from, so a draw with no key gives the same frame.
+    pub scrolled: std::cell::Cell<usize>,
     /// Whether the list was drawn with blank rows between its groups, which it is while they fit.
     pub spaced: std::cell::Cell<bool>,
     /// When each hideable column last had a value in the filtered list, so one that loses its

@@ -468,24 +468,30 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
     app.spaced.set(gaps > 0 && items.len() + gaps <= height);
     let items = app.items();
     let at = items.iter().position(|item| is_selected(app, item));
-    let (_, kept, _) = app.drawn.get();
-    // The last line says how many rows are below, but only when some are: with none hidden it goes
-    // to the list.
-    let place = |room: usize| {
-        let (offset, sticky) = scroll_offset(at, kept, &items, room);
-        // A sticky group header takes the first line, so the rows drawn are one fewer and start a
-        // line lower.
-        (offset, usize::from(sticky.is_some()), sticky)
-    };
+    // The more line takes the last line while the items overflow. The first layout decides where
+    // the list is (`scrolled`, kept for the next draw); when no row is hidden below, the line is
+    // given to the list instead, and the window only reaches one item further up.
     let mut room = if items.len() > height {
         height.saturating_sub(1)
     } else {
         height
     };
-    let (mut offset, mut top, mut sticky) = place(room);
+    let (mut offset, mut sticky) = scroll_offset(at, app.scrolled.get(), &items, room);
+    app.scrolled.set(offset);
+    let mut top = usize::from(sticky.is_some());
     if room < height && hidden_below(&items, offset + room - top) == 0 {
-        room = height;
-        (offset, top, sticky) = place(room);
+        let freed = [offset.saturating_sub(1), offset]
+            .into_iter()
+            .find_map(|first| {
+                let sticky = sticky_header(&items, first, height);
+                let top = usize::from(sticky.is_some());
+                let fits = first + height - top >= items.len()
+                    && at.is_none_or(|at| (first..first + height - top).contains(&at));
+                fits.then_some((first, sticky, top))
+            });
+        if let Some((first, above, rows_top)) = freed {
+            (room, offset, sticky, top) = (height, first, above, rows_top);
+        }
     }
     let room_for_rows = room - top;
     app.drawn.set((area.y + top as u16, offset, room_for_rows));
@@ -549,13 +555,10 @@ fn list(frame: &mut Frame, area: Rect, app: &App, board: Rect, now: DateTime<Utc
                 ),
             }),
     );
-    if room < height {
+    let hidden = hidden_below(&items, offset + room_for_rows);
+    if hidden > 0 {
         lines.push(Line::styled(
-            format!(
-                "{} {} more",
-                theme::MORE,
-                hidden_below(&items, offset + room_for_rows)
-            ),
+            format!("{} {hidden} more", theme::MORE),
             theme::quiet(),
         ));
     }
@@ -2209,9 +2212,11 @@ mod tests {
     fn walk_is_consistent(height: u16) {
         let mut app = three_groups();
         render(&app, 100, height);
+        let jumps = "GHjLMkknG".chars().map(KeyCode::Char);
         let walk = (0..13)
             .map(|_| KeyCode::Char('j'))
-            .chain((0..13).map(|_| KeyCode::Char('k')));
+            .chain((0..13).map(|_| KeyCode::Char('k')))
+            .chain(jumps);
         for code in walk {
             press(&mut app, code);
             let screen = render(&app, 100, height);
