@@ -1910,6 +1910,51 @@ mod tests {
         assert!(top.contains("2 hosts · 4 panes · 4 agents"), "{top}");
     }
 
+    /// Three groups of four rows that do not fit a 14-line screen.
+    fn three_groups() -> App {
+        let mut app = App::default();
+        let mut rows = Vec::new();
+        for (group, state, seen) in [
+            ("needs_you", "blocked", false),
+            ("working", "working", true),
+            ("quiet", "idle", true),
+        ] {
+            for n in 1..=4 {
+                rows.push(row(&format!("local/{group}-{n}"), state, group, seen));
+            }
+        }
+        app.set_rows(rows, hosts());
+        app
+    }
+
+    /// Presses `code` and draws, as the board does, so the next key sees where the list is.
+    fn step(app: &mut App, code: KeyCode, height: u16) -> String {
+        press(app, code);
+        render(app, 100, height)
+    }
+
+    #[test]
+    fn the_first_group_is_named_again_when_the_selection_walks_back_up_to_its_first_row() {
+        let mut app = three_groups();
+        let mut screen = render(&app, 100, 14);
+        for _ in 0..9 {
+            screen = step(&mut app, KeyCode::Char('j'), 14);
+        }
+        assert!(!screen.contains("NEEDS YOU"), "scrolled past it:\n{screen}");
+        for _ in 0..9 {
+            screen = step(&mut app, KeyCode::Char('k'), 14);
+        }
+        assert_eq!(
+            app.selected,
+            Some(Spot::Row("local/needs_you-1".into())),
+            "{screen}"
+        );
+        assert!(
+            screen.lines().any(|l| l.starts_with("NEEDS YOU (4)")),
+            "the first row shows with its group named:\n{screen}"
+        );
+    }
+
     #[test]
     fn rows_below_the_list_are_counted() {
         let text = render(&fuller(), 80, 14);
