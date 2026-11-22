@@ -471,3 +471,9 @@ It reads and writes [`tui.json`](#tuijson) and [`board.json`](#boardjson) as the
 | `q` | close a layer, else quit | exits 1 |
 
 Every other key does the same in both: moving, `gg`/`G`, `H`/`M`/`L`, paging, `]`/`[`, `1`-`9` and `g1`-`g9`, `enter`, `'`, `*`, `+`, `/`, `f`, `:`, `v`/`V`, `o`, the folds, `m`, `yy`/`yp`, `R` and `?`. The `?` table of a `pick` lists keys it does not take.
+
+### Open it from Rex
+
+[`examples/rex/rexboard.lua`](../examples/rex/rexboard.lua) opens `board --once` on `ctrl+x` then `f` from any pane: one Rex action that builds a focused floating layer, about 84% of the window, over the window the key was pressed in, and closes with the board. Over a zoomed pane the popup is the same size and the pane is zoomed again when you close it without a jump. An error the board printed stays up until `enter`. The same file keeps the variants as one table (`--status marked`, `--view session`, `--keep session=api`), each bound with `{ variant = "name" }`, and [`examples/`](../examples/README.md) has the config and `tui.json` that go with it.
+
+The layer runs on the host that owns the pane. On a pane of another Rex host the popup is that host's rexboard, with its own `config.toml`, favorites and `board.json`. For one board everywhere, run rexboard on every host, or wrap the command (an `ssh` to the host that holds your board); that part is yours to set up.

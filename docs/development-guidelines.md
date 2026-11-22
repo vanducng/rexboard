@@ -7,6 +7,7 @@ Setup, the checks, conventions and pull request rules are in [CONTRIBUTING](../C
 - `src/main.rs` parses and reports errors. `src/lib.rs` dispatches.
 - `src/cli.rs` is the clap surface and the agent contract. Help text changes are interface changes.
 - `src/error.rs` is the error type: a code, a message, and `next_steps`.
+- `examples/` holds the files users copy ([README](../examples/README.md)): a Rex popup binding, config and `tui.json` settings, an extension. Tests keep them working.
 
 [System architecture](system-architecture.md#pieces) maps the rest.
 
@@ -17,7 +18,8 @@ Setup, the checks, conventions and pull request rules are in [CONTRIBUTING](../C
 | Unit | `#[cfg(test)]` modules next to the code | Pure logic |
 | CLI | `tests/cli.rs` | The real binary against `tests/fixtures/fake-rex`, its output, and exit codes |
 | Hooks | `tests/hooks.rs` | `rexboard hook` and `rexboard hooks`, run as an agent runs them: a fake `tmux`, and a fake home with each harness's settings |
-| Lua | `tests/lua.rs` | `observer.lua` and `send.lua` under a Lua interpreter, against a stand-in for Rex's API |
+| Lua | `tests/lua.rs` | `observer.lua` and `send.lua`, and the Rex popup example `examples/rex/rexboard.lua`, under a Lua interpreter, against a stand-in for Rex's API |
+| Examples | `tests/examples.rs` | The settings in `examples/rexboard/`, read by the real binary |
 | Direction | `tests/direction.rs` | The docs: every JSON sample parses, `docs/cli.md` names every command and flag, no private path or host, the decisions index is whole |
 
 Three tests read files you may edit:
