@@ -44,19 +44,19 @@ Agents straight in a Rex pane report on their own. Inside tmux they need hooks: 
 - **Read the board.** Rows grouped by what needs you, with a turn card (`c`) under the list that shows what the agent said. [TUI](docs/tui.md)
 - **Change the view.** `v` steps through status, table, harness, host, session and one view per extension field; `o` sorts by a column. [Views](docs/tui.md#views)
 - **Filter.** `/` narrows by text, `f` by status. [Status filter](docs/tui.md#status-filter)
-- **Mark rows and keep favorites.** `*` makes a pane a favorite, `'` goes to the marked rows, and `[[mark]]` rules in `config.toml` mark more. [Marked rows](docs/tui.md#marked-rows)
-- **Keep groups.** `+` keeps a group and `f+` shows only the kept ones, so a board of many sessions shows the few you work in. [Kept groups](docs/tui.md#kept-groups)
-- **Jump.** `enter` goes to a pane on whichever host owns it, `1`-`99` pick a row by its number, and `rexboard board --once` is a popup that closes when you land. [Digits](docs/tui.md#digits), [Popup](docs/tui.md#popup)
-- **Answer and close.** `a` answers a dialog or an input line, `dd` closes a pane, `x` runs an extension's action. [Answer mode](docs/tui.md#answer-mode), [Actions](docs/tui.md#actions)
-- **Script it.** Every command takes `--json`: `ls`, `watch`, `show`, `answer`, `close`, `jump`, `next`, `pick`. [CLI](docs/cli.md)
+- **Mark rows and keep favorites.** `*` marks a pane, `'` goes to the marked rows. [Marked rows](docs/tui.md#marked-rows)
+- **Keep groups.** `+` keeps a group, `f+` shows only the kept ones. [Kept groups](docs/tui.md#kept-groups)
+- **Jump.** `enter` goes to the pane on whichever host owns it; `1`-`99` pick a row, `board --once` is a popup. [Digits](docs/tui.md#digits), [Popup](docs/tui.md#popup)
+- **Answer and close.** `a` answers, `dd` closes a pane, `x` runs an extension's action. [Answer mode](docs/tui.md#answer-mode), [Actions](docs/tui.md#actions)
+- **Script it.** `ls`, `watch`, `show`, `answer`, `close` and `jump` take `--json`. [CLI](docs/cli.md)
 - **Add columns from any tool.** An extension reads rows and returns fields, marks and actions. [Extensions](docs/extensions.md)
-- **Catch a decision.** In tmux, a `[hooks.ask]` rule makes a finished turn that asks for a decision show as blocked, and `/ask:` finds those rows. [Decision signals](docs/agent-status.md#decision-signals)
-- **See what an agent spent.** `MODEL`, `CTX` and `EFFORT` show when an agent reports them, and `tui.json` adds `TOK`, `COST` and `5H`, all from `rexboard usage`. [Usage on every host](docs/agent-status.md#usage-on-every-host)
-- **Wire up hooks.** `rexboard hooks install` puts the hook and usage commands into Claude Code, Codex and pi. [Setting it up](docs/agent-status.md#setting-it-up)
+- **Catch a decision.** A `[hooks.ask]` rule shows a turn that asks for one as blocked. [Decision signals](docs/agent-status.md#decision-signals)
+- **See what an agent spent.** Model, context, tokens and cost columns, from `rexboard usage`. [Usage on every host](docs/agent-status.md#usage-on-every-host)
+- **Wire up hooks.** `rexboard hooks install` sets up Claude Code, Codex and pi. [Setting it up](docs/agent-status.md#setting-it-up)
 
 ## How it works
 
-<img alt="rexboard architecture: agents (Claude Code, Codex, pi, grok) report their state to Rex, on their own in a Rex pane, or, in tmux and in pi, through rexboard hook, and rexboard usage writes their usage records to the state dir. Rex runs observer.lua on this host and every host in rex hosts and streams NDJSON to rexboard serve. serve keeps state on disk, runs the extensions (rows in, fields out) and answers the board, pick and the CLI over a unix socket; an extension's action runs from a client. Writes go to one pane you chose: a jump, an answer and a close act through Rex on the pane's host, and a jump then asks the Rex app to show the pane" src="docs/assets/architecture.svg" width="100%">
+<img alt="How agents, Rex, rexboard serve and the clients fit together" src="docs/assets/architecture.svg" width="100%">
 
 rexboard reads Rex and writes to a pane you chose, through Rex: a jump, an answer or a close. It also writes its own state files, and the hook settings of the agents it names when you run `hooks install`. [System architecture](docs/system-architecture.md) has the details.
 

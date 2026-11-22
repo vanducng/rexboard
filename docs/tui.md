@@ -447,9 +447,7 @@ A grouped view can hold many groups: the `session` view on three hosts shows abo
 
 `rexboard pick` shows the same list, with the same column header, without the turn card, at every width. It takes the keys that choose a row, not the ones that act on a pane or open the card; [Popup](#popup) lists them, and `rexboard board --once` is the board with every key for a popup. Enter goes to the selected pane and exits 0; esc exits 1. `/` filters, as on the board. `rexboard pick --filter`, `--status`, `--view` and `--keep` open it already narrowed, `f*` keeps the marked rows (see [Marked rows](#marked-rows)), and `+` and `f+` keep groups for its run (see [Kept groups](#kept-groups)); `pick` keeps a `--view` for its next run, as it keeps one chosen with `v`, once the view or sort changes.
 
-<a id="popup"></a>
-
-## Popup (`board --once`)
+## Popup
 
 `rexboard board --once` runs the whole board for one choice, for a floating pane that should close once you have gone somewhere: every key of the board works (the turn card on `c`, the full view, answer mode, `dd`, extension actions, `m`), and a jump that lands leaves it. These jumps exit 0, after going to the pane and marking it seen: `enter`, `'`, a digit under `"digits": "jump"` (see [Digits](#digits)), `g` and a digit, and `-`; `--json` prints the jump as `pick` does.
 

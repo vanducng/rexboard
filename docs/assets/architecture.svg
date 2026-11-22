@@ -1,6 +1,6 @@
-    <svg id="architecture" viewBox="0 0 960 504" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="architecture-title architecture-desc">
+    <svg id="architecture" viewBox="0 0 960 528" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="architecture-title architecture-desc">
       <title id="architecture-title">rexboard architecture</title>
-      <desc id="architecture-desc">Agents report their state to Rex, on their own in a Rex pane or through rexboard hook in tmux. Rex on every host streams it to rexboard serve, which keeps state on disk, runs the extensions and feeds the board, pick and the CLI. Those act on one pane you chose through Rex, and a jump asks the Rex app to show it.</desc>
+      <desc id="architecture-desc">Agents (Claude Code, Codex, pi, grok) report their state to Rex on their own in a Rex pane, or through rexboard hook in tmux; rexboard usage writes their usage records to the state dir. Rex runs observer.lua on this host and every host in rex hosts and streams NDJSON to rexboard serve, which keeps state on disk, runs the extensions (rows in, fields out) and answers the board, pick and the CLI over a unix socket. The clients also read a pane straight through Rex, for the card's tail and the full view, and write to one pane you chose: a jump, an answer and a close act through Rex on the pane's host, and a jump then asks the Rex app to show it.</desc>
       <defs>
         <style>
         #architecture { --paper: #f5f5f5; --ink: #2d3142; --muted: #4f5d75; --soft: #5f6b80; --accent: #eb6c36; --accent-tint: rgba(235,108,54,0.08); --box: #ffffff; --wash: rgba(45,49,66,0.03); --wash2: rgba(45,49,66,0.05); --line: rgba(45,49,66,0.30); --zone-fill: rgba(45,49,66,0.02); --zone-stroke: rgba(45,49,66,0.14); }
@@ -12,7 +12,7 @@
         #architecture .external { fill: var(--wash); stroke: var(--line); }
         #architecture .backend { fill: var(--box); stroke: var(--ink); }
         #architecture .store { fill: var(--wash2); stroke: var(--muted); }
-        #architecture .focal { fill: var(--accent-tint); stroke: var(--accent); stroke-width: 1.5; }
+        #architecture .focal { fill: var(--box); stroke: var(--ink); stroke-width: 2; }
         #architecture .name { fill: var(--ink); font: 600 12px 'Geist', ui-sans-serif, system-ui, sans-serif; }
         #architecture .sub { fill: var(--muted); font: 400 9px 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
         #architecture .alabel { fill: var(--soft); font: 400 8px 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0.06em; }
@@ -54,8 +54,10 @@
       <rect class="mask" x="706" y="212" width="76" height="12" rx="2"/><text class="alabel" x="744" y="221" text-anchor="middle">ROWS · FIELDS</text>
       <path class="arrow dash" d="M872,184 V272" marker-end="url(#arrow)"/>
       <rect class="mask" x="880" y="222" width="48" height="12" rx="2"/><text class="alabel" x="904" y="231" text-anchor="middle">ACTIONS</text>
-      <path class="arrow write" d="M832,88 V40 Q832,32 824,32 H432 Q424,32 424,40 V88" marker-end="url(#arrow-accent)"/>
-      <rect class="mask" x="590" y="12" width="76" height="12" rx="2"/><text class="alabel" x="628" y="21" text-anchor="middle">ACT ON A PANE</text>
+      <path class="arrow write" d="M832,88 V52 Q832,44 824,44 H432 Q424,44 424,52 V88" marker-end="url(#arrow-accent)"/>
+      <rect class="mask" x="590" y="38" width="76" height="12" rx="2"/><text class="alabel" x="628" y="47" text-anchor="middle">ACT ON A PANE</text>
+      <path class="arrow" d="M888,88 V32 Q888,24 880,24 H400 Q392,24 392,32 V88" marker-end="url(#arrow)"/>
+      <rect class="mask" x="606" y="18" width="68" height="12" rx="2"/><text class="alabel" x="640" y="27" text-anchor="middle">READS A PANE</text>
       <path class="arrow write" d="M376,184 V272" marker-end="url(#arrow-accent)"/>
       <rect class="mask" x="384" y="222" width="80" height="12" rx="2"/><text class="alabel" x="424" y="231" text-anchor="middle">SHOW THE PANE</text>
       <rect class="mask" x="48" y="88" width="160" height="96" rx="6"/>
@@ -67,9 +69,9 @@
       <rect class="mask" x="48" y="272" width="160" height="96" rx="6"/>
       <rect class="node backend" x="48" y="272" width="160" height="96" rx="6"/>
       <text class="name" x="128" y="299" text-anchor="middle">rexboard hook</text>
-      <text class="sub" x="128" y="320" text-anchor="middle">for tmux and pi</text>
-      <text class="sub" x="128" y="334" text-anchor="middle">status to Rex</text>
-      <text class="sub" x="128" y="348" text-anchor="middle">plus rexboard usage</text>
+      <text class="sub" x="128" y="320" text-anchor="middle">hook: status, in tmux</text>
+      <text class="sub" x="128" y="334" text-anchor="middle">usage: model, tokens</text>
+      <text class="sub" x="128" y="348" text-anchor="middle">run from the agent's hooks</text>
       <rect class="mask" x="296" y="88" width="160" height="96" rx="6"/>
       <rect class="node external" x="296" y="88" width="160" height="96" rx="6"/>
       <text class="name" x="376" y="122" text-anchor="middle">Rex, every host</text>
@@ -83,8 +85,8 @@
       <rect class="mask" x="544" y="88" width="160" height="96" rx="6"/>
       <rect class="node focal" x="544" y="88" width="160" height="96" rx="6"/>
       <text class="name" x="624" y="115" text-anchor="middle">rexboard serve</text>
-      <text class="sub" x="624" y="136" text-anchor="middle">observer per host</text>
-      <text class="sub" x="624" y="150" text-anchor="middle">reducer · adapters</text>
+      <text class="sub" x="624" y="136" text-anchor="middle">a collector per host</text>
+      <text class="sub" x="624" y="150" text-anchor="middle">one reducer</text>
       <text class="sub" x="624" y="164" text-anchor="middle">extension runner</text>
       <rect class="mask" x="752" y="88" width="160" height="96" rx="6"/>
       <rect class="node backend" x="752" y="88" width="160" height="96" rx="6"/>
@@ -107,15 +109,17 @@
       <line class="rule" x1="24" y1="448" x2="936" y2="448"/>
       <text class="legend-head" x="24" y="472">LEGEND</text>
       <path class="arrow" d="M96,468 H132" marker-end="url(#arrow)"/>
-      <text class="legend" x="140" y="471">reads</text>
-      <path class="arrow write" d="M212,468 H248" marker-end="url(#arrow-accent)"/>
-      <text class="legend" x="256" y="471">writes to a pane you chose</text>
-      <path class="arrow dash" d="M424,468 H460" marker-end="url(#arrow)"/>
-      <text class="legend" x="468" y="471">optional path</text>
-      <rect class="node focal" x="632" y="461" width="20" height="14" rx="3"/>
-      <text class="legend" x="660" y="471">focal</text>
-      <rect class="node external" x="716" y="461" width="20" height="14" rx="3"/>
-      <text class="legend" x="744" y="471">outside rexboard</text>
-      <rect class="node store" x="852" y="461" width="20" height="14" rx="3"/>
-      <text class="legend" x="880" y="471">on disk</text>
+      <text class="legend" x="140" y="471">data flow</text>
+      <path class="arrow write" d="M236,468 H272" marker-end="url(#arrow-accent)"/>
+      <text class="legend" x="280" y="471">writes to a pane you chose</text>
+      <path class="arrow dash" d="M468,468 H504" marker-end="url(#arrow)"/>
+      <text class="legend" x="512" y="471">optional path</text>
+      <rect class="node focal" x="96" y="485" width="20" height="14" rx="3"/>
+      <text class="legend" x="124" y="495">focal: rexboard serve</text>
+      <rect class="node backend" x="296" y="485" width="20" height="14" rx="3"/>
+      <text class="legend" x="324" y="495">rexboard's own</text>
+      <rect class="node external" x="456" y="485" width="20" height="14" rx="3"/>
+      <text class="legend" x="484" y="495">outside rexboard</text>
+      <rect class="node store" x="640" y="485" width="20" height="14" rx="3"/>
+      <text class="legend" x="668" y="495">on disk</text>
     </svg>
