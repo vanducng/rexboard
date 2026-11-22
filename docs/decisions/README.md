@@ -40,7 +40,7 @@ These decide between options the records do not cover.
 ## Adding or changing one
 
 1. Copy the shape of any record: a title, `**Status:**` with a date, then Context, Decision, Consequences and Supersedes. Keep it under about 40 lines.
-2. Number it next (`0019-…`), with a short kebab-case name.
+2. Number it one past the last row of the table above, with a short kebab-case name.
 3. A record that replaces another says so under Supersedes, and the old one's status becomes `Superseded by N`. Records are not deleted.
 4. A change that narrows or adds to a record without reversing it may edit that record instead: add `Amended <date>` to its status and say what changed under Supersedes.
 5. Add it to the table above, in the same PR as the change it decides.

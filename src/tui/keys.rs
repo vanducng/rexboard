@@ -67,8 +67,6 @@ pub enum Act {
     Quit,
     /// The full view's way back to the board.
     Leave,
-    /// An old key: says where it went and does nothing else. Gone in the release after next.
-    Moved(&'static str),
 }
 
 /// A key as the table names it: its code, and whether ctrl is held. Shift is in the character.
@@ -110,7 +108,7 @@ pub struct Entry {
     pub jump: Option<(&'static str, &'static str)>,
     /// Every key sequence that does it: one key, or a prefix and a key.
     pub seqs: &'static [&'static [K]],
-    /// How `?` lists the keys; empty when another row lists them, or for a moved key.
+    /// How `?` lists the keys; empty when another row lists them.
     pub keys: &'static str,
     pub help: &'static str,
     /// The footer's word for it, and a prefix's word for its second key.
@@ -300,7 +298,7 @@ pub const BOARD: &[Entry] = &[
         Act::Command,
         &[&[c(':')]],
         ":",
-        "a view, :seen or :q",
+        "a view, :seen, :unkeep, :q",
         "command",
     ),
     e(
@@ -421,72 +419,6 @@ pub const BOARD: &[Entry] = &[
         "close a layer, else quit",
         "quit",
     ),
-    e(Act::Moved("mark seen is m now"), &[&[c('s')]], "", "", ""),
-    e(
-        Act::Moved("mark every done row seen is :seen now"),
-        &[&[ctrl('s')]],
-        "",
-        "",
-        "",
-    ),
-    e(
-        Act::Moved("sort by state is os now"),
-        &[&[c('S')]],
-        "",
-        "",
-        "",
-    ),
-    e(
-        Act::Moved("sort by age is oa now"),
-        &[&[c('A')]],
-        "",
-        "",
-        "",
-    ),
-    e(
-        Act::Moved("sort by turn is ot now"),
-        &[&[c('T')]],
-        "",
-        "",
-        "",
-    ),
-    e(
-        Act::Moved("sort by host is oo now"),
-        &[&[c('O')]],
-        "",
-        "",
-        "",
-    ),
-    e(
-        Act::Moved("sort by where is ow now"),
-        &[&[c('W')]],
-        "",
-        "",
-        "",
-    ),
-    e(
-        Act::Moved("sort by session is oe now"),
-        &[&[c('E')]],
-        "",
-        "",
-        "",
-    ),
-    e(
-        Act::Moved("sort by block is ob now"),
-        &[&[c('B')]],
-        "",
-        "",
-        "",
-    ),
-    e(Act::Moved("reconnect is R now"), &[&[c('r')]], "", "", ""),
-    e(
-        Act::Moved("copy the place is yp now"),
-        &[&[c('Y')]],
-        "",
-        "",
-        "",
-    ),
-    e(Act::Moved("close is dd now"), &[&[ctrl('k')]], "", "", ""),
 ];
 
 /// The board's footer, most needed first; a narrow board drops them from the end.
@@ -657,7 +589,7 @@ mod tests {
     }
 
     /// docs/tui.md names every key the board and the full view bind, each in its own section,
-    /// and the Keys table lists no key the board does not bind, such as a moved one.
+    /// and the Keys table lists no key the board does not bind.
     #[test]
     fn the_tui_doc_names_every_bound_key_and_no_other() {
         let doc = include_str!("../../docs/tui.md");
@@ -666,12 +598,8 @@ mod tests {
             let rest = &doc[start..];
             &rest[..rest.find("\n## ").unwrap_or(rest.len())]
         };
-        let live = |table: &'static [Entry]| {
-            table
-                .iter()
-                .filter(|entry| !matches!(entry.act, Act::Moved(_)))
-                .flat_map(|entry| entry.seqs.iter().copied())
-        };
+        let live =
+            |table: &'static [Entry]| table.iter().flat_map(|entry| entry.seqs.iter().copied());
         for (table, title) in [(BOARD, "## Keys"), (FULL, "## Full view")] {
             let text = section(title);
             for seq in live(table) {
@@ -704,27 +632,18 @@ mod tests {
     }
 
     /// No key or sequence means two things in one layer, and the only chords that act are vim's
-    /// own; an old chord only says where it went.
+    /// own.
     #[test]
     fn every_key_is_bound_once_and_no_chord_is_off_the_list() {
         for table in [BOARD, FULL] {
-            let seqs: Vec<(&[K], Act)> = table
-                .iter()
-                .flat_map(|e| e.seqs.iter().map(|seq| (*seq, e.act)))
-                .collect();
-            for (i, (seq, act)) in seqs.iter().enumerate() {
-                assert!(
-                    !seqs[i + 1..].iter().any(|(other, _)| other == seq),
-                    "{seq:?} is bound twice"
-                );
+            let seqs: Vec<&[K]> = table.iter().flat_map(|e| e.seqs.iter().copied()).collect();
+            for (i, seq) in seqs.iter().enumerate() {
+                assert!(!seqs[i + 1..].contains(seq), "{seq:?} is bound twice");
                 // A prefix key is never an action of its own.
                 assert!(
                     seq.len() == 2 || !starts(table, seq[0]),
                     "{seq:?} is both a key and a prefix"
                 );
-                if matches!(act, Act::Moved(_)) {
-                    continue;
-                }
                 for key in seq.iter().filter(|k| k.1) {
                     let K(KeyCode::Char(ch), _) = key else {
                         panic!("{key:?}");

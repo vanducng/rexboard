@@ -236,8 +236,6 @@ pub struct App {
     pub offered: Vec<Offered>,
     /// An action past its key: its input line or its confirm.
     pub doing: Option<actions::Doing>,
-    /// Keys whose meaning changed (`R`, `M`, `N`), told once a run.
-    told: BTreeSet<char>,
     told_table: bool,
     /// ctrl-e and ctrl-y: the row whose card text is scrolled, and how far. Another row starts
     /// where its card opens.
@@ -594,12 +592,6 @@ impl App {
             Act::First => self.selected = self.spots().first().cloned(),
             Act::Last => self.selected = self.spots().last().cloned(),
             Act::Top | Act::Middle | Act::Bottom => {
-                if act == Act::Middle {
-                    self.tell(
-                        'M',
-                        "middle of the screen · M used to sort; message is om now",
-                    );
-                }
                 self.on_screen(act);
             }
             Act::CardDown => self.card_scroll(1),
@@ -615,10 +607,6 @@ impl App {
             Act::Favorite => return self.favorite(),
             Act::Keep => self.keep_group(),
             Act::PrevNeeds => {
-                self.tell(
-                    'N',
-                    "previous row needing you · N used to sort; window is on now",
-                );
                 return self.next_waiting(now, true);
             }
             Act::Nth | Act::NthOther => {
@@ -667,7 +655,6 @@ impl App {
             Act::CopyMsg => return self.copy(false),
             Act::CopyPlace => return self.copy(true),
             Act::Reconnect => {
-                self.tell('R', "reconnecting · R used to sort; harness is oh now");
                 self.link = Link::Connecting;
                 return Some(Effect::Reconnect);
             }
@@ -686,17 +673,9 @@ impl App {
             // `q` closes the layer in front, and quits only from the bare board.
             Act::Quit if self.keys && k.0 == KeyCode::Char('q') => self.keys = false,
             Act::Quit => return Some(Effect::Quit),
-            Act::Moved(note) => self.say(note),
             Act::Leave => {}
         }
         None
-    }
-
-    /// Says `note` the first time a run presses `key`, whose meaning changed.
-    fn tell(&mut self, key: char, note: &str) {
-        if self.told.insert(key) {
-            self.say(note);
-        }
     }
 }
 
@@ -796,40 +775,30 @@ mod tests {
         assert_eq!(press(&mut app, KeyCode::Char('q')), Some(Effect::Quit));
     }
 
-    /// Each old key says where it went and does nothing else; R, M and N, whose meaning
-    /// changed, act and say so once a run.
+    /// A key that is not bound does nothing and says nothing.
     #[test]
-    fn old_keys_say_where_they_went() {
+    fn a_key_no_longer_bound_does_nothing() {
         let mut app = app();
         app.selected = Some(Spot::Row("local/claude".into()));
-        for (code, said) in [
-            (KeyCode::Char('s'), "mark seen is m now"),
-            (KeyCode::Char('S'), "sort by state is os now"),
-            (KeyCode::Char('r'), "reconnect is R now"),
-            (KeyCode::Char('Y'), "copy the place is yp now"),
+        for code in [
+            KeyCode::Char('s'),
+            KeyCode::Char('S'),
+            KeyCode::Char('r'),
+            KeyCode::Char('Y'),
         ] {
             assert!(press(&mut app, code).is_none(), "{code:?}");
-            assert_eq!(app.toast(), Some(said));
+            assert_eq!(app.toast(), None, "{code:?}");
         }
-        assert_eq!(app.sort, None, "S no longer sorts");
-        for (c, said) in [
-            ('s', "mark every done row seen is :seen now"),
-            ('k', "close is dd now"),
-        ] {
+        for c in ['s', 'k'] {
             assert!(key(&mut app, ctrl(c)).is_none());
-            assert_eq!(app.toast(), Some(said));
+            assert_eq!(app.toast(), None, "ctrl-{c}");
         }
+        assert_eq!(app.sort, None);
         assert!(matches!(
             press(&mut app, KeyCode::Char('R')),
             Some(Effect::Reconnect)
         ));
-        assert_eq!(
-            app.toast(),
-            Some("reconnecting · R used to sort; harness is oh now")
-        );
-        app.toast = None;
-        press(&mut app, KeyCode::Char('R'));
-        assert_eq!(app.toast(), None, "said once a run");
+        assert_eq!(app.toast(), None, "R reconnects without a note");
     }
 
     #[test]

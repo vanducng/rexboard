@@ -16,6 +16,9 @@ Setup, the checks, conventions and pull request rules are in [CONTRIBUTING](../C
 | --- | --- | --- |
 | Unit | `#[cfg(test)]` modules next to the code | Pure logic |
 | CLI | `tests/cli.rs` | The real binary against `tests/fixtures/fake-rex`, its output, and exit codes |
+| Hooks | `tests/hooks.rs` | `rexboard hook` and `rexboard hooks`, run as an agent runs them: a fake `tmux`, and a fake home with each harness's settings |
+| Lua | `tests/lua.rs` | `observer.lua` and `send.lua` under a Lua interpreter, against a stand-in for Rex's API |
+| Direction | `tests/direction.rs` | The docs: every JSON sample parses, `docs/cli.md` names every command and flag, no private path or host, the decisions index is whole |
 
 Three tests read files you may edit:
 
