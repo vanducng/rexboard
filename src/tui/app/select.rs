@@ -273,6 +273,14 @@ impl App {
         rows.take(NUMBERED).collect()
     }
 
+    /// The key of each row drawn on screen, from number 1: what a `#` number means now.
+    pub fn shown_keys(&self) -> Vec<String> {
+        self.numbered()
+            .into_iter()
+            .map(|i| self.rows[i].key.clone())
+            .collect()
+    }
+
     /// `1`-`9`: goes to that row of the screen at once (selects it, or jumps to it with `jump`),
     /// unless a two-digit number starts with it, which waits for the second digit.
     pub(super) fn number_key(&mut self, digit: usize, now: Instant, jump: bool) -> Option<Effect> {

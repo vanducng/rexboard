@@ -11,6 +11,7 @@ mod kept;
 mod keys;
 mod markdown;
 mod meta;
+mod numbers;
 mod prefs;
 pub(crate) mod query;
 pub(crate) mod screen;
@@ -216,6 +217,8 @@ fn board(pick: bool, once: bool, open: &OpenArgs) -> Result<Option<Row>> {
     };
     let mut terminal = ratatui::init();
     let _restore = Restore;
+    // Only the resident board's numbers mean something to a key outside it.
+    let mut numbers = (!once && !pick).then(numbers::Publisher::start);
     let mut tick = Instant::now();
     let mut captured = false;
     loop {
@@ -225,6 +228,13 @@ fn board(pick: bool, once: bool, open: &OpenArgs) -> Result<Option<Row>> {
         terminal
             .draw(|frame| view::draw(frame, &app, chrono::Utc::now()))
             .unwrap_or_else(|_| leave());
+        if let Some(numbers) = &mut numbers {
+            if matches!(app.link, Link::Lost(_)) {
+                numbers.forget();
+            } else {
+                numbers.publish(app.shown_keys());
+            }
+        }
         let mut changed = false;
         while !changed {
             if interrupted() {
@@ -334,6 +344,7 @@ fn terminal_gone() -> bool {
 /// drop when it cannot show the cursor, and printing to a terminal that is gone panics inside
 /// the panic hook, which aborts. A signal can come just before its terminal goes.
 fn leave() -> ! {
+    numbers::clear();
     crate::extension::action::stop_all();
     let _ = mouse_capture(&mut std::io::stdout(), false);
     let _ = ratatui::try_restore();

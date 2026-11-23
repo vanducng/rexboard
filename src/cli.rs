@@ -70,8 +70,17 @@ pub enum Command {
     Jump {
         /// HOST/BLOCK_ID (the `key` from `ls --json`), N for the nth NEEDS YOU row, or `-` for the
         /// pane before the last jump.
-        #[arg(value_name = "TARGET")]
-        target: String,
+        #[arg(value_name = "TARGET", required_unless_present = "shown")]
+        target: Option<String>,
+        /// Go to the row the resident `rexboard board` shows with this number in its `#` column,
+        /// as it shows it now. Exit 1 `NO_BOARD_NUMBERS` when no board is showing numbers.
+        #[arg(long, value_name = "N", conflicts_with = "target")]
+        shown: Option<usize>,
+        /// With `--shown`, for a key that types digits one at a time: exit 3 (`MORE`), doing
+        /// nothing, when the board shows enough rows that a longer number could start with N (10
+        /// or more, for 1); the caller then waits for another digit or enter.
+        #[arg(long, requires = "shown")]
+        partial: bool,
     },
     /// Go to the next pane that needs you, after this one. Exit 1 when nobody needs you.
     Next {

@@ -36,6 +36,11 @@ pub enum Error {
     NobodyNeedsYou,
     #[error("{0}")]
     NoMarkedRow(String),
+    #[error("no board is showing numbers · open rexboard board")]
+    NoBoardNumbers,
+    /// `jump --shown N --partial`: a longer number could follow, so nothing was done.
+    #[error("more digits may follow")]
+    More,
     /// No app, or not exactly one, could take a jump on this host.
     #[error("{message}")]
     AmbiguousClient { message: String, steps: Vec<String> },
@@ -115,6 +120,8 @@ impl Error {
             Self::Refused { .. } => "REFUSED",
             Self::NobodyNeedsYou => "NOBODY_NEEDS_YOU",
             Self::NoMarkedRow(_) => "NO_MARKED_ROW",
+            Self::NoBoardNumbers => "NO_BOARD_NUMBERS",
+            Self::More => "MORE",
             Self::AmbiguousClient { .. } => "AMBIGUOUS_CLIENT",
             Self::Config(_) => "CONFIG",
             Self::Upgrade { .. } => "UPGRADE",
@@ -137,6 +144,7 @@ impl Error {
             Self::NotFound(_) => vec!["rexboard ls --json".to_owned()],
             Self::NobodyNeedsYou => vec!["rexboard ls".to_owned()],
             Self::NoMarkedRow(_) => vec!["rexboard ls --marked".to_owned()],
+            Self::NoBoardNumbers => vec!["rexboard board".to_owned()],
             Self::AmbiguousClient { steps, .. }
             | Self::RexExplained { steps, .. }
             | Self::Upgrade { steps, .. }
@@ -158,12 +166,13 @@ impl Error {
     pub fn exit_code(&self) -> ExitCode {
         match self {
             Self::Usage { .. } | Self::Help | Self::HostsUnreachable(_) => ExitCode::from(2),
+            Self::More => ExitCode::from(3),
             _ => ExitCode::from(1),
         }
     }
 
     pub fn quiet(&self) -> bool {
-        matches!(self, Self::Help | Self::Cancelled)
+        matches!(self, Self::Help | Self::Cancelled | Self::More)
     }
 }
 
@@ -192,7 +201,7 @@ pub fn report(json: bool, err: &Error) {
         eprintln!("{body}");
         return;
     }
-    if let Error::NobodyNeedsYou | Error::NoMarkedRow(_) = err {
+    if let Error::NobodyNeedsYou | Error::NoMarkedRow(_) | Error::NoBoardNumbers = err {
         eprintln!("{err}");
         return;
     }

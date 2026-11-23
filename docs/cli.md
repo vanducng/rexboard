@@ -507,6 +507,8 @@ The hosts serve watches, as the board's top bar sees them: this host as `local` 
 rexboard jump mini/block:web-seat-b   # by the key from ls --json
 rexboard jump 1                       # the first NEEDS YOU row
 rexboard jump -                       # back to the pane before the last jump
+rexboard jump --shown 3               # the row the open board shows as 3
+rexboard jump --shown 1 --partial     # the same, unless a 2-digit number could follow
 rexboard next                         # the next pane that needs you
 rexboard next --back                  # the other way
 rexboard next --marked                # the next marked pane
@@ -528,6 +530,8 @@ Past 30 seconds the jump fails with `REX`, `the Rex app on NAME did not answer t
 
 `next --marked` goes instead to the next marked row (a [`[[mark]]` rule](configuration.md#mark), a [favorite](tui.md#favorites) or an [extension](extensions.md) marked it), in board order, seen or not, starting after the same pane as `next` does and wrapping at the end; `--back` goes the other way. `next --marked SOURCE` walks only the rows that source marked, named as `ls --marked SOURCE` takes it. With no marked row it exits 1 with `no marked row · * marks one, or see [[mark]] in config.toml` (`NO_MARKED_ROW` with `--json`, next step `rexboard ls --marked`), as `next` does when nobody needs you; with a SOURCE no row has, `no row marked by SOURCE · see rexboard ls --marked`.
 
+`jump --shown N` goes to the row the resident [`rexboard board`](tui.md#layout) shows as `N` in its `#` column right now, for a key outside the board (a Rex binding). It reads the numbering the board gave serve, scans nothing in Rex, and then jumps as `jump KEY` does. The last board drawn wins; a board that exits, or is no longer running, shows nothing. With no board showing numbers it fails with `NO_BOARD_NUMBERS`, and `board --once` and `pick` never publish. `--partial`, for a key that types digits one at a time, exits 3 (`MORE`) and does nothing, printing only `{"more":true}` with `--json`, when a longer number could start with `N` (the board shows `N` times ten rows or more, so `1` with 10 rows); the caller then waits for another digit or enter and asks again. Otherwise it jumps and exits 0.
+
 `jump -` goes to the pane the jump before the last one went to, and the two swap, as `cd -` does, so a second `jump -` comes back. Every jump counts: `jump`, `next`, `pick`, and the board's `enter` and `-`.
 
 `pick` opens the board's list without the turn card: Enter jumps and exits 0, esc exits 1. It takes `--filter`, `--status`, `--view` and `--keep` as `board` does. [TUI](tui.md#pick) has the rest.
@@ -538,13 +542,15 @@ Past 30 seconds the jump fails with `REX`, `the Rex app on NAME did not answer t
 | --- | --- |
 | 0 | Jumped |
 | 1 | An error code, below. `pick`: esc |
+| 3 | `MORE`: `jump --shown N --partial`, when a longer number could follow |
 | 2 | `USAGE`: TARGET is neither a key, a number nor `-`, `pick` without a terminal, or `pick --view`, `--status` or `--keep` names nothing |
 
 Exit 1 is one of:
 
 - `NOBODY_NEEDS_YOU`: `next`, or `jump N`, with nothing in `needs_you`; prints `nobody needs you`.
 - `NO_MARKED_ROW`: `next --marked` with no marked row (or none marked by the SOURCE given); prints `no marked row · * marks one, or see [[mark]] in config.toml`, or `no row marked by SOURCE · see rexboard ls --marked`.
-- `NOT_FOUND`: no such key, no row N, or for `jump -`, `no previous jump yet` or `previous pane is gone`.
+- `NO_BOARD_NUMBERS`: `jump --shown` with no resident board showing numbers; prints `no board is showing numbers · open rexboard board`.
+- `NOT_FOUND`: no such key, no row N (`no row N · rows 1-M on the board` for `--shown`), or for `jump -`, `no previous jump yet` or `previous pane is gone`.
 - `AMBIGUOUS_CLIENT`: no app client named, and none or more than one on the unix socket; the message says which, and the next steps name each app (`open the Rex app` when there is none).
 - `CONFIG`: config.toml cannot be read or has an unknown key, or `client` names no app.
 - `REX`: a step in Rex failed; the message names it.

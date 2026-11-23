@@ -413,6 +413,7 @@ fn parse(line: &str) -> Result<Value> {
             Some("NOT_FOUND") => Error::NotFound(message),
             Some("NOBODY_NEEDS_YOU") => Error::NobodyNeedsYou,
             Some("NO_MARKED_ROW") => Error::NoMarkedRow(message),
+            Some("NO_BOARD_NUMBERS") => Error::NoBoardNumbers,
             Some("USAGE") => Error::usage_with(message, &["rexboard --help"]),
             code => Error::serve(format!("{}: {message}", code.unwrap_or("ERROR"))),
         });

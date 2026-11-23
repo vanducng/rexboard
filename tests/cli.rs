@@ -3457,7 +3457,7 @@ fn jump_shown_goes_to_the_row_the_board_published_as_that_number() {
         .args(["--json", "jump", "--shown", "1"])
         .assert()
         .success()
-        .stdout(format!("{{\"key\":\"{OLD}\",\"ok\":true}}\n"));
+        .stdout(format!("{{\"ok\":true,\"key\":\"{OLD}\"}}\n"));
 }
 
 #[test]
@@ -3514,7 +3514,8 @@ fn jump_shown_names_the_numbers_there_are_when_there_is_no_such_row() {
 #[test]
 fn the_board_drawn_last_is_the_one_jump_shown_follows_and_only_its_own_exit_clears_it() {
     let serve = needing();
-    let (first, second) = (std::process::id(), std::process::id() + 1);
+    // Two running processes stand for two boards.
+    let (first, second) = (std::process::id(), std::os::unix::process::parent_id());
     publish(&serve, first, &[OLD]);
     publish(&serve, second, &[NEW]);
     let shown = || {
@@ -3533,6 +3534,13 @@ fn the_board_drawn_last_is_the_one_jump_shown_follows_and_only_its_own_exit_clea
         String::from_utf8(shown()).unwrap().contains(NEW),
         "the first board's exit does not clear the second's numbers"
     );
+    unpublish(&serve, second);
+    serve
+        .needing_cmd()
+        .args(["jump", "--shown", "1"])
+        .assert()
+        .code(1)
+        .stderr("no board is showing numbers · open rexboard board\n");
 }
 
 #[test]
@@ -3615,12 +3623,12 @@ fn jump_shown_reads_serves_state_and_scans_nothing_before_the_jump() {
 
 /// `jump --shown N` while `board ARGS` is on a pty, once it has drawn: its stdout, and its exit
 /// code (when `wait` is set, until the numbers show).
-fn shown_during(serve: &Serve, args: &[&str], n: &str, wait: bool) -> (String, i32) {
+fn shown_during(serve: &Serve, args: &[&str], on_screen: &str, wait: bool) -> (String, i32) {
     let result = std::cell::RefCell::new((String::new(), 0));
     let ask = || {
         let out = serve
             .needing_cmd()
-            .args(["--json", "jump", "--shown", n])
+            .args(["--json", "jump", "--shown", "1"])
             .output()
             .unwrap();
         (
@@ -3639,7 +3647,7 @@ fn shown_during(serve: &Serve, args: &[&str], n: &str, wait: bool) -> (String, i
     let ran = on_pty_env(
         args,
         Some(serve),
-        &["seat-old"],
+        &[on_screen],
         &[],
         Some(libc::SIGTERM),
         false,
@@ -3653,11 +3661,17 @@ fn shown_during(serve: &Serve, args: &[&str], n: &str, wait: bool) -> (String, i
 #[test]
 fn the_resident_board_publishes_what_it_shows_and_clears_it_when_it_exits() {
     let serve = needing();
-    let (out, code) = shown_during(&serve, &["board"], "1", true);
+    let (out, code) = shown_during(&serve, &["board"], "seat-old", true);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains(r#""ok":true"#), "{out}");
-    let key = out.split('"').nth(3).unwrap().to_owned();
-    assert!(key.starts_with("mini/block:seat-"), "{out}");
+    let said: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert!(
+        said["key"]
+            .as_str()
+            .unwrap()
+            .starts_with("mini/block:seat-"),
+        "{out}"
+    );
     serve
         .needing_cmd()
         .args(["jump", "--shown", "1"])
@@ -3669,7 +3683,12 @@ fn the_resident_board_publishes_what_it_shows_and_clears_it_when_it_exits() {
 #[test]
 fn the_numbers_a_board_publishes_follow_its_view() {
     let serve = needing();
-    let (out, code) = shown_during(&serve, &["board", "--filter", "seat-done"], "1", true);
+    let (out, code) = shown_during(
+        &serve,
+        &["board", "--filter", "seat-done"],
+        "seat-done",
+        true,
+    );
     assert_eq!(code, 0, "{out}");
     assert!(
         out.contains("mini/block:seat-done"),
@@ -3681,7 +3700,7 @@ fn the_numbers_a_board_publishes_follow_its_view() {
 fn board_once_and_pick_publish_nothing() {
     let serve = needing();
     for args in [vec!["board", "--once"], vec!["pick"]] {
-        let (out, code) = shown_during(&serve, &args, "1", false);
+        let (out, code) = shown_during(&serve, &args, "seat-old", false);
         assert_eq!(code, 1, "{args:?}: {out}");
         assert!(out.is_empty(), "{args:?}: {out}");
     }

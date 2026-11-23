@@ -93,6 +93,16 @@ enum Request {
     },
     /// The pane the jump before the last one went to, for `jump -`.
     Back,
+    /// The resident board `owner` (its pid) shows these rows, by key, as numbers 1, 2, 3…; no
+    /// keys means it shows none any more.
+    Numbers {
+        owner: i32,
+        keys: Option<Vec<String>>,
+    },
+    /// The row the board shows as number `n`, and how many it shows.
+    Shown {
+        n: usize,
+    },
     Stop,
     /// Which rexboard this serve is, so a newer client can replace it.
     Version,
@@ -231,6 +241,20 @@ fn connection(stream: UnixStream, tx: &Sender<Msg>) {
     }
 }
 
+/// What a resident board shows: the key of each row from number 1, and when it said so.
+struct Numbering {
+    owner: i32,
+    keys: Vec<String>,
+    drawn: Instant,
+}
+
+/// Whether a process with this pid is running.
+fn alive(pid: i32) -> bool {
+    pid > 0
+        && (unsafe { libc::kill(pid, 0) } == 0
+            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM))
+}
+
 fn error_line(code: &str, message: &str) -> Value {
     json!({ "v": VERSION, "error": { "code": code, "message": message } })
 }
@@ -260,6 +284,9 @@ struct Reducer {
     suspects: BTreeSet<(String, String)>,
     /// The keys the last two jumps went to, older first, kept in state.json.
     jumps: Vec<String>,
+    /// What the resident board drawn last shows. Held in memory only: a number means something
+    /// while a board shows it, so it goes with the board, and with serve.
+    numbering: Option<Numbering>,
     rows_due: Option<Instant>,
     save_due: Option<Instant>,
     extensions: Running,
@@ -396,6 +423,7 @@ impl Reducer {
             rows_cache: None,
             suspects: BTreeSet::new(),
             jumps: saved.jumps,
+            numbering: None,
             rows_due: None,
             save_due: None,
             extensions: Running::new(ext_tx),
@@ -908,10 +936,63 @@ impl Reducer {
                 on,
             ),
             Request::Back => self.back(),
+            Request::Numbers { owner, keys } => {
+                match keys {
+                    Some(keys) => {
+                        self.numbering = Some(Numbering {
+                            owner,
+                            keys,
+                            drawn: Instant::now(),
+                        });
+                    }
+                    None if self.numbering.as_ref().is_some_and(|n| n.owner == owner) => {
+                        self.numbering = None;
+                    }
+                    None => {}
+                }
+                json!({ "v": VERSION, "ok": true })
+            }
+            Request::Shown { n } => self.shown(n),
             Request::Stop => unreachable!("handled in run"),
             Request::Version => unreachable!("answered by the connection"),
         };
         offer(&reply, &line.to_string());
+    }
+
+    /// The row the board shows as `n`, from the numbering it last published, and how many rows
+    /// it shows. A board that is no longer running shows nothing, whatever it said last.
+    fn shown(&mut self, n: usize) -> Value {
+        if self.numbering.as_ref().is_some_and(|b| !alive(b.owner)) {
+            self.numbering = None;
+        }
+        let Some(numbering) = &self.numbering else {
+            return error_line(
+                "NO_BOARD_NUMBERS",
+                "no board is showing numbers · open rexboard board",
+            );
+        };
+        let count = numbering.keys.len();
+        let Some(key) = n.checked_sub(1).and_then(|i| numbering.keys.get(i)) else {
+            return error_line(
+                "NOT_FOUND",
+                &format!("no row {n} · rows 1-{count} on the board"),
+            );
+        };
+        match self
+            .board
+            .rows(chrono::Utc::now())
+            .into_iter()
+            .find(|row| row.key == *key)
+        {
+            Some(row) => json!({
+                "v": VERSION, "row": row, "count": count,
+                "drawn_ms_ago": numbering.drawn.elapsed().as_millis() as u64,
+            }),
+            None => error_line(
+                "NOT_FOUND",
+                &format!("row {n} is gone · the board will redraw"),
+            ),
+        }
     }
 
     /// The row of the jump before the last: going there makes it the last, so a second `jump -`
