@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.0](https://github.com/vanducng/rexboard/compare/v0.35.0...v0.36.0) (2026-11-23)
+
+
+### Features
+
+* **marks:** give a pane a letter and jump to it with jump [@a](https://github.com/a) ([#182](https://github.com/vanducng/rexboard/issues/182)) ([2b48bd9](https://github.com/vanducng/rexboard/commit/2b48bd9810b65fcfa723ad05f324749bb45dc288))
+
 ## [0.35.0](https://github.com/vanducng/rexboard/compare/v0.34.5...v0.35.0) (2026-11-23)
 
 
