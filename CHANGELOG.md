@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.0](https://github.com/vanducng/rexboard/compare/v0.34.5...v0.35.0) (2026-11-23)
+
+
+### Features
+
+* **jump:** jump to the row the board shows with --shown ([#180](https://github.com/vanducng/rexboard/issues/180)) ([c641548](https://github.com/vanducng/rexboard/commit/c641548e49ad0be843e608ff19e1f737ad553c6a))
+
 ## [0.34.5](https://github.com/vanducng/rexboard/compare/v0.34.4...v0.34.5) (2026-11-23)
 
 
