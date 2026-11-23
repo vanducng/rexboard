@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.5](https://github.com/vanducng/rexboard/compare/v0.34.4...v0.34.5) (2026-11-23)
+
+
+### Bug Fixes
+
+* **hooks:** keep a pi subagent's child run from reporting into its parent's pane ([#178](https://github.com/vanducng/rexboard/issues/178)) ([097f912](https://github.com/vanducng/rexboard/commit/097f912d492ee22e90a85c9d35680389bf6f0f12))
+
 ## [0.34.4](https://github.com/vanducng/rexboard/compare/v0.34.3...v0.34.4) (2026-11-22)
 
 
