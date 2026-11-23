@@ -11,6 +11,12 @@ export function reporting(env) {
   return Boolean(env.TMUX || env.REX_BLOCK || /^(tmux|screen)/.test(env.TERM ?? ""));
 }
 
+// A run with `--mode json` is read by the program that started it (a subagent), not by a person
+// in a pane, though it inherits the pane's environment: it must not report as the pane's pi.
+export function child(ctx) {
+  return ctx?.mode === "json";
+}
+
 export function textOf(message) {
   return (message?.content ?? [])
     .filter((part) => part?.type === "text")
@@ -63,14 +69,14 @@ export default function rexboard(pi) {
   const send = (args, payload) => (queue = queue.then(() => run(args, payload)));
   const hook = (event) => send(["hook", "pi"], event);
 
-  pi.on("session_start", async () => {
-    hook({ hook_event_name: "SessionStart" });
+  pi.on("session_start", async (_event, ctx) => {
+    if (!child(ctx)) hook({ hook_event_name: "SessionStart" });
   });
 
-  pi.on("agent_start", async () => {
+  pi.on("agent_start", async (_event, ctx) => {
     last = "";
     failure = undefined;
-    hook({ hook_event_name: "UserPromptSubmit" });
+    if (!child(ctx)) hook({ hook_event_name: "UserPromptSubmit" });
   });
 
   pi.on("message_end", async (event) => {
@@ -84,6 +90,7 @@ export default function rexboard(pi) {
 
   // The context is final only at a turn's end; TOK is the last message's prompt side.
   pi.on("turn_end", async (_event, ctx) => {
+    if (child(ctx)) return;
     send(["usage", "pi"], {
       model: ctx?.model?.id,
       effort: pi.getThinkingLevel?.(),
@@ -93,10 +100,12 @@ export default function rexboard(pi) {
     });
   });
 
-  pi.on("agent_settled", async () => hook(settled(last, failure)));
+  pi.on("agent_settled", async (_event, ctx) => {
+    if (!child(ctx)) await hook(settled(last, failure));
+  });
 
   // Without a UI (`pi -p`) the session ends with its one run, whose result should stay up.
   pi.on("session_shutdown", async (_event, ctx) => {
-    if (ctx?.hasUI) await hook({ hook_event_name: "SessionEnd" });
+    if (ctx?.hasUI && !child(ctx)) await hook({ hook_event_name: "SessionEnd" });
   });
 }
