@@ -6281,3 +6281,344 @@ fn a_program_path_is_the_extensions_not_the_callers_in_ext_test_and_ext_run() {
         "ext run started bin/send from the extension's directory"
     );
 }
+
+/// A serve whose only host, mini, has these `(block, label)` panes in one tab of session `web`.
+fn panes_serve(panes: &[(&str, &str)]) -> Serve {
+    let serve = Serve::new();
+    std::fs::write(
+        serve.dir.path().join("observer-studio-quiet.ndjson"),
+        "{\"v\":1,\"type\":\"snapshot\",\"rex_version\":\"0.0.1-test\",\"sessions\":[]}\n",
+    )
+    .unwrap();
+    let blocks: Vec<_> = panes
+        .iter()
+        .map(|(id, label)| {
+            serde_json::json!({ "block_id": id, "label": label, "title": "", "process": {},
+            "records": [{ "state": "done", "app": "claude-code", "msg": "ok",
+                          "updated_at": "2026-01-01T00:10:00Z" }] })
+        })
+        .collect();
+    let snapshot = serde_json::json!({ "v": 1, "type": "snapshot", "rex_version": "0.0.1-test",
+        "sessions": [{ "session_id": "session:web", "label": "web", "windows": [
+            { "window_id": "window:web-a", "label": "build", "blocks": blocks }] }] });
+    std::fs::write(
+        serve.dir.path().join("observer-mini-needing.ndjson"),
+        format!("{snapshot}\n"),
+    )
+    .unwrap();
+    eventually("mini's rows", || serve.needing_rows().len() == panes.len());
+    serve
+}
+
+impl Serve {
+    /// `rexboard mark ARGS`, run in the pane `block` (REX_BLOCK) when given.
+    fn mark(&self, block: Option<&str>, args: &[&str]) -> assert_cmd::assert::Assert {
+        let mut cmd = self.needing_cmd();
+        if let Some(block) = block {
+            cmd.env("REX_BLOCK", block);
+        }
+        cmd.arg("--json").arg("mark").args(args).assert()
+    }
+
+    /// `mark ls --json`, as an array of `{letter, ...}`.
+    fn letters(&self) -> Vec<serde_json::Value> {
+        let out = self
+            .mark(None, &["ls"])
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        serde_json::from_slice(&out).unwrap()
+    }
+
+    fn held(&self, letter: &str) -> Option<String> {
+        self.letters()
+            .iter()
+            .find(|entry| entry["letter"] == letter)
+            .and_then(|entry| entry["key"].as_str().map(str::to_owned))
+    }
+}
+
+#[test]
+fn mark_set_gives_the_pane_it_runs_in_a_letter_kept_by_labels_across_a_restart() {
+    let serve = needing();
+    serve
+        .mark(Some("block:seat-old"), &["set", "a"])
+        .success()
+        .stdout(predicate::str::contains(r#""letter":"a""#));
+    assert_eq!(serve.held("a").as_deref(), Some(OLD));
+    let file = std::fs::read_to_string(serve.file("letters.json")).unwrap();
+    assert!(
+        file.contains("seat-old") && file.contains("build"),
+        "{file}"
+    );
+    assert!(
+        !file.contains("block:"),
+        "labels, not a block id that Rex hands out again: {file}"
+    );
+    let rows = serve.needing_rows();
+    let old = row(&rows, OLD);
+    assert_eq!(old["letter"], "a", "{old}");
+    assert_eq!(old["marked"], true);
+    assert_eq!(old["marked_by"], serde_json::json!(["letter"]));
+    assert_eq!(row(&rows, NEW)["marked"], false);
+    serve.cmd().args(["serve", "--stop"]).assert().success();
+    eventually("the letter after a restart", || {
+        serve.held("a").as_deref() == Some(OLD)
+    });
+}
+
+#[test]
+fn mark_set_takes_a_key_and_only_a_to_z() {
+    let serve = needing();
+    serve.mark(None, &["set", "b", "--key", NEW]).success();
+    assert_eq!(serve.held("b").as_deref(), Some(NEW));
+    for bad in ["A", "ab", "1", "-", ""] {
+        serve
+            .mark(Some("block:seat-old"), &["set", bad])
+            .code(2)
+            .stderr(predicate::str::contains("a letter from a to z"));
+    }
+    serve
+        .mark(None, &["set", "c"])
+        .code(2)
+        .stderr(predicate::str::contains("REX_BLOCK"));
+    serve
+        .mark(None, &["set", "c", "--key", "mini/block:nope"])
+        .code(1)
+        .stderr(predicate::str::contains("no pane mini/block:nope"));
+}
+
+#[test]
+fn a_letter_set_again_moves_to_the_new_pane_and_a_pane_holds_one_letter() {
+    let serve = needing();
+    serve.mark(Some("block:seat-old"), &["set", "a"]).success();
+    serve.mark(Some("block:seat-new"), &["set", "a"]).success();
+    assert_eq!(serve.held("a").as_deref(), Some(NEW), "it moved, as in vim");
+    assert_eq!(serve.letters().len(), 1);
+    assert_eq!(row(&serve.needing_rows(), OLD)["marked"], false);
+    serve.mark(Some("block:seat-new"), &["set", "b"]).success();
+    assert_eq!(serve.held("a"), None, "the pane's letter is now b");
+    assert_eq!(serve.held("b").as_deref(), Some(NEW));
+    assert_eq!(row(&serve.needing_rows(), NEW)["letter"], "b");
+}
+
+#[test]
+fn mark_clear_frees_a_letter_and_one_nobody_holds_is_not_found() {
+    let serve = needing();
+    serve.mark(Some("block:seat-old"), &["set", "a"]).success();
+    serve.mark(None, &["clear", "a"]).success();
+    assert!(serve.letters().is_empty());
+    assert_eq!(row(&serve.needing_rows(), OLD)["marked"], false);
+    serve
+        .mark(None, &["clear", "a"])
+        .code(1)
+        .stderr(predicate::str::contains(
+            "no pane holds mark a · rexboard mark ls",
+        ));
+}
+
+#[test]
+fn mark_ls_lists_each_letter_with_its_labels_and_says_when_its_pane_is_not_on_the_board() {
+    let serve = needing();
+    let dir = serve.file("letters.json");
+    std::fs::create_dir_all(dir.parent().unwrap()).unwrap();
+    std::fs::write(
+        &dir,
+        r#"{"letters":[{"letter":"z","host":"mini","session":"web","tab":"build","pane":"closed","seen":4102444800}]}"#,
+    )
+    .unwrap();
+    serve.cmd().args(["serve", "--stop"]).assert().success();
+    serve.mark(Some("block:seat-new"), &["set", "b"]).success();
+    serve.mark(Some("block:seat-old"), &["set", "a"]).success();
+    let letters = serve.letters();
+    let names: Vec<_> = letters
+        .iter()
+        .map(|l| l["letter"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["a", "b", "z"], "in letter order");
+    assert_eq!(letters[0]["pane"], "seat-old");
+    assert_eq!(letters[0]["on_board"], true);
+    assert_eq!(letters[2]["on_board"], false, "{}", letters[2]);
+    assert_eq!(letters[2]["key"], serde_json::Value::Null);
+    let text = serve.needing_cmd().args(["mark", "ls"]).assert().success();
+    let text = String::from_utf8(text.get_output().stdout.clone()).unwrap();
+    assert!(text.contains("a  mini › web › build › seat-old"), "{text}");
+    assert!(text.contains("not on the board"), "{text}");
+}
+
+#[test]
+fn a_pane_with_no_label_of_its_own_cannot_hold_a_letter() {
+    let serve = panes_serve(&[("block:unnamed", "")]);
+    serve
+        .mark(Some("block:unnamed"), &["set", "a"])
+        .code(2)
+        .stderr(predicate::str::contains(
+            "this pane has no label of its own; label it in Rex to give it a letter",
+        ));
+    assert!(!serve.file("letters.json").exists());
+}
+
+#[test]
+fn panes_that_share_labels_all_show_the_letter_and_jump_goes_to_the_first() {
+    let serve = panes_serve(&[("block:one", "seat-a"), ("block:two", "seat-a")]);
+    serve.mark(Some("block:two"), &["set", "a"]).success();
+    let rows = serve.needing_rows();
+    assert!(rows.iter().all(|row| row["letter"] == "a"), "{rows:?}");
+    serve.needing_cmd().args(["jump", "@a"]).assert().success();
+    assert_eq!(last_jump(&serve).as_deref(), Some("block:one"));
+}
+
+#[test]
+fn jump_at_a_goes_to_the_pane_holding_the_letter_and_marks_it_seen() {
+    let serve = needing();
+    serve.mark(Some("block:seat-new"), &["set", "q"]).success();
+    serve
+        .needing_cmd()
+        .args(["jump", "@q"])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("jumped to "));
+    assert_eq!(last_jump(&serve).as_deref(), Some("block:seat-new"));
+    assert!(seen(&serve, NEW));
+    assert!(!seen(&serve, OLD));
+    serve
+        .needing_cmd()
+        .args(["--json", "jump", "@q"])
+        .assert()
+        .success()
+        .stdout(format!("{{\"ok\":true,\"key\":\"{NEW}\"}}\n"));
+}
+
+#[test]
+fn jump_at_a_says_which_of_the_two_things_is_wrong() {
+    let serve = needing();
+    serve
+        .needing_cmd()
+        .args(["jump", "@a"])
+        .assert()
+        .code(1)
+        .stderr("error: no pane holds mark a · rexboard mark ls\nnext: rexboard mark ls\n");
+    let file = serve.file("letters.json");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(
+        &file,
+        r#"{"letters":[{"letter":"a","host":"mini","session":"web","tab":"build","pane":"closed","seen":4102444800}]}"#,
+    )
+    .unwrap();
+    serve.cmd().args(["serve", "--stop"]).assert().success();
+    serve
+        .needing_cmd()
+        .args(["--json", "jump", "@a"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("NOT_FOUND"))
+        .stderr(predicate::str::contains(
+            "mark a's pane is not on the board",
+        ));
+    serve
+        .needing_cmd()
+        .args(["jump", "@ab"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("a letter from a to z"));
+    assert!(serve.jumps().is_empty(), "nothing was jumped to");
+}
+
+#[test]
+fn letter_is_a_mark_source_for_ls_the_filter_and_next() {
+    let serve = needing();
+    serve.mark(Some("block:seat-new"), &["set", "n"]).success();
+    serve.mark(Some("block:seat-done"), &["set", "d"]).success();
+    favorite(&serve, "mini", "web", "seat-new", true);
+    assert_eq!(
+        ls_keys(&serve, &["--marked", "letter"]),
+        ["seat-new", "seat-done"]
+    );
+    assert_eq!(
+        ls_keys(&serve, &["--filter", "mark:letter"]),
+        ["seat-new", "seat-done"]
+    );
+    assert_eq!(
+        ls_keys(&serve, &["--marked", "favorite"]),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        row(&serve.needing_rows(), NEW)["marked_by"],
+        serde_json::json!(["letter"]),
+    );
+    assert_eq!(
+        serve.next(&["--marked", "letter"], None),
+        "mini/block:seat-new"
+    );
+    assert_eq!(
+        serve.next(&["--marked", "letter"], None),
+        "mini/block:seat-done"
+    );
+    assert_eq!(
+        serve.next(&["--marked", "letter"], None),
+        "mini/block:seat-new",
+        "round again"
+    );
+}
+
+#[test]
+fn a_letter_comes_after_the_other_sources() {
+    let serve = needing_with("[[mark]]\nblock = \"seat-old\"\n");
+    favorite(&serve, "mini", "web", "seat-old", true);
+    serve.mark(Some("block:seat-old"), &["set", "a"]).success();
+    assert_eq!(
+        row(&serve.needing_rows(), OLD)["marked_by"],
+        serde_json::json!(["config", "favorite", "letter"])
+    );
+}
+
+#[test]
+fn the_board_sets_a_letter_on_the_selected_row_with_a_quote_then_a_letter_and_a_dash_clears_it() {
+    let serve = needing();
+    let ran = on_pty(
+        &["board"],
+        Some(&serve),
+        &["seat-old"],
+        &["\"", "a"],
+        Some(libc::SIGTERM),
+        false,
+    );
+    assert!(
+        ran.out.contains("a-z sets"),
+        "the footer shows the wait: {}",
+        ran.out
+    );
+    eventually("the letter", || serve.letters().len() == 1);
+    let key = serve.held("a").expect("a is held");
+    assert!(key.starts_with("mini/block:seat-"), "{key}");
+    on_pty(
+        &["board"],
+        Some(&serve),
+        &["seat-old"],
+        &["\"", "-"],
+        Some(libc::SIGTERM),
+        false,
+    );
+    eventually("the letter cleared", || serve.letters().is_empty());
+}
+
+#[test]
+fn a_quote_then_esc_or_a_key_that_is_no_letter_sets_nothing() {
+    let serve = needing();
+    let ran = on_pty(
+        &["board"],
+        Some(&serve),
+        &["seat-old"],
+        &["\"", "\x1b", "\"", "1"],
+        Some(libc::SIGTERM),
+        false,
+    );
+    assert!(
+        ran.out.contains("\" takes a-z; - clears; esc cancels"),
+        "{}",
+        ran.out
+    );
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    assert!(serve.letters().is_empty());
+}
