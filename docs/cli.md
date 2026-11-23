@@ -408,7 +408,7 @@ rexboard hooks replay SESSION          # from tmux, when a client attaches
 | --- | --- | --- |
 | `claude` | `$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json` | `/bin/sh -c 'REXBOARD hook claude EVENT \|\| true'` for the nine events above (`PostToolUse` for `AskUserQuestion` only), each with a 5 s timeout, so a hook exits 0 even with rexboard gone or too old to know `hook`. The `statusLine` runs through `rexboard usage claude`: yours keeps running and printing, through rexboard while it answers `usage --help` and on its own when it does not. With no status line, `rexboard usage claude` |
 | `codex` | `$CODEX_HOME/hooks.json`, else `~/.codex/hooks.json` | `/bin/sh -c 'REXBOARD hook codex EVENT \|\| true'` for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `Stop` and `SessionEnd`; `Stop` keeps the usage too |
-| `pi` | `rexboard.js` in `$PI_CODING_AGENT_DIR/extensions`, else `~/.pi/agent/extensions` | An extension that runs `rexboard hook pi` on pi's events and `rexboard usage pi` at each turn's end |
+| `pi` | `rexboard.js` in `$PI_CODING_AGENT_DIR/extensions`, else `~/.pi/agent/extensions` | An extension that runs `rexboard hook pi` on pi's events and `rexboard usage pi` at each turn's end. A run with `--mode json`, which the program that started it reads (a subagent), reports nothing though it inherits the pane's environment; interactive pi and `pi -p` report |
 | `grok` | | Nothing: grok reports to a Rex pane itself, and reads a status line only from `~/.grok/config.toml`, which rexboard does not edit. For its usage, add the lines below there by hand |
 
 A settings file is merged, never replaced.
