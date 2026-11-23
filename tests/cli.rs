@@ -6526,6 +6526,14 @@ fn jump_at_a_says_which_of_the_two_things_is_wrong() {
         ));
     serve
         .needing_cmd()
+        .args(["jump", "@a"])
+        .assert()
+        .code(1)
+        .stderr(
+            "error: mark a's pane is not on the board · rexboard mark ls\nnext: rexboard mark ls\n",
+        );
+    serve
+        .needing_cmd()
         .args(["jump", "@ab"])
         .assert()
         .code(2)

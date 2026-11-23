@@ -4299,11 +4299,14 @@ mod extension_tests {
         let app = lettered();
         let text = render(&app, 140, 30);
         let held = text.lines().find(|l| l.contains("seat-b")).unwrap();
-        assert!(held.starts_with(" a"), "the letter, not a star: {held}");
+        assert!(
+            held.starts_with(" A3 "),
+            "a capital before the number, so it does not read as part of it: {held}"
+        );
         let other = text.lines().find(|l| l.contains("codex")).unwrap();
         assert!(other.starts_with(" *"), "a star for the other: {other}");
         assert!(
-            text.contains("marked  config, mark a"),
+            text.contains("marked  config, letter a"),
             "the card names it:\n{text}"
         );
     }
