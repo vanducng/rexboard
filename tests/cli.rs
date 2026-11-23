@@ -1475,10 +1475,12 @@ fn on_pty(
     signal: Option<libc::c_int>,
     hang_up: bool,
 ) -> Ran {
-    on_pty_env(args, serve, expect, send, signal, hang_up, &[])
+    on_pty_env(args, serve, expect, send, signal, hang_up, &[], &|| {})
 }
 
-/// `on_pty` with more of the child's environment.
+/// `on_pty` with more of the child's environment, and `during`, run once it has drawn and before
+/// anything is typed or sent to it.
+#[allow(clippy::too_many_arguments)]
 fn on_pty_env(
     args: &[&str],
     serve: Option<&Serve>,
@@ -1487,6 +1489,7 @@ fn on_pty_env(
     signal: Option<libc::c_int>,
     hang_up: bool,
     env: &[(&str, &str)],
+    during: &dyn Fn(),
 ) -> Ran {
     use std::io::{Read, Write};
     use std::os::fd::FromRawFd;
@@ -1605,6 +1608,7 @@ fn on_pty_env(
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
+    during();
     let mut alive = true;
     if !send.is_empty() {
         let mut writer =
@@ -2301,6 +2305,7 @@ fn once_slow(
             ("FAKE_REX_JUMP_REPLY", replies.last().unwrap()),
             ("REXBOARD_TEST_JUMP_WAIT_MS", wait_ms),
         ],
+        &|| {},
     )
 }
 
@@ -2339,6 +2344,7 @@ fn board_once_and_pick_give_up_a_jump_in_flight_on_q_and_esc_and_nothing_lands_l
             Some(libc::SIGTERM),
             false,
             &[("FAKE_REX_JUMP_SLEEP", "2")],
+            &|| {},
         );
         let what = format!("{args:?} {key:?}: {:?}", ran.out);
         assert!(!ran.alive, "{what}");
@@ -3400,6 +3406,285 @@ fn jump_does_not_ask_again_when_the_failure_is_not_a_timeout() {
         1,
         "one ask, and the second reply was never asked for"
     );
+}
+
+/// Tells serve what the resident board with this pid shows: the key of each row from number 1.
+fn publish(serve: &Serve, owner: u32, keys: &[&str]) {
+    let reply = ask(
+        serve,
+        serde_json::json!({ "cmd": "numbers", "owner": owner, "keys": keys }),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+}
+
+fn unpublish(serve: &Serve, owner: u32) {
+    ask(
+        serve,
+        serde_json::json!({ "cmd": "numbers", "owner": owner, "keys": null }),
+    );
+}
+
+const OLD: &str = "mini/block:seat-old";
+const NEW: &str = "mini/block:seat-new";
+
+/// A pid that is not running: a child that has exited.
+fn dead_pid() -> u32 {
+    let mut child = std::process::Command::new("true").spawn().unwrap();
+    let pid = child.id();
+    child.wait().unwrap();
+    pid
+}
+
+fn seen(serve: &Serve, key: &str) -> bool {
+    row(&serve.needing_rows(), key)["seen"] == true
+}
+
+#[test]
+fn jump_shown_goes_to_the_row_the_board_published_as_that_number() {
+    let serve = needing();
+    publish(&serve, std::process::id(), &[OLD, NEW]);
+    serve
+        .needing_cmd()
+        .args(["jump", "--shown", "2"])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("jumped to "));
+    assert_eq!(last_jump(&serve).as_deref(), Some("block:seat-new"));
+    assert!(seen(&serve, NEW), "as jump KEY marks it seen");
+    assert!(!seen(&serve, OLD));
+    serve
+        .needing_cmd()
+        .args(["--json", "jump", "--shown", "1"])
+        .assert()
+        .success()
+        .stdout(format!("{{\"key\":\"{OLD}\",\"ok\":true}}\n"));
+}
+
+#[test]
+fn jump_shown_with_no_board_showing_numbers_says_so_and_starts_nothing() {
+    let quiet = Serve::new();
+    quiet
+        .cmd()
+        .args(["jump", "--shown", "1"])
+        .assert()
+        .code(1)
+        .stderr("no board is showing numbers · open rexboard board\n");
+    assert!(
+        !quiet.socket().exists(),
+        "with no serve running there is nothing to ask, and it starts none"
+    );
+    let serve = needing();
+    let out = serve
+        .needing_cmd()
+        .args(["--json", "jump", "--shown", "1"])
+        .assert()
+        .code(1)
+        .get_output()
+        .stderr
+        .clone();
+    let error: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(error["error"]["code"], "NO_BOARD_NUMBERS");
+    assert_eq!(error["error"]["next_steps"][0], "rexboard board");
+    publish(&serve, dead_pid(), &[OLD]);
+    serve
+        .needing_cmd()
+        .args(["jump", "--shown", "1"])
+        .assert()
+        .code(1)
+        .stderr("no board is showing numbers · open rexboard board\n");
+}
+
+#[test]
+fn jump_shown_names_the_numbers_there_are_when_there_is_no_such_row() {
+    let serve = needing();
+    publish(&serve, std::process::id(), &[OLD, NEW]);
+    for n in ["3", "0"] {
+        serve
+            .needing_cmd()
+            .args(["jump", "--shown", n])
+            .assert()
+            .code(1)
+            .stderr(format!(
+                "error: no row {n} · rows 1-2 on the board\nnext: rexboard ls --json\n"
+            ));
+    }
+    assert!(serve.jumps().is_empty());
+}
+
+#[test]
+fn the_board_drawn_last_is_the_one_jump_shown_follows_and_only_its_own_exit_clears_it() {
+    let serve = needing();
+    let (first, second) = (std::process::id(), std::process::id() + 1);
+    publish(&serve, first, &[OLD]);
+    publish(&serve, second, &[NEW]);
+    let shown = || {
+        serve
+            .needing_cmd()
+            .args(["--json", "jump", "--shown", "1"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone()
+    };
+    assert!(String::from_utf8(shown()).unwrap().contains(NEW));
+    unpublish(&serve, first);
+    assert!(
+        String::from_utf8(shown()).unwrap().contains(NEW),
+        "the first board's exit does not clear the second's numbers"
+    );
+}
+
+#[test]
+fn partial_jumps_unless_a_longer_number_could_follow() {
+    let serve = needing();
+    let keys = |n: usize| -> Vec<String> {
+        std::iter::once(OLD.to_owned())
+            .chain((1..n).map(|i| format!("mini/block:gone-{i}")))
+            .collect()
+    };
+    let publish_n = |n: usize| {
+        let keys = keys(n);
+        publish(
+            &serve,
+            std::process::id(),
+            &keys.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
+    };
+    // 9 rows: 1 starts no longer number, so it jumps.
+    publish_n(9);
+    serve
+        .needing_cmd()
+        .args(["jump", "--shown", "1", "--partial"])
+        .assert()
+        .success();
+    assert_eq!(serve.jumps().len(), 1);
+    // 10 rows: 1 could be 10. Exit 3, no jump, nothing printed.
+    publish_n(10);
+    serve
+        .needing_cmd()
+        .args(["jump", "--shown", "1", "--partial"])
+        .assert()
+        .code(3)
+        .stdout("")
+        .stderr("");
+    serve
+        .needing_cmd()
+        .args(["--json", "jump", "--shown", "1", "--partial"])
+        .assert()
+        .code(3)
+        .stdout("{\"more\":true}\n")
+        .stderr("");
+    assert_eq!(serve.jumps().len(), 1, "exit 3 jumped nowhere");
+    // 10 rows: 2 starts no longer number (20 is not shown). Without --partial, 1 jumps at once.
+    serve
+        .needing_cmd()
+        .args(["jump", "--shown", "1"])
+        .assert()
+        .success();
+    assert_eq!(serve.jumps().len(), 2);
+    // A number that is not shown is NOT_FOUND whatever --partial says.
+    serve
+        .needing_cmd()
+        .args(["jump", "--shown", "11", "--partial"])
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn jump_shown_reads_serves_state_and_scans_nothing_before_the_jump() {
+    let serve = needing();
+    publish(&serve, std::process::id(), &[OLD]);
+    let before = serve.log_lines().len();
+    serve
+        .needing_cmd()
+        .args(["jump", "--shown", "1"])
+        .assert()
+        .success();
+    let calls: Vec<String> = serve.log_lines().split_off(before);
+    assert_eq!(
+        calls.len(),
+        1,
+        "only the jump itself reached rex: {calls:?}"
+    );
+    assert!(
+        calls[0].contains(r#""block_id":"block:seat-old""#),
+        "{calls:?}"
+    );
+}
+
+/// `jump --shown N` while `board ARGS` is on a pty, once it has drawn: its stdout, and its exit
+/// code (when `wait` is set, until the numbers show).
+fn shown_during(serve: &Serve, args: &[&str], n: &str, wait: bool) -> (String, i32) {
+    let result = std::cell::RefCell::new((String::new(), 0));
+    let ask = || {
+        let out = serve
+            .needing_cmd()
+            .args(["--json", "jump", "--shown", n])
+            .output()
+            .unwrap();
+        (
+            String::from_utf8(out.stdout).unwrap(),
+            out.status.code().unwrap(),
+        )
+    };
+    let during = || {
+        if wait {
+            eventually("the board's numbers", || ask().1 == 0);
+        } else {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+        }
+        *result.borrow_mut() = ask();
+    };
+    let ran = on_pty_env(
+        args,
+        Some(serve),
+        &["seat-old"],
+        &[],
+        Some(libc::SIGTERM),
+        false,
+        &[],
+        &during,
+    );
+    assert!(!ran.out.is_empty());
+    result.into_inner()
+}
+
+#[test]
+fn the_resident_board_publishes_what_it_shows_and_clears_it_when_it_exits() {
+    let serve = needing();
+    let (out, code) = shown_during(&serve, &["board"], "1", true);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains(r#""ok":true"#), "{out}");
+    let key = out.split('"').nth(3).unwrap().to_owned();
+    assert!(key.starts_with("mini/block:seat-"), "{out}");
+    serve
+        .needing_cmd()
+        .args(["jump", "--shown", "1"])
+        .assert()
+        .code(1)
+        .stderr("no board is showing numbers · open rexboard board\n");
+}
+
+#[test]
+fn the_numbers_a_board_publishes_follow_its_view() {
+    let serve = needing();
+    let (out, code) = shown_during(&serve, &["board", "--filter", "seat-done"], "1", true);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("mini/block:seat-done"),
+        "the filtered row is 1: {out}"
+    );
+}
+
+#[test]
+fn board_once_and_pick_publish_nothing() {
+    let serve = needing();
+    for args in [vec!["board", "--once"], vec!["pick"]] {
+        let (out, code) = shown_during(&serve, &args, "1", false);
+        assert_eq!(code, 1, "{args:?}: {out}");
+        assert!(out.is_empty(), "{args:?}: {out}");
+    }
 }
 
 #[test]
