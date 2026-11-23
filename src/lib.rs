@@ -79,7 +79,16 @@ pub fn execute(cli: &Cli) -> Result<()> {
         Command::Usage { harness, then } => harness::usage::run(harness, then),
         Command::Views => show::views(cli.json),
         Command::Hosts => show::hosts(cli.json),
-        Command::Jump { target } => jump::jump(target, cli.json),
+        Command::Jump {
+            target: Some(target),
+            ..
+        } => jump::jump(target, cli.json),
+        Command::Jump {
+            shown: Some(n),
+            partial,
+            ..
+        } => jump::shown(*n, *partial, cli.json),
+        Command::Jump { .. } => unreachable!("clap wants a TARGET or --shown"),
         Command::Next { back, marked } => jump::next(*back, marked.as_deref(), cli.json),
         Command::Upgrade { check } => upgrade::run(*check, cli.json),
         Command::Ext(command) => extension::cli::run(command, cli.json),

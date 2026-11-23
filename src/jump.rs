@@ -34,6 +34,33 @@ pub fn jump(target: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
+/// `rexboard jump --shown N`: the row the resident board shows as N. With `partial`, a number
+/// that a longer one could extend (N times ten is shown) exits 3 and goes nowhere.
+pub fn shown(n: usize, partial: bool, json: bool) -> Result<()> {
+    let reply = client::ask_running(&json!({ "cmd": "shown", "n": n }))
+        .map_err(|err| match err {
+            // This ask never starts or replaces a serve, so one from before `shown` answers it as a bad request.
+            Error::Usage { .. } => Error::serve_with(
+                "serve is older than this rexboard and has no board numbers · rexboard board restarts it",
+                &["rexboard board"],
+            ),
+            err => err,
+        })?
+        .ok_or(Error::NoBoardNumbers)?;
+    let count = reply["count"].as_u64().unwrap_or_default() as usize;
+    if partial && n * 10 <= count {
+        if json {
+            println!("{}", json!({ "more": true }));
+        }
+        return Err(Error::More);
+    }
+    let row: Row = serde_json::from_value(reply["row"].clone())
+        .map_err(|err| Error::serve(format!("serve sent a row in an unexpected shape: {err}")))?;
+    go(&row)?;
+    done(&row, json);
+    Ok(())
+}
+
 /// `rexboard next`: the NEEDS YOU row after this pane (`REX_BLOCK`), unseen rows first; with
 /// `marked` (a source, or `any`), the row that source marked after it instead.
 pub fn next(back: bool, marked: Option<&str>, json: bool) -> Result<()> {
