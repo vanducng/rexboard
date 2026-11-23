@@ -190,6 +190,11 @@ fn prefix_keys(app: &App, prefix: char, width: usize) -> Line<'static> {
             .collect()
     } else if prefix == 'x' {
         app.action_pairs()
+    } else if prefix == '"' {
+        vec![
+            ("a-z".to_owned(), "sets".to_owned()),
+            ("-".to_owned(), "clears".to_owned()),
+        ]
     } else {
         keys::after(
             keys::BOARD,
@@ -4294,9 +4299,9 @@ mod extension_tests {
         let app = lettered();
         let text = render(&app, 140, 30);
         let held = text.lines().find(|l| l.contains("seat-b")).unwrap();
-        assert!(held.starts_with("  a"), "the letter, not a star: {held}");
+        assert!(held.starts_with(" a"), "the letter, not a star: {held}");
         let other = text.lines().find(|l| l.contains("codex")).unwrap();
-        assert!(other.starts_with("  *"), "a star for the other: {other}");
+        assert!(other.starts_with(" *"), "a star for the other: {other}");
         assert!(
             text.contains("marked  config, mark a"),
             "the card names it:\n{text}"
@@ -4319,7 +4324,7 @@ mod extension_tests {
         let mut keys = crate::tui::app::testkit::app();
         press(&mut keys, KeyCode::Char('?'));
         assert!(
-            render(&keys, 100, 40).contains("mark the row with a letter"),
+            render(&keys, 100, 40).contains("mark with a letter"),
             "? lists it"
         );
     }

@@ -6282,6 +6282,14 @@ fn a_program_path_is_the_extensions_not_the_callers_in_ext_test_and_ext_run() {
     );
 }
 
+fn favorite_in_build(serve: &Serve, pane: &str) {
+    let reply = ask(
+        serve,
+        serde_json::json!({"cmd": "favorite", "host": "mini", "session": "web", "tab": "build", "pane": pane, "on": true}),
+    );
+    assert_eq!(reply["favorite"], true, "{reply}");
+}
+
 /// A serve whose only host, mini, has these `(block, label)` panes in one tab of session `web`.
 fn panes_serve(panes: &[(&str, &str)]) -> Serve {
     let serve = Serve::new();
@@ -6530,7 +6538,7 @@ fn letter_is_a_mark_source_for_ls_the_filter_and_next() {
     let serve = needing();
     serve.mark(Some("block:seat-new"), &["set", "n"]).success();
     serve.mark(Some("block:seat-done"), &["set", "d"]).success();
-    favorite(&serve, "mini", "web", "seat-new", true);
+    favorite_in_build(&serve, "seat-new");
     assert_eq!(
         ls_keys(&serve, &["--marked", "letter"]),
         ["seat-new", "seat-done"]
@@ -6539,13 +6547,10 @@ fn letter_is_a_mark_source_for_ls_the_filter_and_next() {
         ls_keys(&serve, &["--filter", "mark:letter"]),
         ["seat-new", "seat-done"]
     );
-    assert_eq!(
-        ls_keys(&serve, &["--marked", "favorite"]),
-        Vec::<String>::new()
-    );
+    assert_eq!(ls_keys(&serve, &["--marked", "favorite"]), ["seat-new"]);
     assert_eq!(
         row(&serve.needing_rows(), NEW)["marked_by"],
-        serde_json::json!(["letter"]),
+        serde_json::json!(["favorite", "letter"]),
     );
     assert_eq!(
         serve.next(&["--marked", "letter"], None),
@@ -6565,7 +6570,7 @@ fn letter_is_a_mark_source_for_ls_the_filter_and_next() {
 #[test]
 fn a_letter_comes_after_the_other_sources() {
     let serve = needing_with("[[mark]]\nblock = \"seat-old\"\n");
-    favorite(&serve, "mini", "web", "seat-old", true);
+    favorite_in_build(&serve, "seat-old");
     serve.mark(Some("block:seat-old"), &["set", "a"]).success();
     assert_eq!(
         row(&serve.needing_rows(), OLD)["marked_by"],
@@ -6585,9 +6590,13 @@ fn the_board_sets_a_letter_on_the_selected_row_with_a_quote_then_a_letter_and_a_
         false,
     );
     assert!(
-        ran.out.contains("a-z sets"),
-        "the footer shows the wait: {}",
-        ran.out
+        ran.out.contains("\"… a-z"),
+        "the footer shows the wait: {:?}",
+        &ran.out[ran.out.len().saturating_sub(1500)..]
+    );
+    assert!(
+        ran.out.contains("seat-old holds mark a"),
+        "and then says so"
     );
     eventually("the letter", || serve.letters().len() == 1);
     let key = serve.held("a").expect("a is held");

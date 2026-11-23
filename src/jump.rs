@@ -22,6 +22,8 @@ const SCRIPT: &str = concat!(
 pub fn jump(target: &str, json: bool) -> Result<()> {
     let row = if target == "-" {
         previous()?
+    } else if let Some(letter) = target.strip_prefix('@') {
+        crate::mark::pane_of(letter)?
     } else {
         let rows: Rows =
             serde_json::from_value(client::call(&json!({ "cmd": "rows" }))?).map_err(|err| {

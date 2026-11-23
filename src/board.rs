@@ -53,6 +53,9 @@ pub struct Row {
     /// What marked it: `config`.
     #[serde(default)]
     pub marked_by: Vec<String>,
+    /// The letter a-z this row's pane holds, set by `rexboard mark set` or the board's `"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub letter: Option<char>,
     /// The group `ls --view` puts the row in, as the board's header names it without the count
     /// (`API`, `API @MINI`, `-`); null for any other row, as serve sends them.
     #[serde(default)]
@@ -157,6 +160,7 @@ impl Entry {
             usage: self.pane.reported_usage.clone(),
             marked: !self.ext_marks.is_empty(),
             marked_by: self.ext_marks.iter().cloned().collect(),
+            letter: None,
             view_group: None,
         }
     }

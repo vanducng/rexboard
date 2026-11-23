@@ -51,6 +51,7 @@ Rust, under `src/`:
 | `src/error.rs` | The error type: a code, a message and `next_steps`, printed as JSON with `--json` |
 | `src/config.rs` | `config.toml` |
 | `src/marks.rs` | `[[mark]]` rules: the glob match, and which rows a rule marks. serve, `ls` and `watch --json --direct` apply them to the rows ([18](decisions/0018-rows-can-be-marked.md)) |
+| `src/letters.rs`, `src/mark.rs` | `letters.json`: the letters a-z that panes hold, by their labels; serve changes it on `letter` requests and adds `letter` to `marked_by`; `rexboard mark` and `jump @a` ask it |
 | `src/favorites.rs` | `favorites.json`: the panes marked with `*`, by their labels; serve reads it, changes it on `favorite` requests, and adds `favorite` to `marked_by` |
 | `src/rex.rs` | Finds `rex`, runs one-shot scripts, and holds the one lock around every spawn, bind, accept and connect |
 | `src/event.rs` | The observer line contract, `v` 1 |

@@ -123,6 +123,13 @@ pub enum Effect {
         on: bool,
         label: String,
     },
+    /// Give the pane `key` a letter a-z, or with none take its letter away; `label` is how the
+    /// footer names the pane.
+    Letter {
+        key: String,
+        letter: Option<char>,
+        label: String,
+    },
     Reconnect,
     Quit,
 }
@@ -586,7 +593,13 @@ impl App {
                 self.say(format!("f takes {} +; ff clears", letters.join(" ")));
             }
             ('x', _) => return self.start_action(k),
-            ('o' | 'f', _) => {}
+            ('"', Some(letter)) if letter.is_ascii_lowercase() || letter == '-' => {
+                return self.letter((letter != '-').then_some(letter));
+            }
+            ('"', _) if k.0 != KeyCode::Esc => {
+                self.say("\" takes a-z; - clears; esc cancels");
+            }
+            ('o' | 'f' | '"', _) => {}
             _ => {
                 let act = keys::find(keys::BOARD, &[K(KeyCode::Char(prefix), false), k])?;
                 return self.act(act, k, now);
@@ -632,6 +645,7 @@ impl App {
             Act::NextNeeds => return self.next_waiting(now, false),
             Act::Marked => return self.go_marked(now),
             Act::Favorite => return self.favorite(),
+            Act::Letter => self.pending = Some('"'),
             Act::Keep => self.keep_group(),
             Act::PrevNeeds => {
                 return self.next_waiting(now, true);
