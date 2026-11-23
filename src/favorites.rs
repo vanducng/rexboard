@@ -152,7 +152,12 @@ pub fn touch(path: &Path, live: &[Id], now: i64) -> Result<(), String> {
 }
 
 fn write(path: &Path, file: &File) -> std::io::Result<()> {
-    let mut text = serde_json::to_string_pretty(file).map_err(std::io::Error::other)?;
+    save(path, file)
+}
+
+/// Writes `value` as the file at `path`, whole or not at all, readable by this user only.
+pub(crate) fn save(path: &Path, value: &impl Serialize) -> std::io::Result<()> {
+    let mut text = serde_json::to_string_pretty(value).map_err(std::io::Error::other)?;
     text.push('\n');
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;

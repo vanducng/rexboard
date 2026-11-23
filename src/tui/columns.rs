@@ -921,12 +921,20 @@ impl Columns {
             .iter()
             .flat_map(|(c, width)| {
                 if c.id == Col::Num && row.marked {
-                    // `*` before the number, which stays dim, in the same 3 cells and a gap.
+                    // `*`, or the pane's letter as a capital so it is not read as part of the number,
+                    // before the number, which stays dim, in the same 3 cells and a gap.
                     let n = number.map_or_else(String::new, |n| n.to_string());
                     let room = width.saturating_sub(self.gap(c.id));
                     let pad = room.saturating_sub(n.len() + 1);
                     return vec![
-                        (format!("{}*", " ".repeat(pad)), Tone::Marked),
+                        (
+                            format!(
+                                "{}{}",
+                                " ".repeat(pad),
+                                row.letter.map_or('*', |letter| letter.to_ascii_uppercase())
+                            ),
+                            Tone::Marked,
+                        ),
                         (n + &" ".repeat(self.gap(c.id)), Tone::Dim),
                     ];
                 }

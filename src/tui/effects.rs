@@ -263,8 +263,32 @@ pub(super) fn act(effect: Effect, tx: &Sender<Msg>, generation: &Arc<AtomicU64>)
                 let _ = tx.send(Msg::Say(text));
             });
         }
+        Effect::Letter { key, letter, label } => {
+            thread::spawn(move || {
+                let request = match letter {
+                    Some(letter) => json!({
+                        "cmd": "letter", "op": "set", "letter": letter.to_string(), "key": key,
+                    }),
+                    None => json!({ "cmd": "letter", "op": "clear", "key": key }),
+                };
+                let text = match client::call(&request) {
+                    Ok(reply) => letter_message(&label, letter, &reply),
+                    Err(err) => format!("could not keep the letter: {err}"),
+                };
+                let _ = tx.send(Msg::Say(text));
+            });
+        }
         Effect::Reconnect => listen(&tx, generation),
         Effect::Quit => {}
+    }
+}
+
+/// `seat-a holds mark a`, `mark a moved from seat-b to seat-a`, or `seat-a holds no letter now`.
+fn letter_message(label: &str, letter: Option<char>, reply: &serde_json::Value) -> String {
+    match (letter, reply["moved_from"].as_str()) {
+        (Some(letter), Some(from)) => format!("mark {letter} moved from {from} to {label}"),
+        (Some(letter), None) => format!("{label} holds mark {letter}"),
+        (None, _) => format!("{label} holds no letter now"),
     }
 }
 
@@ -455,6 +479,19 @@ fn seen_message(label: &str, state: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_letter_message_says_where_the_letter_came_from() {
+        let said = |letter, from: Option<&str>| {
+            letter_message("seat-a", letter, &json!({ "moved_from": from }))
+        };
+        assert_eq!(said(Some('a'), None), "seat-a holds mark a");
+        assert_eq!(
+            said(Some('a'), Some("seat-b")),
+            "mark a moved from seat-b to seat-a"
+        );
+        assert_eq!(said(None, None), "seat-a holds no letter now");
+    }
 
     #[test]
     fn the_favorite_message_says_what_still_marks_the_pane() {

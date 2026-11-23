@@ -141,7 +141,7 @@ pub fn lines(app: &App, row: &Row, width: usize, board: usize) -> Vec<Line<'stat
     let repeats = title.is_empty() || title == clean(&crate::output::name(row));
     let names = vec![
         row.marked
-            .then(|| fact(Fact::Marked, clean(&row.marked_by.join(", ")))),
+            .then(|| fact(Fact::Marked, clean(&marked_by(row)))),
         (!repeats).then(|| fact(Fact::Title, clean(title))),
         Some(fact(Fact::Source, row.pane.source.clone())),
     ]
@@ -283,4 +283,16 @@ fn plain_place(row: &Row, max: usize) -> String {
         Some(room) if room >= 3 => format!("{}{SEP}{block}", path(&[session, window], room)),
         _ => fit(&block, max).trim_end().to_owned(),
     }
+}
+
+/// What marked the row, a letter as `letter a`.
+fn marked_by(row: &Row) -> String {
+    row.marked_by
+        .iter()
+        .map(|by| match row.letter {
+            Some(letter) if by == crate::letters::LETTER => format!("letter {letter}"),
+            _ => by.clone(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }

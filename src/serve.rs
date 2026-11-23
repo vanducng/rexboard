@@ -18,6 +18,7 @@ use crate::extension::runner::Report;
 use crate::extension::running::Running;
 use crate::favorites::{self, Favorites};
 use crate::harness::usage::{self, Usage};
+use crate::letters::{self, Letters};
 use crate::marks::Marks;
 use crate::state::{self, Lock, Paths, Record};
 use crate::{interrupted, rex, stop_on_signals};
@@ -61,6 +62,15 @@ fn ready_within() -> Duration {
     timer("REXBOARD_TEST_READY_WITHIN_SECS", READY_WITHIN)
 }
 
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum LetterOp {
+    Set,
+    Clear,
+    Ls,
+    Find,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 enum Request {
@@ -93,6 +103,13 @@ enum Request {
     },
     /// The pane the jump before the last one went to, for `jump -`.
     Back,
+    /// Letter marks: give a pane (`key`, or a block id) `letter`, free a letter or the pane's, list
+    /// them, or find the row a letter's pane is.
+    Letter {
+        op: LetterOp,
+        letter: Option<char>,
+        key: Option<String>,
+    },
     /// The resident board `owner` (its pid) shows these rows, by key, as numbers 1, 2, 3…; no
     /// keys means it shows none any more.
     Numbers {
@@ -306,6 +323,9 @@ struct Reducer {
     /// not be read, until it can.
     favorites: Favorites,
     favorites_bad: Option<String>,
+    /// The letters from letters.json, kept the same way.
+    letters: Letters,
+    letters_bad: Option<String>,
     usage: BTreeMap<String, Usage>,
     /// The local rows the usage watcher joins its files to.
     usage_panes: Arc<Mutex<Option<Vec<UsagePane>>>>,
@@ -435,6 +455,8 @@ impl Reducer {
             mark_warned: BTreeSet::new(),
             favorites: Favorites::default(),
             favorites_bad: None,
+            letters: Letters::default(),
+            letters_bad: None,
             usage: BTreeMap::new(),
             usage_panes: Arc::default(),
         }
@@ -557,6 +579,7 @@ impl Reducer {
     fn rescan_now(&mut self) {
         self.sync_extensions();
         self.sync_favorites();
+        self.sync_letters();
         match collector::hosts_without(&self.exclude) {
             Ok(labels) => self.set_hosts(&labels),
             Err(err) => {
@@ -570,6 +593,7 @@ impl Reducer {
     fn rescan(&mut self) {
         self.sync_extensions();
         self.sync_favorites();
+        self.sync_letters();
         let tx = self.tx.clone();
         let exclude = self.exclude.clone();
         thread::spawn(move || match collector::hosts_without(&exclude) {
@@ -693,11 +717,164 @@ impl Reducer {
         }
     }
 
-    /// Marks the rows the rules, the extensions and the user's `*` mark, `config` first and
-    /// `favorite` last among the sources.
+    /// Re-reads letters.json as `sync_favorites` does favorites.json.
+    fn sync_letters(&mut self) {
+        let Ok(paths) = Paths::find() else { return };
+        let now = chrono::Utc::now();
+        let live = self.live_ids(now);
+        if let Err(why) = letters::touch(&paths.letters(), &live, now.timestamp()) {
+            eprintln!("warning: letters: {why}");
+        }
+        let (letters, bad) = Letters::load(&paths.letters());
+        if bad != self.letters_bad {
+            if let Some(why) = &bad {
+                eprintln!("warning: letters: {why}; no letters until it reads again");
+            }
+            self.letters_bad = bad;
+        }
+        if letters != self.letters {
+            self.letters = letters;
+            self.rows_changed();
+        }
+    }
+
+    fn live_ids(&self, now: chrono::DateTime<chrono::Utc>) -> Vec<favorites::Id> {
+        self.board
+            .rows(now)
+            .iter()
+            .filter_map(favorites::Id::of)
+            .collect()
+    }
+
+    /// Marks the rows the rules, the extensions, the user's `*` mark and the letters they gave:
+    /// `config` first, then `favorite`, and `letter` last among the sources.
     fn mark(&self, rows: &mut [Row]) {
         self.marks.apply(rows);
         self.favorites.apply(rows);
+        self.letters.apply(rows);
+    }
+
+    /// `mark set|clear|ls` and `jump @a`: what each says is in docs/cli.md.
+    fn letter(&mut self, op: LetterOp, letter: Option<char>, key: Option<&str>) -> Value {
+        let now = chrono::Utc::now();
+        let mut rows = self.board.rows(now);
+        self.mark(&mut rows);
+        let at_key = key.map(|key| {
+            rows.iter()
+                .find(|row| row.key == key || row.pane.block_id == key)
+        });
+        if letter.is_some_and(|letter| !letter.is_ascii_lowercase()) {
+            return error_line("USAGE", "a mark is a letter from a to z");
+        }
+        let row_of = |id: &favorites::Id| {
+            rows.iter()
+                .find(|row| favorites::Id::of(row).as_ref() == Some(id))
+        };
+        let no_holder = |letter: char| {
+            error_line(
+                "NO_MARK",
+                &format!("no pane holds mark {letter} · rexboard mark ls"),
+            )
+        };
+        match (op, letter) {
+            (LetterOp::Ls, _) => {
+                let list: Vec<_> = self
+                    .letters
+                    .held()
+                    .iter()
+                    .map(|(letter, id)| {
+                        let row = row_of(id);
+                        json!({
+                            "letter": letter.to_string(), "host": id.host, "session": id.session,
+                            "tab": id.tab, "pane": id.pane, "on_board": row.is_some(),
+                            "key": row.map(|row| row.key.clone()),
+                        })
+                    })
+                    .collect();
+                json!({ "v": VERSION, "letters": list })
+            }
+            (LetterOp::Find, Some(letter)) => match self.letters.pane(letter).map(row_of) {
+                None => no_holder(letter),
+                Some(Some(row)) => json!({ "v": VERSION, "row": row }),
+                Some(None) => error_line(
+                    "NO_MARK",
+                    &format!("mark {letter}'s pane is not on the board · rexboard mark ls"),
+                ),
+            },
+            (LetterOp::Set, Some(letter)) => {
+                let Some(Some(row)) = at_key else {
+                    return error_line(
+                        "NOT_FOUND",
+                        &format!("no pane {}", key.unwrap_or_default()),
+                    );
+                };
+                let Some(id) = favorites::Id::of(row) else {
+                    return error_line(
+                        "USAGE",
+                        "this pane has no label of its own; label it in Rex to give it a letter",
+                    );
+                };
+                let key = row.key.clone();
+                match self.save_letter(now, |path, live| {
+                    letters::set(path, letter, &id, live, now.timestamp())
+                }) {
+                    Ok(moved) => json!({
+                        "v": VERSION, "ok": true, "letter": letter.to_string(), "key": key,
+                        "moved_from": moved.map(|id| id.pane),
+                    }),
+                    Err(reply) => reply,
+                }
+            }
+            (LetterOp::Clear, named) => {
+                let letter = named.or_else(|| {
+                    let Some(Some(row)) = at_key else { return None };
+                    row.letter
+                });
+                let Some(letter) = letter else {
+                    return match at_key {
+                        Some(Some(_)) => json!({ "v": VERSION, "ok": true, "cleared": null }),
+                        Some(None) => {
+                            error_line("NOT_FOUND", &format!("no pane {}", key.unwrap_or_default()))
+                        }
+                        None => error_line("USAGE", "which mark? a letter from a to z, or a key"),
+                    };
+                };
+                if self.letters.pane(letter).is_none() {
+                    return no_holder(letter);
+                }
+                match self.save_letter(now, |path, live| {
+                    letters::clear(path, letter, live, now.timestamp())
+                }) {
+                    Ok(_) => json!({ "v": VERSION, "ok": true, "cleared": letter.to_string() }),
+                    Err(reply) => reply,
+                }
+            }
+            (_, None) => error_line("USAGE", "which mark? a letter from a to z"),
+        }
+    }
+
+    /// Runs one change of letters.json, then reads it back and tells the boards.
+    fn save_letter(
+        &mut self,
+        now: chrono::DateTime<chrono::Utc>,
+        change: impl FnOnce(
+            &std::path::Path,
+            &[favorites::Id],
+        ) -> std::result::Result<Option<favorites::Id>, String>,
+    ) -> std::result::Result<Option<favorites::Id>, Value> {
+        let Ok(paths) = Paths::find() else {
+            return Err(error_line("ERROR", "no state dir"));
+        };
+        let live = self.live_ids(now);
+        let done = change(&paths.letters(), &live).map_err(|why| {
+            eprintln!("warning: letters: {why}");
+            error_line("ERROR", &why)
+        })?;
+        let (letters, bad) = Letters::load(&paths.letters());
+        self.letters = letters;
+        self.letters_bad = bad;
+        self.rows_changed();
+        Ok(done)
     }
 
     /// `*`: makes the pane with these labels a favorite or not, in favorites.json, and says what
@@ -936,6 +1113,7 @@ impl Reducer {
                 on,
             ),
             Request::Back => self.back(),
+            Request::Letter { op, letter, key } => self.letter(op, letter, key.as_deref()),
             Request::Numbers { owner, keys } => {
                 self.numbering.retain(|board| board.owner != owner);
                 if let Some(keys) = keys {

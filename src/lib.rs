@@ -11,6 +11,8 @@ mod favorites;
 mod harness;
 mod hook;
 mod jump;
+mod letters;
+mod mark;
 mod marks;
 mod output;
 mod pane;
@@ -79,6 +81,7 @@ pub fn execute(cli: &Cli) -> Result<()> {
         Command::Usage { harness, then } => harness::usage::run(harness, then),
         Command::Views => show::views(cli.json),
         Command::Hosts => show::hosts(cli.json),
+        Command::Mark(command) => mark::run(command, cli.json),
         Command::Jump {
             target: Some(target),
             ..

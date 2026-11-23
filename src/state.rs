@@ -82,6 +82,11 @@ impl Paths {
         self.dir.join("favorites.json")
     }
 
+    /// The letters a-z the user gave panes, kept by serve.
+    pub fn letters(&self) -> PathBuf {
+        self.dir.join("letters.json")
+    }
+
     /// The board's own settings on this machine, such as whether the turn card is hidden.
     pub fn tui(&self) -> PathBuf {
         self.dir.join("tui.json")

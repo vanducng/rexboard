@@ -28,6 +28,8 @@ pub enum Act {
     Marked,
     /// `*`: make the selected pane a favorite, or not.
     Favorite,
+    /// `"`, then a letter a-z, or `-`: give the selected pane that letter, or take its letter away.
+    Letter,
     /// `+`: keep the row's group, or drop it.
     Keep,
     /// `1`-`9`, then maybe another: the row with that number on screen, selected or jumped to as
@@ -224,6 +226,13 @@ pub const BOARD: &[Entry] = &[
         "*",
         "favorite or unfavorite the row",
         "favorite",
+    ),
+    e(
+        Act::Letter,
+        &[&[c('"')]],
+        "\"",
+        "mark with a letter; \"- clears",
+        "letter",
     ),
     e(
         Act::Keep,

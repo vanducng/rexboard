@@ -225,6 +225,24 @@ impl App {
         })
     }
 
+    /// `"` then a letter, or `-`: the selected pane holds that letter, or none.
+    pub(super) fn letter(&mut self, letter: Option<char>) -> Option<Effect> {
+        let row = self.current()?;
+        let Some(id) = crate::favorites::Id::of(row) else {
+            self.say("this pane has no label of its own · label it in Rex to give it a letter");
+            return None;
+        };
+        if letter.is_none() && row.letter.is_none() {
+            self.say(format!("{} holds no letter", id.pane));
+            return None;
+        }
+        Some(Effect::Letter {
+            key: row.key.clone(),
+            letter,
+            label: id.pane,
+        })
+    }
+
     /// `'`: the first marked row in list order, after opening the groups that hold one as `n`
     /// does, and a jump to its pane; pressed again within 2 s, the next, wrapping.
     pub(super) fn go_marked(&mut self, now: Instant) -> Option<Effect> {
@@ -951,6 +969,43 @@ mod tests {
             Some("mini/codex"),
             "the only marked row wraps to itself"
         );
+    }
+
+    #[test]
+    fn a_quote_then_a_letter_gives_the_selected_pane_that_letter_and_a_dash_takes_it_away() {
+        let t = Instant::now();
+        let mut app = marked();
+        let key = selected(&app);
+        key_at(&mut app, '"', t);
+        match key_at(&mut app, 'q', t) {
+            Some(Effect::Letter {
+                key: on, letter, ..
+            }) => {
+                assert_eq!((on, letter), (key.clone(), Some('q')));
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(app.pending.is_none());
+        key_at(&mut app, '"', t);
+        assert!(
+            key_at(&mut app, '-', t).is_none(),
+            "the row holds no letter"
+        );
+        assert_eq!(app.toast(), Some("seat-b holds no letter"));
+        let mut rows = app.rows.clone();
+        rows.iter_mut().find(|row| row.key == key).unwrap().letter = Some('q');
+        app.set_rows(rows, app.hosts.clone());
+        key_at(&mut app, '"', t);
+        match key_at(&mut app, '-', t) {
+            Some(Effect::Letter { letter, .. }) => assert_eq!(letter, None),
+            other => panic!("{other:?}"),
+        }
+        key_at(&mut app, '"', t);
+        assert!(key_at(&mut app, 'Q', t).is_none());
+        assert_eq!(app.toast(), Some("\" takes a-z; - clears; esc cancels"));
+        key_at(&mut app, '"', t);
+        app.handle_at(KeyEvent::from(KeyCode::Esc), t);
+        assert!(app.pending.is_none(), "esc cancels");
     }
 
     #[test]

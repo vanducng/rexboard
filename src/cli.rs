@@ -66,10 +66,13 @@ pub enum Command {
     Views,
     /// List the hosts serve watches: each one's state, agent rows and last error.
     Hosts,
+    /// Give a pane a letter from a to z, take it away, or list them; `jump @a` goes there.
+    #[command(subcommand)]
+    Mark(MarkCommand),
     /// Go to a pane in the Rex window you are in, on its host, and mark it seen.
     Jump {
         /// HOST/BLOCK_ID (the `key` from `ls --json`), N for the nth NEEDS YOU row, or `-` for the
-        /// pane before the last jump.
+        /// pane before the last jump, or @a for the pane holding mark a (`rexboard mark`).
         #[arg(value_name = "TARGET", required_unless_present = "shown")]
         target: Option<String>,
         /// Go to the row the resident `rexboard board` shows with this number in its `#` column,
@@ -120,6 +123,28 @@ pub enum Command {
         #[arg(long)]
         check: bool,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MarkCommand {
+    /// Give the pane this command runs in (`REX_BLOCK`), or the one `--key` names, the letter.
+    /// A letter held by another pane moves here, and a pane holds one letter.
+    Set {
+        /// A letter from a to z.
+        #[arg(value_name = "LETTER")]
+        letter: String,
+        /// The pane's key (HOST/BLOCK_ID) instead of the pane this runs in.
+        #[arg(long, value_name = "KEY")]
+        key: Option<String>,
+    },
+    /// Take the letter away from its pane.
+    Clear {
+        /// A letter from a to z.
+        #[arg(value_name = "LETTER")]
+        letter: String,
+    },
+    /// Each letter with its pane's labels, and whether the pane is on the board.
+    Ls,
 }
 
 #[derive(Debug, Subcommand)]
