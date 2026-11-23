@@ -3495,6 +3495,43 @@ fn jump_shown_with_no_board_showing_numbers_says_so_and_starts_nothing() {
 }
 
 #[test]
+fn jump_shown_against_an_older_serve_says_so_instead_of_a_bad_request() {
+    let serve = Serve::new();
+    // A serve from before `shown` answers it as it answers any request it does not know.
+    let state = serve.dir.path().join("oldstate");
+    std::fs::create_dir_all(state.join("rexboard")).unwrap();
+    let listener =
+        std::os::unix::net::UnixListener::bind(state.join("rexboard/serve.sock")).unwrap();
+    let old = std::thread::spawn(move || {
+        use std::io::{BufRead, Write};
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut line = String::new();
+        std::io::BufReader::new(stream.try_clone().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        writeln!(
+            stream,
+            r#"{{"v":1,"error":{{"code":"USAGE","message":"bad request: unknown variant `shown`"}}}}"#
+        )
+        .unwrap();
+    });
+    let out = serve
+        .cmd()
+        .env("XDG_STATE_HOME", &state)
+        .args(["jump", "--shown", "1"])
+        .assert()
+        .code(1)
+        .get_output()
+        .stderr
+        .clone();
+    old.join().unwrap();
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "error: serve is older than this rexboard and has no board numbers · rexboard board restarts it\nnext: rexboard board\n"
+    );
+}
+
+#[test]
 fn jump_shown_names_the_numbers_there_are_when_there_is_no_such_row() {
     let serve = needing();
     publish(&serve, std::process::id(), &[OLD, NEW]);
@@ -3505,7 +3542,7 @@ fn jump_shown_names_the_numbers_there_are_when_there_is_no_such_row() {
             .assert()
             .code(1)
             .stderr(format!(
-                "error: no row {n} · rows 1-2 on the board\nnext: rexboard ls --json\n"
+                "error: no row {n} · rows 1-2 on the board\nnext: look at the board's # column\n"
             ));
     }
     assert!(serve.jumps().is_empty());
@@ -3541,6 +3578,34 @@ fn the_board_drawn_last_is_the_one_jump_shown_follows_and_only_its_own_exit_clea
         .assert()
         .code(1)
         .stderr("no board is showing numbers · open rexboard board\n");
+}
+
+#[test]
+fn two_boards_each_keep_their_numbers_and_the_one_that_remains_is_followed_when_the_other_exits() {
+    let serve = needing();
+    let (older, newer) = (std::process::id(), std::os::unix::process::parent_id());
+    publish(&serve, older, &[OLD]);
+    publish(&serve, newer, &[NEW]);
+    let shown = || {
+        let out = serve
+            .needing_cmd()
+            .args(["--json", "jump", "--shown", "1"])
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    };
+    assert!(shown().contains(NEW), "the board drawn last is followed");
+    unpublish(&serve, newer);
+    assert!(
+        shown().contains(OLD),
+        "the older board never resent, and its numbers are still there"
+    );
+    publish(&serve, newer, &[NEW]);
+    publish(&serve, older, &[OLD]);
+    assert!(
+        shown().contains(OLD),
+        "drawn last, the older board is followed"
+    );
 }
 
 #[test]
@@ -3597,6 +3662,32 @@ fn partial_jumps_unless_a_longer_number_could_follow() {
         .args(["jump", "--shown", "11", "--partial"])
         .assert()
         .code(1);
+}
+
+#[test]
+fn partial_with_the_most_rows_the_board_numbers_says_more_only_where_a_longer_number_exists() {
+    let serve = needing();
+    // The board numbers 99 rows at most, so with 99 shown 10 has no 100 to grow into.
+    let keys: Vec<String> = (1..=99)
+        .map(|n| match n {
+            9 => NEW.to_owned(),
+            10 => OLD.to_owned(),
+            _ => format!("mini/block:gone-{n}"),
+        })
+        .collect();
+    let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+    publish(&serve, std::process::id(), &refs);
+    serve
+        .needing_cmd()
+        .args(["jump", "--shown", "9", "--partial"])
+        .assert()
+        .code(3);
+    serve
+        .needing_cmd()
+        .args(["jump", "--shown", "10", "--partial"])
+        .assert()
+        .success();
+    assert_eq!(last_jump(&serve).as_deref(), Some("block:seat-old"));
 }
 
 #[test]
