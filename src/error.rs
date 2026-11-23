@@ -38,6 +38,9 @@ pub enum Error {
     NoMarkedRow(String),
     #[error("no board is showing numbers · open rexboard board")]
     NoBoardNumbers,
+    /// `jump --shown N`: the board does not show that number.
+    #[error("{0}")]
+    NotShown(String),
     /// `jump --shown N --partial`: a longer number could follow, so nothing was done.
     #[error("more digits may follow")]
     More,
@@ -121,6 +124,7 @@ impl Error {
             Self::NobodyNeedsYou => "NOBODY_NEEDS_YOU",
             Self::NoMarkedRow(_) => "NO_MARKED_ROW",
             Self::NoBoardNumbers => "NO_BOARD_NUMBERS",
+            Self::NotShown(_) => "NOT_FOUND",
             Self::More => "MORE",
             Self::AmbiguousClient { .. } => "AMBIGUOUS_CLIENT",
             Self::Config(_) => "CONFIG",
@@ -145,6 +149,7 @@ impl Error {
             Self::NobodyNeedsYou => vec!["rexboard ls".to_owned()],
             Self::NoMarkedRow(_) => vec!["rexboard ls --marked".to_owned()],
             Self::NoBoardNumbers => vec!["rexboard board".to_owned()],
+            Self::NotShown(_) => vec!["look at the board's # column".to_owned()],
             Self::AmbiguousClient { steps, .. }
             | Self::RexExplained { steps, .. }
             | Self::Upgrade { steps, .. }

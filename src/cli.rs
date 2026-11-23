@@ -76,9 +76,9 @@ pub enum Command {
         /// as it shows it now. Exit 1 `NO_BOARD_NUMBERS` when no board is showing numbers.
         #[arg(long, value_name = "N", conflicts_with = "target")]
         shown: Option<usize>,
-        /// With `--shown`, for a key that types digits one at a time: exit 3 (`MORE`), doing
-        /// nothing, when the board shows enough rows that a longer number could start with N (10
-        /// or more, for 1); the caller then waits for another digit or enter.
+        /// With `--shown`, for a key that sends digits one at a time: exit 3 (`MORE`) and do
+        /// nothing while another digit could still make a longer number, such as `1` when the
+        /// board shows 10 rows. Wait for the next digit or enter, then ask again.
         #[arg(long, requires = "shown")]
         partial: bool,
     },

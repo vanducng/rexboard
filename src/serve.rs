@@ -284,9 +284,9 @@ struct Reducer {
     suspects: BTreeSet<(String, String)>,
     /// The keys the last two jumps went to, older first, kept in state.json.
     jumps: Vec<String>,
-    /// What the resident board drawn last shows. Held in memory only: a number means something
+    /// What each resident board shows, by its pid. Held in memory only: a number means something
     /// while a board shows it, so it goes with the board, and with serve.
-    numbering: Option<Numbering>,
+    numbering: Vec<Numbering>,
     rows_due: Option<Instant>,
     save_due: Option<Instant>,
     extensions: Running,
@@ -423,7 +423,7 @@ impl Reducer {
             rows_cache: None,
             suspects: BTreeSet::new(),
             jumps: saved.jumps,
-            numbering: None,
+            numbering: Vec::new(),
             rows_due: None,
             save_due: None,
             extensions: Running::new(ext_tx),
@@ -937,18 +937,13 @@ impl Reducer {
             ),
             Request::Back => self.back(),
             Request::Numbers { owner, keys } => {
-                match keys {
-                    Some(keys) => {
-                        self.numbering = Some(Numbering {
-                            owner,
-                            keys,
-                            drawn: Instant::now(),
-                        });
-                    }
-                    None if self.numbering.as_ref().is_some_and(|n| n.owner == owner) => {
-                        self.numbering = None;
-                    }
-                    None => {}
+                self.numbering.retain(|board| board.owner != owner);
+                if let Some(keys) = keys {
+                    self.numbering.push(Numbering {
+                        owner,
+                        keys,
+                        drawn: Instant::now(),
+                    });
                 }
                 json!({ "v": VERSION, "ok": true })
             }
@@ -959,13 +954,11 @@ impl Reducer {
         offer(&reply, &line.to_string());
     }
 
-    /// The row the board shows as `n`, from the numbering it last published, and how many rows
-    /// it shows. A board that is no longer running shows nothing, whatever it said last.
+    /// The row the board drawn last shows as `n`, and how many rows it shows. A board that is no
+    /// longer running shows nothing, whatever it said last.
     fn shown(&mut self, n: usize) -> Value {
-        if self.numbering.as_ref().is_some_and(|b| !alive(b.owner)) {
-            self.numbering = None;
-        }
-        let Some(numbering) = &self.numbering else {
+        self.numbering.retain(|board| alive(board.owner));
+        let Some(numbering) = self.numbering.iter().max_by_key(|board| board.drawn) else {
             return error_line(
                 "NO_BOARD_NUMBERS",
                 "no board is showing numbers · open rexboard board",
@@ -974,7 +967,7 @@ impl Reducer {
         let count = numbering.keys.len();
         let Some(key) = n.checked_sub(1).and_then(|i| numbering.keys.get(i)) else {
             return error_line(
-                "NOT_FOUND",
+                "NOT_SHOWN",
                 &format!("no row {n} · rows 1-{count} on the board"),
             );
         };
@@ -989,7 +982,7 @@ impl Reducer {
                 "drawn_ms_ago": numbering.drawn.elapsed().as_millis() as u64,
             }),
             None => error_line(
-                "NOT_FOUND",
+                "NOT_SHOWN",
                 &format!("row {n} is gone · the board will redraw"),
             ),
         }

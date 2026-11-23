@@ -37,8 +37,16 @@ pub fn jump(target: &str, json: bool) -> Result<()> {
 /// `rexboard jump --shown N`: the row the resident board shows as N. With `partial`, a number
 /// that a longer one could extend (N times ten is shown) exits 3 and goes nowhere.
 pub fn shown(n: usize, partial: bool, json: bool) -> Result<()> {
-    let reply =
-        client::ask_running(&json!({ "cmd": "shown", "n": n }))?.ok_or(Error::NoBoardNumbers)?;
+    let reply = client::ask_running(&json!({ "cmd": "shown", "n": n }))
+        .map_err(|err| match err {
+            // This ask never starts or replaces a serve, so one from before `shown` answers it as a bad request.
+            Error::Usage { .. } => Error::serve_with(
+                "serve is older than this rexboard and has no board numbers · rexboard board restarts it",
+                &["rexboard board"],
+            ),
+            err => err,
+        })?
+        .ok_or(Error::NoBoardNumbers)?;
     let count = reply["count"].as_u64().unwrap_or_default() as usize;
     if partial && n * 10 <= count {
         if json {
