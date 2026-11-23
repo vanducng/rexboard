@@ -4300,7 +4300,7 @@ mod extension_tests {
         let text = render(&app, 140, 30);
         let held = text.lines().find(|l| l.contains("seat-b")).unwrap();
         assert!(
-            held.starts_with(" A3 "),
+            held.starts_with(" A1 "),
             "a capital before the number, so it does not read as part of it: {held}"
         );
         let other = text.lines().find(|l| l.contains("codex")).unwrap();
@@ -4309,6 +4309,48 @@ mod extension_tests {
             text.contains("marked  config, letter a"),
             "the card names it:\n{text}"
         );
+    }
+
+    #[test]
+    fn a_letter_keeps_the_number_column_at_99_rows_in_both_widths() {
+        use crate::tui::app::testkit::{hosts, row};
+        let mut app = App::default();
+        let rows: Vec<Row> = (0..120)
+            .map(|i| {
+                let mut json =
+                    serde_json::to_value(row(&format!("local/r{i}"), "working", "working", true))
+                        .unwrap();
+                if i == 0 || i == 98 || i == 99 {
+                    json["letter"] =
+                        ["a", "b", "c"][[0, 98, 99].iter().position(|n| *n == i).unwrap()].into();
+                    json["marked"] = true.into();
+                    json["marked_by"] = serde_json::json!(["letter"]);
+                }
+                serde_json::from_value(json).unwrap()
+            })
+            .collect();
+        app.set_rows(rows, hosts());
+        for width in [80, 140] {
+            let text = render(&app, width, 130);
+            let at = |needle: &str| {
+                let line = text.lines().find(|l| l.contains(needle)).unwrap();
+                (line.to_owned(), line.find(needle).unwrap())
+            };
+            let (plain, plain_at) = at("r50 ");
+            let (first, first_at) = at("r0 ");
+            let (last, last_at) = at("r98 ");
+            let (past, _) = at("r99 ");
+            assert!(first.starts_with(" A1 "), "{width}: {first}");
+            assert!(last.starts_with("B99 "), "{width}: {last}");
+            assert!(
+                past.starts_with("  C "),
+                "{width}: past 99 the letter shows alone: {past}"
+            );
+            assert!(
+                plain_at == first_at && plain_at == last_at,
+                "{width}: the column keeps its width\n{plain}\n{first}\n{last}"
+            );
+        }
     }
 
     #[test]

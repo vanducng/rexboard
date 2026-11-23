@@ -285,12 +285,12 @@ fn plain_place(row: &Row, max: usize) -> String {
     }
 }
 
-/// What marked the row, a letter as `mark a`.
+/// What marked the row, a letter as `letter a`.
 fn marked_by(row: &Row) -> String {
     row.marked_by
         .iter()
         .map(|by| match row.letter {
-            Some(letter) if by == crate::letters::LETTER => format!("mark {letter}"),
+            Some(letter) if by == crate::letters::LETTER => format!("letter {letter}"),
             _ => by.clone(),
         })
         .collect::<Vec<_>>()

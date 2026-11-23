@@ -798,7 +798,7 @@ impl Reducer {
                 Some(Some(row)) => json!({ "v": VERSION, "row": row }),
                 Some(None) => error_line(
                     "NO_MARK",
-                    &format!("mark {letter}'s pane is not on the board"),
+                    &format!("mark {letter}'s pane is not on the board · rexboard mark ls"),
                 ),
             },
             (LetterOp::Set, Some(letter)) => {

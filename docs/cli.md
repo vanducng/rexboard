@@ -534,7 +534,7 @@ Past 30 seconds the jump fails with `REX`, `the Rex app on NAME did not answer t
 
 `jump --shown N` goes to the row the resident [`rexboard board`](tui.md#layout) shows as `N` in its `#` column now, for a key outside the board. It reads the numbering serve holds, scans nothing in Rex, and jumps as `jump KEY` does; with two boards up it follows the one drawn last. With no board showing numbers it fails with `NO_BOARD_NUMBERS`. `--partial`, for a key that sends digits one at a time, exits 3 (`MORE`) and does nothing, printing only `{"more":true}` with `--json`, while a longer number could start with `N` (the board shows `N` times ten rows or more); wait for another digit or enter, then ask again.
 
-`jump @a` goes to the pane holding mark `a`, set with [`rexboard mark`](#rexboard-mark) or the board's `"`, as `jump KEY` does. With no pane holding it, it exits 1 `NOT_FOUND`, `no pane holds mark a · rexboard mark ls`; when its pane is not on the board, `mark a's pane is not on the board`. When several panes share the labels, it goes to the first of them in board order.
+`jump @a` goes to the pane holding mark `a`, set with [`rexboard mark`](#rexboard-mark) or the board's `"`, as `jump KEY` does. With no pane holding it, it exits 1 `NOT_FOUND`, `no pane holds mark a · rexboard mark ls`; when its pane is not on the board, `mark a's pane is not on the board · rexboard mark ls`.
 
 `jump -` goes to the pane the jump before the last one went to, and the two swap, as `cd -` does, so a second `jump -` comes back. Every jump counts: `jump`, `next`, `pick`, and the board's `enter` and `-`.
 
@@ -569,7 +569,9 @@ rexboard mark ls                      # each letter, its pane's labels, and whet
 rexboard jump @a                      # go there
 ```
 
-A pane holds a letter from a to z, kept by serve in `letters.json` beside `favorites.json`, by the pane's labels (host, session, tab, pane label) as favorites are, so it survives a Rex restart. A letter that another pane holds moves to this one, as in vim, and setting a second letter on a pane replaces its first. Every pane with the same labels in a tab shows the letter. A pane with no label of its own cannot hold one: it exits 2 `USAGE`, `this pane has no label of its own; label it in Rex to give it a letter`. A letter is the `letter` mark source: `ls --marked letter`, `/mark:letter` and `next --marked letter`. The board sets one with [`"`](tui.md#letters). `mark set` prints `mark a is on KEY`; `--json` prints `{"ok":true,"letter":"a","key":...}`; `mark ls --json` an array of `{letter, host, session, tab, pane, on_board, key}` (`key` is null when the pane is not on the board). An entry whose pane has not been on the board for 30 days is dropped, as a favorite is. A letter that is not a to z, or `mark set` outside a pane without `--key`, exits 2; `mark clear` of a letter nobody holds exits 1 `NOT_FOUND`.
+A pane holds one letter from a to z, kept by serve in `letters.json` beside `favorites.json`, by the pane's labels (host, session, tab, pane label) as [favorites](tui.md#favorites) are, so it survives a Rex restart and ages out after 30 days off the board. A letter another pane holds moves here, as in vim. Every pane with the same labels shows it, and `jump @a` goes to the first. A pane with no label of its own cannot hold one (exit 2 `USAGE`). `letter` is a mark source for `ls --marked letter`, `/mark:letter` and `next --marked letter`; the board sets one with [`"`](tui.md#letters).
+
+`mark set` prints `mark a is on KEY` (`{"ok":true,"letter":"a","key":...}` with `--json`); `mark ls --json` is an array of `{letter, host, session, tab, pane, on_board, key}`. A letter outside a to z, or `mark set` outside a pane without `--key`, exits 2; `mark clear` of a letter nobody holds exits 1 `NOT_FOUND`.
 
 ## `rexboard ext`
 
